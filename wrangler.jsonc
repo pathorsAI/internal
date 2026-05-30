@@ -10,7 +10,13 @@
     "binding": "ASSETS"
   },
   "observability": {
-    "enabled": true
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    },
+    "traces": {
+      "enabled": false
+    }
   },
   "vars": {
     "NEXT_PUBLIC_APP_NAME": "Pathors Internal"
