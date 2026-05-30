@@ -44,7 +44,11 @@ export default async function BankAccountsPage() {
               rows.map((a) => (
                 <TableRow key={a.id}>
                   <TableCell className="font-medium">{a.name}</TableCell>
-                  <TableCell className="text-muted-foreground">{a.kind}</TableCell>
+                  <TableCell>
+                    <Badge variant={a.kind === "bank" ? "outline" : "secondary"}>
+                      {a.kind === "bank" ? "實體" : "虛擬"}
+                    </Badge>
+                  </TableCell>
                   <TableCell>{a.currency}</TableCell>
                   <TableCell>
                     <BookBadge book={a.defaultBook} />
