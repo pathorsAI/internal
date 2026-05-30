@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { BookBadge } from "@/components/book-badge";
+import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import {
   Table,
@@ -88,7 +89,16 @@ export default async function TransactionsPage({
                     <TableCell className="whitespace-nowrap text-muted-foreground">
                       {formatDate(t.txnDate)}
                     </TableCell>
-                    <TableCell>{t.party ?? "—"}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1.5">
+                        <span>{t.party ?? "—"}</span>
+                        {t.supplierName ? (
+                          <Badge variant="secondary" className="font-normal">
+                            供應商
+                          </Badge>
+                        ) : null}
+                      </div>
+                    </TableCell>
                     <TableCell className="max-w-[20ch] truncate text-muted-foreground">
                       {t.description ?? "—"}
                     </TableCell>

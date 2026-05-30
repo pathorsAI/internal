@@ -8,9 +8,12 @@
     "start": "next start",
     "lint": "eslint",
     "db:pull": "dotenv -e .env.local -- drizzle-kit pull",
+    "db:generate": "dotenv -e .env.local -- drizzle-kit generate",
+    "db:migrate": "dotenv -e .env.local -- drizzle-kit migrate",
     "db:studio": "dotenv -e .env.local -- drizzle-kit studio",
-    "cf:preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "cf:deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "cf:build": "NEXT_DIST_DIR=.next-prod opennextjs-cloudflare build",
+    "cf:preview": "pnpm cf:build && NEXT_DIST_DIR=.next-prod opennextjs-cloudflare preview",
+    "cf:deploy": "pnpm cf:build && NEXT_DIST_DIR=.next-prod opennextjs-cloudflare deploy",
     "cf:typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
   },
   "dependencies": {

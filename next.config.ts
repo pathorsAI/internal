@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Production/OpenNext builds use a separate dist dir (NEXT_DIST_DIR=.next-prod)
+  // so they never clobber the `.next` that `next dev` is actively using.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
 };
 
 export default nextConfig;

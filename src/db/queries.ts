@@ -80,11 +80,13 @@ export async function listTransactions(book?: Book, limit = 100) {
       categoryKind: categories.kind,
       fromAccount: fromAcct.name,
       toAccount: toAcct.name,
+      supplierName: suppliers.name,
     })
     .from(transactions)
     .leftJoin(categories, eq(categories.id, transactions.categoryId))
     .leftJoin(fromAcct, eq(fromAcct.id, transactions.fromAccountId))
     .leftJoin(toAcct, eq(toAcct.id, transactions.toAccountId))
+    .leftJoin(suppliers, eq(suppliers.id, transactions.supplierId))
     .where(book ? eq(transactions.book, book) : undefined)
     .orderBy(desc(transactions.txnDate), desc(transactions.id))
     .limit(limit);
