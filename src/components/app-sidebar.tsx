@@ -4,9 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
+  ArrowLeftRight,
+  FileText,
+  Landmark,
   Users,
-  Wallet,
-  Settings,
+  ReceiptText,
   Boxes,
 } from "lucide-react";
 
@@ -26,11 +28,15 @@ import {
 
 const nav = [
   { title: "總覽", href: "/", icon: LayoutDashboard },
-  { title: "帳戶管理", href: "/accounts", icon: Users },
-  { title: "記帳", href: "/transactions", icon: Wallet },
+  { title: "內外帳", href: "/transactions", icon: ArrowLeftRight },
+  { title: "發票", href: "/invoices", icon: FileText },
+  { title: "銀行帳戶", href: "/bank-accounts", icon: Landmark },
 ];
 
-const settings = [{ title: "設定", href: "/settings", icon: Settings }];
+const hr = [
+  { title: "員工", href: "/employees", icon: Users },
+  { title: "薪資", href: "/payroll", icon: ReceiptText },
+];
 
 export function AppSidebar() {
   const pathname = usePathname();
@@ -60,7 +66,7 @@ export function AppSidebar() {
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>管理</SidebarGroupLabel>
+          <SidebarGroupLabel>會計</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {nav.map((item) => (
@@ -79,10 +85,10 @@ export function AppSidebar() {
         </SidebarGroup>
 
         <SidebarGroup>
-          <SidebarGroupLabel>系統</SidebarGroupLabel>
+          <SidebarGroupLabel>人事</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {settings.map((item) => (
+              {hr.map((item) => (
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton
                     isActive={isActive(item.href)}
