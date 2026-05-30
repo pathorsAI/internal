@@ -8,6 +8,8 @@ import {
   employees,
   payrollRuns,
   payslips,
+  suppliers,
+  accountReconciliations,
 } from "./schema";
 
 export type Book = "internal" | "external" | "both";
@@ -103,6 +105,73 @@ export async function listBankAccounts() {
 export async function listEmployees(limit = 200) {
   const db = getDb();
   return db.select().from(employees).orderBy(desc(employees.isActive), employees.name).limit(limit);
+}
+
+export async function listSuppliers() {
+  const db = getDb();
+  return db
+    .select({
+      id: suppliers.id,
+      name: suppliers.name,
+      taxId: suppliers.taxId,
+      defaultCurrency: suppliers.defaultCurrency,
+      typicalAmount: suppliers.typicalAmount,
+      contact: suppliers.contact,
+      note: suppliers.note,
+      isActive: suppliers.isActive,
+      accountName: bankAccounts.name,
+      txnCount: sql<number>`(select count(*)::int from ${transactions} t where t.supplier_id = ${suppliers.id})`,
+      txnTotal: sql<string>`coalesce((select sum(coalesce(t.amount_twd, t.amount)) from ${transactions} t where t.supplier_id = ${suppliers.id}), 0)`,
+    })
+    .from(suppliers)
+    .leftJoin(bankAccounts, eq(bankAccounts.id, suppliers.defaultAccountId))
+    .orderBy(desc(suppliers.isActive), suppliers.name);
+}
+
+// Current computed book balance per account = opening + inflows - outflows.
+export async function listAccountBalances() {
+  const db = getDb();
+  return db
+    .select({
+      id: bankAccounts.id,
+      name: bankAccounts.name,
+      currency: bankAccounts.currency,
+      kind: bankAccounts.kind,
+      openingBalance: bankAccounts.openingBalance,
+      bookBalance: sql<string>`(
+        ${bankAccounts.openingBalance}
+        + coalesce((select sum(t.amount) from ${transactions} t where t.to_account_id = ${bankAccounts.id}), 0)
+        - coalesce((select sum(t.amount) from ${transactions} t where t.from_account_id = ${bankAccounts.id}), 0)
+      )`,
+      lastReconciledAt: sql<string | null>`(select max(r.as_of_date) from ${accountReconciliations} r where r.account_id = ${bankAccounts.id})`,
+    })
+    .from(bankAccounts)
+    .where(eq(bankAccounts.isActive, true))
+    .orderBy(bankAccounts.name);
+}
+
+// Reconciliation snapshots with the book balance computed as of each snapshot date.
+export async function listReconciliations(limit = 100) {
+  const db = getDb();
+  return db
+    .select({
+      id: accountReconciliations.id,
+      accountId: accountReconciliations.accountId,
+      accountName: bankAccounts.name,
+      currency: bankAccounts.currency,
+      asOfDate: accountReconciliations.asOfDate,
+      statementBalance: accountReconciliations.statementBalance,
+      note: accountReconciliations.note,
+      bookBalance: sql<string>`(
+        ${bankAccounts.openingBalance}
+        + coalesce((select sum(t.amount) from ${transactions} t where t.to_account_id = ${accountReconciliations.accountId} and t.txn_date <= ${accountReconciliations.asOfDate}), 0)
+        - coalesce((select sum(t.amount) from ${transactions} t where t.from_account_id = ${accountReconciliations.accountId} and t.txn_date <= ${accountReconciliations.asOfDate}), 0)
+      )`,
+    })
+    .from(accountReconciliations)
+    .leftJoin(bankAccounts, eq(bankAccounts.id, accountReconciliations.accountId))
+    .orderBy(desc(accountReconciliations.asOfDate), desc(accountReconciliations.id))
+    .limit(limit);
 }
 
 export async function listPayrollRuns(limit = 50) {

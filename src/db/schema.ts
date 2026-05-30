@@ -1,4 +1,4 @@
-import { pgTable, check, bigint, text, boolean, index, foreignKey, date, numeric, char, timestamp, unique, integer } from "drizzle-orm/pg-core"
+import { pgTable, check, bigint, text, boolean, char, numeric, timestamp, date, unique, integer, foreignKey, index } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 
@@ -12,62 +12,6 @@ export const categories = pgTable("categories", {
 	isActive: boolean("is_active").default(true).notNull(),
 }, (table) => [
 	check("chk_category_kind", sql`kind = ANY (ARRAY['income'::text, 'cogs'::text, 'expense'::text, 'non_operating'::text, 'transfer'::text, 'equity'::text])`),
-]);
-
-export const transactions = pgTable("transactions", {
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "transactions_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
-	txnDate: date("txn_date").notNull(),
-	party: text(),
-	description: text(),
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	categoryId: bigint("category_id", { mode: "number" }),
-	counterpartyTaxId: text("counterparty_tax_id"),
-	amount: numeric({ precision: 18, scale:  2 }).notNull(),
-	currency: char({ length: 3 }).notNull(),
-	originalAmount: numeric("original_amount", { precision: 18, scale:  2 }),
-	originalCurrency: char("original_currency", { length: 3 }),
-	fxRate: numeric("fx_rate", { precision: 18, scale:  8 }),
-	amountTwd: numeric("amount_twd", { precision: 18, scale:  2 }),
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	fromAccountId: bigint("from_account_id", { mode: "number" }),
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	toAccountId: bigint("to_account_id", { mode: "number" }),
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	transferGroupId: bigint("transfer_group_id", { mode: "number" }),
-	book: text().default('both').notNull(),
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	invoiceId: bigint("invoice_id", { mode: "number" }),
-	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-}, (table) => [
-	index("idx_txn_book").using("btree", table.book.asc().nullsLast().op("text_ops")),
-	index("idx_txn_category").using("btree", table.categoryId.asc().nullsLast().op("int8_ops")),
-	index("idx_txn_date").using("btree", table.txnDate.asc().nullsLast().op("date_ops")),
-	index("idx_txn_from").using("btree", table.fromAccountId.asc().nullsLast().op("int8_ops")),
-	index("idx_txn_to").using("btree", table.toAccountId.asc().nullsLast().op("int8_ops")),
-	foreignKey({
-			columns: [table.categoryId],
-			foreignColumns: [categories.id],
-			name: "transactions_category_id_fkey"
-		}),
-	foreignKey({
-			columns: [table.fromAccountId],
-			foreignColumns: [bankAccounts.id],
-			name: "transactions_from_account_id_fkey"
-		}),
-	foreignKey({
-			columns: [table.toAccountId],
-			foreignColumns: [bankAccounts.id],
-			name: "transactions_to_account_id_fkey"
-		}),
-	foreignKey({
-			columns: [table.invoiceId],
-			foreignColumns: [invoices.id],
-			name: "transactions_invoice_id_fkey"
-		}),
-	check("chk_txn_book", sql`book = ANY (ARRAY['both'::text, 'internal'::text, 'external'::text])`),
-	check("chk_txn_accounts", sql`(from_account_id IS NOT NULL) OR (to_account_id IS NOT NULL)`),
 ]);
 
 export const bankAccounts = pgTable("bank_accounts", {
@@ -205,4 +149,108 @@ export const payrollItemTypes = pgTable("payroll_item_types", {
 	note: text(),
 }, (table) => [
 	check("chk_pit_direction", sql`direction = ANY (ARRAY['earning'::text, 'deduction'::text])`),
+]);
+
+export const suppliers = pgTable("suppliers", {
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "suppliers_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	name: text().notNull(),
+	taxId: text("tax_id"),
+	defaultCurrency: char("default_currency", { length: 3 }),
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	defaultAccountId: bigint("default_account_id", { mode: "number" }),
+	typicalAmount: numeric("typical_amount", { precision: 18, scale:  2 }),
+	contact: text(),
+	note: text(),
+	isActive: boolean("is_active").default(true).notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	foreignKey({
+			columns: [table.defaultAccountId],
+			foreignColumns: [bankAccounts.id],
+			name: "suppliers_default_account_id_fkey"
+		}),
+]);
+
+export const transactions = pgTable("transactions", {
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "transactions_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	txnDate: date("txn_date").notNull(),
+	party: text(),
+	description: text(),
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	categoryId: bigint("category_id", { mode: "number" }),
+	counterpartyTaxId: text("counterparty_tax_id"),
+	amount: numeric({ precision: 18, scale:  2 }).notNull(),
+	currency: char({ length: 3 }).notNull(),
+	originalAmount: numeric("original_amount", { precision: 18, scale:  2 }),
+	originalCurrency: char("original_currency", { length: 3 }),
+	fxRate: numeric("fx_rate", { precision: 18, scale:  8 }),
+	amountTwd: numeric("amount_twd", { precision: 18, scale:  2 }),
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	fromAccountId: bigint("from_account_id", { mode: "number" }),
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	toAccountId: bigint("to_account_id", { mode: "number" }),
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	transferGroupId: bigint("transfer_group_id", { mode: "number" }),
+	book: text().default('both').notNull(),
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	invoiceId: bigint("invoice_id", { mode: "number" }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	billedToCompanyTaxId: boolean("billed_to_company_tax_id").default(false).notNull(),
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	supplierId: bigint("supplier_id", { mode: "number" }),
+}, (table) => [
+	index("idx_txn_book").using("btree", table.book.asc().nullsLast().op("text_ops")),
+	index("idx_txn_category").using("btree", table.categoryId.asc().nullsLast().op("int8_ops")),
+	index("idx_txn_date").using("btree", table.txnDate.asc().nullsLast().op("date_ops")),
+	index("idx_txn_from").using("btree", table.fromAccountId.asc().nullsLast().op("int8_ops")),
+	index("idx_txn_supplier").using("btree", table.supplierId.asc().nullsLast().op("int8_ops")),
+	index("idx_txn_to").using("btree", table.toAccountId.asc().nullsLast().op("int8_ops")),
+	foreignKey({
+			columns: [table.categoryId],
+			foreignColumns: [categories.id],
+			name: "transactions_category_id_fkey"
+		}),
+	foreignKey({
+			columns: [table.fromAccountId],
+			foreignColumns: [bankAccounts.id],
+			name: "transactions_from_account_id_fkey"
+		}),
+	foreignKey({
+			columns: [table.toAccountId],
+			foreignColumns: [bankAccounts.id],
+			name: "transactions_to_account_id_fkey"
+		}),
+	foreignKey({
+			columns: [table.invoiceId],
+			foreignColumns: [invoices.id],
+			name: "transactions_invoice_id_fkey"
+		}),
+	foreignKey({
+			columns: [table.supplierId],
+			foreignColumns: [suppliers.id],
+			name: "transactions_supplier_id_fkey"
+		}),
+	check("chk_txn_book", sql`book = ANY (ARRAY['both'::text, 'internal'::text, 'external'::text])`),
+	check("chk_txn_accounts", sql`(from_account_id IS NOT NULL) OR (to_account_id IS NOT NULL)`),
+]);
+
+export const accountReconciliations = pgTable("account_reconciliations", {
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "account_reconciliations_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	accountId: bigint("account_id", { mode: "number" }).notNull(),
+	asOfDate: date("as_of_date").notNull(),
+	statementBalance: numeric("statement_balance", { precision: 18, scale:  2 }).notNull(),
+	note: text(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	foreignKey({
+			columns: [table.accountId],
+			foreignColumns: [bankAccounts.id],
+			name: "account_reconciliations_account_id_fkey"
+		}),
+	unique("uq_recon_account_date").on(table.accountId, table.asOfDate),
 ]);
