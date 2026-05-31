@@ -1,4 +1,4 @@
-import { sql, eq, desc, and, inArray, aliasedTable } from "drizzle-orm";
+import { sql, eq, desc, and, or, lte, inArray, aliasedTable } from "drizzle-orm";
 import { getDb } from "./index";
 import {
   transactions,
@@ -274,10 +274,10 @@ export async function listCategories() {
     .orderBy(categories.kind, categories.name);
 }
 
-// Current computed book balance per account = opening + inflows - outflows.
+// 帳面餘額 = 期初 + 流入 − 流出。用 left join + filter 聚合（相關子查詢在 drizzle sql 模板會關聯失效）。
 export async function listAccountBalances() {
   const db = getDb();
-  return db
+  const balances = await db
     .select({
       id: bankAccounts.id,
       name: bankAccounts.name,
@@ -286,14 +286,33 @@ export async function listAccountBalances() {
       openingBalance: bankAccounts.openingBalance,
       bookBalance: sql<string>`(
         ${bankAccounts.openingBalance}
-        + coalesce((select sum(t.amount) from ${transactions} t where t.to_account_id = ${bankAccounts.id}), 0)
-        - coalesce((select sum(t.amount) from ${transactions} t where t.from_account_id = ${bankAccounts.id}), 0)
+        + coalesce(sum(${transactions.amount}) filter (where ${transactions.toAccountId} = ${bankAccounts.id}), 0)
+        - coalesce(sum(${transactions.amount}) filter (where ${transactions.fromAccountId} = ${bankAccounts.id}), 0)
       )`,
-      lastReconciledAt: sql<string | null>`(select max(r.as_of_date) from ${accountReconciliations} r where r.account_id = ${bankAccounts.id})`,
     })
     .from(bankAccounts)
+    .leftJoin(
+      transactions,
+      or(
+        eq(transactions.fromAccountId, bankAccounts.id),
+        eq(transactions.toAccountId, bankAccounts.id),
+      ),
+    )
     .where(eq(bankAccounts.isActive, true))
+    .groupBy(bankAccounts.id)
     .orderBy(bankAccounts.name);
+
+  // 最後對帳日（另外查，避免和上面的 join 產生笛卡兒積把金額重複加）
+  const lastRows = await db
+    .select({
+      accountId: accountReconciliations.accountId,
+      last: sql<string>`max(${accountReconciliations.asOfDate})`,
+    })
+    .from(accountReconciliations)
+    .groupBy(accountReconciliations.accountId);
+  const lastMap = new Map(lastRows.map((r) => [r.accountId, r.last]));
+
+  return balances.map((b) => ({ ...b, lastReconciledAt: lastMap.get(b.id) ?? null }));
 }
 
 // Reconciliation snapshots with the book balance computed as of each snapshot date.
@@ -308,14 +327,26 @@ export async function listReconciliations(limit = 100) {
       asOfDate: accountReconciliations.asOfDate,
       statementBalance: accountReconciliations.statementBalance,
       note: accountReconciliations.note,
+      // 截止日(含)前的帳面餘額：left join + filter，不用相關子查詢
       bookBalance: sql<string>`(
         ${bankAccounts.openingBalance}
-        + coalesce((select sum(t.amount) from ${transactions} t where t.to_account_id = ${accountReconciliations.accountId} and t.txn_date <= ${accountReconciliations.asOfDate}), 0)
-        - coalesce((select sum(t.amount) from ${transactions} t where t.from_account_id = ${accountReconciliations.accountId} and t.txn_date <= ${accountReconciliations.asOfDate}), 0)
+        + coalesce(sum(${transactions.amount}) filter (where ${transactions.toAccountId} = ${accountReconciliations.accountId}), 0)
+        - coalesce(sum(${transactions.amount}) filter (where ${transactions.fromAccountId} = ${accountReconciliations.accountId}), 0)
       )`,
     })
     .from(accountReconciliations)
     .leftJoin(bankAccounts, eq(bankAccounts.id, accountReconciliations.accountId))
+    .leftJoin(
+      transactions,
+      and(
+        or(
+          eq(transactions.fromAccountId, accountReconciliations.accountId),
+          eq(transactions.toAccountId, accountReconciliations.accountId),
+        ),
+        lte(transactions.txnDate, accountReconciliations.asOfDate),
+      ),
+    )
+    .groupBy(accountReconciliations.id, bankAccounts.id)
     .orderBy(desc(accountReconciliations.asOfDate), desc(accountReconciliations.id))
     .limit(limit);
 }
