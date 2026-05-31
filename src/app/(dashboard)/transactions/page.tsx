@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { BookBadge } from "@/components/book-badge";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +17,7 @@ import {
   listCategories,
   listParties,
   listEmployees,
+  listTransactionMonths,
   type Book,
   type TxnDocument,
 } from "@/db/queries";
@@ -28,15 +28,9 @@ import { DeleteButton } from "@/components/delete-button";
 import { deleteTransaction } from "@/db/mutations";
 import { RowDialog } from "@/components/row-dialog";
 import { EditTransactionForm } from "./edit-transaction-form";
+import { TransactionFilters } from "./transaction-filters";
 
 export const dynamic = "force-dynamic";
-
-const tabs: { label: string; book?: Book }[] = [
-  { label: "全部" },
-  { label: "內帳", book: "internal" },
-  { label: "外帳", book: "external" },
-  { label: "內外", book: "both" },
-];
 
 function txnAmountColor(type: string) {
   if (type === "income") return "text-green-600";
@@ -153,18 +147,21 @@ function TransactionRow({
 export default async function TransactionsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ book?: string }>;
+  searchParams: Promise<{ book?: string; category?: string; account?: string; period?: string }>;
 }) {
-  const { book } = await searchParams;
+  const { book, category, account, period } = await searchParams;
   const active = (["internal", "external", "both"].includes(book ?? "") ? book : undefined) as
     | Book
     | undefined;
-  const [rows, accounts, categories, parties, employees] = await Promise.all([
-    listTransactions(active),
+  const categoryId = category && Number.isFinite(Number(category)) ? Number(category) : undefined;
+  const accountId = account && Number.isFinite(Number(account)) ? Number(account) : undefined;
+  const [rows, accounts, categories, parties, employees, months] = await Promise.all([
+    listTransactions({ book: active, categoryId, accountId, period }),
     listBankAccounts(),
     listCategories(),
     listParties(),
     listEmployees(),
+    listTransactionMonths(),
   ]);
   const docsMap = await listDocumentsForTransactions(rows.map((r) => r.id));
   const partyOpts = parties.map((s) => ({ id: s.id, name: s.name }));
@@ -174,7 +171,7 @@ export default async function TransactionsPage({
 
   return (
     <>
-      <PageHeader title="內外帳" description="所有交易紀錄，可依內帳 / 外帳檢視">
+      <PageHeader title="內外帳" description="所有交易紀錄，可依帳別、分類篩選">
         <NewTransactionDialog
           accounts={accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }))}
           categories={categories}
@@ -183,25 +180,15 @@ export default async function TransactionsPage({
         />
       </PageHeader>
 
-      <div className="flex gap-1">
-        {tabs.map((t) => {
-          const isActive = t.book === active;
-          return (
-            <Link
-              key={t.label}
-              href={t.book ? `/transactions?book=${t.book}` : "/transactions"}
-              className={cn(
-                "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-                isActive
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-muted",
-              )}
-            >
-              {t.label}
-            </Link>
-          );
-        })}
-      </div>
+      <TransactionFilters
+        categories={categories.map((c) => ({ id: c.id, name: c.name }))}
+        accounts={accountOpts}
+        months={months}
+        book={active}
+        category={category}
+        account={account}
+        period={period}
+      />
 
       {groups.length === 0 ? (
         <Card>

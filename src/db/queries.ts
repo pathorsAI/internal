@@ -38,7 +38,15 @@ export async function getOverview() {
   });
 }
 
-export async function listTransactions(book?: Book, limit = 100) {
+export type TxnFilters = {
+  book?: Book;
+  categoryId?: number;
+  accountId?: number;
+  period?: string; // YYYY-MM
+};
+
+export async function listTransactions(filters: TxnFilters = {}, limit = 100) {
+  const { book, categoryId, accountId, period } = filters;
   const db = getDb();
   const fromAcct = aliasedTable(bankAccounts, "from_acct");
   const toAcct = aliasedTable(bankAccounts, "to_acct");
@@ -72,11 +80,36 @@ export async function listTransactions(book?: Book, limit = 100) {
     .leftJoin(toAcct, eq(toAcct.id, transactions.toAccountId))
     .leftJoin(parties, eq(parties.id, transactions.partyId))
     .leftJoin(employees, eq(employees.id, transactions.settleEmployeeId))
-    .where(book ? eq(transactions.book, book) : undefined)
+    .where(
+      and(
+        book ? eq(transactions.book, book) : undefined,
+        categoryId ? eq(transactions.categoryId, categoryId) : undefined,
+        accountId
+          ? or(
+              eq(transactions.fromAccountId, accountId),
+              eq(transactions.toAccountId, accountId),
+            )
+          : undefined,
+        period ? sql`to_char(${transactions.txnDate}, 'YYYY-MM') = ${period}` : undefined,
+      ),
+    )
     .orderBy(desc(transactions.txnDate), desc(transactions.id))
     .limit(limit);
 
   return rows;
+}
+
+// 有交易的年月清單（新到舊），給篩選下拉用
+export async function listTransactionMonths(): Promise<string[]> {
+  const db = getDb();
+  const rows = await db
+    .selectDistinct({ ym: sql<string>`to_char(${transactions.txnDate}, 'YYYY-MM')`.as("ym") })
+    .from(transactions);
+  return rows
+    .map((r) => r.ym)
+    .filter((ym): ym is string => !!ym)
+    .sort()
+    .reverse();
 }
 
 export type TxnDocument = {
