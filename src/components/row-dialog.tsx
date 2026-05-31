@@ -32,9 +32,20 @@ export function RowDialog({
   const [open, setOpen] = React.useState(false);
   const close = React.useCallback(() => setOpen(false), []);
 
+  function onRowClick(e: React.MouseEvent<HTMLTableRowElement>) {
+    // 有對話框正開著 / 正在關閉時（例如點灰色背景關閉發放薪資 dialog，
+    // 那個點擊會「穿透」到下面的列）→ 不要開啟這一列的編輯
+    if (document.querySelector('[data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"]')) {
+      return;
+    }
+    // 點到列裡的按鈕 / 連結等互動元素也不開啟（發放薪資、刪除等）
+    if ((e.target as HTMLElement).closest("button, a, input, label")) return;
+    setOpen(true);
+  }
+
   return (
     <>
-      <TableRow className="cursor-pointer hover:bg-muted/50" onClick={() => setOpen(true)}>
+      <TableRow className="cursor-pointer hover:bg-muted/50" onClick={onRowClick}>
         {cells}
       </TableRow>
       <Dialog open={open} onOpenChange={setOpen}>
