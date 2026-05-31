@@ -1,6 +1,9 @@
+import { RowDialog } from "@/components/row-dialog";
+import { DeleteButton } from "@/components/delete-button";
+import { deleteBankAccount } from "@/db/mutations";
+import { EditBankAccountForm } from "./edit-bank-account-form";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
-import { BookBadge } from "@/components/book-badge";
 import { Card } from "@/components/ui/card";
 import {
   Table,
@@ -12,6 +15,7 @@ import {
 } from "@/components/ui/table";
 import { listBankAccounts } from "@/db/queries";
 import { formatCurrency } from "@/lib/format";
+import { NewBankAccountDialog } from "./new-bank-account-dialog";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +24,9 @@ export default async function BankAccountsPage() {
 
   return (
     <>
-      <PageHeader title="銀行帳戶" description="現金與銀行帳戶" />
+      <PageHeader title="銀行帳戶" description="現金與銀行帳戶">
+        <NewBankAccountDialog />
+      </PageHeader>
       <Card>
         <Table>
           <TableHeader>
@@ -28,9 +34,9 @@ export default async function BankAccountsPage() {
               <TableHead>名稱</TableHead>
               <TableHead>類型</TableHead>
               <TableHead>幣別</TableHead>
-              <TableHead>預設帳別</TableHead>
               <TableHead>狀態</TableHead>
               <TableHead className="text-right">期初餘額</TableHead>
+              <TableHead className="text-right">動作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -42,26 +48,44 @@ export default async function BankAccountsPage() {
               </TableRow>
             ) : (
               rows.map((a) => (
-                <TableRow key={a.id}>
-                  <TableCell className="font-medium">{a.name}</TableCell>
-                  <TableCell>
-                    <Badge variant={a.kind === "bank" ? "outline" : "secondary"}>
-                      {a.kind === "bank" ? "實體" : "虛擬"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{a.currency}</TableCell>
-                  <TableCell>
-                    <BookBadge book={a.defaultBook} />
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={a.isActive ? "outline" : "secondary"}>
-                      {a.isActive ? "啟用" : "停用"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right font-medium tabular-nums">
-                    {formatCurrency(a.openingBalance, a.currency)}
-                  </TableCell>
-                </TableRow>
+                <RowDialog
+                  key={a.id}
+                  title={a.name}
+                  description="銀行帳戶"
+                  cells={
+                    <>
+                      <TableCell className="font-medium">{a.name}</TableCell>
+                      <TableCell>
+                        <Badge variant={a.kind === "bank" ? "outline" : "secondary"}>
+                          {a.kind === "bank" ? "實體" : "虛擬"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{a.currency}</TableCell>
+                      <TableCell>
+                        <Badge variant={a.isActive ? "outline" : "secondary"}>
+                          {a.isActive ? "啟用" : "停用"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right font-medium tabular-nums">
+                        {formatCurrency(a.openingBalance, a.currency)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <DeleteButton action={deleteBankAccount} id={a.id} />
+                      </TableCell>
+                    </>
+                  }
+                >
+                  <EditBankAccountForm
+                    account={{
+                      id: a.id,
+                      name: a.name,
+                      kind: a.kind,
+                      currency: a.currency,
+                      openingBalance: a.openingBalance,
+                      isActive: a.isActive,
+                    }}
+                  />
+                </RowDialog>
               ))
             )}
           </TableBody>

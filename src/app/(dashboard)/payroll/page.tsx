@@ -1,6 +1,7 @@
+import Link from "next/link";
+import { Users } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
-import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -9,67 +10,93 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { listPayrollRuns } from "@/db/queries";
-import { formatCurrency, formatDate } from "@/lib/format";
+import { listPayslipRecords } from "@/db/queries";
+import { formatCurrency } from "@/lib/format";
+import { DeleteButton } from "@/components/delete-button";
+import { deletePayslip } from "@/db/mutations";
 
 export const dynamic = "force-dynamic";
 
-const statusCfg: Record<string, { label: string; variant: "default" | "secondary" | "outline" }> = {
-  draft: { label: "草稿", variant: "secondary" },
-  finalized: { label: "已結算", variant: "outline" },
-  paid: { label: "已發放", variant: "default" },
-};
-
 export default async function PayrollPage() {
-  const rows = await listPayrollRuns();
+  const rows = await listPayslipRecords();
 
   return (
     <>
-      <PageHeader title="薪資" description="每月薪資結算批次" />
+      <PageHeader
+        title="薪資"
+        description="到「員工」頁對每位員工發放薪資；這裡是發放紀錄"
+      >
+        <Link
+          href="/employees"
+          className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90"
+        >
+          <Users className="size-4" /> 去員工頁發薪
+        </Link>
+      </PageHeader>
+
       <Card>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>期間</TableHead>
-              <TableHead>發薪日</TableHead>
-              <TableHead>狀態</TableHead>
-              <TableHead className="text-right">薪資單</TableHead>
-              <TableHead className="text-right">實發合計</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.length === 0 ? (
+        <CardHeader>
+          <CardTitle className="text-base">發放紀錄</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground">
-                  尚無薪資批次
-                </TableCell>
+                <TableHead>月份</TableHead>
+                <TableHead>員工</TableHead>
+                <TableHead className="text-right">應稅</TableHead>
+                <TableHead className="text-right">免稅</TableHead>
+                <TableHead className="text-right">實發</TableHead>
+                <TableHead>交易</TableHead>
+                <TableHead className="text-right">動作</TableHead>
               </TableRow>
-            ) : (
-              rows.map((r) => {
-                const cfg = statusCfg[r.status] ?? { label: r.status, variant: "outline" as const };
-                return (
+            </TableHeader>
+            <TableBody>
+              {rows.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center text-muted-foreground">
+                    尚無發放紀錄
+                  </TableCell>
+                </TableRow>
+              ) : (
+                rows.map((r) => (
                   <TableRow key={r.id}>
-                    <TableCell className="font-medium">
-                      {r.periodYear} 年 {String(r.periodMonth).padStart(2, "0")} 月
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      {r.periodYear}-{String(r.periodMonth).padStart(2, "0")}
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {r.payDate ? formatDate(r.payDate) : "—"}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={cfg.variant}>{cfg.label}</Badge>
+                    <TableCell className="font-medium">{r.employeeName ?? "—"}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                      {formatCurrency(r.taxableTotal)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground">
-                      {r.payslipCount}
+                      {formatCurrency(r.nontaxableTotal)}
                     </TableCell>
                     <TableCell className="text-right font-medium tabular-nums">
-                      {formatCurrency(r.netTotal)}
+                      {formatCurrency(r.netPay)}
+                    </TableCell>
+                    <TableCell>
+                      {r.paidTransactionId ? (
+                        <Link href="/transactions" className="text-xs text-primary hover:underline">
+                          已入帳
+                        </Link>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <DeleteButton
+                        action={deletePayslip}
+                        id={r.id}
+                        title="撤銷這筆發放？"
+                        description="會一併刪除它產生的薪資支出交易。"
+                      />
                     </TableCell>
                   </TableRow>
-                );
-              })
-            )}
-          </TableBody>
-        </Table>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
       </Card>
     </>
   );

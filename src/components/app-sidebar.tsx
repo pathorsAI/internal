@@ -5,12 +5,13 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   ArrowLeftRight,
-  FileText,
   Landmark,
   Truck,
   Scale,
   Users,
   ReceiptText,
+  BellRing,
+  Tags,
   Boxes,
 } from "lucide-react";
 
@@ -31,8 +32,10 @@ import {
 const nav = [
   { title: "總覽", href: "/", icon: LayoutDashboard },
   { title: "內外帳", href: "/transactions", icon: ArrowLeftRight },
-  { title: "發票", href: "/invoices", icon: FileText },
-  { title: "供應商", href: "/suppliers", icon: Truck },
+  { title: "交易對象", href: "/parties", icon: Truck },
+  { title: "分類", href: "/categories", icon: Tags },
+  { title: "代墊", href: "/advances", icon: ReceiptText },
+  { title: "待通知會計師", href: "/accountant-notices", icon: BellRing },
   { title: "銀行帳戶", href: "/bank-accounts", icon: Landmark },
   { title: "對帳", href: "/reconciliation", icon: Scale },
 ];

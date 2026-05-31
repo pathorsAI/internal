@@ -17,4 +17,12 @@ function Label({ className, ...props }: React.ComponentProps<"label">) {
   )
 }
 
-export { Label }
+function Req() {
+  return (
+    <span aria-hidden className="text-destructive">
+      *
+    </span>
+  )
+}
+
+export { Label, Req }

@@ -1,20 +1,5 @@
-import Link from "next/link";
-import {
-  ArrowLeftRight,
-  FileText,
-  Users,
-  Landmark,
-  TrendingUp,
-  TrendingDown,
-  Wallet,
-} from "lucide-react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { TrendingUp, TrendingDown, Wallet } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/page-header";
 import { getOverview, listTransactions } from "@/db/queries";
 import { formatCurrency, formatDate } from "@/lib/format";
@@ -26,63 +11,49 @@ export default async function DashboardPage() {
   const overview = await getOverview();
   const recent = await listTransactions(undefined, 6);
 
-  const counts = [
-    { label: "交易筆數", value: overview.counts.txns, icon: ArrowLeftRight, href: "/transactions" },
-    { label: "發票", value: overview.counts.invoices, icon: FileText, href: "/invoices" },
-    { label: "在職員工", value: overview.counts.employees, icon: Users, href: "/employees" },
-    { label: "銀行帳戶", value: overview.counts.accounts, icon: Landmark, href: "/bank-accounts" },
-  ];
-
-  const money = [
-    { label: "收入", value: overview.income, icon: TrendingUp, tone: "text-emerald-600" },
-    { label: "支出", value: overview.expense, icon: TrendingDown, tone: "text-red-600" },
-    { label: "淨額", value: overview.net, icon: Wallet, tone: overview.net >= 0 ? "text-emerald-600" : "text-red-600" },
+  const currencyLabel: Record<string, string> = { TWD: "台幣", USD: "美金" };
+  const stats = [
+    { label: "收入", key: "income" as const, icon: TrendingUp },
+    { label: "支出", key: "expense" as const, icon: TrendingDown },
+    { label: "淨額", key: "net" as const, icon: Wallet },
   ];
 
   return (
     <>
       <PageHeader title="總覽" description="派斯科技內外帳與財務概況" />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {counts.map((c) => (
-          <Link key={c.label} href={c.href}>
-            <Card className="transition-colors hover:bg-muted/40">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  {c.label}
-                </CardTitle>
-                <c.icon className="size-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-semibold">{c.value}</div>
-              </CardContent>
-            </Card>
-          </Link>
-        ))}
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-3">
-        {money.map((m) => (
-          <Card key={m.label}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                {m.label}
-              </CardTitle>
-              <m.icon className="size-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className={"text-2xl font-semibold tabular-nums " + m.tone}>
-                {formatCurrency(m.value)}
+      <Card className="divide-y gap-0 p-0">
+        {overview.length === 0 ? (
+          <div className="p-6 text-sm text-muted-foreground">尚無收支資料</div>
+        ) : (
+          overview.map((c) => (
+            <div key={c.currency} className="flex items-center gap-4 px-4 py-3">
+              <span className="w-8 shrink-0 text-xs font-medium text-muted-foreground">
+                {currencyLabel[c.currency] ?? c.currency}
+              </span>
+              <div className="grid flex-1 grid-cols-3 gap-4">
+                {stats.map((m) => {
+                  const value = c[m.key];
+                  const tone =
+                    m.key === "expense" || value < 0 ? "text-red-600" : "text-emerald-600";
+                  return (
+                    <div key={m.label} className="space-y-0.5">
+                      <div className="text-xs text-muted-foreground">{m.label}</div>
+                      <div className={"text-base font-semibold tabular-nums " + tone}>
+                        {formatCurrency(value, c.currency)}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+            </div>
+          ))
+        )}
+      </Card>
 
       <Card>
         <CardHeader>
           <CardTitle className="text-base">最近交易</CardTitle>
-          <CardDescription>來自 Neon 即時資料</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {recent.length === 0 ? (
@@ -95,7 +66,7 @@ export default async function DashboardPage() {
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">
-                    {t.description ?? t.party ?? t.categoryName ?? "—"}
+                    {t.description ?? t.partyName ?? t.categoryName ?? "—"}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {t.categoryName ?? "未分類"} · {formatDate(t.txnDate)}
@@ -104,7 +75,7 @@ export default async function DashboardPage() {
                 <div className="flex items-center gap-2">
                   <BookBadge book={t.book} />
                   <span className="text-sm font-medium tabular-nums">
-                    {formatCurrency(t.amountTwd ?? t.amount, t.currency)}
+                    {formatCurrency(t.amount, t.currency)}
                   </span>
                 </div>
               </div>

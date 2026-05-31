@@ -2,10 +2,9 @@
 
 import { useActionState, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Plus } from "lucide-react";
-import { createReconciliation, type ActionState } from "@/db/mutations";
+import { createReimbursement, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { formatCurrency } from "@/lib/format";
 import { Label, Req } from "@/components/ui/label";
 import {
   Select,
@@ -27,13 +26,15 @@ import { DatePicker } from "@/components/date-picker";
 
 const initial: ActionState = { ok: false };
 
-export function NewReconciliationDialog({
+export function RecordReimbursementDialog({
+  advance,
   accounts,
-}: {
+}: Readonly<{
+  advance: { id: number; settleName: string; amount: string; currency: string; vendorName: string };
   accounts: { id: number; name: string; currency: string }[];
-}) {
+}>) {
   const [open, setOpen] = useState(false);
-  const [state, action, pending] = useActionState(createReconciliation, initial);
+  const [state, action, pending] = useActionState(createReimbursement, initial);
   const today = new Date().toISOString().slice(0, 10);
   const accountItems = Object.fromEntries(
     accounts.map((a) => [String(a.id), `${a.name}（${a.currency}）`]),
@@ -42,7 +43,7 @@ export function NewReconciliationDialog({
   useEffect(() => {
     if (state.ok) {
       setOpen(false);
-      toast.success("已新增對帳紀錄");
+      toast.success("已記錄撥款");
     }
   }, [state]);
   useEffect(() => {
@@ -51,24 +52,27 @@ export function NewReconciliationDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="sm" />}>
-        <Plus className="size-4" /> 新增對帳
-      </DialogTrigger>
+      <DialogTrigger render={<Button size="sm" variant="outline" />}>記錄撥款</DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <form action={action}>
+          <input type="hidden" name="advanceId" value={advance.id} />
           <DialogHeader>
-            <DialogTitle>新增對帳紀錄</DialogTitle>
+            <DialogTitle>記錄撥款</DialogTitle>
             <DialogDescription>
-              填入該帳戶在截止日的實際餘額，系統會自動與帳面餘額比對差額
+              還給 {advance.settleName || "代墊人"}（原費用：{advance.vendorName || "—"}）
             </DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4 py-4">
             <div className="space-y-1.5">
-              <Label>帳戶<Req /></Label>
-              <Select name="accountId" items={accountItems} required>
+              <Label>撥款日期<Req /></Label>
+              <DatePicker name="payDate" defaultValue={today} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>付款帳戶<Req /></Label>
+              <Select name="fromAccountId" items={accountItems} required>
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="— 請選擇 —" />
+                  <SelectValue placeholder="— 選擇帳戶 —" />
                 </SelectTrigger>
                 <SelectContent>
                   {accounts.map((a) => (
@@ -80,29 +84,17 @@ export function NewReconciliationDialog({
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>截止日期<Req /></Label>
-              <DatePicker name="asOfDate" defaultValue={today} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="statementBalance">對帳單實際餘額<Req /></Label>
-              <Input
-                id="statementBalance"
-                name="statementBalance"
-                type="number"
-                step="0.01"
-                required
-                placeholder="銀行 / 帳戶顯示的餘額"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="note">備註</Label>
-              <Input id="note" name="note" placeholder="選填" />
+              <Label>金額（依代墊，不可改）</Label>
+              <div className="flex h-9 items-center rounded-md border bg-muted px-3 text-sm text-muted-foreground">
+                {formatCurrency(advance.amount, advance.currency)}
+              </div>
+              <input type="hidden" name="amount" value={advance.amount} />
             </div>
           </div>
 
           <DialogFooter>
             <Button type="submit" disabled={pending}>
-              {pending ? "儲存中…" : "儲存"}
+              {pending ? "儲存中…" : "確認撥款"}
             </Button>
           </DialogFooter>
         </form>

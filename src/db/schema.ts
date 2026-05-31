@@ -5,10 +5,9 @@ import { sql } from "drizzle-orm"
 
 export const categories = pgTable("categories", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "categories_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "categories_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
 	name: text().notNull(),
 	kind: text().notNull(),
-	pnlSection: text("pnl_section"),
 	isActive: boolean("is_active").default(true).notNull(),
 }, (table) => [
 	check("chk_category_kind", sql`kind = ANY (ARRAY['income'::text, 'cogs'::text, 'expense'::text, 'non_operating'::text, 'transfer'::text, 'equity'::text])`),
@@ -16,21 +15,18 @@ export const categories = pgTable("categories", {
 
 export const bankAccounts = pgTable("bank_accounts", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "bank_accounts_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "bank_accounts_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
 	name: text().notNull(),
 	kind: text().notNull(),
 	currency: char({ length: 3 }).notNull(),
 	openingBalance: numeric("opening_balance", { precision: 18, scale:  2 }).default('0').notNull(),
-	defaultBook: text("default_book").default('both').notNull(),
 	isActive: boolean("is_active").default(true).notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-}, (table) => [
-	check("chk_bankacct_book", sql`default_book = ANY (ARRAY['both'::text, 'internal'::text, 'external'::text])`),
-]);
+});
 
 export const invoices = pgTable("invoices", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "invoices_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "invoices_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
 	direction: text().notNull(),
 	invoiceNumber: text("invoice_number"),
 	invoiceDate: date("invoice_date"),
@@ -50,7 +46,7 @@ export const invoices = pgTable("invoices", {
 
 export const employees = pgTable("employees", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "employees_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "employees_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
 	name: text().notNull(),
 	nationalId: text("national_id"),
 	employmentType: text("employment_type").default('full_time').notNull(),
@@ -58,6 +54,10 @@ export const employees = pgTable("employees", {
 	hasHealthInsurance: boolean("has_health_insurance").default(true).notNull(),
 	hasPension: boolean("has_pension").default(true).notNull(),
 	baseSalary: numeric("base_salary", { precision: 18, scale:  2 }),
+	// 勞健保投保薪資（記錄保多少，先不試算保費）；是否有勞退看 hasPension
+	laborInsuredSalary: numeric("labor_insured_salary", { precision: 18, scale: 2 }),
+	healthInsuredSalary: numeric("health_insured_salary", { precision: 18, scale: 2 }),
+	salaryAccount: text("salary_account"),
 	startDate: date("start_date"),
 	endDate: date("end_date"),
 	isActive: boolean("is_active").default(true).notNull(),
@@ -68,7 +68,7 @@ export const employees = pgTable("employees", {
 
 export const payrollRuns = pgTable("payroll_runs", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "payroll_runs_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "payroll_runs_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
 	periodYear: integer("period_year").notNull(),
 	periodMonth: integer("period_month").notNull(),
 	payDate: date("pay_date"),
@@ -82,7 +82,7 @@ export const payrollRuns = pgTable("payroll_runs", {
 
 export const payslips = pgTable("payslips", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "payslips_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "payslips_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	payrollRunId: bigint("payroll_run_id", { mode: "number" }).notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
@@ -115,7 +115,7 @@ export const payslips = pgTable("payslips", {
 
 export const payslipItems = pgTable("payslip_items", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "payslip_items_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "payslip_items_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	payslipId: bigint("payslip_id", { mode: "number" }).notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
@@ -141,7 +141,7 @@ export const payslipItems = pgTable("payslip_items", {
 
 export const payrollItemTypes = pgTable("payroll_item_types", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "payroll_item_types_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "payroll_item_types_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
 	name: text().notNull(),
 	direction: text().notNull(),
 	isTaxable: boolean("is_taxable").notNull(),
@@ -151,10 +151,11 @@ export const payrollItemTypes = pgTable("payroll_item_types", {
 	check("chk_pit_direction", sql`direction = ANY (ARRAY['earning'::text, 'deduction'::text])`),
 ]);
 
-export const suppliers = pgTable("suppliers", {
+export const parties = pgTable("parties", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "suppliers_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "suppliers_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
 	name: text().notNull(),
+	label: text().default('vendor').notNull(),
 	taxId: text("tax_id"),
 	defaultCurrency: char("default_currency", { length: 3 }),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
@@ -170,17 +171,17 @@ export const suppliers = pgTable("suppliers", {
 			foreignColumns: [bankAccounts.id],
 			name: "suppliers_default_account_id_fkey"
 		}),
+	check("chk_supplier_type", sql`label = ANY (ARRAY['vendor'::text, 'customer'::text, 'gov'::text, 'other'::text])`),
+	unique("parties_name_key").on(table.name),
 ]);
 
 export const transactions = pgTable("transactions", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "transactions_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "transactions_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
 	txnDate: date("txn_date").notNull(),
-	party: text(),
 	description: text(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	categoryId: bigint("category_id", { mode: "number" }),
-	counterpartyTaxId: text("counterparty_tax_id"),
 	amount: numeric({ precision: 18, scale:  2 }).notNull(),
 	currency: char({ length: 3 }).notNull(),
 	originalAmount: numeric("original_amount", { precision: 18, scale:  2 }),
@@ -200,14 +201,19 @@ export const transactions = pgTable("transactions", {
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	billedToCompanyTaxId: boolean("billed_to_company_tax_id").default(false).notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	supplierId: bigint("supplier_id", { mode: "number" }),
+	partyId: bigint("party_id", { mode: "number" }),
+	settleEmployeeId: bigint("settle_employee_id", { mode: "number" }),
+	relatedToId: bigint("related_to_id", { mode: "number" }),
+	type: text().default('expense').notNull(),
 }, (table) => [
 	index("idx_txn_book").using("btree", table.book.asc().nullsLast().op("text_ops")),
 	index("idx_txn_category").using("btree", table.categoryId.asc().nullsLast().op("int8_ops")),
 	index("idx_txn_date").using("btree", table.txnDate.asc().nullsLast().op("date_ops")),
 	index("idx_txn_from").using("btree", table.fromAccountId.asc().nullsLast().op("int8_ops")),
-	index("idx_txn_supplier").using("btree", table.supplierId.asc().nullsLast().op("int8_ops")),
+	index("idx_txn_supplier").using("btree", table.partyId.asc().nullsLast().op("int8_ops")),
 	index("idx_txn_to").using("btree", table.toAccountId.asc().nullsLast().op("int8_ops")),
+	index("idx_txn_settle").using("btree", table.settleEmployeeId.asc().nullsLast().op("int8_ops")),
+	index("idx_txn_related").using("btree", table.relatedToId.asc().nullsLast().op("int8_ops")),
 	foreignKey({
 			columns: [table.categoryId],
 			foreignColumns: [categories.id],
@@ -229,17 +235,27 @@ export const transactions = pgTable("transactions", {
 			name: "transactions_invoice_id_fkey"
 		}),
 	foreignKey({
-			columns: [table.supplierId],
-			foreignColumns: [suppliers.id],
+			columns: [table.partyId],
+			foreignColumns: [parties.id],
 			name: "transactions_supplier_id_fkey"
 		}),
+	foreignKey({
+			columns: [table.settleEmployeeId],
+			foreignColumns: [employees.id],
+			name: "transactions_settle_employee_id_fkey"
+		}),
+	foreignKey({
+			columns: [table.relatedToId],
+			foreignColumns: [table.id],
+			name: "transactions_related_to_id_fkey"
+		}),
 	check("chk_txn_book", sql`book = ANY (ARRAY['both'::text, 'internal'::text, 'external'::text])`),
-	check("chk_txn_accounts", sql`(from_account_id IS NOT NULL) OR (to_account_id IS NOT NULL)`),
+	check("chk_txn_type", sql`type = ANY (ARRAY['expense'::text, 'income'::text, 'advance'::text, 'reimbursement'::text, 'transfer'::text])`),
 ]);
 
 export const accountReconciliations = pgTable("account_reconciliations", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "account_reconciliations_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "account_reconciliations_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	accountId: bigint("account_id", { mode: "number" }).notNull(),
 	asOfDate: date("as_of_date").notNull(),
@@ -253,4 +269,38 @@ export const accountReconciliations = pgTable("account_reconciliations", {
 			name: "account_reconciliations_account_id_fkey"
 		}),
 	unique("uq_recon_account_date").on(table.accountId, table.asOfDate),
+]);
+
+export const documents = pgTable("documents", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "documents_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	docType: text("doc_type").notNull(),
+	r2Key: text("r2_key").notNull(),
+	fileName: text("file_name"),
+	contentType: text("content_type"),
+	sizeBytes: bigint("size_bytes", { mode: "number" }),
+	transactionId: bigint("transaction_id", { mode: "number" }),
+	invoiceId: bigint("invoice_id", { mode: "number" }),
+	periodLabel: text("period_label"),
+	note: text(),
+	// 發票細分：電子發票(electronic)會計師會自動看到;其他發票(paper，三聯式等)要主動通知
+	invoiceKind: text("invoice_kind"),
+	// 其他發票主動通知會計師的時間（null = 尚未通知）
+	accountantNotifiedAt: timestamp("accountant_notified_at", { withTimezone: true, mode: 'string' }),
+	uploadedAt: timestamp("uploaded_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_doc_txn").using("btree", table.transactionId.asc().nullsLast().op("int8_ops")),
+	index("idx_doc_invoice").using("btree", table.invoiceId.asc().nullsLast().op("int8_ops")),
+	foreignKey({
+			columns: [table.transactionId],
+			foreignColumns: [transactions.id],
+			name: "documents_transaction_id_fkey"
+		}).onDelete("set null"),
+	foreignKey({
+			columns: [table.invoiceId],
+			foreignColumns: [invoices.id],
+			name: "documents_invoice_id_fkey"
+		}).onDelete("set null"),
+	unique("documents_r2_key_key").on(table.r2Key),
+	check("chk_doc_type", sql`doc_type = ANY (ARRAY['receipt'::text, 'invoice'::text, 'vat_return_401'::text, 'withholding'::text, 'payroll'::text, 'contract'::text, 'other'::text])`),
+	check("chk_doc_invoice_kind", sql`invoice_kind IS NULL OR invoice_kind = ANY (ARRAY['electronic'::text, 'paper'::text])`),
 ]);
