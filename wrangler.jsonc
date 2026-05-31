@@ -9,6 +9,9 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
+  "r2_buckets": [
+    { "binding": "STORAGE", "bucket_name": "pathors-internal-storage" }
+  ],
   "observability": {
     "logs": {
       "enabled": true,

@@ -1,4 +1,8 @@
 import { CheckCircle2, AlertTriangle } from "lucide-react";
+import { RowDialog } from "@/components/row-dialog";
+import { DeleteButton } from "@/components/delete-button";
+import { deleteReconciliation } from "@/db/mutations";
+import { EditReconciliationForm } from "./edit-reconciliation-form";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -80,12 +84,13 @@ export default async function ReconciliationPage() {
                 <TableHead className="text-right">差額</TableHead>
                 <TableHead>狀態</TableHead>
                 <TableHead>備註</TableHead>
+                <TableHead className="text-right">動作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {recons.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground">
+                  <TableCell colSpan={8} className="text-center text-muted-foreground">
                     尚無對帳紀錄
                   </TableCell>
                 </TableRow>
@@ -94,40 +99,64 @@ export default async function ReconciliationPage() {
                   const diff = Number(r.statementBalance) - Number(r.bookBalance);
                   const matched = Math.abs(diff) < EPS;
                   return (
-                    <TableRow key={r.id}>
-                      <TableCell className="whitespace-nowrap text-muted-foreground">
-                        {formatDate(r.asOfDate)}
-                      </TableCell>
-                      <TableCell>{r.accountName ?? "—"}</TableCell>
-                      <TableCell className="text-right tabular-nums text-muted-foreground">
-                        {formatCurrency(r.bookBalance, r.currency ?? "TWD")}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {formatCurrency(r.statementBalance, r.currency ?? "TWD")}
-                      </TableCell>
-                      <TableCell
-                        className={
-                          "text-right font-medium tabular-nums " +
-                          (matched ? "text-muted-foreground" : "text-red-600")
-                        }
-                      >
-                        {formatCurrency(diff, r.currency ?? "TWD")}
-                      </TableCell>
-                      <TableCell>
-                        {matched ? (
-                          <Badge variant="outline" className="gap-1">
-                            <CheckCircle2 className="size-3" /> 已對平
-                          </Badge>
-                        ) : (
-                          <Badge variant="destructive" className="gap-1">
-                            <AlertTriangle className="size-3" /> 有差額
-                          </Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {r.note ?? "—"}
-                      </TableCell>
-                    </TableRow>
+                    <RowDialog
+                      key={r.id}
+                      title="編輯對帳紀錄"
+                      cells={
+                        <>
+                          <TableCell className="whitespace-nowrap text-muted-foreground">
+                            {formatDate(r.asOfDate)}
+                          </TableCell>
+                          <TableCell>{r.accountName ?? "—"}</TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">
+                            {formatCurrency(r.bookBalance, r.currency ?? "TWD")}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {formatCurrency(r.statementBalance, r.currency ?? "TWD")}
+                          </TableCell>
+                          <TableCell
+                            className={
+                              "text-right font-medium tabular-nums " +
+                              (matched ? "text-muted-foreground" : "text-red-600")
+                            }
+                          >
+                            {formatCurrency(diff, r.currency ?? "TWD")}
+                          </TableCell>
+                          <TableCell>
+                            {matched ? (
+                              <Badge variant="outline" className="gap-1">
+                                <CheckCircle2 className="size-3" /> 已對平
+                              </Badge>
+                            ) : (
+                              <Badge variant="destructive" className="gap-1">
+                                <AlertTriangle className="size-3" /> 有差額
+                              </Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {r.note ?? "—"}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <DeleteButton action={deleteReconciliation} id={r.id} />
+                          </TableCell>
+                        </>
+                      }
+                    >
+                      <EditReconciliationForm
+                        recon={{
+                          id: r.id,
+                          accountId: r.accountId,
+                          asOfDate: r.asOfDate,
+                          statementBalance: r.statementBalance,
+                          note: r.note,
+                        }}
+                        accounts={accounts.map((a) => ({
+                          id: a.id,
+                          name: a.name,
+                          currency: a.currency,
+                        }))}
+                      />
+                    </RowDialog>
                   );
                 })
               )}

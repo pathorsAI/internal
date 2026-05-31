@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm/relations";
-import { payrollRuns, payslips, employees, transactions, payslipItems, payrollItemTypes, bankAccounts, suppliers, categories, invoices, accountReconciliations } from "./schema";
+import { payrollRuns, payslips, employees, transactions, payslipItems, payrollItemTypes, bankAccounts, parties, categories, invoices, accountReconciliations } from "./schema";
 
 export const payslipsRelations = relations(payslips, ({one, many}) => ({
 	payrollRun: one(payrollRuns, {
@@ -45,9 +45,9 @@ export const transactionsRelations = relations(transactions, ({one, many}) => ({
 		fields: [transactions.invoiceId],
 		references: [invoices.id]
 	}),
-	supplier: one(suppliers, {
-		fields: [transactions.supplierId],
-		references: [suppliers.id]
+	party: one(parties, {
+		fields: [transactions.partyId],
+		references: [parties.id]
 	}),
 }));
 
@@ -66,16 +66,16 @@ export const payrollItemTypesRelations = relations(payrollItemTypes, ({many}) =>
 	payslipItems: many(payslipItems),
 }));
 
-export const suppliersRelations = relations(suppliers, ({one, many}) => ({
+export const partiesRelations = relations(parties, ({one, many}) => ({
 	bankAccount: one(bankAccounts, {
-		fields: [suppliers.defaultAccountId],
+		fields: [parties.defaultAccountId],
 		references: [bankAccounts.id]
 	}),
 	transactions: many(transactions),
 }));
 
 export const bankAccountsRelations = relations(bankAccounts, ({many}) => ({
-	suppliers: many(suppliers),
+	parties: many(parties),
 	transactions_fromAccountId: many(transactions, {
 		relationName: "transactions_fromAccountId_bankAccounts_id"
 	}),
