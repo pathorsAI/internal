@@ -19,6 +19,7 @@ import {
   listParties,
   listEmployees,
   type Book,
+  type TxnDocument,
 } from "@/db/queries";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -51,6 +52,104 @@ const typeLabel: Record<string, string> = {
   transfer: "轉帳",
 };
 
+type TxnRow = Awaited<ReturnType<typeof listTransactions>>[number];
+type Opt = { id: number; name: string };
+type AccountOpt = { id: number; name: string; currency: string };
+
+// 依年月分組（rows 已照日期新到舊排序，保留順序）
+function groupByMonth(rows: TxnRow[]) {
+  const map = new Map<string, TxnRow[]>();
+  for (const t of rows) {
+    const ym = t.txnDate.slice(0, 7);
+    const arr = map.get(ym) ?? [];
+    arr.push(t);
+    map.set(ym, arr);
+  }
+  return [...map.entries()].map(([ym, items]) => {
+    const [y, m] = ym.split("-");
+    return { ym, label: `${y} 年 ${m} 月`, rows: items };
+  });
+}
+
+const COLUMNS = ["日期", "對象", "說明", "分類", "帳別", "帳戶", "金額", "動作"];
+
+function TransactionRow({
+  t,
+  categories,
+  parties,
+  employees,
+  accounts,
+  docs,
+}: Readonly<{
+  t: TxnRow;
+  categories: Opt[];
+  parties: Opt[];
+  employees: Opt[];
+  accounts: AccountOpt[];
+  docs: TxnDocument[];
+}>) {
+  return (
+    <RowDialog
+      title="編輯交易"
+      description="類型不可改，其餘欄位皆可編輯"
+      cells={
+        <>
+          <TableCell className="whitespace-nowrap text-muted-foreground">
+            {formatDate(t.txnDate)}
+          </TableCell>
+          <TableCell>
+            <div className="flex flex-col gap-1">
+              <span>{t.partyName ?? t.settleName ?? "—"}</span>
+              <Badge variant="secondary" className="w-fit font-normal">
+                {typeLabel[t.type] ?? t.type}
+              </Badge>
+            </div>
+          </TableCell>
+          <TableCell className="max-w-[20ch] truncate text-muted-foreground">
+            {t.description ?? "—"}
+          </TableCell>
+          <TableCell>{t.categoryName ?? "未分類"}</TableCell>
+          <TableCell>
+            <BookBadge book={t.book} />
+          </TableCell>
+          <TableCell className="text-xs text-muted-foreground">
+            {[t.fromAccount, t.toAccount].filter(Boolean).join(" → ") || "—"}
+          </TableCell>
+          <TableCell className={cn("text-right font-medium tabular-nums", txnAmountColor(t.type))}>
+            {formatCurrency(t.amount, t.currency)}
+          </TableCell>
+          <TableCell className="text-right">
+            <DeleteButton action={deleteTransaction} id={t.id} />
+          </TableCell>
+        </>
+      }
+    >
+      <EditTransactionForm
+        txn={{
+          id: t.id,
+          type: t.type,
+          txnDate: t.txnDate,
+          description: t.description,
+          amount: t.amount,
+          currency: t.currency,
+          categoryId: t.categoryId,
+          book: t.book,
+          billedToCompanyTaxId: t.billedToCompanyTaxId,
+          partyName: t.partyName,
+          settleName: t.settleName,
+          fromAccountId: t.fromAccountId,
+          toAccountId: t.toAccountId,
+        }}
+        categories={categories}
+        parties={parties}
+        employees={employees}
+        accounts={accounts}
+        docs={docs}
+      />
+    </RowDialog>
+  );
+}
+
 export default async function TransactionsPage({
   searchParams,
 }: {
@@ -68,6 +167,10 @@ export default async function TransactionsPage({
     listEmployees(),
   ]);
   const docsMap = await listDocumentsForTransactions(rows.map((r) => r.id));
+  const partyOpts = parties.map((s) => ({ id: s.id, name: s.name }));
+  const employeeOpts = employees.map((e) => ({ id: e.id, name: e.name }));
+  const accountOpts = accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }));
+  const groups = groupByMonth(rows);
 
   return (
     <>
@@ -100,96 +203,46 @@ export default async function TransactionsPage({
         })}
       </div>
 
-      <Card>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>日期</TableHead>
-              <TableHead>對象</TableHead>
-              <TableHead>說明</TableHead>
-              <TableHead>分類</TableHead>
-              <TableHead>帳別</TableHead>
-              <TableHead>帳戶</TableHead>
-              <TableHead className="text-right">金額</TableHead>
-              <TableHead className="text-right">動作</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={8} className="text-center text-muted-foreground">
-                  尚無交易
-                </TableCell>
-              </TableRow>
-            ) : (
-              rows.map((t) => {
-                const amountColor = txnAmountColor(t.type); // reimbursement / transfer → 黑
-                return (
-                  <RowDialog
-                    key={t.id}
-                    title="編輯交易"
-                    description="類型不可改，其餘欄位皆可編輯"
-                    cells={
-                      <>
-                        <TableCell className="whitespace-nowrap text-muted-foreground">
-                          {formatDate(t.txnDate)}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-col gap-1">
-                            <span>{t.partyName ?? t.settleName ?? "—"}</span>
-                            <Badge variant="secondary" className="w-fit font-normal">
-                              {typeLabel[t.type] ?? t.type}
-                            </Badge>
-                          </div>
-                        </TableCell>
-                        <TableCell className="max-w-[20ch] truncate text-muted-foreground">
-                          {t.description ?? "—"}
-                        </TableCell>
-                        <TableCell>{t.categoryName ?? "未分類"}</TableCell>
-                        <TableCell>
-                          <BookBadge book={t.book} />
-                        </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
-                          {[t.fromAccount, t.toAccount].filter(Boolean).join(" → ") || "—"}
-                        </TableCell>
-                        <TableCell className={cn("text-right font-medium tabular-nums", amountColor)}>
-                          {formatCurrency(t.amount, t.currency)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <DeleteButton action={deleteTransaction} id={t.id} />
-                        </TableCell>
-                      </>
-                    }
-                  >
-                    <EditTransactionForm
-                      txn={{
-                        id: t.id,
-                        type: t.type,
-                        txnDate: t.txnDate,
-                        description: t.description,
-                        amount: t.amount,
-                        currency: t.currency,
-                        categoryId: t.categoryId,
-                        book: t.book,
-                        billedToCompanyTaxId: t.billedToCompanyTaxId,
-                        partyName: t.partyName,
-                        settleName: t.settleName,
-                        fromAccountId: t.fromAccountId,
-                        toAccountId: t.toAccountId,
-                      }}
+      {groups.length === 0 ? (
+        <Card>
+          <div className="p-8 text-center text-sm text-muted-foreground">尚無交易</div>
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          {groups.map((g) => (
+            <Card key={g.ym}>
+              <div className="flex items-center justify-between border-b px-4 py-2.5">
+                <span className="font-medium">{g.label}</span>
+                <span className="text-xs text-muted-foreground">{g.rows.length} 筆</span>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    {COLUMNS.map((c) => (
+                      <TableHead key={c} className={c === "金額" || c === "動作" ? "text-right" : ""}>
+                        {c}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {g.rows.map((t) => (
+                    <TransactionRow
+                      key={t.id}
+                      t={t}
                       categories={categories}
-                      parties={parties.map((s) => ({ id: s.id, name: s.name }))}
-                      employees={employees.map((e) => ({ id: e.id, name: e.name }))}
-                      accounts={accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }))}
+                      parties={partyOpts}
+                      employees={employeeOpts}
+                      accounts={accountOpts}
                       docs={docsMap.get(t.id) ?? []}
                     />
-                  </RowDialog>
-                );
-              })
-            )}
-          </TableBody>
-        </Table>
-      </Card>
+                  ))}
+                </TableBody>
+              </Table>
+            </Card>
+          ))}
+        </div>
+      )}
     </>
   );
 }
