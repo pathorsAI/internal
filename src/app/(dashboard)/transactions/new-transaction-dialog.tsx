@@ -15,14 +15,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { DatePicker } from "@/components/date-picker";
 import { PartyCombobox } from "./party-combobox";
 import { CategoryCombobox } from "./category-combobox";
@@ -57,11 +57,13 @@ export function NewTransactionDialog({
   categories,
   parties,
   employees,
+  projects,
 }: Readonly<{
   accounts: Account[];
   categories: { id: number; name: string; kind: string }[];
   parties: { id: number; name: string }[];
   employees: { id: number; name: string }[];
+  projects: { id: number; name: string }[];
 }>) {
   const [open, setOpen] = useState(false);
   const [scenario, setScenario] = useState<Scenario | null>(null);
@@ -81,6 +83,7 @@ export function NewTransactionDialog({
   const accountItems = Object.fromEntries(
     accounts.map((a) => [String(a.id), `${a.name}（${a.currency}）`]),
   );
+  const projectItems = Object.fromEntries(projects.map((p) => [String(p.id), p.name]));
 
   function handleOpenChange(next: boolean) {
     setOpen(next);
@@ -90,18 +93,18 @@ export function NewTransactionDialog({
   const current = SCENARIOS.find((s) => s.key === scenario);
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger render={<Button size="sm" />}>
+    <Sheet open={open} onOpenChange={handleOpenChange}>
+      <SheetTrigger render={<Button size="sm" />}>
         <Plus className="size-4" /> 新增交易
-      </DialogTrigger>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+      </SheetTrigger>
+      <SheetContent className="data-[side=right]:sm:max-w-xl">
         {scenario === null ? (
           <ScenarioPicker onPick={setScenario} />
         ) : (
-          <form action={action}>
+          <form action={action} className="flex min-h-0 flex-1 flex-col">
             <input type="hidden" name="type" value={scenario} />
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
+            <SheetHeader>
+              <SheetTitle className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setScenario(null)}
@@ -112,10 +115,10 @@ export function NewTransactionDialog({
                 </button>
                 {current ? <current.icon className="size-4" /> : null}
                 {current?.label}
-              </DialogTitle>
-            </DialogHeader>
+              </SheetTitle>
+            </SheetHeader>
 
-            <div className="grid gap-4 py-4 sm:grid-cols-2">
+            <div className="grid flex-1 gap-4 overflow-y-auto px-4 py-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label>日期<Req /></Label>
                 <DatePicker name="txnDate" />
@@ -231,6 +234,22 @@ export function NewTransactionDialog({
                       </Select>
                     </div>
                   )}
+
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <Label>專案</Label>
+                    <Select name="projectId" items={projectItems}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="— 未指定 —" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {projects.map((p) => (
+                          <SelectItem key={p.id} value={String(p.id)}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </>
               )}
 
@@ -262,26 +281,26 @@ export function NewTransactionDialog({
               )}
             </div>
 
-            <DialogFooter>
+            <SheetFooter>
               <Button type="submit" disabled={pending}>
                 {pending ? "儲存中…" : "儲存"}
               </Button>
-            </DialogFooter>
+            </SheetFooter>
           </form>
         )}
-      </DialogContent>
-    </Dialog>
+      </SheetContent>
+    </Sheet>
   );
 }
 
 function ScenarioPicker({ onPick }: Readonly<{ onPick: (s: Scenario) => void }>) {
   return (
     <>
-      <DialogHeader>
-        <DialogTitle>新增交易</DialogTitle>
-        <DialogDescription>先選這是哪一種交易</DialogDescription>
-      </DialogHeader>
-      <div className="grid grid-cols-2 gap-3 py-4">
+      <SheetHeader>
+        <SheetTitle>新增交易</SheetTitle>
+        <SheetDescription>先選這是哪一種交易</SheetDescription>
+      </SheetHeader>
+      <div className="grid grid-cols-2 gap-3 p-4">
         {SCENARIOS.map((s) => (
           <button
             key={s.key}

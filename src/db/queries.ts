@@ -12,11 +12,15 @@ import {
   parties,
   accountReconciliations,
   documents,
+  projects,
+  subscriptions,
+  contracts,
+  receivables,
 } from "./schema";
 
 export type Book = "internal" | "external" | "both";
 
-export async function getOverview() {
+export async function getOverview(orgId: string) {
   const db = getDb();
 
   // 依幣別分組（不同幣別不能混加）：收入=type income，支出=type expense+advance
@@ -27,7 +31,12 @@ export async function getOverview() {
       expense: sql<string>`coalesce(sum(${transactions.amount}) filter (where ${transactions.type} in ('expense','advance')), 0)`,
     })
     .from(transactions)
-    .where(sql`${transactions.type} in ('income','expense','advance')`)
+    .where(
+      and(
+        eq(transactions.organizationId, orgId),
+        sql`${transactions.type} in ('income','expense','advance')`,
+      ),
+    )
     .groupBy(transactions.currency)
     .orderBy(transactions.currency);
 
@@ -42,11 +51,16 @@ export type TxnFilters = {
   book?: Book;
   categoryId?: number;
   accountId?: number;
+  projectId?: number;
   period?: string; // YYYY-MM
 };
 
-export async function listTransactions(filters: TxnFilters = {}, limit = 100) {
-  const { book, categoryId, accountId, period } = filters;
+export async function listTransactions(
+  orgId: string,
+  filters: TxnFilters = {},
+  limit = 100,
+) {
+  const { book, categoryId, accountId, projectId, period } = filters;
   const db = getDb();
   const fromAcct = aliasedTable(bankAccounts, "from_acct");
   const toAcct = aliasedTable(bankAccounts, "to_acct");
@@ -69,6 +83,8 @@ export async function listTransactions(filters: TxnFilters = {}, limit = 100) {
       toAccountId: transactions.toAccountId,
       partyId: transactions.partyId,
       settleEmployeeId: transactions.settleEmployeeId,
+      projectId: transactions.projectId,
+      projectName: projects.name,
       fromAccount: fromAcct.name,
       toAccount: toAcct.name,
       partyName: parties.name,
@@ -80,8 +96,10 @@ export async function listTransactions(filters: TxnFilters = {}, limit = 100) {
     .leftJoin(toAcct, eq(toAcct.id, transactions.toAccountId))
     .leftJoin(parties, eq(parties.id, transactions.partyId))
     .leftJoin(employees, eq(employees.id, transactions.settleEmployeeId))
+    .leftJoin(projects, eq(projects.id, transactions.projectId))
     .where(
       and(
+        eq(transactions.organizationId, orgId),
         book ? eq(transactions.book, book) : undefined,
         categoryId ? eq(transactions.categoryId, categoryId) : undefined,
         accountId
@@ -90,6 +108,7 @@ export async function listTransactions(filters: TxnFilters = {}, limit = 100) {
               eq(transactions.toAccountId, accountId),
             )
           : undefined,
+        projectId ? eq(transactions.projectId, projectId) : undefined,
         period ? sql`to_char(${transactions.txnDate}, 'YYYY-MM') = ${period}` : undefined,
       ),
     )
@@ -100,11 +119,12 @@ export async function listTransactions(filters: TxnFilters = {}, limit = 100) {
 }
 
 // 有交易的年月清單（新到舊），給篩選下拉用
-export async function listTransactionMonths(): Promise<string[]> {
+export async function listTransactionMonths(orgId: string): Promise<string[]> {
   const db = getDb();
   const rows = await db
     .selectDistinct({ ym: sql<string>`to_char(${transactions.txnDate}, 'YYYY-MM')`.as("ym") })
-    .from(transactions);
+    .from(transactions)
+    .where(eq(transactions.organizationId, orgId));
   return rows
     .map((r) => r.ym)
     .filter((ym): ym is string => !!ym)
@@ -124,6 +144,7 @@ export type TxnDocument = {
 
 // 一批交易的憑證 / 相關證明，回傳以 transactionId 分組的 Map
 export async function listDocumentsForTransactions(
+  orgId: string,
   ids: number[],
 ): Promise<Map<number, TxnDocument[]>> {
   const map = new Map<number, TxnDocument[]>();
@@ -141,7 +162,12 @@ export async function listDocumentsForTransactions(
       uploadedAt: documents.uploadedAt,
     })
     .from(documents)
-    .where(inArray(documents.transactionId, ids))
+    .where(
+      and(
+        eq(documents.organizationId, orgId),
+        inArray(documents.transactionId, ids),
+      ),
+    )
     .orderBy(desc(documents.uploadedAt));
   for (const r of rows) {
     if (r.transactionId == null) continue;
@@ -154,7 +180,7 @@ export async function listDocumentsForTransactions(
 }
 
 // 待通知 / 已通知會計師的「其他發票（三聯式等）」
-export async function listAccountantNotices() {
+export async function listAccountantNotices(orgId: string) {
   const db = getDb();
   return db
     .select({
@@ -175,12 +201,14 @@ export async function listAccountantNotices() {
     .innerJoin(transactions, eq(transactions.id, documents.transactionId))
     .leftJoin(parties, eq(parties.id, transactions.partyId))
     .leftJoin(categories, eq(categories.id, transactions.categoryId))
-    .where(eq(documents.invoiceKind, "paper"))
+    .where(
+      and(eq(documents.organizationId, orgId), eq(documents.invoiceKind, "paper")),
+    )
     .orderBy(desc(transactions.txnDate), desc(documents.id));
 }
 
 // 代墊未還：type=advance 且還沒有任何 reimbursement 連回它
-export async function listOutstandingAdvances() {
+export async function listOutstandingAdvances(orgId: string) {
   const db = getDb();
   const vendor = aliasedTable(parties, "adv_vendor");
   return db
@@ -201,6 +229,7 @@ export async function listOutstandingAdvances() {
     .leftJoin(categories, eq(categories.id, transactions.categoryId))
     .where(
       and(
+        eq(transactions.organizationId, orgId),
         eq(transactions.type, "advance"),
         sql`NOT EXISTS (SELECT 1 FROM ${transactions} r WHERE r.related_to_id = ${transactions.id})`,
       ),
@@ -208,22 +237,36 @@ export async function listOutstandingAdvances() {
     .orderBy(desc(transactions.txnDate));
 }
 
-export async function listInvoices(limit = 100) {
+export async function listInvoices(orgId: string, limit = 100) {
   const db = getDb();
-  return db.select().from(invoices).orderBy(desc(invoices.invoiceDate), desc(invoices.id)).limit(limit);
+  return db
+    .select()
+    .from(invoices)
+    .where(eq(invoices.organizationId, orgId))
+    .orderBy(desc(invoices.invoiceDate), desc(invoices.id))
+    .limit(limit);
 }
 
-export async function listBankAccounts() {
+export async function listBankAccounts(orgId: string) {
   const db = getDb();
-  return db.select().from(bankAccounts).orderBy(desc(bankAccounts.isActive), bankAccounts.name);
+  return db
+    .select()
+    .from(bankAccounts)
+    .where(eq(bankAccounts.organizationId, orgId))
+    .orderBy(desc(bankAccounts.isActive), bankAccounts.name);
 }
 
-export async function listEmployees(limit = 200) {
+export async function listEmployees(orgId: string, limit = 200) {
   const db = getDb();
-  return db.select().from(employees).orderBy(desc(employees.isActive), employees.name).limit(limit);
+  return db
+    .select()
+    .from(employees)
+    .where(eq(employees.organizationId, orgId))
+    .orderBy(desc(employees.isActive), employees.name)
+    .limit(limit);
 }
 
-export async function listParties() {
+export async function listParties(orgId: string) {
   const db = getDb();
   return db
     .select({
@@ -243,72 +286,106 @@ export async function listParties() {
     })
     .from(parties)
     .leftJoin(bankAccounts, eq(bankAccounts.id, parties.defaultAccountId))
+    .where(eq(parties.organizationId, orgId))
     .orderBy(desc(parties.isActive), parties.name);
 }
 
-export async function getParty(id: number) {
-  const db = getDb();
-  const [row] = await db.select().from(parties).where(eq(parties.id, id)).limit(1);
-  return row ?? null;
-}
-
-export async function getBankAccount(id: number) {
-  const db = getDb();
-  const [row] = await db.select().from(bankAccounts).where(eq(bankAccounts.id, id)).limit(1);
-  return row ?? null;
-}
-
-export async function getEmployee(id: number) {
-  const db = getDb();
-  const [row] = await db.select().from(employees).where(eq(employees.id, id)).limit(1);
-  return row ?? null;
-}
-
-export async function getInvoice(id: number) {
-  const db = getDb();
-  const [row] = await db.select().from(invoices).where(eq(invoices.id, id)).limit(1);
-  return row ?? null;
-}
-
-export async function getDocument(id: number) {
-  const db = getDb();
-  const [row] = await db.select().from(documents).where(eq(documents.id, id)).limit(1);
-  return row ?? null;
-}
-
-export async function getReconciliation(id: number) {
+export async function getParty(orgId: string, id: number) {
   const db = getDb();
   const [row] = await db
     .select()
-    .from(accountReconciliations)
-    .where(eq(accountReconciliations.id, id))
+    .from(parties)
+    .where(and(eq(parties.organizationId, orgId), eq(parties.id, id)))
     .limit(1);
   return row ?? null;
 }
 
-export async function getTransaction(id: number) {
+export async function getBankAccount(orgId: string, id: number) {
   const db = getDb();
-  const [row] = await db.select().from(transactions).where(eq(transactions.id, id)).limit(1);
+  const [row] = await db
+    .select()
+    .from(bankAccounts)
+    .where(and(eq(bankAccounts.organizationId, orgId), eq(bankAccounts.id, id)))
+    .limit(1);
   return row ?? null;
 }
 
-export async function getPayrollRun(id: number) {
+export async function getEmployee(orgId: string, id: number) {
   const db = getDb();
-  const [row] = await db.select().from(payrollRuns).where(eq(payrollRuns.id, id)).limit(1);
+  const [row] = await db
+    .select()
+    .from(employees)
+    .where(and(eq(employees.organizationId, orgId), eq(employees.id, id)))
+    .limit(1);
   return row ?? null;
 }
 
-export async function listCategories() {
+export async function getInvoice(orgId: string, id: number) {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(invoices)
+    .where(and(eq(invoices.organizationId, orgId), eq(invoices.id, id)))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function getDocument(orgId: string, id: number) {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(documents)
+    .where(and(eq(documents.organizationId, orgId), eq(documents.id, id)))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function getReconciliation(orgId: string, id: number) {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(accountReconciliations)
+    .where(
+      and(
+        eq(accountReconciliations.organizationId, orgId),
+        eq(accountReconciliations.id, id),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+export async function getTransaction(orgId: string, id: number) {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(transactions)
+    .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function getPayrollRun(orgId: string, id: number) {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(payrollRuns)
+    .where(and(eq(payrollRuns.organizationId, orgId), eq(payrollRuns.id, id)))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function listCategories(orgId: string) {
   const db = getDb();
   return db
     .select({ id: categories.id, name: categories.name, kind: categories.kind })
     .from(categories)
-    .where(eq(categories.isActive, true))
+    .where(and(eq(categories.organizationId, orgId), eq(categories.isActive, true)))
     .orderBy(categories.kind, categories.name);
 }
 
 // 帳面餘額 = 期初 + 流入 − 流出。用 left join + filter 聚合（相關子查詢在 drizzle sql 模板會關聯失效）。
-export async function listAccountBalances() {
+export async function listAccountBalances(orgId: string) {
   const db = getDb();
   const balances = await db
     .select({
@@ -331,7 +408,7 @@ export async function listAccountBalances() {
         eq(transactions.toAccountId, bankAccounts.id),
       ),
     )
-    .where(eq(bankAccounts.isActive, true))
+    .where(and(eq(bankAccounts.organizationId, orgId), eq(bankAccounts.isActive, true)))
     .groupBy(bankAccounts.id)
     .orderBy(bankAccounts.name);
 
@@ -342,6 +419,7 @@ export async function listAccountBalances() {
       last: sql<string>`max(${accountReconciliations.asOfDate})`,
     })
     .from(accountReconciliations)
+    .where(eq(accountReconciliations.organizationId, orgId))
     .groupBy(accountReconciliations.accountId);
   const lastMap = new Map(lastRows.map((r) => [r.accountId, r.last]));
 
@@ -349,7 +427,7 @@ export async function listAccountBalances() {
 }
 
 // Reconciliation snapshots with the book balance computed as of each snapshot date.
-export async function listReconciliations(limit = 100) {
+export async function listReconciliations(orgId: string, limit = 100) {
   const db = getDb();
   return db
     .select({
@@ -379,12 +457,13 @@ export async function listReconciliations(limit = 100) {
         lte(transactions.txnDate, accountReconciliations.asOfDate),
       ),
     )
+    .where(eq(accountReconciliations.organizationId, orgId))
     .groupBy(accountReconciliations.id, bankAccounts.id)
     .orderBy(desc(accountReconciliations.asOfDate), desc(accountReconciliations.id))
     .limit(limit);
 }
 
-export async function listPayrollRuns(limit = 50) {
+export async function listPayrollRuns(orgId: string, limit = 50) {
   const db = getDb();
   return db
     .select({
@@ -398,11 +477,12 @@ export async function listPayrollRuns(limit = 50) {
       netTotal: sql<string>`coalesce((select sum(ps.net_pay) from ${payslips} ps where ps.payroll_run_id = ${payrollRuns.id}), 0)`,
     })
     .from(payrollRuns)
+    .where(eq(payrollRuns.organizationId, orgId))
     .orderBy(desc(payrollRuns.periodYear), desc(payrollRuns.periodMonth))
     .limit(limit);
 }
 
-export async function listPayrollItemTypes() {
+export async function listPayrollItemTypes(orgId: string) {
   const db = getDb();
   // direction desc → 'earning' 在 'deduction' 之前
   return db
@@ -414,11 +494,12 @@ export async function listPayrollItemTypes() {
       isStatutory: payrollItemTypes.isStatutory,
     })
     .from(payrollItemTypes)
+    .where(eq(payrollItemTypes.organizationId, orgId))
     .orderBy(desc(payrollItemTypes.direction), payrollItemTypes.id);
 }
 
 // 薪資發放紀錄（每位員工每月一張）
-export async function listPayslipRecords(limit = 200) {
+export async function listPayslipRecords(orgId: string, limit = 200) {
   const db = getDb();
   return db
     .select({
@@ -436,6 +517,152 @@ export async function listPayslipRecords(limit = 200) {
     .from(payslips)
     .innerJoin(payrollRuns, eq(payrollRuns.id, payslips.payrollRunId))
     .leftJoin(employees, eq(employees.id, payslips.employeeId))
+    .where(eq(payrollRuns.organizationId, orgId))
     .orderBy(desc(payrollRuns.periodYear), desc(payrollRuns.periodMonth), employees.name)
     .limit(limit);
+}
+
+// ---- 客戶營運（專案 / 訂閱 / 合約 / 應收帳款）----
+
+// 收支以 TWD 為主（amount_twd 缺值時退回 amount）做單一幣別彙總，報表用。
+const incomeTwd = sql<string>`coalesce(sum(coalesce(${transactions.amountTwd}, ${transactions.amount})) filter (where ${transactions.type} = 'income'), 0)`;
+const expenseTwd = sql<string>`coalesce(sum(coalesce(${transactions.amountTwd}, ${transactions.amount})) filter (where ${transactions.type} in ('expense','advance')), 0)`;
+
+// 專案清單，附帶以 TWD 彙總的收入 / 支出（per-project P&L）。
+export async function listProjects(orgId: string) {
+  const db = getDb();
+  const client = aliasedTable(parties, "client_party");
+  const rows = await db
+    .select({
+      id: projects.id,
+      name: projects.name,
+      status: projects.status,
+      description: projects.description,
+      clientPartyId: projects.clientPartyId,
+      clientName: client.name,
+      income: incomeTwd,
+      expense: expenseTwd,
+    })
+    .from(projects)
+    .leftJoin(client, eq(client.id, projects.clientPartyId))
+    .leftJoin(transactions, eq(transactions.projectId, projects.id))
+    .where(eq(projects.organizationId, orgId))
+    .groupBy(projects.id, client.name)
+    .orderBy(desc(projects.createdAt));
+  return rows.map((r) => {
+    const income = Number(r.income);
+    const expense = Number(r.expense);
+    return { ...r, income, expense, net: income - expense };
+  });
+}
+
+export async function getProject(orgId: string, id: number) {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(projects)
+    .where(and(eq(projects.organizationId, orgId), eq(projects.id, id)))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function listSubscriptions(orgId: string) {
+  const db = getDb();
+  return db
+    .select({
+      id: subscriptions.id,
+      customerPartyId: subscriptions.customerPartyId,
+      customerName: parties.name,
+      projectId: subscriptions.projectId,
+      projectName: projects.name,
+      name: subscriptions.name,
+      amount: subscriptions.amount,
+      currency: subscriptions.currency,
+      intervalMonths: subscriptions.intervalMonths,
+      startDate: subscriptions.startDate,
+      endDate: subscriptions.endDate,
+      status: subscriptions.status,
+      note: subscriptions.note,
+    })
+    .from(subscriptions)
+    .leftJoin(parties, eq(parties.id, subscriptions.customerPartyId))
+    .leftJoin(projects, eq(projects.id, subscriptions.projectId))
+    .where(eq(subscriptions.organizationId, orgId))
+    .orderBy(desc(subscriptions.createdAt));
+}
+
+export async function listContracts(orgId: string) {
+  const db = getDb();
+  return db
+    .select({
+      id: contracts.id,
+      customerPartyId: contracts.customerPartyId,
+      customerName: parties.name,
+      projectId: contracts.projectId,
+      projectName: projects.name,
+      title: contracts.title,
+      amount: contracts.amount,
+      currency: contracts.currency,
+      startDate: contracts.startDate,
+      endDate: contracts.endDate,
+      status: contracts.status,
+      note: contracts.note,
+    })
+    .from(contracts)
+    .leftJoin(parties, eq(parties.id, contracts.customerPartyId))
+    .leftJoin(projects, eq(projects.id, contracts.projectId))
+    .where(eq(contracts.organizationId, orgId))
+    .orderBy(desc(contracts.createdAt));
+}
+
+export async function listReceivables(orgId: string) {
+  const db = getDb();
+  return db
+    .select({
+      id: receivables.id,
+      customerPartyId: receivables.customerPartyId,
+      customerName: parties.name,
+      contractId: receivables.contractId,
+      contractTitle: contracts.title,
+      subscriptionId: receivables.subscriptionId,
+      projectId: receivables.projectId,
+      projectName: projects.name,
+      description: receivables.description,
+      amount: receivables.amount,
+      currency: receivables.currency,
+      dueDate: receivables.dueDate,
+      status: receivables.status,
+      paidTransactionId: receivables.paidTransactionId,
+      paidAt: receivables.paidAt,
+    })
+    .from(receivables)
+    .leftJoin(parties, eq(parties.id, receivables.customerPartyId))
+    .leftJoin(contracts, eq(contracts.id, receivables.contractId))
+    .leftJoin(projects, eq(projects.id, receivables.projectId))
+    .where(eq(receivables.organizationId, orgId))
+    .orderBy(receivables.status, receivables.dueDate);
+}
+
+// 廠商 / infra 成本報表：把支出（含代墊）依交易對象彙總（TWD）。
+export async function listVendorCosts(orgId: string) {
+  const db = getDb();
+  const rows = await db
+    .select({
+      partyId: parties.id,
+      partyName: parties.name,
+      label: parties.label,
+      txnCount: sql<number>`count(${transactions.id})`,
+      total: sql<string>`coalesce(sum(coalesce(${transactions.amountTwd}, ${transactions.amount})), 0)`,
+    })
+    .from(transactions)
+    .innerJoin(parties, eq(parties.id, transactions.partyId))
+    .where(
+      and(
+        eq(transactions.organizationId, orgId),
+        sql`${transactions.type} in ('expense','advance')`,
+      ),
+    )
+    .groupBy(parties.id, parties.name, parties.label)
+    .orderBy(sql`coalesce(sum(coalesce(${transactions.amountTwd}, ${transactions.amount})), 0) desc`);
+  return rows.map((r) => ({ ...r, total: Number(r.total), txnCount: Number(r.txnCount) }));
 }

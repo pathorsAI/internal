@@ -12,7 +12,12 @@ import {
   ReceiptText,
   BellRing,
   Tags,
-  Boxes,
+  FolderKanban,
+  Repeat,
+  FileSignature,
+  HandCoins,
+  BarChart3,
+  UserCog,
 } from "lucide-react";
 
 import {
@@ -28,6 +33,8 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { OrgSwitcher } from "@/components/org-switcher";
+import { UserMenu } from "@/components/user-menu";
 
 const nav = [
   { title: "總覽", href: "/", icon: LayoutDashboard },
@@ -40,10 +47,20 @@ const nav = [
   { title: "對帳", href: "/reconciliation", icon: Scale },
 ];
 
+const clients = [
+  { title: "專案", href: "/projects", icon: FolderKanban },
+  { title: "訂閱 / 月費", href: "/subscriptions", icon: Repeat },
+  { title: "合約", href: "/contracts", icon: FileSignature },
+  { title: "應收帳款", href: "/receivables", icon: HandCoins },
+  { title: "報表", href: "/reports", icon: BarChart3 },
+];
+
 const hr = [
   { title: "員工", href: "/employees", icon: Users },
   { title: "薪資", href: "/payroll", icon: ReceiptText },
 ];
+
+const org = [{ title: "成員", href: "/members", icon: UserCog }];
 
 export function AppSidebar() {
   const pathname = usePathname();
@@ -54,21 +71,7 @@ export function AppSidebar() {
   return (
     <Sidebar>
       <SidebarHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton size="lg" render={<Link href="/" />}>
-              <div className="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg">
-                <Boxes className="size-4" />
-              </div>
-              <div className="flex flex-col gap-0.5 leading-none">
-                <span className="font-semibold">Pathors Internal</span>
-                <span className="text-xs text-muted-foreground">
-                  派斯科技後台
-                </span>
-              </div>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
+        <OrgSwitcher />
       </SidebarHeader>
 
       <SidebarContent>
@@ -77,6 +80,25 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {nav.map((item) => (
+                <SidebarMenuItem key={item.href}>
+                  <SidebarMenuButton
+                    isActive={isActive(item.href)}
+                    render={<Link href={item.href} />}
+                  >
+                    <item.icon />
+                    <span>{item.title}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>客戶 / 營運</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {clients.map((item) => (
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton
                     isActive={isActive(item.href)}
@@ -109,24 +131,29 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>組織</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {org.map((item) => (
+                <SidebarMenuItem key={item.href}>
+                  <SidebarMenuButton
+                    isActive={isActive(item.href)}
+                    render={<Link href={item.href} />}
+                  >
+                    <item.icon />
+                    <span>{item.title}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
       </SidebarContent>
 
       <SidebarFooter>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton size="lg">
-              <div className="bg-muted flex aspect-square size-8 items-center justify-center rounded-lg text-xs font-medium">
-                P
-              </div>
-              <div className="flex flex-col gap-0.5 leading-none">
-                <span className="font-medium">尚未登入</span>
-                <span className="text-xs text-muted-foreground">
-                  之後接 OAuth
-                </span>
-              </div>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
+        <UserMenu />
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>

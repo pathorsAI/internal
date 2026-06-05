@@ -19,6 +19,7 @@ import {
 import { listAccountantNotices } from "@/db/queries";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { NotifyButton } from "./notify-button";
+import { requireOrg } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -90,7 +91,8 @@ function NoticeTable({ rows, done }: Readonly<{ rows: Notice[]; done: boolean }>
 }
 
 export default async function AccountantNoticesPage() {
-  const all = await listAccountantNotices();
+  const { orgId } = await requireOrg();
+  const all = await listAccountantNotices(orgId);
   const pending = all.filter((r) => !r.notifiedAt);
   const done = all.filter((r) => r.notifiedAt);
 

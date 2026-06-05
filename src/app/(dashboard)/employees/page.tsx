@@ -17,6 +17,7 @@ import { listEmployees, listPayrollItemTypes, listBankAccounts } from "@/db/quer
 import { formatCurrency, formatDate } from "@/lib/format";
 import { NewEmployeeDialog } from "./new-employee-dialog";
 import { PaySalaryDialog } from "./pay-salary-dialog";
+import { requireOrg } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -28,10 +29,11 @@ const empType: Record<string, string> = {
 };
 
 export default async function EmployeesPage() {
+  const { orgId } = await requireOrg();
   const [rows, itemTypes, accounts] = await Promise.all([
-    listEmployees(),
-    listPayrollItemTypes(),
-    listBankAccounts(),
+    listEmployees(orgId),
+    listPayrollItemTypes(orgId),
+    listBankAccounts(orgId),
   ]);
   const accountList = accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }));
 

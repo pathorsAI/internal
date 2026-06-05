@@ -27,16 +27,18 @@ import {
 } from "@/db/queries";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { NewReconciliationDialog } from "./new-reconciliation-dialog";
+import { requireOrg } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 const EPS = 0.01;
 
 export default async function ReconciliationPage() {
+  const { orgId } = await requireOrg();
   const [balances, recons, accounts] = await Promise.all([
-    listAccountBalances(),
-    listReconciliations(),
-    listBankAccounts(),
+    listAccountBalances(orgId),
+    listReconciliations(orgId),
+    listBankAccounts(orgId),
   ]);
 
   return (

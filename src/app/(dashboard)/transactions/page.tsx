@@ -17,6 +17,7 @@ import {
   listCategories,
   listParties,
   listEmployees,
+  listProjects,
   listTransactionMonths,
   type Book,
   type TxnDocument,
@@ -29,6 +30,7 @@ import { deleteTransaction } from "@/db/mutations";
 import { RowDialog } from "@/components/row-dialog";
 import { EditTransactionForm } from "./edit-transaction-form";
 import { TransactionFilters } from "./transaction-filters";
+import { requireOrg } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -73,6 +75,7 @@ function TransactionRow({
   parties,
   employees,
   accounts,
+  projects,
   docs,
 }: Readonly<{
   t: TxnRow;
@@ -80,10 +83,12 @@ function TransactionRow({
   parties: Opt[];
   employees: Opt[];
   accounts: AccountOpt[];
+  projects: Opt[];
   docs: TxnDocument[];
 }>) {
   return (
     <RowDialog
+      variant="sheet"
       title="編輯交易"
       description="類型不可改，其餘欄位皆可編輯"
       cells={
@@ -133,11 +138,13 @@ function TransactionRow({
           settleName: t.settleName,
           fromAccountId: t.fromAccountId,
           toAccountId: t.toAccountId,
+          projectId: t.projectId,
         }}
         categories={categories}
         parties={parties}
         employees={employees}
         accounts={accounts}
+        projects={projects}
         docs={docs}
       />
     </RowDialog>
@@ -149,24 +156,27 @@ export default async function TransactionsPage({
 }: {
   searchParams: Promise<{ book?: string; category?: string; account?: string; period?: string }>;
 }) {
+  const { orgId } = await requireOrg();
   const { book, category, account, period } = await searchParams;
   const active = (["internal", "external", "both"].includes(book ?? "") ? book : undefined) as
     | Book
     | undefined;
   const categoryId = category && Number.isFinite(Number(category)) ? Number(category) : undefined;
   const accountId = account && Number.isFinite(Number(account)) ? Number(account) : undefined;
-  const [rows, accounts, categories, parties, employees, months] = await Promise.all([
-    listTransactions({ book: active, categoryId, accountId, period }),
-    listBankAccounts(),
-    listCategories(),
-    listParties(),
-    listEmployees(),
-    listTransactionMonths(),
+  const [rows, accounts, categories, parties, employees, projects, months] = await Promise.all([
+    listTransactions(orgId, { book: active, categoryId, accountId, period }),
+    listBankAccounts(orgId),
+    listCategories(orgId),
+    listParties(orgId),
+    listEmployees(orgId),
+    listProjects(orgId),
+    listTransactionMonths(orgId),
   ]);
-  const docsMap = await listDocumentsForTransactions(rows.map((r) => r.id));
+  const docsMap = await listDocumentsForTransactions(orgId, rows.map((r) => r.id));
   const partyOpts = parties.map((s) => ({ id: s.id, name: s.name }));
   const employeeOpts = employees.map((e) => ({ id: e.id, name: e.name }));
   const accountOpts = accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }));
+  const projectOpts = projects.map((p) => ({ id: p.id, name: p.name }));
   const groups = groupByMonth(rows);
 
   return (
@@ -177,6 +187,7 @@ export default async function TransactionsPage({
           categories={categories}
           parties={parties.map((s) => ({ id: s.id, name: s.name }))}
           employees={employees.map((e) => ({ id: e.id, name: e.name }))}
+          projects={projectOpts}
         />
       </PageHeader>
 
@@ -221,6 +232,7 @@ export default async function TransactionsPage({
                       parties={partyOpts}
                       employees={employeeOpts}
                       accounts={accountOpts}
+                      projects={projectOpts}
                       docs={docsMap.get(t.id) ?? []}
                     />
                   ))}

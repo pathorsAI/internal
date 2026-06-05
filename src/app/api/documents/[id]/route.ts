@@ -1,5 +1,6 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getDocument } from "@/db/queries";
+import { requireOrg } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,8 @@ export async function GET(
     return new Response("Bad id", { status: 400 });
   }
 
-  const doc = await getDocument(docId);
+  const { orgId } = await requireOrg();
+  const doc = await getDocument(orgId, docId);
   if (!doc?.r2Key || doc.r2Key.startsWith("meta/")) {
     return new Response("Not found", { status: 404 });
   }

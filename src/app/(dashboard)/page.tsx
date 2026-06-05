@@ -4,12 +4,14 @@ import { PageHeader } from "@/components/page-header";
 import { getOverview, listTransactions } from "@/db/queries";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { BookBadge } from "@/components/book-badge";
+import { requireOrg } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const overview = await getOverview();
-  const recent = await listTransactions(undefined, 6);
+  const { orgId } = await requireOrg();
+  const overview = await getOverview(orgId);
+  const recent = await listTransactions(orgId, undefined, 6);
 
   const currencyLabel: Record<string, string> = { TWD: "台幣", USD: "美金" };
   const stats = [

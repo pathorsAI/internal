@@ -59,6 +59,7 @@ type Txn = {
   settleName: string | null;
   fromAccountId: number | null;
   toAccountId: number | null;
+  projectId: number | null;
 };
 
 export function EditTransactionForm({
@@ -67,6 +68,7 @@ export function EditTransactionForm({
   parties,
   employees,
   accounts,
+  projects,
   docs = [],
   footer,
 }: Readonly<{
@@ -75,6 +77,7 @@ export function EditTransactionForm({
   parties: { id: number; name: string }[];
   employees: { id: number; name: string }[];
   accounts: Account[];
+  projects: { id: number; name: string }[];
   docs?: TxnDocument[];
   footer?: React.ReactNode;
 }>) {
@@ -94,6 +97,7 @@ export function EditTransactionForm({
   const accountItems = Object.fromEntries(
     accounts.map((a) => [String(a.id), `${a.name}（${a.currency}）`]),
   );
+  const projectItems = Object.fromEntries(projects.map((p) => [String(p.id), p.name]));
   const isTransfer = txn.type === "transfer";
   const isIncome = txn.type === "income";
   const isAdvance = txn.type === "advance";
@@ -211,6 +215,25 @@ export function EditTransactionForm({
                 defaultValue={isIncome ? txn.toAccountId : txn.fromAccountId}
               />
             )}
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label>專案</Label>
+              <Select
+                name="projectId"
+                items={projectItems}
+                defaultValue={txn.projectId == null ? undefined : String(txn.projectId)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="— 未指定 —" />
+                </SelectTrigger>
+                <SelectContent>
+                  {projects.map((p) => (
+                    <SelectItem key={p.id} value={String(p.id)}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </>
         )}
 

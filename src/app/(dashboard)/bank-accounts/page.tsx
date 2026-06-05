@@ -16,11 +16,13 @@ import {
 import { listBankAccounts } from "@/db/queries";
 import { formatCurrency } from "@/lib/format";
 import { NewBankAccountDialog } from "./new-bank-account-dialog";
+import { requireOrg } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function BankAccountsPage() {
-  const rows = await listBankAccounts();
+  const { orgId } = await requireOrg();
+  const rows = await listBankAccounts(orgId);
 
   return (
     <>

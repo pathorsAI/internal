@@ -16,6 +16,7 @@ import {
 import { listParties, listBankAccounts } from "@/db/queries";
 import { formatCurrency } from "@/lib/format";
 import { NewPartyDialog } from "./new-party-dialog";
+import { requireOrg } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,8 @@ const labelMap: Record<string, string> = {
 };
 
 export default async function PartiesPage() {
-  const [rows, accounts] = await Promise.all([listParties(), listBankAccounts()]);
+  const { orgId } = await requireOrg();
+  const [rows, accounts] = await Promise.all([listParties(orgId), listBankAccounts(orgId)]);
 
   return (
     <>

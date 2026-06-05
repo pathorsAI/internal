@@ -6,6 +6,7 @@ import { sql } from "drizzle-orm"
 export const categories = pgTable("categories", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "categories_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id"),
 	name: text().notNull(),
 	kind: text().notNull(),
 	isActive: boolean("is_active").default(true).notNull(),
@@ -16,6 +17,7 @@ export const categories = pgTable("categories", {
 export const bankAccounts = pgTable("bank_accounts", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "bank_accounts_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id"),
 	name: text().notNull(),
 	kind: text().notNull(),
 	currency: char({ length: 3 }).notNull(),
@@ -27,6 +29,7 @@ export const bankAccounts = pgTable("bank_accounts", {
 export const invoices = pgTable("invoices", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "invoices_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id"),
 	direction: text().notNull(),
 	invoiceNumber: text("invoice_number"),
 	invoiceDate: date("invoice_date"),
@@ -47,6 +50,7 @@ export const invoices = pgTable("invoices", {
 export const employees = pgTable("employees", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "employees_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id"),
 	name: text().notNull(),
 	nationalId: text("national_id"),
 	employmentType: text("employment_type").default('full_time').notNull(),
@@ -69,6 +73,7 @@ export const employees = pgTable("employees", {
 export const payrollRuns = pgTable("payroll_runs", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "payroll_runs_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id"),
 	periodYear: integer("period_year").notNull(),
 	periodMonth: integer("period_month").notNull(),
 	payDate: date("pay_date"),
@@ -142,6 +147,7 @@ export const payslipItems = pgTable("payslip_items", {
 export const payrollItemTypes = pgTable("payroll_item_types", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "payroll_item_types_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id"),
 	name: text().notNull(),
 	direction: text().notNull(),
 	isTaxable: boolean("is_taxable").notNull(),
@@ -154,6 +160,7 @@ export const payrollItemTypes = pgTable("payroll_item_types", {
 export const parties = pgTable("parties", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "suppliers_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id"),
 	name: text().notNull(),
 	label: text().default('vendor').notNull(),
 	taxId: text("tax_id"),
@@ -172,12 +179,13 @@ export const parties = pgTable("parties", {
 			name: "suppliers_default_account_id_fkey"
 		}),
 	check("chk_supplier_type", sql`label = ANY (ARRAY['vendor'::text, 'customer'::text, 'gov'::text, 'other'::text])`),
-	unique("parties_name_key").on(table.name),
+	unique("parties_name_key").on(table.organizationId, table.name),
 ]);
 
 export const transactions = pgTable("transactions", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "transactions_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id"),
 	txnDate: date("txn_date").notNull(),
 	description: text(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
@@ -205,6 +213,9 @@ export const transactions = pgTable("transactions", {
 	settleEmployeeId: bigint("settle_employee_id", { mode: "number" }),
 	relatedToId: bigint("related_to_id", { mode: "number" }),
 	type: text().default('expense').notNull(),
+	// 專案標籤：vendor ≠ project，交易同時帶 party_id（廠商/客戶）與 project_id（專案）。
+	// FK 在 DB 端（migrations/0003）建立，這裡只放欄位避免與 projects 的宣告順序衝突。
+	projectId: bigint("project_id", { mode: "number" }),
 }, (table) => [
 	index("idx_txn_book").using("btree", table.book.asc().nullsLast().op("text_ops")),
 	index("idx_txn_category").using("btree", table.categoryId.asc().nullsLast().op("int8_ops")),
@@ -256,6 +267,7 @@ export const transactions = pgTable("transactions", {
 export const accountReconciliations = pgTable("account_reconciliations", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "account_reconciliations_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id"),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	accountId: bigint("account_id", { mode: "number" }).notNull(),
 	asOfDate: date("as_of_date").notNull(),
@@ -273,6 +285,7 @@ export const accountReconciliations = pgTable("account_reconciliations", {
 
 export const documents = pgTable("documents", {
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "documents_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id"),
 	docType: text("doc_type").notNull(),
 	r2Key: text("r2_key").notNull(),
 	fileName: text("file_name"),
@@ -303,4 +316,122 @@ export const documents = pgTable("documents", {
 	unique("documents_r2_key_key").on(table.r2Key),
 	check("chk_doc_type", sql`doc_type = ANY (ARRAY['receipt'::text, 'invoice'::text, 'vat_return_401'::text, 'withholding'::text, 'payroll'::text, 'contract'::text, 'other'::text])`),
 	check("chk_doc_invoice_kind", sql`invoice_kind IS NULL OR invoice_kind = ANY (ARRAY['electronic'::text, 'paper'::text])`),
+]);
+
+// ---- 客戶營運（專案 / 訂閱 / 合約 / 應收帳款）----
+
+export const projects = pgTable("projects", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "projects_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id"),
+	name: text().notNull(),
+	clientPartyId: bigint("client_party_id", { mode: "number" }),
+	status: text().default('active').notNull(),
+	description: text(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	foreignKey({
+			columns: [table.clientPartyId],
+			foreignColumns: [parties.id],
+			name: "projects_client_party_id_fkey"
+		}),
+	check("chk_project_status", sql`status = ANY (ARRAY['active'::text, 'archived'::text])`),
+]);
+
+export const subscriptions = pgTable("subscriptions", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "subscriptions_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id"),
+	customerPartyId: bigint("customer_party_id", { mode: "number" }).notNull(),
+	projectId: bigint("project_id", { mode: "number" }),
+	name: text().notNull(),
+	amount: numeric({ precision: 18, scale: 2 }).notNull(),
+	currency: char({ length: 3 }).default('TWD').notNull(),
+	intervalMonths: integer("interval_months").default(1).notNull(),
+	startDate: date("start_date").notNull(),
+	endDate: date("end_date"),
+	status: text().default('active').notNull(),
+	note: text(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	foreignKey({
+			columns: [table.customerPartyId],
+			foreignColumns: [parties.id],
+			name: "subscriptions_customer_party_id_fkey"
+		}),
+	foreignKey({
+			columns: [table.projectId],
+			foreignColumns: [projects.id],
+			name: "subscriptions_project_id_fkey"
+		}),
+	check("chk_subscription_status", sql`status = ANY (ARRAY['active'::text, 'paused'::text, 'ended'::text])`),
+]);
+
+export const contracts = pgTable("contracts", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "contracts_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id"),
+	customerPartyId: bigint("customer_party_id", { mode: "number" }).notNull(),
+	projectId: bigint("project_id", { mode: "number" }),
+	title: text().notNull(),
+	amount: numeric({ precision: 18, scale: 2 }),
+	currency: char({ length: 3 }).default('TWD').notNull(),
+	startDate: date("start_date"),
+	endDate: date("end_date"),
+	status: text().default('active').notNull(),
+	note: text(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	foreignKey({
+			columns: [table.customerPartyId],
+			foreignColumns: [parties.id],
+			name: "contracts_customer_party_id_fkey"
+		}),
+	foreignKey({
+			columns: [table.projectId],
+			foreignColumns: [projects.id],
+			name: "contracts_project_id_fkey"
+		}),
+	check("chk_contract_status", sql`status = ANY (ARRAY['draft'::text, 'active'::text, 'completed'::text, 'cancelled'::text])`),
+]);
+
+export const receivables = pgTable("receivables", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "receivables_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id"),
+	customerPartyId: bigint("customer_party_id", { mode: "number" }).notNull(),
+	contractId: bigint("contract_id", { mode: "number" }),
+	subscriptionId: bigint("subscription_id", { mode: "number" }),
+	projectId: bigint("project_id", { mode: "number" }),
+	description: text(),
+	amount: numeric({ precision: 18, scale: 2 }).notNull(),
+	currency: char({ length: 3 }).default('TWD').notNull(),
+	dueDate: date("due_date"),
+	status: text().default('open').notNull(),
+	paidTransactionId: bigint("paid_transaction_id", { mode: "number" }),
+	paidAt: date("paid_at"),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	foreignKey({
+			columns: [table.customerPartyId],
+			foreignColumns: [parties.id],
+			name: "receivables_customer_party_id_fkey"
+		}),
+	foreignKey({
+			columns: [table.contractId],
+			foreignColumns: [contracts.id],
+			name: "receivables_contract_id_fkey"
+		}),
+	foreignKey({
+			columns: [table.subscriptionId],
+			foreignColumns: [subscriptions.id],
+			name: "receivables_subscription_id_fkey"
+		}),
+	foreignKey({
+			columns: [table.projectId],
+			foreignColumns: [projects.id],
+			name: "receivables_project_id_fkey"
+		}),
+	foreignKey({
+			columns: [table.paidTransactionId],
+			foreignColumns: [transactions.id],
+			name: "receivables_paid_transaction_id_fkey"
+		}),
+	check("chk_receivable_status", sql`status = ANY (ARRAY['open'::text, 'paid'::text, 'void'::text])`),
 ]);

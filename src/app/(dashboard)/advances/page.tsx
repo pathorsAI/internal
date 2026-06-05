@@ -24,11 +24,16 @@ import {
 import { listOutstandingAdvances, listBankAccounts } from "@/db/queries";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { RecordReimbursementDialog } from "./record-reimbursement-dialog";
+import { requireOrg } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdvancesPage() {
-  const [rows, accounts] = await Promise.all([listOutstandingAdvances(), listBankAccounts()]);
+  const { orgId } = await requireOrg();
+  const [rows, accounts] = await Promise.all([
+    listOutstandingAdvances(orgId),
+    listBankAccounts(orgId),
+  ]);
   const total = rows.reduce((s, r) => s + Number(r.amountTwd ?? r.amount ?? 0), 0);
   const accountOpts = accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }));
 

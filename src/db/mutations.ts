@@ -15,8 +15,13 @@ import {
   payrollRuns,
   payslips,
   payslipItems,
+  projects,
+  subscriptions,
+  contracts,
+  receivables,
 } from "./schema";
 import { uploadDocument, deleteDocument } from "@/lib/storage";
+import { requireOrg } from "@/lib/session";
 
 export type ActionState = { ok: boolean; error?: string };
 
@@ -42,6 +47,7 @@ const DOC_KIND_MAP: Record<string, { docType: string; invoiceKind: string | null
 // 另外「有報公司統編」(billed) 時，即使沒附檔也要記下發票類型（電子 / 其他）。
 async function storeTransactionDocument(
   db: ReturnType<typeof getDb>,
+  orgId: string,
   transactionId: number,
   formData: FormData,
   billed = false,
@@ -72,6 +78,7 @@ async function storeTransactionDocument(
     contentType,
     sizeBytes,
     transactionId,
+    organizationId: orgId,
   });
 }
 
@@ -83,9 +90,11 @@ export async function createParty(
   if (!name) return { ok: false, error: "請輸入交易對象名稱" };
 
   try {
+    const { orgId } = await requireOrg();
     await getDb()
       .insert(parties)
       .values({
+        organizationId: orgId,
         name,
         label: str(formData.get("label")) ?? "vendor",
         taxId: str(formData.get("taxId")),
@@ -115,9 +124,11 @@ export async function createReconciliation(
   if (statementBalance === null) return { ok: false, error: "請輸入對帳單餘額" };
 
   try {
+    const { orgId } = await requireOrg();
     await getDb()
       .insert(accountReconciliations)
       .values({
+        organizationId: orgId,
         accountId,
         asOfDate,
         statementBalance,
@@ -138,35 +149,37 @@ export async function createReconciliation(
 
 async function getOrCreateParty(
   db: ReturnType<typeof getDb>,
+  orgId: string,
   name: string,
   label: string,
 ): Promise<number> {
   const found = await db
     .select({ id: parties.id })
     .from(parties)
-    .where(eq(parties.name, name))
+    .where(and(eq(parties.organizationId, orgId), eq(parties.name, name)))
     .limit(1);
   if (found.length) return found[0].id;
   const [created] = await db
     .insert(parties)
-    .values({ name, label })
+    .values({ organizationId: orgId, name, label })
     .returning({ id: parties.id });
   return created.id;
 }
 
 async function getOrCreateEmployee(
   db: ReturnType<typeof getDb>,
+  orgId: string,
   name: string,
 ): Promise<number> {
   const found = await db
     .select({ id: employees.id })
     .from(employees)
-    .where(eq(employees.name, name))
+    .where(and(eq(employees.organizationId, orgId), eq(employees.name, name)))
     .limit(1);
   if (found.length) return found[0].id;
   const [created] = await db
     .insert(employees)
-    .values({ name })
+    .values({ organizationId: orgId, name })
     .returning({ id: employees.id });
   return created.id;
 }
@@ -190,6 +203,7 @@ const blankFields: TxnFields = {
 
 async function resolveExpenseIncome(
   db: ReturnType<typeof getDb>,
+  orgId: string,
   isIncome: boolean,
   formData: FormData,
 ): Promise<TxnResult> {
@@ -199,7 +213,7 @@ async function resolveExpenseIncome(
   if (!partyName) return { error: isIncome ? "請輸入客戶" : "請輸入交易對象" };
   const categoryId = num(formData.get("categoryId"));
   if (!categoryId) return { error: "請選擇分類" };
-  const partyId = await getOrCreateParty(db, partyName, isIncome ? "customer" : "vendor");
+  const partyId = await getOrCreateParty(db, orgId, partyName, isIncome ? "customer" : "vendor");
   return {
     fields: {
       ...blankFields,
@@ -213,6 +227,7 @@ async function resolveExpenseIncome(
 
 async function resolveAdvance(
   db: ReturnType<typeof getDb>,
+  orgId: string,
   formData: FormData,
 ): Promise<TxnResult> {
   const partyName = str(formData.get("partyName"));
@@ -225,8 +240,8 @@ async function resolveAdvance(
     fields: {
       ...blankFields,
       categoryId,
-      partyId: await getOrCreateParty(db, partyName, "vendor"),
-      settleEmployeeId: await getOrCreateEmployee(db, settleName),
+      partyId: await getOrCreateParty(db, orgId, partyName, "vendor"),
+      settleEmployeeId: await getOrCreateEmployee(db, orgId, settleName),
     },
   };
 }
@@ -241,12 +256,13 @@ function resolveTransfer(formData: FormData): TxnResult {
 // 依情境（type）解析交易要寫的欄位，順便驗證；回傳欄位或錯誤訊息。
 function resolveTxnFields(
   db: ReturnType<typeof getDb>,
+  orgId: string,
   type: string,
   formData: FormData,
 ): Promise<TxnResult> | TxnResult {
   if (type === "expense" || type === "income")
-    return resolveExpenseIncome(db, type === "income", formData);
-  if (type === "advance") return resolveAdvance(db, formData);
+    return resolveExpenseIncome(db, orgId, type === "income", formData);
+  if (type === "advance") return resolveAdvance(db, orgId, formData);
   if (type === "transfer") return resolveTransfer(formData);
   return { error: "不支援的交易類型" };
 }
@@ -280,20 +296,23 @@ export async function createTransaction(
   }
 
   try {
+    const { orgId } = await requireOrg();
     const db = getDb();
-    const resolved = await resolveTxnFields(db, type, formData);
+    const resolved = await resolveTxnFields(db, orgId, type, formData);
     if ("error" in resolved) return { ok: false, error: resolved.error };
     const f = resolved.fields;
 
     const [inserted] = await db
       .insert(transactions)
       .values({
+        organizationId: orgId,
         type,
         txnDate,
         description: str(formData.get("description")),
         categoryId: f.categoryId,
         partyId: f.partyId,
         settleEmployeeId: f.settleEmployeeId,
+        projectId: num(formData.get("projectId")),
         amount,
         currency,
         amountTwd: currency === "TWD" ? amount : null,
@@ -304,7 +323,7 @@ export async function createTransaction(
       })
       .returning({ id: transactions.id });
 
-    await storeTransactionDocument(db, inserted.id, formData, billed);
+    await storeTransactionDocument(db, orgId, inserted.id, formData, billed);
 
     revalidatePath("/transactions");
     revalidatePath("/accountant-notices");
@@ -325,6 +344,7 @@ export async function updateParty(
   if (!name) return { ok: false, error: "請輸入名稱" };
 
   try {
+    const { orgId } = await requireOrg();
     await getDb()
       .update(parties)
       .set({
@@ -338,7 +358,7 @@ export async function updateParty(
         note: str(formData.get("note")),
         isActive: formData.get("isActive") === "on",
       })
-      .where(eq(parties.id, id));
+      .where(and(eq(parties.organizationId, orgId), eq(parties.id, id)));
     revalidatePath("/parties");
     revalidatePath(`/parties/${id}`);
     return { ok: true };
@@ -367,6 +387,7 @@ export async function createReimbursement(
   if (amount === null) return { ok: false, error: "請輸入金額" };
 
   try {
+    const { orgId } = await requireOrg();
     const db = getDb();
     // 讀原代墊，拿到代墊人（員工）＝撥款對象
     const [adv] = await db
@@ -375,12 +396,13 @@ export async function createReimbursement(
         currency: transactions.currency,
       })
       .from(transactions)
-      .where(eq(transactions.id, advanceId))
+      .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, advanceId)))
       .limit(1);
     if (!adv) return { ok: false, error: "找不到該代墊紀錄" };
     const advCurrency = adv.currency ?? "TWD";
 
     await db.insert(transactions).values({
+      organizationId: orgId,
       type: "reimbursement",
       txnDate: payDate,
       settleEmployeeId: adv.settleEmployeeId, // 付給代墊人（員工）
@@ -421,7 +443,8 @@ export async function createCategory(
   if (!name) return { ok: false, error: "請輸入分類名稱" };
   if (!CATEGORY_KINDS.has(kind)) return { ok: false, error: "分類別不正確" };
   try {
-    await getDb().insert(categories).values({ name, kind });
+    const { orgId } = await requireOrg();
+    await getDb().insert(categories).values({ organizationId: orgId, name, kind });
     revalidatePath("/categories");
     revalidatePath("/transactions");
     return { ok: true };
@@ -439,7 +462,11 @@ export async function updateCategory(
   if (!id) return { ok: false, error: "缺少 ID" };
   if (!name) return { ok: false, error: "請輸入分類名稱" };
   try {
-    await getDb().update(categories).set({ name }).where(eq(categories.id, id));
+    const { orgId } = await requireOrg();
+    await getDb()
+      .update(categories)
+      .set({ name })
+      .where(and(eq(categories.organizationId, orgId), eq(categories.id, id)));
     revalidatePath("/categories");
     revalidatePath("/transactions");
     return { ok: true };
@@ -450,7 +477,10 @@ export async function updateCategory(
 
 export async function deleteCategory(id: number): Promise<ActionState> {
   try {
-    await getDb().delete(categories).where(eq(categories.id, id));
+    const { orgId } = await requireOrg();
+    await getDb()
+      .delete(categories)
+      .where(and(eq(categories.organizationId, orgId), eq(categories.id, id)));
     revalidatePath("/categories");
     revalidatePath("/transactions");
     return { ok: true };
@@ -467,7 +497,9 @@ export async function createBankAccount(
   const name = str(formData.get("name"));
   if (!name) return { ok: false, error: "請輸入名稱" };
   try {
+    const { orgId } = await requireOrg();
     await getDb().insert(bankAccounts).values({
+      organizationId: orgId,
       name,
       kind: str(formData.get("kind")) ?? "bank",
       currency: str(formData.get("currency")) ?? "TWD",
@@ -490,6 +522,7 @@ export async function updateBankAccount(
   if (!id) return { ok: false, error: "缺少 ID" };
   if (!name) return { ok: false, error: "請輸入名稱" };
   try {
+    const { orgId } = await requireOrg();
     await getDb()
       .update(bankAccounts)
       .set({
@@ -499,7 +532,7 @@ export async function updateBankAccount(
         openingBalance: str(formData.get("openingBalance")) ?? "0",
         isActive: formData.get("isActive") === "on",
       })
-      .where(eq(bankAccounts.id, id));
+      .where(and(eq(bankAccounts.organizationId, orgId), eq(bankAccounts.id, id)));
     revalidatePath("/bank-accounts");
     revalidatePath(`/bank-accounts/${id}`);
     return { ok: true };
@@ -510,7 +543,10 @@ export async function updateBankAccount(
 
 export async function deleteBankAccount(id: number): Promise<ActionState> {
   try {
-    await getDb().delete(bankAccounts).where(eq(bankAccounts.id, id));
+    const { orgId } = await requireOrg();
+    await getDb()
+      .delete(bankAccounts)
+      .where(and(eq(bankAccounts.organizationId, orgId), eq(bankAccounts.id, id)));
     revalidatePath("/bank-accounts");
     return { ok: true };
   } catch (e) {
@@ -528,9 +564,11 @@ export async function createEmployee(
   const laborInsured = str(formData.get("laborInsuredSalary"));
   const healthInsured = str(formData.get("healthInsuredSalary"));
   try {
+    const { orgId } = await requireOrg();
     await getDb()
       .insert(employees)
       .values({
+        organizationId: orgId,
         name,
         nationalId: str(formData.get("nationalId")),
         employmentType: str(formData.get("employmentType")) ?? "full_time",
@@ -563,6 +601,7 @@ export async function updateEmployee(
   const laborInsured = str(formData.get("laborInsuredSalary"));
   const healthInsured = str(formData.get("healthInsuredSalary"));
   try {
+    const { orgId } = await requireOrg();
     await getDb()
       .update(employees)
       .set({
@@ -580,7 +619,7 @@ export async function updateEmployee(
         endDate: str(formData.get("endDate")),
         isActive: formData.get("isActive") === "on",
       })
-      .where(eq(employees.id, id));
+      .where(and(eq(employees.organizationId, orgId), eq(employees.id, id)));
     revalidatePath("/employees");
     revalidatePath(`/employees/${id}`);
     return { ok: true };
@@ -591,7 +630,10 @@ export async function updateEmployee(
 
 export async function deleteEmployee(id: number): Promise<ActionState> {
   try {
-    await getDb().delete(employees).where(eq(employees.id, id));
+    const { orgId } = await requireOrg();
+    await getDb()
+      .delete(employees)
+      .where(and(eq(employees.organizationId, orgId), eq(employees.id, id)));
     revalidatePath("/employees");
     return { ok: true };
   } catch (e) {
@@ -602,7 +644,10 @@ export async function deleteEmployee(id: number): Promise<ActionState> {
 // ---- 交易對象 / 交易 刪除 ----
 export async function deleteParty(id: number): Promise<ActionState> {
   try {
-    await getDb().delete(parties).where(eq(parties.id, id));
+    const { orgId } = await requireOrg();
+    await getDb()
+      .delete(parties)
+      .where(and(eq(parties.organizationId, orgId), eq(parties.id, id)));
     revalidatePath("/parties");
     return { ok: true };
   } catch (e) {
@@ -612,7 +657,15 @@ export async function deleteParty(id: number): Promise<ActionState> {
 
 export async function deleteTransaction(id: number): Promise<ActionState> {
   try {
+    const { orgId } = await requireOrg();
     const db = getDb();
+    // 確認這筆交易屬於目前 org，否則不准刪
+    const [owned] = await db
+      .select({ id: transactions.id })
+      .from(transactions)
+      .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)))
+      .limit(1);
+    if (!owned) return { ok: false, error: "找不到該交易" };
     // 薪資發放產生的交易：要刪請到「薪資」頁撤銷該筆發放（會連這筆交易一起刪）
     const [slip] = await db
       .select({ id: payslips.id })
@@ -636,7 +689,7 @@ export async function deleteTransaction(id: number): Promise<ActionState> {
     if (docs.length > 0) {
       await db.delete(documents).where(eq(documents.transactionId, id));
     }
-    await db.delete(transactions).where(eq(transactions.id, id));
+    await db.delete(transactions).where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)));
     revalidatePath("/transactions");
     revalidatePath("/advances");
     revalidatePath("/accountant-notices");
@@ -650,13 +703,15 @@ export async function deleteTransaction(id: number): Promise<ActionState> {
 // 刪除交易的某筆憑證（連同 R2 檔案）
 export async function deleteTransactionDocument(id: number): Promise<ActionState> {
   try {
+    const { orgId } = await requireOrg();
     const db = getDb();
     const [doc] = await db
       .select({ r2Key: documents.r2Key })
       .from(documents)
-      .where(eq(documents.id, id))
+      .where(and(eq(documents.organizationId, orgId), eq(documents.id, id)))
       .limit(1);
-    await db.delete(documents).where(eq(documents.id, id));
+    if (!doc) return { ok: false, error: "找不到該憑證" };
+    await db.delete(documents).where(and(eq(documents.organizationId, orgId), eq(documents.id, id)));
     if (doc?.r2Key && !doc.r2Key.startsWith("meta/")) {
       await deleteDocument(doc.r2Key);
     }
@@ -670,10 +725,11 @@ export async function deleteTransactionDocument(id: number): Promise<ActionState
 // 標記 / 取消標記「已通知會計師」（針對其他發票憑證）
 export async function markAccountantNotified(id: number): Promise<ActionState> {
   try {
+    const { orgId } = await requireOrg();
     await getDb()
       .update(documents)
       .set({ accountantNotifiedAt: new Date().toISOString() })
-      .where(eq(documents.id, id));
+      .where(and(eq(documents.organizationId, orgId), eq(documents.id, id)));
     revalidatePath("/accountant-notices");
     return { ok: true };
   } catch (e) {
@@ -683,10 +739,11 @@ export async function markAccountantNotified(id: number): Promise<ActionState> {
 
 export async function unmarkAccountantNotified(id: number): Promise<ActionState> {
   try {
+    const { orgId } = await requireOrg();
     await getDb()
       .update(documents)
       .set({ accountantNotifiedAt: null })
-      .where(eq(documents.id, id));
+      .where(and(eq(documents.organizationId, orgId), eq(documents.id, id)));
     revalidatePath("/accountant-notices");
     return { ok: true };
   } catch (e) {
@@ -720,8 +777,9 @@ export async function updateTransaction(
   }
 
   try {
+    const { orgId } = await requireOrg();
     const db = getDb();
-    const resolved = await resolveTxnFields(db, type, formData);
+    const resolved = await resolveTxnFields(db, orgId, type, formData);
     if ("error" in resolved) return { ok: false, error: resolved.error };
     const f = resolved.fields;
 
@@ -736,15 +794,16 @@ export async function updateTransaction(
         categoryId: f.categoryId,
         partyId: f.partyId,
         settleEmployeeId: f.settleEmployeeId,
+        projectId: num(formData.get("projectId")),
         fromAccountId: f.fromAccountId,
         toAccountId: f.toAccountId,
         book,
         billedToCompanyTaxId: billed,
         updatedAt: new Date().toISOString(),
       })
-      .where(eq(transactions.id, id));
+      .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)));
     // 編輯時若有補上憑證，新增一筆 documents
-    await storeTransactionDocument(db, id, formData, billed);
+    await storeTransactionDocument(db, orgId, id, formData, billed);
     revalidatePath("/transactions");
     revalidatePath("/accountant-notices");
     revalidatePath("/");
@@ -776,7 +835,8 @@ export async function createInvoice(
   formData: FormData,
 ): Promise<ActionState> {
   try {
-    await getDb().insert(invoices).values(invoiceValues(formData));
+    const { orgId } = await requireOrg();
+    await getDb().insert(invoices).values({ organizationId: orgId, ...invoiceValues(formData) });
     revalidatePath("/invoices");
     return { ok: true };
   } catch (e) {
@@ -791,7 +851,11 @@ export async function updateInvoice(
   const id = num(formData.get("id"));
   if (!id) return { ok: false, error: "缺少 ID" };
   try {
-    await getDb().update(invoices).set(invoiceValues(formData)).where(eq(invoices.id, id));
+    const { orgId } = await requireOrg();
+    await getDb()
+      .update(invoices)
+      .set(invoiceValues(formData))
+      .where(and(eq(invoices.organizationId, orgId), eq(invoices.id, id)));
     revalidatePath("/invoices");
     revalidatePath(`/invoices/${id}`);
     return { ok: true };
@@ -802,7 +866,10 @@ export async function updateInvoice(
 
 export async function deleteInvoice(id: number): Promise<ActionState> {
   try {
-    await getDb().delete(invoices).where(eq(invoices.id, id));
+    const { orgId } = await requireOrg();
+    await getDb()
+      .delete(invoices)
+      .where(and(eq(invoices.organizationId, orgId), eq(invoices.id, id)));
     revalidatePath("/invoices");
     return { ok: true };
   } catch (e) {
@@ -824,10 +891,11 @@ export async function updateReconciliation(
   if (!asOfDate) return { ok: false, error: "請選擇截止日期" };
   if (statementBalance === null) return { ok: false, error: "請輸入對帳單餘額" };
   try {
+    const { orgId } = await requireOrg();
     await getDb()
       .update(accountReconciliations)
       .set({ accountId, asOfDate, statementBalance, note: str(formData.get("note")) })
-      .where(eq(accountReconciliations.id, id));
+      .where(and(eq(accountReconciliations.organizationId, orgId), eq(accountReconciliations.id, id)));
     revalidatePath("/reconciliation");
     revalidatePath(`/reconciliation/${id}`);
     return { ok: true };
@@ -842,7 +910,10 @@ export async function updateReconciliation(
 
 export async function deleteReconciliation(id: number): Promise<ActionState> {
   try {
-    await getDb().delete(accountReconciliations).where(eq(accountReconciliations.id, id));
+    const { orgId } = await requireOrg();
+    await getDb()
+      .delete(accountReconciliations)
+      .where(and(eq(accountReconciliations.organizationId, orgId), eq(accountReconciliations.id, id)));
     revalidatePath("/reconciliation");
     return { ok: true };
   } catch (e) {
@@ -853,7 +924,10 @@ export async function deleteReconciliation(id: number): Promise<ActionState> {
 // ---- 薪資（刪除整期；payslips 隨之 cascade）----
 export async function deletePayrollRun(id: number): Promise<ActionState> {
   try {
-    await getDb().delete(payrollRuns).where(eq(payrollRuns.id, id));
+    const { orgId } = await requireOrg();
+    await getDb()
+      .delete(payrollRuns)
+      .where(and(eq(payrollRuns.organizationId, orgId), eq(payrollRuns.id, id)));
     revalidatePath("/payroll");
     return { ok: true };
   } catch (e) {
@@ -883,6 +957,7 @@ function sumPayItems(items: PayItem[]) {
 
 async function getOrCreatePayrollRunId(
   db: ReturnType<typeof getDb>,
+  orgId: string,
   year: number,
   month: number,
   payDate: string,
@@ -890,12 +965,18 @@ async function getOrCreatePayrollRunId(
   const [run] = await db
     .select({ id: payrollRuns.id })
     .from(payrollRuns)
-    .where(and(eq(payrollRuns.periodYear, year), eq(payrollRuns.periodMonth, month)))
+    .where(
+      and(
+        eq(payrollRuns.organizationId, orgId),
+        eq(payrollRuns.periodYear, year),
+        eq(payrollRuns.periodMonth, month),
+      ),
+    )
     .limit(1);
   if (run) return run.id;
   const [created] = await db
     .insert(payrollRuns)
-    .values({ periodYear: year, periodMonth: month, payDate, status: "paid" })
+    .values({ organizationId: orgId, periodYear: year, periodMonth: month, payDate, status: "paid" })
     .returning({ id: payrollRuns.id });
   return created.id;
 }
@@ -937,8 +1018,9 @@ export async function payEmployeeSalary(
   const net = taxable + nontaxable - deductionTotal;
 
   try {
+    const { orgId } = await requireOrg();
     const db = getDb();
-    const runId = await getOrCreatePayrollRunId(db, year, month, payDate);
+    const runId = await getOrCreatePayrollRunId(db, orgId, year, month, payDate);
 
     // 一個員工一個月一張：已發放就擋
     const [existing] = await db
@@ -953,17 +1035,18 @@ export async function payEmployeeSalary(
     const [cat] = await db
       .select({ id: categories.id })
       .from(categories)
-      .where(eq(categories.name, "薪資費用"))
+      .where(and(eq(categories.organizationId, orgId), eq(categories.name, "薪資費用")))
       .limit(1);
     const [emp] = await db
       .select({ name: employees.name })
       .from(employees)
-      .where(eq(employees.id, employeeId))
+      .where(and(eq(employees.organizationId, orgId), eq(employees.id, employeeId)))
       .limit(1);
     const period = `${year}-${String(month).padStart(2, "0")}`;
     const [txn] = await db
       .insert(transactions)
       .values({
+        organizationId: orgId,
         type: "expense",
         txnDate: payDate,
         description: `${period} 薪資 - ${emp?.name ?? ""}`.trim(),
@@ -1024,15 +1107,20 @@ export async function payEmployeeSalary(
 // 刪除（撤銷）一張薪資單，連同它產生的薪資支出交易
 export async function deletePayslip(id: number): Promise<ActionState> {
   try {
+    const { orgId } = await requireOrg();
     const db = getDb();
     const [slip] = await db
       .select({ paidTransactionId: payslips.paidTransactionId })
       .from(payslips)
-      .where(eq(payslips.id, id))
+      .innerJoin(payrollRuns, eq(payslips.payrollRunId, payrollRuns.id))
+      .where(and(eq(payrollRuns.organizationId, orgId), eq(payslips.id, id)))
       .limit(1);
+    if (!slip) return { ok: false, error: "找不到該薪資單" };
     await db.delete(payslips).where(eq(payslips.id, id));
     if (slip?.paidTransactionId) {
-      await db.delete(transactions).where(eq(transactions.id, slip.paidTransactionId));
+      await db
+        .delete(transactions)
+        .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, slip.paidTransactionId)));
     }
     revalidatePath("/payroll");
     revalidatePath("/transactions");
@@ -1040,5 +1128,419 @@ export async function deletePayslip(id: number): Promise<ActionState> {
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
+  }
+}
+
+// ---- 專案 ----
+const PROJECT_STATUS = new Set(["active", "archived"]);
+
+export async function createProject(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const name = str(formData.get("name"));
+  if (!name) return { ok: false, error: "請輸入專案名稱" };
+  const status = str(formData.get("status")) ?? "active";
+  if (!PROJECT_STATUS.has(status)) return { ok: false, error: "狀態不正確" };
+  try {
+    const { orgId } = await requireOrg();
+    await getDb().insert(projects).values({
+      organizationId: orgId,
+      name,
+      clientPartyId: num(formData.get("clientPartyId")),
+      status,
+      description: str(formData.get("description")),
+    });
+    revalidatePath("/projects");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "新增失敗" };
+  }
+}
+
+export async function updateProject(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const id = num(formData.get("id"));
+  const name = str(formData.get("name"));
+  if (!id) return { ok: false, error: "缺少 ID" };
+  if (!name) return { ok: false, error: "請輸入專案名稱" };
+  const status = str(formData.get("status")) ?? "active";
+  if (!PROJECT_STATUS.has(status)) return { ok: false, error: "狀態不正確" };
+  try {
+    const { orgId } = await requireOrg();
+    await getDb()
+      .update(projects)
+      .set({
+        name,
+        clientPartyId: num(formData.get("clientPartyId")),
+        status,
+        description: str(formData.get("description")),
+      })
+      .where(and(eq(projects.organizationId, orgId), eq(projects.id, id)));
+    revalidatePath("/projects");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
+  }
+}
+
+export async function deleteProject(id: number): Promise<ActionState> {
+  try {
+    const { orgId } = await requireOrg();
+    await getDb()
+      .delete(projects)
+      .where(and(eq(projects.organizationId, orgId), eq(projects.id, id)));
+    revalidatePath("/projects");
+    return { ok: true };
+  } catch (e) {
+    return fkError(e, "此專案已被交易或合約使用，無法刪除；可改為「封存」");
+  }
+}
+
+// ---- 訂閱 / 月費 ----
+const SUBSCRIPTION_STATUS = new Set(["active", "paused", "ended"]);
+
+function subscriptionValues(formData: FormData) {
+  return {
+    customerPartyId: num(formData.get("customerPartyId")),
+    projectId: num(formData.get("projectId")),
+    name: str(formData.get("name")),
+    amount: str(formData.get("amount")),
+    currency: str(formData.get("currency")) ?? "TWD",
+    intervalMonths: num(formData.get("intervalMonths")) ?? 1,
+    startDate: str(formData.get("startDate")),
+    endDate: str(formData.get("endDate")),
+    status: str(formData.get("status")) ?? "active",
+    note: str(formData.get("note")),
+  };
+}
+
+export async function createSubscription(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const v = subscriptionValues(formData);
+  if (!v.customerPartyId) return { ok: false, error: "請選擇客戶" };
+  if (!v.name) return { ok: false, error: "請輸入方案名稱" };
+  if (v.amount === null) return { ok: false, error: "請輸入金額" };
+  if (!v.startDate) return { ok: false, error: "請選擇開始日期" };
+  if (!SUBSCRIPTION_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
+  try {
+    const { orgId } = await requireOrg();
+    await getDb()
+      .insert(subscriptions)
+      .values({
+        organizationId: orgId,
+        customerPartyId: v.customerPartyId,
+        projectId: v.projectId,
+        name: v.name,
+        amount: v.amount,
+        currency: v.currency,
+        intervalMonths: v.intervalMonths,
+        startDate: v.startDate,
+        endDate: v.endDate,
+        status: v.status,
+        note: v.note,
+      });
+    revalidatePath("/subscriptions");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "新增失敗" };
+  }
+}
+
+export async function updateSubscription(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const id = num(formData.get("id"));
+  if (!id) return { ok: false, error: "缺少 ID" };
+  const v = subscriptionValues(formData);
+  if (!v.customerPartyId) return { ok: false, error: "請選擇客戶" };
+  if (!v.name) return { ok: false, error: "請輸入方案名稱" };
+  if (v.amount === null) return { ok: false, error: "請輸入金額" };
+  if (!v.startDate) return { ok: false, error: "請選擇開始日期" };
+  if (!SUBSCRIPTION_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
+  try {
+    const { orgId } = await requireOrg();
+    await getDb()
+      .update(subscriptions)
+      .set({
+        customerPartyId: v.customerPartyId,
+        projectId: v.projectId,
+        name: v.name,
+        amount: v.amount,
+        currency: v.currency,
+        intervalMonths: v.intervalMonths,
+        startDate: v.startDate,
+        endDate: v.endDate,
+        status: v.status,
+        note: v.note,
+      })
+      .where(and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, id)));
+    revalidatePath("/subscriptions");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
+  }
+}
+
+export async function deleteSubscription(id: number): Promise<ActionState> {
+  try {
+    const { orgId } = await requireOrg();
+    await getDb()
+      .delete(subscriptions)
+      .where(and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, id)));
+    revalidatePath("/subscriptions");
+    return { ok: true };
+  } catch (e) {
+    return fkError(e, "此訂閱已被應收帳款連結，無法刪除");
+  }
+}
+
+// ---- 合約 ----
+const CONTRACT_STATUS = new Set(["draft", "active", "completed", "cancelled"]);
+
+function contractValues(formData: FormData) {
+  return {
+    customerPartyId: num(formData.get("customerPartyId")),
+    projectId: num(formData.get("projectId")),
+    title: str(formData.get("title")),
+    amount: str(formData.get("amount")),
+    currency: str(formData.get("currency")) ?? "TWD",
+    startDate: str(formData.get("startDate")),
+    endDate: str(formData.get("endDate")),
+    status: str(formData.get("status")) ?? "active",
+    note: str(formData.get("note")),
+  };
+}
+
+export async function createContract(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const v = contractValues(formData);
+  if (!v.customerPartyId) return { ok: false, error: "請選擇客戶" };
+  if (!v.title) return { ok: false, error: "請輸入合約名稱" };
+  if (!CONTRACT_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
+  try {
+    const { orgId } = await requireOrg();
+    await getDb()
+      .insert(contracts)
+      .values({
+        organizationId: orgId,
+        customerPartyId: v.customerPartyId,
+        projectId: v.projectId,
+        title: v.title,
+        amount: v.amount,
+        currency: v.currency,
+        startDate: v.startDate,
+        endDate: v.endDate,
+        status: v.status,
+        note: v.note,
+      });
+    revalidatePath("/contracts");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "新增失敗" };
+  }
+}
+
+export async function updateContract(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const id = num(formData.get("id"));
+  if (!id) return { ok: false, error: "缺少 ID" };
+  const v = contractValues(formData);
+  if (!v.customerPartyId) return { ok: false, error: "請選擇客戶" };
+  if (!v.title) return { ok: false, error: "請輸入合約名稱" };
+  if (!CONTRACT_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
+  try {
+    const { orgId } = await requireOrg();
+    await getDb()
+      .update(contracts)
+      .set({
+        customerPartyId: v.customerPartyId,
+        projectId: v.projectId,
+        title: v.title,
+        amount: v.amount,
+        currency: v.currency,
+        startDate: v.startDate,
+        endDate: v.endDate,
+        status: v.status,
+        note: v.note,
+      })
+      .where(and(eq(contracts.organizationId, orgId), eq(contracts.id, id)));
+    revalidatePath("/contracts");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
+  }
+}
+
+export async function deleteContract(id: number): Promise<ActionState> {
+  try {
+    const { orgId } = await requireOrg();
+    await getDb()
+      .delete(contracts)
+      .where(and(eq(contracts.organizationId, orgId), eq(contracts.id, id)));
+    revalidatePath("/contracts");
+    return { ok: true };
+  } catch (e) {
+    return fkError(e, "此合約已被應收帳款連結，無法刪除");
+  }
+}
+
+// ---- 應收帳款 ----
+function receivableValues(formData: FormData) {
+  return {
+    customerPartyId: num(formData.get("customerPartyId")),
+    contractId: num(formData.get("contractId")),
+    subscriptionId: num(formData.get("subscriptionId")),
+    projectId: num(formData.get("projectId")),
+    description: str(formData.get("description")),
+    amount: str(formData.get("amount")),
+    currency: str(formData.get("currency")) ?? "TWD",
+    dueDate: str(formData.get("dueDate")),
+  };
+}
+
+export async function createReceivable(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const v = receivableValues(formData);
+  if (!v.customerPartyId) return { ok: false, error: "請選擇客戶" };
+  if (v.amount === null) return { ok: false, error: "請輸入金額" };
+  try {
+    const { orgId } = await requireOrg();
+    await getDb()
+      .insert(receivables)
+      .values({
+        organizationId: orgId,
+        customerPartyId: v.customerPartyId,
+        contractId: v.contractId,
+        subscriptionId: v.subscriptionId,
+        projectId: v.projectId,
+        description: v.description,
+        amount: v.amount,
+        currency: v.currency,
+        dueDate: v.dueDate,
+        status: "open",
+      });
+    revalidatePath("/receivables");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "新增失敗" };
+  }
+}
+
+export async function updateReceivable(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const id = num(formData.get("id"));
+  if (!id) return { ok: false, error: "缺少 ID" };
+  const v = receivableValues(formData);
+  if (!v.customerPartyId) return { ok: false, error: "請選擇客戶" };
+  if (v.amount === null) return { ok: false, error: "請輸入金額" };
+  try {
+    const { orgId } = await requireOrg();
+    await getDb()
+      .update(receivables)
+      .set({
+        customerPartyId: v.customerPartyId,
+        contractId: v.contractId,
+        subscriptionId: v.subscriptionId,
+        projectId: v.projectId,
+        description: v.description,
+        amount: v.amount,
+        currency: v.currency,
+        dueDate: v.dueDate,
+      })
+      .where(and(eq(receivables.organizationId, orgId), eq(receivables.id, id)));
+    revalidatePath("/receivables");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
+  }
+}
+
+export async function deleteReceivable(id: number): Promise<ActionState> {
+  try {
+    const { orgId } = await requireOrg();
+    await getDb()
+      .delete(receivables)
+      .where(and(eq(receivables.organizationId, orgId), eq(receivables.id, id)));
+    revalidatePath("/receivables");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
+  }
+}
+
+// 收款：把一筆 open 的應收帳款結掉 → 建一筆 type=income 收入交易（記到客戶 + 專案），
+// 並把應收標記為已收（連到該筆交易）。
+export async function collectReceivable(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const id = num(formData.get("id"));
+  const accountId = num(formData.get("accountId"));
+  const payDate = str(formData.get("payDate"));
+  if (!id) return { ok: false, error: "缺少應收帳款" };
+  if (!accountId) return { ok: false, error: "請選擇收款帳戶" };
+  if (!payDate) return { ok: false, error: "請選擇收款日期" };
+  try {
+    const { orgId } = await requireOrg();
+    const db = getDb();
+    const [ar] = await db
+      .select({
+        customerPartyId: receivables.customerPartyId,
+        projectId: receivables.projectId,
+        amount: receivables.amount,
+        currency: receivables.currency,
+        status: receivables.status,
+        description: receivables.description,
+      })
+      .from(receivables)
+      .where(and(eq(receivables.organizationId, orgId), eq(receivables.id, id)))
+      .limit(1);
+    if (!ar) return { ok: false, error: "找不到該應收帳款" };
+    if (ar.status === "paid") return { ok: false, error: "這筆已收款" };
+
+    const currency = ar.currency ?? "TWD";
+    const [txn] = await db
+      .insert(transactions)
+      .values({
+        organizationId: orgId,
+        type: "income",
+        txnDate: payDate,
+        description: ar.description ?? "應收帳款收款",
+        partyId: ar.customerPartyId,
+        projectId: ar.projectId,
+        amount: ar.amount,
+        currency,
+        amountTwd: currency === "TWD" ? ar.amount : null,
+        toAccountId: accountId,
+        book: "both",
+        billedToCompanyTaxId: false,
+      })
+      .returning({ id: transactions.id });
+
+    await db
+      .update(receivables)
+      .set({ status: "paid", paidTransactionId: txn.id, paidAt: payDate })
+      .where(and(eq(receivables.organizationId, orgId), eq(receivables.id, id)));
+
+    revalidatePath("/receivables");
+    revalidatePath("/transactions");
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "收款失敗" };
   }
 }

@@ -14,11 +14,13 @@ import { listPayslipRecords } from "@/db/queries";
 import { formatCurrency } from "@/lib/format";
 import { DeleteButton } from "@/components/delete-button";
 import { deletePayslip } from "@/db/mutations";
+import { requireOrg } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function PayrollPage() {
-  const rows = await listPayslipRecords();
+  const { orgId } = await requireOrg();
+  const rows = await listPayslipRecords(orgId);
 
   return (
     <>
