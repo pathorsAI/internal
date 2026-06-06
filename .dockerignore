@@ -1,0 +1,28 @@
+node_modules
+.next
+.next-prod
+.open-next
+.wrangler
+out
+build
+coverage
+
+# env & secrets — never bake into an image
+.env*
+!.env.example
+.dev.vars
+.dev.vars.*
+wrangler.jsonc
+
+# vcs / tooling / local
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+*.pem
+*.tsbuildinfo
+
+# docs & assets not needed at runtime
+docs
+README.md

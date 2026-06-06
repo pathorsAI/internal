@@ -121,18 +121,18 @@ By default it uses **Neon's** serverless (HTTP) driver, because the app deploys 
 
 ## Deployment
 
-The project deploys to **Cloudflare Workers** via OpenNext.
+It's a standard Next.js + Postgres app, so you can host it wherever you like. Two paths are documented in **[`docs/deployment.md`](docs/deployment.md)**:
 
-```bash
-cp wrangler.jsonc.example wrangler.jsonc   # first time: fill in your own values
-bun run cf:deploy
-```
+- **Cloudflare Workers + Neon** (how we run it — the default the repo is wired for):
 
-`wrangler.jsonc` is gitignored (it holds account-specific values). In it:
+  ```bash
+  cp wrangler.jsonc.example wrangler.jsonc   # first time: fill in your own values
+  bun run cf:deploy
+  ```
 
-- `account_id` — set it here, or omit it and export `CLOUDFLARE_ACCOUNT_ID` (wrangler reads it natively).
-- `routes` — your custom domain; delete the block to deploy on `*.workers.dev` only.
-- `r2_buckets[].bucket_name` and `name` (worker name) — set your own.
+  `wrangler.jsonc` is gitignored (account-specific values: `account_id` — or export `CLOUDFLARE_ACCOUNT_ID`; `routes` — your domain, delete to use `*.workers.dev`; `r2_buckets[].bucket_name` and `name`).
+
+- **Docker self-host** (vendor-neutral Node + Postgres) — see the [`Dockerfile`](Dockerfile) / [`docker-compose.yml`](docker-compose.yml) and the [deployment guide](docs/deployment.md#docker-self-host) for the small DB-driver and storage swaps it needs.
 
 ---
 
@@ -146,7 +146,9 @@ src/
   lib/            # auth (better-auth), session helpers, storage (R2), utils
 migrations/       # plain forward-only SQL migrations
 scripts/          # one-off operational SQL (e.g. bootstrap-owner)
-docs/images/      # README assets
+docs/             # deployment guide + README assets
+Dockerfile        # vendor-neutral self-host image
+docker-compose.yml
 ```
 
 ## Contributing
