@@ -49,16 +49,16 @@
       <text x="59" y="23" text-anchor="middle" fill="#cbd5e1">Next.js 16</text>
     </g>
     <g transform="translate(420,250)">
-      <rect x="0" y="0" width="148" height="34" rx="17" fill="#0e1729" stroke="#293556"/>
-      <text x="74" y="23" text-anchor="middle" fill="#cbd5e1">Cloudflare Workers</text>
+      <rect x="0" y="0" width="98" height="34" rx="17" fill="#0e1729" stroke="#293556"/>
+      <text x="49" y="23" text-anchor="middle" fill="#cbd5e1">Drizzle</text>
     </g>
-    <g transform="translate(580,250)">
-      <rect x="0" y="0" width="118" height="34" rx="17" fill="#0e1729" stroke="#293556"/>
-      <text x="59" y="23" text-anchor="middle" fill="#cbd5e1">Postgres</text>
+    <g transform="translate(530,250)">
+      <rect x="0" y="0" width="112" height="34" rx="17" fill="#0e1729" stroke="#293556"/>
+      <text x="56" y="23" text-anchor="middle" fill="#cbd5e1">Postgres</text>
     </g>
-    <g transform="translate(710,250)">
-      <rect x="0" y="0" width="132" height="34" rx="17" fill="#0e1729" stroke="#293556"/>
-      <text x="66" y="23" text-anchor="middle" fill="#cbd5e1">Apache&#160;2.0</text>
+    <g transform="translate(654,250)">
+      <rect x="0" y="0" width="124" height="34" rx="17" fill="#0e1729" stroke="#293556"/>
+      <text x="62" y="23" text-anchor="middle" fill="#cbd5e1">better-auth</text>
     </g>
   </g>
 </svg>

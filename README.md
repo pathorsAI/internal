@@ -5,8 +5,8 @@
 <p align="center">
   <a href="./LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-blue.svg"></a>
   <a href="https://nextjs.org"><img alt="Next.js 16" src="https://img.shields.io/badge/Next.js-16-black?logo=next.js"></a>
-  <a href="https://workers.cloudflare.com"><img alt="Cloudflare Workers" src="https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white"></a>
   <a href="https://www.postgresql.org"><img alt="Postgres" src="https://img.shields.io/badge/Postgres-Drizzle-4169E1?logo=postgresql&logoColor=white"></a>
+  <a href="https://better-auth.com"><img alt="better-auth" src="https://img.shields.io/badge/Auth-better--auth-1f6feb"></a>
   <img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg">
 </p>
 
@@ -60,7 +60,7 @@ Capture with fake data (e.g. a demo org on a local/dev database) to avoid leakin
 - **Client finance** — track client income & expenses across projects, subscriptions, contracts, and accounts receivable.
 - **Payroll** — employees, payroll item types, and pay runs.
 - **Reports** — aggregated income/expense and receivables views.
-- **Documents** — file uploads stored in Cloudflare R2.
+- **Documents** — file uploads to object storage (e.g. receipts attached to transactions).
 - **Auth** — Google OAuth via better-auth; invite-based member management; org settings (rename / delete).
 
 ## Tech stack
@@ -70,8 +70,9 @@ Capture with fake data (e.g. a demo org on a local/dev database) to avoid leakin
 | Frontend | Next.js 16 (App Router), React 19, Tailwind CSS v4, shadcn/ui + Base UI |
 | Backend | Next.js Route Handlers / Server Actions, better-auth |
 | Database | Postgres + Drizzle ORM (introspect-only schema, plain-SQL migrations) |
-| Hosting | Cloudflare Workers (via [OpenNext](https://opennext.js.org)), Cloudflare R2 for files |
 | Tooling | Bun |
+
+Nothing here is tied to a specific host or cloud — it's a standard Next.js + Postgres app. Where *we* happen to run it is just one option; see [Deployment](#deployment).
 
 ---
 
@@ -111,30 +112,15 @@ See [`.env.example`](.env.example) for the full template.
 
 This app uses **Postgres** through **Drizzle ORM**. Everything under [`migrations/`](migrations) is plain forward-only SQL, and `src/db/schema.ts` is introspected from the database (`bun run db:pull`) — the app never pushes schema. There is no vendor-specific SQL, so **any Postgres works**.
 
-By default it uses **Neon's** serverless (HTTP) driver, because the app deploys to **Cloudflare Workers**, where you can't open a normal TCP connection and need an HTTP-based driver. This is not a hard dependency — to use any other Postgres or runtime, change one file:
-
-- Swap the driver in [`src/db/index.ts`](src/db/index.ts):
-  - Plain Node host → `drizzle-orm/node-postgres` (`pg`) or `drizzle-orm/postgres-js`.
-  - Other serverless platforms → their respective serverless driver.
-- With a driver that supports interactive transactions, you can remove `transaction: false` in [`src/lib/auth.ts`](src/lib/auth.ts).
-- Point `DATABASE_URL` at your Postgres.
+The Drizzle client lives in [`src/db/index.ts`](src/db/index.ts) — point `DATABASE_URL` at your database and you're set. Which Postgres *driver* to use is the only runtime-dependent choice (a TCP driver like `node-postgres` on a normal server; an HTTP driver if you run somewhere that can't open TCP). That single swap is covered in the [deployment guide](docs/deployment.md#database-driver).
 
 > How you evolve schema, branch your database, or roll out migrations is up to your own workflow — this project does not prescribe one.
 
 ## Deployment
 
-It's a standard Next.js + Postgres app, so you can host it wherever you like. Two paths are documented in **[`docs/deployment.md`](docs/deployment.md)**:
+Build it (`bun run build`) and run it like any other Next.js app, anywhere that can serve Next.js and reach a Postgres database. The repo prescribes no host.
 
-- **Cloudflare Workers + Neon** (how we run it — the default the repo is wired for):
-
-  ```bash
-  cp wrangler.jsonc.example wrangler.jsonc   # first time: fill in your own values
-  bun run cf:deploy
-  ```
-
-  `wrangler.jsonc` is gitignored (account-specific values: `account_id` — or export `CLOUDFLARE_ACCOUNT_ID`; `routes` — your domain, delete to use `*.workers.dev`; `r2_buckets[].bucket_name` and `name`).
-
-- **Docker self-host** (vendor-neutral Node + Postgres) — see the [`Dockerfile`](Dockerfile) / [`docker-compose.yml`](docker-compose.yml) and the [deployment guide](docs/deployment.md#docker-self-host) for the small DB-driver and storage swaps it needs.
+The **[deployment guide](docs/deployment.md)** walks through two concrete setups as examples — a **Docker self-host** (vendor-neutral Node + Postgres, with a [`Dockerfile`](Dockerfile) and [`docker-compose.yml`](docker-compose.yml)), and the serverless setup *we* happen to run — but neither is a requirement.
 
 ---
 
@@ -145,7 +131,7 @@ src/
   app/            # Next.js App Router (dashboard pages, auth routes, onboarding)
   components/     # UI components (shadcn/ui + Base UI) and shared widgets
   db/             # Drizzle client, introspected schema, queries & mutations
-  lib/            # auth (better-auth), session helpers, storage (R2), utils
+  lib/            # auth (better-auth), session helpers, object storage, utils
 migrations/       # plain forward-only SQL migrations
 scripts/          # one-off operational SQL (e.g. bootstrap-owner)
 docs/             # deployment guide + README assets
