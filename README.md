@@ -13,11 +13,13 @@
 <h1 align="center">Pathors Internal</h1>
 
 <p align="center">
-  <b>Self-hosted, multi-tenant bookkeeping for small companies.</b><br/>
+  <b>Self-hosted internal accounting (內外帳) &amp; client-finance management for small companies.</b><br/>
   One deployment serves many organizations, with data isolated per <code>organization_id</code>.
 </p>
 
-> **Note** — the application UI is in **Traditional Chinese (zh-TW)**. The codebase, docs, and configuration are in English. It is designed for small Taiwanese companies that keep both *internal* and *external* books (內外帳), but the data model is generic enough for any small-business ledger.
+> **What it is** — an internal accounting system for small companies that keep both *internal* and *external* books (內外帳), with built-in management of **client income & expenses** (projects, subscriptions, contracts, receivables). It is *not* a generic accounting/ERP package — it's the in-house ledger + client-finance tool we run ourselves.
+>
+> **Note** — the application UI is in **Traditional Chinese (zh-TW)**; the codebase, docs, and configuration are in English. Built for small Taiwanese companies, but the data model is plain enough for any small team.
 
 ---
 
@@ -54,8 +56,8 @@ Capture with fake data (e.g. a demo org on a local/dev database) to avoid leakin
 
 - **Multi-tenancy** — powered by the [better-auth](https://better-auth.com) organization plugin. A single deployment hosts many orgs; every row is scoped by `organization_id`, with a built-in org switcher and owner/admin roles.
 - **Dual books (內外帳)** — each transaction carries a `book` field separating internal vs. external ledgers.
-- **Bookkeeping core** — transactions, categories, bank accounts, counterparties, reconciliation, and advances/reimbursements.
-- **Client operations** — projects, subscriptions, contracts, and accounts receivable.
+- **Accounting core** — transactions, categories, bank accounts, counterparties, reconciliation, and advances/reimbursements.
+- **Client finance** — track client income & expenses across projects, subscriptions, contracts, and accounts receivable.
 - **Payroll** — employees, payroll item types, and pay runs.
 - **Reports** — aggregated income/expense and receivables views.
 - **Documents** — file uploads stored in Cloudflare R2.

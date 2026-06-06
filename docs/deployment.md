@@ -1,8 +1,9 @@
 # Deployment
 
-This project is a standard **Next.js 16 (App Router)** application backed by
-**Postgres**. There is nothing that forces a particular host on you — if you can
-run Next.js and reach a Postgres database, you can run this app.
+This project (an internal-accounting / 內外帳 + client-finance app) is a standard
+**Next.js 16 (App Router)** application backed by **Postgres**. There is nothing
+that forces a particular host on you — if you can run Next.js and reach a
+Postgres database, you can run this app.
 
 This document describes two paths:
 
@@ -17,7 +18,7 @@ This document describes two paths:
 > exists on Cloudflare. On any other host (including Docker) uploads/downloads
 > need an alternative storage backend — see
 > [Storage portability](#storage-portability). Everything else (auth,
-> bookkeeping, reports) is host-agnostic.
+> accounting, client finance, reports) is host-agnostic.
 
 ---
 
@@ -196,5 +197,5 @@ const s3 = new S3Client({
 ```
 
 The provided `docker-compose.yml` includes an **optional, commented-out MinIO
-service** as a starting point. Until you make this swap, the bookkeeping app runs
+service** as a starting point. Until you make this swap, the accounting app runs
 fine but the document upload/preview feature will error.
