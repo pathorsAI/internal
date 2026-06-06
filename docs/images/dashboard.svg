@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-label="Dashboard screenshot placeholder">
+  <rect width="1280" height="720" fill="#0f172a"/>
+  <rect x="1" y="1" width="1278" height="718" fill="none" stroke="#334155" stroke-width="2" stroke-dasharray="10 8"/>
+  <text x="640" y="340" fill="#e2e8f0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="48" font-weight="700" text-anchor="middle">總覽 Dashboard</text>
+  <text x="640" y="396" fill="#64748b" font-family="ui-sans-serif, system-ui, sans-serif" font-size="24" text-anchor="middle">screenshot placeholder — replace with docs/images/dashboard.png</text>
+</svg>
