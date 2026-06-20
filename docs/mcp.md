@@ -31,15 +31,24 @@ returns you to `/api/auth/mcp/authorize` to complete the grant.
 All data is scoped to your organization. The token only carries your user id, so
 the server resolves your org from membership (matching the dashboard's behaviour).
 
-If you belong to **multiple orgs**, pin one per connection with a query param:
-`<BASE_URL>/api/mcp?org=<slug-or-id>` (validated against your memberships). Run
-one connection per org. With no `?org`, it defaults to your earliest-joined org;
-a tool call can also pass `organizationId` to override per call. The `/mcp`
-settings page lists ready-to-copy per-org URLs.
+If you belong to **multiple orgs**, the server never guesses. Two options:
+
+- **One connection (recommended):** add a single `<BASE_URL>/api/mcp`. The server
+  `instructions` tell the model to call `list_organizations` at the start of a
+  session and ask which org to use, then pass it as `organizationId` on every
+  call. If it skips that, org-scoped tools return an "ambiguous organization"
+  error listing the choices, so it must ask and retry — no data ever lands in the
+  wrong org.
+- **Pin per connection:** add `<BASE_URL>/api/mcp?org=<slug-or-id>` (validated
+  against your memberships) — one connection per org, no asking. The `/mcp`
+  settings page lists ready-to-copy per-org URLs.
+
+With a single-org account it just uses that org automatically.
 
 ## Tools
 
 Read:
+- `list_organizations` — which orgs you can access; call first to pick one
 - `list_upcoming_billing` — overdue + soon-due receivables, plus projected next
   charges of active subscriptions (the "who do I bill, and when" tool)
 - `list_overdue_receivables`

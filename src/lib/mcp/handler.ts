@@ -8,6 +8,17 @@ import { type ToolContext, tools } from "./tools";
 const SERVER_INFO = { name: "pathors-internal", version: "1.0.0" };
 const PROTOCOL_VERSION = "2025-06-18";
 
+// Returned to the client at initialize. Steers the model to confirm the org
+// before doing org-scoped work — important because the signed-in account may
+// belong to multiple organizations and we never guess.
+const INSTRUCTIONS = [
+  "This server exposes one organization's accounting data (projects, subscriptions, contracts, receivables, customers).",
+  "The signed-in account may belong to multiple organizations.",
+  "At the START of each session, before calling any org-scoped tool, call list_organizations and ask the user which organization to work in.",
+  "Then pass that value as organizationId on every subsequent tool call. Never guess the organization.",
+  "If a tool reports that the organization is ambiguous, stop and ask the user, then retry with organizationId.",
+].join(" ");
+
 type JsonRpcId = string | number | null;
 type JsonRpcMessage = {
   jsonrpc?: string;
@@ -38,6 +49,7 @@ async function handleMessage(
           (msg.params?.protocolVersion as string) ?? PROTOCOL_VERSION,
         capabilities: { tools: {} },
         serverInfo: SERVER_INFO,
+        instructions: INSTRUCTIONS,
       });
 
     case "notifications/initialized":

@@ -39,14 +39,28 @@ export async function resolveOrgId(
     return rows[0].organizationId;
   }
 
+  // No hint: if the user is in exactly one org, use it. If in several, refuse to
+  // guess — tell the model to ask the user and retry with organizationId.
   const rows = await db
-    .select({ organizationId: member.organizationId })
+    .select({
+      organizationId: member.organizationId,
+      name: organization.name,
+      slug: organization.slug,
+    })
     .from(member)
+    .innerJoin(organization, eq(organization.id, member.organizationId))
     .where(eq(member.userId, userId))
-    .orderBy(asc(member.createdAt))
-    .limit(1);
-  if (!rows[0]) {
+    .orderBy(asc(member.createdAt));
+  if (rows.length === 0) {
     throw new Error("No organization is associated with your account.");
   }
-  return rows[0].organizationId;
+  if (rows.length === 1) {
+    return rows[0].organizationId;
+  }
+  const choices = rows
+    .map((r) => `"${r.name}" (organizationId: ${r.slug ?? r.organizationId})`)
+    .join(", ");
+  throw new Error(
+    `Ambiguous organization — your account belongs to multiple: ${choices}. Ask the user which one to use, then call this tool again with organizationId set to that value.`,
+  );
 }

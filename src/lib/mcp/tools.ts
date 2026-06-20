@@ -16,6 +16,7 @@ import {
   receivables,
   subscriptions,
 } from "@/db/schema";
+import { listMyOrgs } from "@/db/queries";
 import { resolveOrgId } from "./org";
 
 export type ToolContext = { userId: string; orgHint?: string };
@@ -108,6 +109,31 @@ const ORG_ARG = {
 } as const;
 
 export const tools: Record<string, ToolDef> = {
+  list_organizations: {
+    description:
+      "List the organizations the signed-in user can access. Call this FIRST in a session, show the user the options, and ask which organization to work in — then pass the chosen value as `organizationId` to every other tool. Required when the account belongs to more than one organization.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+    execute: async (_args, ctx) => {
+      const orgs = await listMyOrgs(ctx.userId);
+      return {
+        organizations: orgs.map((o) => ({
+          name: o.name,
+          organizationId: o.slug ?? o.id,
+          id: o.id,
+          slug: o.slug,
+        })),
+        hint:
+          orgs.length > 1
+            ? "Ask the user which organization to use, then pass its organizationId to the other tools."
+            : "Single organization — you can call the other tools directly.",
+      };
+    },
+  },
+
   list_upcoming_billing: {
     description:
       "The money you should be collecting. Lists overdue open receivables plus everything due within the next N days, AND the projected next charge of every active recurring subscription (computed from start_date + interval_months). Use this to answer 'who do I need to bill, and when'.",
