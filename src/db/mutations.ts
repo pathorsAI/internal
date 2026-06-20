@@ -1568,7 +1568,7 @@ export async function revokeMcpClient(clientId: string): Promise<ActionState> {
     await db
       .delete(oauthApplication)
       .where(eq(oauthApplication.clientId, clientId));
-    revalidatePath("/mcp");
+    revalidatePath("/settings/mcp");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "撤銷失敗" };

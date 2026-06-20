@@ -13,11 +13,12 @@ export function middleware(request: NextRequest) {
 
 // Protect everything except auth pages, the auth API, static assets, and the
 // public MCP surface: the OAuth discovery docs (.well-known) and the MCP
-// endpoint (/api/mcp), which must be reachable without a session cookie so MCP
+// endpoint (/mcp), which must be reachable without a session cookie so MCP
 // clients can discover OAuth and receive a proper 401 (not an HTML login
-// redirect). /api/mcp does its own bearer-token auth via withMcpAuth.
+// redirect). /mcp does its own bearer-token auth via withMcpAuth. The MCP
+// management UI lives at /settings/mcp and stays protected.
 export const config = {
   matcher: [
-    "/((?!login|signup|api/auth|api/mcp|.well-known|_next/static|_next/image|favicon.ico).*)",
+    "/((?!login|signup|api/auth|mcp|.well-known|_next/static|_next/image|favicon.ico).*)",
   ],
 };

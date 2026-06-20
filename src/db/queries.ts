@@ -693,7 +693,7 @@ export type McpClient = {
 /**
  * MCP OAuth clients registered against this deployment (better-auth `mcp`
  * plugin). Self-registered via Dynamic Client Registration, so this is the
- * canonical list of what can talk to /api/mcp. activeTokens = unexpired access
+ * canonical list of what can talk to /mcp. activeTokens = unexpired access
  * tokens for that client. Not org-scoped (the OAuth provider is deployment-wide).
  */
 export async function listMcpClients(): Promise<McpClient[]> {

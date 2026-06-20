@@ -45,7 +45,7 @@ export default async function McpPage() {
   const proto =
     h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   const origin = `${proto}://${host}`;
-  const mcpUrl = `${origin}/api/mcp`;
+  const mcpUrl = `${origin}/mcp`;
   const discoveryUrl = `${origin}/.well-known/oauth-authorization-server`;
 
   const colSpan = canManage ? 7 : 6;

@@ -64,15 +64,20 @@ const hr = [
 
 const org = [
   { title: "成員", href: "/members", icon: UserCog },
-  { title: "MCP", href: "/mcp", icon: Plug },
+  { title: "MCP", href: "/settings/mcp", icon: Plug },
   { title: "組織設定", href: "/settings", icon: Settings },
 ];
 
 export function AppSidebar() {
   const pathname = usePathname();
 
-  const isActive = (href: string) =>
-    href === "/" ? pathname === "/" : pathname.startsWith(href);
+  const isActive = (href: string) => {
+    if (href === "/") return pathname === "/";
+    // /settings is a prefix of /settings/mcp — match it exactly so only the
+    // specific sub-page (e.g. MCP) highlights, not both.
+    if (href === "/settings") return pathname === "/settings";
+    return pathname.startsWith(href);
+  };
 
   return (
     <Sidebar>

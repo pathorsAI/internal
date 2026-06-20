@@ -13,7 +13,7 @@ receivables.
 
 | Purpose | URL |
 | --- | --- |
-| MCP server (configure this in your client) | `<BASE_URL>/api/mcp` |
+| MCP server (configure this in your client) | `<BASE_URL>/mcp` |
 | OAuth Authorization Server metadata | `<BASE_URL>/.well-known/oauth-authorization-server` |
 | OAuth Protected Resource metadata | `<BASE_URL>/.well-known/oauth-protected-resource` |
 
@@ -33,15 +33,15 @@ the server resolves your org from membership (matching the dashboard's behaviour
 
 If you belong to **multiple orgs**, the server never guesses. Two options:
 
-- **One connection (recommended):** add a single `<BASE_URL>/api/mcp`. The server
+- **One connection (recommended):** add a single `<BASE_URL>/mcp`. The server
   `instructions` tell the model to call `list_organizations` at the start of a
   session and ask which org to use, then pass it as `organizationId` on every
   call. If it skips that, org-scoped tools return an "ambiguous organization"
   error listing the choices, so it must ask and retry — no data ever lands in the
   wrong org.
-- **Pin per connection:** add `<BASE_URL>/api/mcp?org=<slug-or-id>` (validated
-  against your memberships) — one connection per org, no asking. The `/mcp`
-  settings page lists ready-to-copy per-org URLs.
+- **Pin per connection:** add `<BASE_URL>/mcp?org=<slug-or-id>` (validated
+  against your memberships) — one connection per org, no asking. The `/settings/mcp`
+  page lists ready-to-copy per-org URLs.
 
 With a single-org account it just uses that org automatically.
 
@@ -67,5 +67,5 @@ Write (safe):
    `migrations/0006_mcp_oauth.sql` (apply it the same way as the other
    `migrations/*.sql` files against your database).
 2. Ensure `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL` are set.
-3. Add the server to your MCP client using `<BASE_URL>/api/mcp` and complete the
+3. Add the server to your MCP client using `<BASE_URL>/mcp` and complete the
    OAuth sign-in when prompted.

@@ -1,5 +1,5 @@
 // MCP server endpoint. Configure this URL in your MCP client (e.g. Claude):
-//   https://<your-app>/api/mcp
+//   https://<your-app>/mcp
 //
 // withMcpAuth validates the OAuth bearer token (issued by the better-auth `mcp`
 // plugin) and hands us the resolved session. Unauthenticated requests get a 401
