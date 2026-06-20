@@ -20,6 +20,7 @@ import {
   contracts,
   receivables,
 } from "./schema";
+import { oauthApplication, member } from "./auth-schema";
 import { uploadDocument, deleteDocument } from "@/lib/storage";
 import { requireOrg } from "@/lib/session";
 
@@ -1542,5 +1543,34 @@ export async function collectReceivable(
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "收款失敗" };
+  }
+}
+
+// ---- MCP / OAuth clients ----
+
+// Revoke (delete) an MCP client registration. Cascades to its access/refresh
+// tokens and consents (FK on delete cascade), so the client must re-authorize.
+// Deployment-wide action — gated to org owners/admins.
+export async function revokeMcpClient(clientId: string): Promise<ActionState> {
+  try {
+    const { orgId, userId } = await requireOrg();
+    const db = getDb();
+    const role = (
+      await db
+        .select({ role: member.role })
+        .from(member)
+        .where(and(eq(member.userId, userId), eq(member.organizationId, orgId)))
+        .limit(1)
+    )[0]?.role;
+    if (role !== "owner" && role !== "admin") {
+      return { ok: false, error: "只有擁有者或管理員可以撤銷 MCP 用戶端" };
+    }
+    await db
+      .delete(oauthApplication)
+      .where(eq(oauthApplication.clientId, clientId));
+    revalidatePath("/mcp");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "撤銷失敗" };
   }
 }

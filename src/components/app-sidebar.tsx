@@ -19,6 +19,7 @@ import {
   BarChart3,
   UserCog,
   Settings,
+  Plug,
 } from "lucide-react";
 
 import {
@@ -63,6 +64,7 @@ const hr = [
 
 const org = [
   { title: "成員", href: "/members", icon: UserCog },
+  { title: "MCP", href: "/mcp", icon: Plug },
   { title: "組織設定", href: "/settings", icon: Settings },
 ];
 

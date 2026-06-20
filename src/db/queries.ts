@@ -17,6 +17,7 @@ import {
   contracts,
   receivables,
 } from "./schema";
+import { oauthApplication, oauthAccessToken, member } from "./auth-schema";
 
 export type Book = "internal" | "external" | "both";
 
@@ -665,4 +666,60 @@ export async function listVendorCosts(orgId: string) {
     .groupBy(parties.id, parties.name, parties.label)
     .orderBy(sql`coalesce(sum(coalesce(${transactions.amountTwd}, ${transactions.amount})), 0) desc`);
   return rows.map((r) => ({ ...r, total: Number(r.total), txnCount: Number(r.txnCount) }));
+}
+
+// ---- MCP / OAuth clients ----
+
+/** The current user's role in the given org (owner/admin/member), or null. */
+export async function getMemberRole(orgId: string, userId: string) {
+  const rows = await getDb()
+    .select({ role: member.role })
+    .from(member)
+    .where(and(eq(member.userId, userId), eq(member.organizationId, orgId)))
+    .limit(1);
+  return rows[0]?.role ?? null;
+}
+
+export type McpClient = {
+  id: string;
+  clientId: string;
+  name: string | null;
+  type: string;
+  disabled: boolean;
+  createdAt: Date;
+  activeTokens: number;
+};
+
+/**
+ * MCP OAuth clients registered against this deployment (better-auth `mcp`
+ * plugin). Self-registered via Dynamic Client Registration, so this is the
+ * canonical list of what can talk to /api/mcp. activeTokens = unexpired access
+ * tokens for that client. Not org-scoped (the OAuth provider is deployment-wide).
+ */
+export async function listMcpClients(): Promise<McpClient[]> {
+  const rows = await getDb()
+    .select({
+      id: oauthApplication.id,
+      clientId: oauthApplication.clientId,
+      name: oauthApplication.name,
+      type: oauthApplication.type,
+      disabled: oauthApplication.disabled,
+      createdAt: oauthApplication.createdAt,
+      activeTokens: sql<number>`count(${oauthAccessToken.accessToken}) filter (where ${oauthAccessToken.accessTokenExpiresAt} > now())`,
+    })
+    .from(oauthApplication)
+    .leftJoin(
+      oauthAccessToken,
+      eq(oauthAccessToken.clientId, oauthApplication.clientId),
+    )
+    .groupBy(
+      oauthApplication.id,
+      oauthApplication.clientId,
+      oauthApplication.name,
+      oauthApplication.type,
+      oauthApplication.disabled,
+      oauthApplication.createdAt,
+    )
+    .orderBy(desc(oauthApplication.createdAt));
+  return rows.map((r) => ({ ...r, activeTokens: Number(r.activeTokens) }));
 }
