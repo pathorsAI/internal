@@ -1,114 +1,33 @@
-import {
-  addDays,
-  addMonths,
-  differenceInCalendarDays,
-  format,
-  isAfter,
-  isBefore,
-  parseISO,
-} from "date-fns";
+import { addDays, differenceInCalendarDays, format, parseISO } from "date-fns";
 import { and, asc, desc, eq, isNotNull, lte } from "drizzle-orm";
 import { getDb } from "@/db";
-import {
-  contracts,
-  parties,
-  projects,
-  receivables,
-  subscriptions,
-} from "@/db/schema";
+import { contracts, parties, projects, receivables, subscriptions } from "@/db/schema";
 import { listMyOrgs } from "@/db/queries";
-import { resolveOrgId } from "./org";
+import {
+  assertInOrg,
+  nextChargeDate,
+  optDate,
+  optNumber,
+  optString,
+  ORG_ARG,
+  requireAmount,
+  requireNumber,
+  normalizeCurrency,
+  resolveOrg,
+  todayStr,
+  type ToolContext,
+  type ToolDef,
+} from "./shared";
+import { accountingTools } from "./tools-accounting";
+import { transactionTools } from "./tools-transactions";
+import { clientTools } from "./tools-client";
+import { hrTools } from "./tools-hr";
 
-export type ToolContext = { userId: string; orgHint?: string };
+export type { ToolContext, ToolDef };
 
-export type ToolDef = {
-  description: string;
-  inputSchema: {
-    type: "object";
-    properties: Record<string, unknown>;
-    required?: string[];
-    additionalProperties: boolean;
-  };
-  execute: (args: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;
-};
-
-// ---- arg helpers (lightweight validation, no extra deps) ----
-
-function optString(args: Record<string, unknown>, key: string): string | undefined {
-  const v = args[key];
-  if (v === undefined || v === null) return undefined;
-  if (typeof v !== "string") throw new Error(`"${key}" must be a string.`);
-  return v;
-}
-
-function requireNumber(args: Record<string, unknown>, key: string): number {
-  const v = args[key];
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v))) {
-    return Number(v);
-  }
-  throw new Error(`"${key}" is required and must be a number.`);
-}
-
-function optNumber(args: Record<string, unknown>, key: string): number | undefined {
-  const v = args[key];
-  if (v === undefined || v === null) return undefined;
-  return requireNumber(args, key);
-}
-
-function requireAmount(args: Record<string, unknown>, key: string): string {
-  const n = requireNumber(args, key);
-  if (n <= 0) throw new Error(`"${key}" must be greater than 0.`);
-  return n.toString();
-}
-
-function normalizeCurrency(args: Record<string, unknown>): string {
-  const c = (optString(args, "currency") ?? "TWD").toUpperCase();
-  if (c.length !== 3) throw new Error(`"currency" must be a 3-letter code (e.g. TWD, USD).`);
-  return c;
-}
-
-function optDate(args: Record<string, unknown>, key: string): string | undefined {
-  const v = optString(args, key);
-  if (v === undefined) return undefined;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) {
-    throw new Error(`"${key}" must be an ISO date (YYYY-MM-DD).`);
-  }
-  return v;
-}
-
-function todayStr(): string {
-  return format(new Date(), "yyyy-MM-dd");
-}
-
-/** Next charge date for a subscription on or after `fromStr`, or null if ended. */
-function nextChargeDate(
-  startStr: string,
-  intervalMonths: number,
-  fromStr: string,
-  endStr: string | null,
-): string | null {
-  if (!startStr || !intervalMonths || intervalMonths < 1) return null;
-  const from = parseISO(fromStr);
-  let d = parseISO(startStr);
-  let guard = 0;
-  while (isBefore(d, from) && guard < 1000) {
-    d = addMonths(d, intervalMonths);
-    guard++;
-  }
-  if (endStr && isAfter(d, parseISO(endStr))) return null;
-  return format(d, "yyyy-MM-dd");
-}
-
-const ORG_ARG = {
-  organizationId: {
-    type: "string",
-    description:
-      "Optional. Only needed if you belong to multiple organizations; defaults to your primary one.",
-  },
-} as const;
-
-export const tools: Record<string, ToolDef> = {
+// Discovery + the recurring-billing tools. Domain CRUD lives in the tools-*.ts
+// modules and is merged into `tools` at the bottom.
+const billingTools: Record<string, ToolDef> = {
   list_organizations: {
     description:
       "List the organizations the signed-in user can access. Call this FIRST in a session, show the user the options, and ask which organization to work in — then pass the chosen value as `organizationId` to every other tool. Required when the account belongs to more than one organization.",
@@ -140,20 +59,14 @@ export const tools: Record<string, ToolDef> = {
     inputSchema: {
       type: "object",
       properties: {
-        days: {
-          type: "number",
-          description: "Look-ahead window in days (default 60).",
-        },
+        days: { type: "number", description: "Look-ahead window in days (default 60)." },
         ...ORG_ARG,
       },
       additionalProperties: false,
     },
     execute: async (args, ctx) => {
       const days = optNumber(args, "days") ?? 60;
-      const orgId = await resolveOrgId(
-        ctx.userId,
-        optString(args, "organizationId") ?? ctx.orgHint,
-      );
+      const orgId = await resolveOrg(args, ctx);
       const db = getDb();
       const today = todayStr();
       const horizon = format(addDays(parseISO(today), days), "yyyy-MM-dd");
@@ -194,10 +107,7 @@ export const tools: Record<string, ToolDef> = {
         .from(subscriptions)
         .leftJoin(parties, eq(subscriptions.customerPartyId, parties.id))
         .where(
-          and(
-            eq(subscriptions.organizationId, orgId),
-            eq(subscriptions.status, "active"),
-          ),
+          and(eq(subscriptions.organizationId, orgId), eq(subscriptions.status, "active")),
         );
 
       type Item = {
@@ -227,12 +137,7 @@ export const tools: Record<string, ToolDef> = {
       }
 
       for (const s of subRows) {
-        const next = nextChargeDate(
-          s.startDate,
-          s.intervalMonths,
-          today,
-          s.endDate,
-        );
+        const next = nextChargeDate(s.startDate, s.intervalMonths, today, s.endDate);
         if (!next || next > horizon) continue;
         items.push({
           kind: "subscription_projected",
@@ -271,10 +176,7 @@ export const tools: Record<string, ToolDef> = {
       additionalProperties: false,
     },
     execute: async (args, ctx) => {
-      const orgId = await resolveOrgId(
-        ctx.userId,
-        optString(args, "organizationId") ?? ctx.orgHint,
-      );
+      const orgId = await resolveOrg(args, ctx);
       const db = getDb();
       const today = todayStr();
       const rows = await db
@@ -322,18 +224,12 @@ export const tools: Record<string, ToolDef> = {
       additionalProperties: false,
     },
     execute: async (args, ctx) => {
-      const orgId = await resolveOrgId(
-        ctx.userId,
-        optString(args, "organizationId") ?? ctx.orgHint,
-      );
+      const orgId = await resolveOrg(args, ctx);
       const status = optString(args, "status");
       const db = getDb();
       const today = todayStr();
       const where = status
-        ? and(
-            eq(subscriptions.organizationId, orgId),
-            eq(subscriptions.status, status),
-          )
+        ? and(eq(subscriptions.organizationId, orgId), eq(subscriptions.status, status))
         : eq(subscriptions.organizationId, orgId);
       const rows = await db
         .select({
@@ -372,22 +268,19 @@ export const tools: Record<string, ToolDef> = {
           enum: ["open", "paid", "void"],
           description: "Optional status filter; defaults to all.",
         },
-        customerPartyId: {
-          type: "number",
-          description: "Optional customer (party) id filter.",
-        },
+        customerPartyId: { type: "number", description: "Optional customer (party) id filter." },
         ...ORG_ARG,
       },
       additionalProperties: false,
     },
     execute: async (args, ctx) => {
-      const orgId = await resolveOrgId(
-        ctx.userId,
-        optString(args, "organizationId") ?? ctx.orgHint,
-      );
+      const orgId = await resolveOrg(args, ctx);
       const status = optString(args, "status");
       const customerPartyId = optNumber(args, "customerPartyId");
       const db = getDb();
+      if (customerPartyId !== undefined) {
+        await assertInOrg(db, parties, customerPartyId, orgId, "Customer");
+      }
       const filters = [eq(receivables.organizationId, orgId)];
       if (status) filters.push(eq(receivables.status, status));
       if (customerPartyId !== undefined) {
@@ -427,10 +320,7 @@ export const tools: Record<string, ToolDef> = {
       additionalProperties: false,
     },
     execute: async (args, ctx) => {
-      const orgId = await resolveOrgId(
-        ctx.userId,
-        optString(args, "organizationId") ?? ctx.orgHint,
-      );
+      const orgId = await resolveOrg(args, ctx);
       const status = optString(args, "status");
       const db = getDb();
       const where = status
@@ -455,8 +345,7 @@ export const tools: Record<string, ToolDef> = {
   },
 
   list_projects: {
-    description:
-      "Client projects with their owning customer and status (active/archived).",
+    description: "Client projects with their owning customer and status (active/archived).",
     inputSchema: {
       type: "object",
       properties: {
@@ -470,10 +359,7 @@ export const tools: Record<string, ToolDef> = {
       additionalProperties: false,
     },
     execute: async (args, ctx) => {
-      const orgId = await resolveOrgId(
-        ctx.userId,
-        optString(args, "organizationId") ?? ctx.orgHint,
-      );
+      const orgId = await resolveOrg(args, ctx);
       const status = optString(args, "status");
       const db = getDb();
       const where = status
@@ -496,17 +382,14 @@ export const tools: Record<string, ToolDef> = {
 
   list_customers: {
     description:
-      "Customer parties (the people/companies you bill). Use the returned id as customerPartyId when creating a receivable.",
+      "Customer parties (the people/companies you bill). Use the returned id as customerPartyId. (list_parties is the more general version.)",
     inputSchema: {
       type: "object",
       properties: { ...ORG_ARG },
       additionalProperties: false,
     },
     execute: async (args, ctx) => {
-      const orgId = await resolveOrgId(
-        ctx.userId,
-        optString(args, "organizationId") ?? ctx.orgHint,
-      );
+      const orgId = await resolveOrg(args, ctx);
       const db = getDb();
       return db
         .select({
@@ -528,19 +411,14 @@ export const tools: Record<string, ToolDef> = {
     },
   },
 
-  // ---- safe writes ----
-
   mark_receivable_paid: {
     description:
-      "Mark an open receivable as paid (sets status=paid and paid_at). Does NOT create a ledger transaction — record the income entry separately in the app.",
+      "Lightweight: flag an open receivable as paid (status=paid, paid_at) WITHOUT a ledger entry. Prefer collect_receivable, which also records the income transaction.",
     inputSchema: {
       type: "object",
       properties: {
         receivableId: { type: "number", description: "The receivable id." },
-        paidAt: {
-          type: "string",
-          description: "Payment date (YYYY-MM-DD). Defaults to today.",
-        },
+        paidAt: { type: "string", description: "Payment date (YYYY-MM-DD). Defaults to today." },
         ...ORG_ARG,
       },
       required: ["receivableId"],
@@ -549,10 +427,7 @@ export const tools: Record<string, ToolDef> = {
     execute: async (args, ctx) => {
       const id = requireNumber(args, "receivableId");
       const paidAt = optDate(args, "paidAt") ?? todayStr();
-      const orgId = await resolveOrgId(
-        ctx.userId,
-        optString(args, "organizationId") ?? ctx.orgHint,
-      );
+      const orgId = await resolveOrg(args, ctx);
       const db = getDb();
       const existing = await db
         .select()
@@ -579,29 +454,17 @@ export const tools: Record<string, ToolDef> = {
 
   create_receivable: {
     description:
-      "Create a new open receivable (something you intend to bill a customer for). Link it to a project/subscription/contract when relevant. Use list_customers to find customerPartyId.",
+      "Create a new open receivable (something you intend to bill a customer for). Link it to a project/subscription/contract when relevant. Use list_parties / list_customers to find customerPartyId.",
     inputSchema: {
       type: "object",
       properties: {
-        customerPartyId: {
-          type: "number",
-          description: "Customer (party) id. See list_customers.",
-        },
+        customerPartyId: { type: "number", description: "Customer (party) id. See list_customers." },
         amount: { type: "number", description: "Amount to bill (> 0)." },
-        currency: {
-          type: "string",
-          description: "3-letter currency code; defaults to TWD.",
-        },
-        dueDate: {
-          type: "string",
-          description: "When payment is due (YYYY-MM-DD). Recommended.",
-        },
+        currency: { type: "string", description: "3-letter currency code; defaults to TWD." },
+        dueDate: { type: "string", description: "When payment is due (YYYY-MM-DD). Recommended." },
         description: { type: "string", description: "What it's for." },
         projectId: { type: "number", description: "Optional project link." },
-        subscriptionId: {
-          type: "number",
-          description: "Optional subscription link.",
-        },
+        subscriptionId: { type: "number", description: "Optional subscription link." },
         contractId: { type: "number", description: "Optional contract link." },
         ...ORG_ARG,
       },
@@ -617,10 +480,7 @@ export const tools: Record<string, ToolDef> = {
       const projectId = optNumber(args, "projectId") ?? null;
       const subscriptionId = optNumber(args, "subscriptionId") ?? null;
       const contractId = optNumber(args, "contractId") ?? null;
-      const orgId = await resolveOrgId(
-        ctx.userId,
-        optString(args, "organizationId") ?? ctx.orgHint,
-      );
+      const orgId = await resolveOrg(args, ctx);
       const db = getDb();
 
       const customer = await db
@@ -629,10 +489,12 @@ export const tools: Record<string, ToolDef> = {
         .where(and(eq(parties.id, customerPartyId), eq(parties.organizationId, orgId)))
         .limit(1);
       if (!customer[0]) {
-        throw new Error(
-          `Customer party ${customerPartyId} not found in your organization.`,
-        );
+        throw new Error(`Customer party ${customerPartyId} not found in your organization.`);
       }
+      if (projectId !== null) await assertInOrg(db, projects, projectId, orgId, "Project");
+      if (subscriptionId !== null)
+        await assertInOrg(db, subscriptions, subscriptionId, orgId, "Subscription");
+      if (contractId !== null) await assertInOrg(db, contracts, contractId, orgId, "Contract");
 
       const inserted = await db
         .insert(receivables)
@@ -652,4 +514,12 @@ export const tools: Record<string, ToolDef> = {
       return inserted[0];
     },
   },
+};
+
+export const tools: Record<string, ToolDef> = {
+  ...billingTools,
+  ...accountingTools,
+  ...transactionTools,
+  ...clientTools,
+  ...hrTools,
 };

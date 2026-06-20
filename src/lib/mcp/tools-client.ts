@@ -1,0 +1,514 @@
+import { and, eq } from "drizzle-orm";
+import { getDb } from "@/db";
+import {
+  bankAccounts,
+  contracts,
+  parties,
+  projects,
+  receivables,
+  subscriptions,
+  transactions,
+} from "@/db/schema";
+import {
+  assertInOrg,
+  fkError,
+  normalizeCurrency,
+  optDecimal,
+  optNumber,
+  optString,
+  ORG_ARG,
+  requireAmount,
+  requireDate,
+  requireNumber,
+  requireString,
+  resolveOrg,
+  type ToolDef,
+} from "./shared";
+
+const PROJECT_STATUS = ["active", "archived"] as const;
+const SUB_STATUS = ["active", "paused", "ended"] as const;
+const CONTRACT_STATUS = ["draft", "active", "completed", "cancelled"] as const;
+
+function checkEnum(v: string | undefined, allowed: readonly string[], field: string) {
+  if (v !== undefined && !allowed.includes(v)) {
+    throw new Error(`"${field}" must be one of: ${allowed.join(", ")}.`);
+  }
+}
+
+export const clientTools: Record<string, ToolDef> = {
+  // ---- projects ----
+  create_project: {
+    description: "Create a client project. Per-project P&L is computed from tagged transactions.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        clientPartyId: { type: "number", description: "Owning customer; see list_parties." },
+        status: { type: "string", enum: [...PROJECT_STATUS], description: "Default active." },
+        description: { type: "string" },
+        ...ORG_ARG,
+      },
+      required: ["name"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      const db = getDb();
+      const clientPartyId = optNumber(args, "clientPartyId");
+      if (clientPartyId !== undefined) await assertInOrg(db, parties, clientPartyId, orgId, "Party");
+      checkEnum(optString(args, "status"), PROJECT_STATUS, "status");
+      const [row] = await db
+        .insert(projects)
+        .values({
+          organizationId: orgId,
+          name: requireString(args, "name"),
+          clientPartyId: clientPartyId ?? null,
+          status: optString(args, "status") ?? "active",
+          description: optString(args, "description") ?? null,
+        })
+        .returning();
+      return row;
+    },
+  },
+
+  update_project: {
+    description: "Update a project (only provided fields). Set status=archived to retire it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "number" },
+        name: { type: "string" },
+        clientPartyId: { type: "number" },
+        status: { type: "string", enum: [...PROJECT_STATUS] },
+        description: { type: "string" },
+        ...ORG_ARG,
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const id = requireNumber(args, "id");
+      const orgId = await resolveOrg(args, ctx);
+      const db = getDb();
+      const clientPartyId = optNumber(args, "clientPartyId");
+      if (clientPartyId !== undefined) await assertInOrg(db, parties, clientPartyId, orgId, "Party");
+      checkEnum(optString(args, "status"), PROJECT_STATUS, "status");
+      const patch: Record<string, unknown> = {};
+      if (optString(args, "name") !== undefined) patch.name = requireString(args, "name");
+      if (clientPartyId !== undefined) patch.clientPartyId = clientPartyId;
+      if (optString(args, "status") !== undefined) patch.status = optString(args, "status");
+      if (optString(args, "description") !== undefined)
+        patch.description = optString(args, "description");
+      if (Object.keys(patch).length === 0) throw new Error("Nothing to update.");
+      const [row] = await db
+        .update(projects)
+        .set(patch)
+        .where(and(eq(projects.organizationId, orgId), eq(projects.id, id)))
+        .returning();
+      if (!row) throw new Error(`Project ${id} not found in your organization.`);
+      return row;
+    },
+  },
+
+  delete_project: {
+    description: "Delete a project. Fails if used by transactions/contracts/subscriptions — archive instead.",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "number" }, ...ORG_ARG },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const id = requireNumber(args, "id");
+      const orgId = await resolveOrg(args, ctx);
+      const db = getDb();
+      await assertInOrg(db, projects, id, orgId, "Project");
+      try {
+        await db.delete(projects).where(and(eq(projects.organizationId, orgId), eq(projects.id, id)));
+        return { deleted: true, id };
+      } catch (e) {
+        throw fkError(e, "This project is referenced by other records — archive it instead (update_project status=archived).");
+      }
+    },
+  },
+
+  // ---- subscriptions (recurring billing) ----
+  create_subscription: {
+    description:
+      "Create a recurring subscription/retainer. intervalMonths controls how often it bills (1=monthly, 3=quarterly, 12=yearly).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        customerPartyId: { type: "number", description: "See list_parties (label=customer)." },
+        projectId: { type: "number" },
+        name: { type: "string" },
+        amount: { type: "number" },
+        currency: { type: "string", description: "3-letter; default TWD." },
+        intervalMonths: { type: "number", description: "Default 1." },
+        startDate: { type: "string", description: "YYYY-MM-DD." },
+        endDate: { type: "string", description: "YYYY-MM-DD; optional." },
+        status: { type: "string", enum: [...SUB_STATUS], description: "Default active." },
+        note: { type: "string" },
+        ...ORG_ARG,
+      },
+      required: ["customerPartyId", "name", "amount", "startDate"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      const db = getDb();
+      const customerPartyId = requireNumber(args, "customerPartyId");
+      await assertInOrg(db, parties, customerPartyId, orgId, "Customer");
+      const projectId = optNumber(args, "projectId");
+      if (projectId !== undefined) await assertInOrg(db, projects, projectId, orgId, "Project");
+      checkEnum(optString(args, "status"), SUB_STATUS, "status");
+      const [row] = await db
+        .insert(subscriptions)
+        .values({
+          organizationId: orgId,
+          customerPartyId,
+          projectId: projectId ?? null,
+          name: requireString(args, "name"),
+          amount: requireAmount(args, "amount"),
+          currency: normalizeCurrency(args, "currency"),
+          intervalMonths: optNumber(args, "intervalMonths") ?? 1,
+          startDate: requireDate(args, "startDate"),
+          endDate: optString(args, "endDate") ?? null,
+          status: optString(args, "status") ?? "active",
+          note: optString(args, "note") ?? null,
+        })
+        .returning();
+      return row;
+    },
+  },
+
+  update_subscription: {
+    description: "Update a subscription (only provided fields). Set status=paused/ended to stop billing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "number" },
+        customerPartyId: { type: "number" },
+        projectId: { type: "number" },
+        name: { type: "string" },
+        amount: { type: "number" },
+        currency: { type: "string" },
+        intervalMonths: { type: "number" },
+        startDate: { type: "string", description: "YYYY-MM-DD." },
+        endDate: { type: "string", description: "YYYY-MM-DD." },
+        status: { type: "string", enum: [...SUB_STATUS] },
+        note: { type: "string" },
+        ...ORG_ARG,
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const id = requireNumber(args, "id");
+      const orgId = await resolveOrg(args, ctx);
+      const db = getDb();
+      const customerPartyId = optNumber(args, "customerPartyId");
+      if (customerPartyId !== undefined) await assertInOrg(db, parties, customerPartyId, orgId, "Customer");
+      const projectId = optNumber(args, "projectId");
+      if (projectId !== undefined) await assertInOrg(db, projects, projectId, orgId, "Project");
+      checkEnum(optString(args, "status"), SUB_STATUS, "status");
+      const patch: Record<string, unknown> = {};
+      if (customerPartyId !== undefined) patch.customerPartyId = customerPartyId;
+      if (projectId !== undefined) patch.projectId = projectId;
+      if (optString(args, "name") !== undefined) patch.name = requireString(args, "name");
+      if (optNumber(args, "amount") !== undefined) patch.amount = requireAmount(args, "amount");
+      if (optString(args, "currency") !== undefined) patch.currency = normalizeCurrency(args, "currency");
+      if (optNumber(args, "intervalMonths") !== undefined)
+        patch.intervalMonths = requireNumber(args, "intervalMonths");
+      if (optString(args, "startDate") !== undefined) patch.startDate = requireDate(args, "startDate");
+      if (optString(args, "endDate") !== undefined) patch.endDate = optString(args, "endDate");
+      if (optString(args, "status") !== undefined) patch.status = optString(args, "status");
+      if (optString(args, "note") !== undefined) patch.note = optString(args, "note");
+      if (Object.keys(patch).length === 0) throw new Error("Nothing to update.");
+      const [row] = await db
+        .update(subscriptions)
+        .set(patch)
+        .where(and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, id)))
+        .returning();
+      if (!row) throw new Error(`Subscription ${id} not found in your organization.`);
+      return row;
+    },
+  },
+
+  delete_subscription: {
+    description: "Delete a subscription. Fails if receivables reference it.",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "number" }, ...ORG_ARG },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const id = requireNumber(args, "id");
+      const orgId = await resolveOrg(args, ctx);
+      const db = getDb();
+      await assertInOrg(db, subscriptions, id, orgId, "Subscription");
+      try {
+        await db.delete(subscriptions).where(and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, id)));
+        return { deleted: true, id };
+      } catch (e) {
+        throw fkError(e, "This subscription is linked to receivables and can't be deleted.");
+      }
+    },
+  },
+
+  // ---- contracts ----
+  create_contract: {
+    description: "Create a client contract.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        customerPartyId: { type: "number" },
+        projectId: { type: "number" },
+        title: { type: "string" },
+        amount: { type: "number", description: "Total value; optional." },
+        currency: { type: "string", description: "3-letter; default TWD." },
+        startDate: { type: "string", description: "YYYY-MM-DD." },
+        endDate: { type: "string", description: "YYYY-MM-DD." },
+        status: { type: "string", enum: [...CONTRACT_STATUS], description: "Default active." },
+        note: { type: "string" },
+        ...ORG_ARG,
+      },
+      required: ["customerPartyId", "title"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      const db = getDb();
+      const customerPartyId = requireNumber(args, "customerPartyId");
+      await assertInOrg(db, parties, customerPartyId, orgId, "Customer");
+      const projectId = optNumber(args, "projectId");
+      if (projectId !== undefined) await assertInOrg(db, projects, projectId, orgId, "Project");
+      checkEnum(optString(args, "status"), CONTRACT_STATUS, "status");
+      const [row] = await db
+        .insert(contracts)
+        .values({
+          organizationId: orgId,
+          customerPartyId,
+          projectId: projectId ?? null,
+          title: requireString(args, "title"),
+          amount: optDecimal(args, "amount") ?? null,
+          currency: normalizeCurrency(args, "currency"),
+          startDate: optString(args, "startDate") ?? null,
+          endDate: optString(args, "endDate") ?? null,
+          status: optString(args, "status") ?? "active",
+          note: optString(args, "note") ?? null,
+        })
+        .returning();
+      return row;
+    },
+  },
+
+  update_contract: {
+    description: "Update a contract (only provided fields).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "number" },
+        customerPartyId: { type: "number" },
+        projectId: { type: "number" },
+        title: { type: "string" },
+        amount: { type: "number" },
+        currency: { type: "string" },
+        startDate: { type: "string", description: "YYYY-MM-DD." },
+        endDate: { type: "string", description: "YYYY-MM-DD." },
+        status: { type: "string", enum: [...CONTRACT_STATUS] },
+        note: { type: "string" },
+        ...ORG_ARG,
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const id = requireNumber(args, "id");
+      const orgId = await resolveOrg(args, ctx);
+      const db = getDb();
+      const customerPartyId = optNumber(args, "customerPartyId");
+      if (customerPartyId !== undefined) await assertInOrg(db, parties, customerPartyId, orgId, "Customer");
+      const projectId = optNumber(args, "projectId");
+      if (projectId !== undefined) await assertInOrg(db, projects, projectId, orgId, "Project");
+      checkEnum(optString(args, "status"), CONTRACT_STATUS, "status");
+      const patch: Record<string, unknown> = {};
+      if (customerPartyId !== undefined) patch.customerPartyId = customerPartyId;
+      if (projectId !== undefined) patch.projectId = projectId;
+      if (optString(args, "title") !== undefined) patch.title = requireString(args, "title");
+      if (optNumber(args, "amount") !== undefined) patch.amount = optDecimal(args, "amount");
+      if (optString(args, "currency") !== undefined) patch.currency = normalizeCurrency(args, "currency");
+      if (optString(args, "startDate") !== undefined) patch.startDate = optString(args, "startDate");
+      if (optString(args, "endDate") !== undefined) patch.endDate = optString(args, "endDate");
+      if (optString(args, "status") !== undefined) patch.status = optString(args, "status");
+      if (optString(args, "note") !== undefined) patch.note = optString(args, "note");
+      if (Object.keys(patch).length === 0) throw new Error("Nothing to update.");
+      const [row] = await db
+        .update(contracts)
+        .set(patch)
+        .where(and(eq(contracts.organizationId, orgId), eq(contracts.id, id)))
+        .returning();
+      if (!row) throw new Error(`Contract ${id} not found in your organization.`);
+      return row;
+    },
+  },
+
+  delete_contract: {
+    description: "Delete a contract. Fails if receivables reference it.",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "number" }, ...ORG_ARG },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const id = requireNumber(args, "id");
+      const orgId = await resolveOrg(args, ctx);
+      const db = getDb();
+      await assertInOrg(db, contracts, id, orgId, "Contract");
+      try {
+        await db.delete(contracts).where(and(eq(contracts.organizationId, orgId), eq(contracts.id, id)));
+        return { deleted: true, id };
+      } catch (e) {
+        throw fkError(e, "This contract is linked to receivables and can't be deleted.");
+      }
+    },
+  },
+
+  // ---- receivables (create_receivable / mark_receivable_paid live in tools.ts) ----
+  update_receivable: {
+    description:
+      "Update an open receivable's fields (only provided ones). Does not change paid status — use collect_receivable for that.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "number" },
+        customerPartyId: { type: "number" },
+        contractId: { type: "number" },
+        subscriptionId: { type: "number" },
+        projectId: { type: "number" },
+        description: { type: "string" },
+        amount: { type: "number" },
+        currency: { type: "string" },
+        dueDate: { type: "string", description: "YYYY-MM-DD." },
+        ...ORG_ARG,
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const id = requireNumber(args, "id");
+      const orgId = await resolveOrg(args, ctx);
+      const db = getDb();
+      await assertInOrg(db, receivables, id, orgId, "Receivable");
+      const customerPartyId = optNumber(args, "customerPartyId");
+      if (customerPartyId !== undefined) await assertInOrg(db, parties, customerPartyId, orgId, "Customer");
+      const contractId = optNumber(args, "contractId");
+      if (contractId !== undefined) await assertInOrg(db, contracts, contractId, orgId, "Contract");
+      const subscriptionId = optNumber(args, "subscriptionId");
+      if (subscriptionId !== undefined)
+        await assertInOrg(db, subscriptions, subscriptionId, orgId, "Subscription");
+      const projectId = optNumber(args, "projectId");
+      if (projectId !== undefined) await assertInOrg(db, projects, projectId, orgId, "Project");
+      const patch: Record<string, unknown> = {};
+      if (customerPartyId !== undefined) patch.customerPartyId = customerPartyId;
+      if (contractId !== undefined) patch.contractId = contractId;
+      if (subscriptionId !== undefined) patch.subscriptionId = subscriptionId;
+      if (projectId !== undefined) patch.projectId = projectId;
+      if (optString(args, "description") !== undefined) patch.description = optString(args, "description");
+      if (optNumber(args, "amount") !== undefined) patch.amount = requireAmount(args, "amount");
+      if (optString(args, "currency") !== undefined) patch.currency = normalizeCurrency(args, "currency");
+      if (optString(args, "dueDate") !== undefined) patch.dueDate = optString(args, "dueDate");
+      if (Object.keys(patch).length === 0) throw new Error("Nothing to update.");
+      const [row] = await db
+        .update(receivables)
+        .set(patch)
+        .where(and(eq(receivables.organizationId, orgId), eq(receivables.id, id)))
+        .returning();
+      return row;
+    },
+  },
+
+  delete_receivable: {
+    description: "Delete a receivable.",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "number" }, ...ORG_ARG },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const id = requireNumber(args, "id");
+      const orgId = await resolveOrg(args, ctx);
+      const db = getDb();
+      await assertInOrg(db, receivables, id, orgId, "Receivable");
+      await db.delete(receivables).where(and(eq(receivables.organizationId, orgId), eq(receivables.id, id)));
+      return { deleted: true, id };
+    },
+  },
+
+  collect_receivable: {
+    description:
+      "Properly collect a receivable: creates an income transaction into the chosen account AND marks the receivable paid. Prefer this over mark_receivable_paid (which only flags it without a ledger entry).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "number", description: "Receivable id." },
+        accountId: { type: "number", description: "Account receiving the payment; see list_bank_accounts." },
+        payDate: { type: "string", description: "YYYY-MM-DD." },
+        ...ORG_ARG,
+      },
+      required: ["id", "accountId", "payDate"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const id = requireNumber(args, "id");
+      const accountId = requireNumber(args, "accountId");
+      const payDate = requireDate(args, "payDate");
+      const orgId = await resolveOrg(args, ctx);
+      const db = getDb();
+      await assertInOrg(db, bankAccounts, accountId, orgId, "Account");
+      const [ar] = await db
+        .select({
+          customerPartyId: receivables.customerPartyId,
+          projectId: receivables.projectId,
+          amount: receivables.amount,
+          currency: receivables.currency,
+          status: receivables.status,
+          description: receivables.description,
+        })
+        .from(receivables)
+        .where(and(eq(receivables.organizationId, orgId), eq(receivables.id, id)))
+        .limit(1);
+      if (!ar) throw new Error(`Receivable ${id} not found in your organization.`);
+      if (ar.status === "paid") throw new Error("This receivable is already collected.");
+
+      const currency = ar.currency ?? "TWD";
+      const [txn] = await db
+        .insert(transactions)
+        .values({
+          organizationId: orgId,
+          type: "income",
+          txnDate: payDate,
+          description: ar.description ?? "應收帳款收款",
+          partyId: ar.customerPartyId,
+          projectId: ar.projectId,
+          amount: ar.amount,
+          currency,
+          amountTwd: currency === "TWD" ? ar.amount : null,
+          toAccountId: accountId,
+          book: "both",
+          billedToCompanyTaxId: false,
+        })
+        .returning({ id: transactions.id });
+
+      const [row] = await db
+        .update(receivables)
+        .set({ status: "paid", paidTransactionId: txn.id, paidAt: payDate })
+        .where(and(eq(receivables.organizationId, orgId), eq(receivables.id, id)))
+        .returning();
+      return { receivable: row, transactionId: txn.id };
+    },
+  },
+};

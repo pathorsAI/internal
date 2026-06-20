@@ -1,13 +1,19 @@
 # MCP server
 
 This app exposes a [Model Context Protocol](https://modelcontextprotocol.io) server
-so an MCP client (Claude, etc.) can query and update your client finance data —
-projects, recurring subscriptions, contracts, and receivables — in natural language.
+so an MCP client (Claude, etc.) can run essentially the whole app in natural
+language — the ledger (內外帳), parties, categories, bank accounts, invoices,
+projects, recurring subscriptions, contracts, receivables, employees, payroll
+(read), and reconciliations.
 
-It is built for one job in particular: **never forget when to bill a client for
-recurring work.** `list_upcoming_billing` projects the next charge of every active
-subscription from `interval_months` + `start_date`, and surfaces overdue + soon-due
-receivables.
+A headline use: **never forget when to bill a client for recurring work.**
+`list_upcoming_billing` projects the next charge of every active subscription from
+`interval_months` + `start_date`, and surfaces overdue + soon-due receivables.
+
+Design: read tools reuse the app's own query layer; writes are org-scoped and
+validate every referenced id against your org. Fixed value sets are exposed as
+enums in each tool's input schema; ids (categories, accounts, parties, …) are
+discovered via `list_*` tools — so the model looks them up rather than guessing.
 
 ## Endpoints
 
@@ -47,19 +53,39 @@ With a single-org account it just uses that org automatically.
 
 ## Tools
 
-Read:
-- `list_organizations` — which orgs you can access; call first to pick one
-- `list_upcoming_billing` — overdue + soon-due receivables, plus projected next
-  charges of active subscriptions (the "who do I bill, and when" tool)
-- `list_overdue_receivables`
-- `list_subscriptions` (with computed `nextChargeDate`)
-- `list_receivables`, `list_contracts`, `list_projects`, `list_customers`
+**Discovery** — `list_organizations` (call first), `get_financial_overview`.
 
-Write (safe):
-- `mark_receivable_paid` — sets status=paid + paid_at (does **not** post a ledger
-  transaction; record the income entry in the app)
-- `create_receivable` — create an open receivable, optionally linked to a
-  project / subscription / contract
+**Billing / receivables** — `list_upcoming_billing` (who to bill & when),
+`list_overdue_receivables`, `list_receivables`, `create_receivable`,
+`update_receivable`, `delete_receivable`, `collect_receivable` (records the income
+transaction **and** marks paid — preferred), `mark_receivable_paid` (lightweight
+flag, no ledger entry).
+
+**Ledger (內外帳)** — `list_transactions`, `get_transaction`,
+`list_outstanding_advances`, `create_transaction` (expense/income/advance/transfer),
+`update_transaction` (date/amount/category/project/…), `delete_transaction`,
+`create_reimbursement` (settle an advance).
+
+**Accounting master data** — parties: `list_parties`/`get_party`/`create_party`/
+`update_party`/`delete_party`; categories: `list_categories`/`create_category`/
+`update_category`/`delete_category`; bank accounts: `list_bank_accounts`/
+`get_bank_account`/`create_bank_account`/`update_bank_account`/`delete_bank_account`;
+invoices: `list_invoices`/`get_invoice`/`create_invoice`/`delete_invoice`.
+
+**Client ops** — projects/subscriptions/contracts each have `list_*` +
+`create_*`/`update_*`/`delete_*` (`list_customers` is a convenience filter of
+`list_parties`).
+
+**HR / payroll / recon** — employees: `list_employees`/`get_employee`/
+`create_employee`/`update_employee`/`delete_employee`; payroll (read):
+`list_payroll_runs`, `list_payslips`; reconciliations: `list_reconciliations` +
+`create`/`update`/`delete`; accountant notices: `list_accountant_notices`,
+`mark_accountant_notified`, `unmark_accountant_notified`.
+
+**Not exposed (do in the app):** uploading invoice/receipt **files** (R2),
+running **payroll** (payslip generation), and multi-currency FX entry — these need
+file handling or multi-step UI. Deletes that would break references return a clear
+error suggesting deactivation/archiving instead.
 
 ## Setup
 

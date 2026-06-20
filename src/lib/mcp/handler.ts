@@ -12,11 +12,12 @@ const PROTOCOL_VERSION = "2025-06-18";
 // before doing org-scoped work — important because the signed-in account may
 // belong to multiple organizations and we never guess.
 const INSTRUCTIONS = [
-  "This server exposes one organization's accounting data (projects, subscriptions, contracts, receivables, customers).",
+  "This server is the operational surface for one organization's bookkeeping: ledger transactions (內外帳), parties, categories, bank accounts, invoices, projects, subscriptions, contracts, receivables, employees, payroll (read-only), and reconciliations.",
   "The signed-in account may belong to multiple organizations.",
   "At the START of each session, before calling any org-scoped tool, call list_organizations and ask the user which organization to work in.",
   "Then pass that value as organizationId on every subsequent tool call. Never guess the organization.",
   "If a tool reports that the organization is ambiguous, stop and ask the user, then retry with organizationId.",
+  "Before creating or editing a record that references another entity (categoryId, accountId, partyName/Id, projectId, contractId, subscriptionId), look the id up first with the relevant list_* tool (list_categories, list_bank_accounts, list_parties, list_projects, …) — never invent ids. Valid values for fixed fields are listed as enums in each tool's input schema.",
 ].join(" ");
 
 type JsonRpcId = string | number | null;
