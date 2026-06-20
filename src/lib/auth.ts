@@ -1,6 +1,6 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { organization } from "better-auth/plugins";
+import { mcp, organization } from "better-auth/plugins";
 import { nextCookies } from "better-auth/next-js";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -47,5 +47,12 @@ export const auth = betterAuth({
       },
     },
   },
-  plugins: [organization(), nextCookies()],
+  plugins: [
+    organization(),
+    // OAuth 2.0 / OIDC provider for MCP clients. Adds /api/auth/mcp/* endpoints
+    // (authorize, token, register, get-session) + OAuth discovery. Unauthenticated
+    // authorize requests are sent to loginPage, which redirects back after sign-in.
+    mcp({ loginPage: "/login" }),
+    nextCookies(),
+  ],
 });

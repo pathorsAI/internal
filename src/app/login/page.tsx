@@ -36,9 +36,19 @@ function GoogleIcon() {
   );
 }
 
+// When better-auth's MCP plugin sends an unauthenticated user here, it appends
+// the original OAuth query (client_id, redirect_uri, code_challenge, …). After
+// sign-in we must return to the authorize endpoint so the flow can issue a code.
+function mcpAuthorizeCallback(params: URLSearchParams): string | null {
+  if (!params.get("client_id") || params.get("response_type") !== "code") {
+    return null;
+  }
+  return `/api/auth/mcp/authorize?${params.toString()}`;
+}
+
 function LoginButton() {
   const params = useSearchParams();
-  const redirectTo = params.get("redirect") || "/";
+  const redirectTo = mcpAuthorizeCallback(params) || params.get("redirect") || "/";
   const [pending, setPending] = useState(false);
 
   async function onGoogle() {
