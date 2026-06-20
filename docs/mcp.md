@@ -30,7 +30,12 @@ returns you to `/api/auth/mcp/authorize` to complete the grant.
 
 All data is scoped to your organization. The token only carries your user id, so
 the server resolves your org from membership (matching the dashboard's behaviour).
-If you belong to multiple orgs, every tool accepts an optional `organizationId`.
+
+If you belong to **multiple orgs**, pin one per connection with a query param:
+`<BASE_URL>/api/mcp?org=<slug-or-id>` (validated against your memberships). Run
+one connection per org. With no `?org`, it defaults to your earliest-joined org;
+a tool call can also pass `organizationId` to override per call. The `/mcp`
+settings page lists ready-to-copy per-org URLs.
 
 ## Tools
 

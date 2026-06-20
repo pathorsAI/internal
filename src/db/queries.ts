@@ -17,7 +17,7 @@ import {
   contracts,
   receivables,
 } from "./schema";
-import { oauthApplication, oauthAccessToken, member } from "./auth-schema";
+import { oauthApplication, oauthAccessToken, member, organization } from "./auth-schema";
 
 export type Book = "internal" | "external" | "both";
 
@@ -722,4 +722,20 @@ export async function listMcpClients(): Promise<McpClient[]> {
     )
     .orderBy(desc(oauthApplication.createdAt));
   return rows.map((r) => ({ ...r, activeTokens: Number(r.activeTokens) }));
+}
+
+export type MyOrg = { id: string; name: string; slug: string | null };
+
+/** Orgs the given user belongs to — for building per-org MCP connection URLs. */
+export async function listMyOrgs(userId: string): Promise<MyOrg[]> {
+  return getDb()
+    .select({
+      id: organization.id,
+      name: organization.name,
+      slug: organization.slug,
+    })
+    .from(member)
+    .innerJoin(organization, eq(organization.id, member.organizationId))
+    .where(eq(member.userId, userId))
+    .orderBy(organization.name);
 }

@@ -17,7 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { listMcpClients, getMemberRole } from "@/db/queries";
+import { listMcpClients, getMemberRole, listMyOrgs } from "@/db/queries";
 import { formatDate } from "@/lib/format";
 import { requireOrg } from "@/lib/session";
 import { RevokeClientButton } from "./revoke-client-button";
@@ -33,9 +33,10 @@ const typeLabel: Record<string, string> = {
 
 export default async function McpPage() {
   const { orgId, userId } = await requireOrg();
-  const [clients, role, h] = await Promise.all([
+  const [clients, role, myOrgs, h] = await Promise.all([
     listMcpClients(),
     getMemberRole(orgId, userId),
+    listMyOrgs(userId),
     headers(),
   ]);
   const canManage = role === "owner" || role === "admin";
@@ -75,6 +76,28 @@ export default async function McpPage() {
                 <CopyButton value={mcpUrl} />
               </div>
             </div>
+            {myOrgs.length > 1 && (
+              <div className="space-y-1.5">
+                <div className="text-sm font-medium">依組織連線</div>
+                <p className="text-xs text-muted-foreground">
+                  你的帳號屬於多個組織。用對應的網址新增連線，那個連線就會固定看該組織的資料。
+                </p>
+                <ul className="space-y-2">
+                  {myOrgs.map((o) => {
+                    const url = `${mcpUrl}?org=${o.slug ?? o.id}`;
+                    return (
+                      <li key={o.id} className="flex items-center gap-2">
+                        <span className="w-32 shrink-0 truncate text-sm">{o.name}</span>
+                        <code className="flex-1 truncate rounded-md border bg-muted px-3 py-2 text-xs">
+                          {url}
+                        </code>
+                        <CopyButton value={url} label="" />
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
             <p className="text-xs text-muted-foreground">
               OAuth 探索端點：<code className="text-xs">{discoveryUrl}</code>
             </p>

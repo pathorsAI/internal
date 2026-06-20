@@ -101,7 +101,10 @@ export async function handleMcpRequest(
     return Response.json(fail(null, -32700, "Parse error"), { status: 400 });
   }
 
-  const ctx: ToolContext = { userId: session.userId };
+  // Optional per-connection org pin: /api/mcp?org=<id-or-slug>. Lets a
+  // multi-org user run one connection per org. Validated in resolveOrgId.
+  const orgHint = new URL(req.url).searchParams.get("org") ?? undefined;
+  const ctx: ToolContext = { userId: session.userId, orgHint };
 
   if (Array.isArray(body)) {
     const responses = (

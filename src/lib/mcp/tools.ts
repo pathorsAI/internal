@@ -18,7 +18,7 @@ import {
 } from "@/db/schema";
 import { resolveOrgId } from "./org";
 
-export type ToolContext = { userId: string };
+export type ToolContext = { userId: string; orgHint?: string };
 
 export type ToolDef = {
   description: string;
@@ -124,7 +124,10 @@ export const tools: Record<string, ToolDef> = {
     },
     execute: async (args, ctx) => {
       const days = optNumber(args, "days") ?? 60;
-      const orgId = await resolveOrgId(ctx.userId, optString(args, "organizationId"));
+      const orgId = await resolveOrgId(
+        ctx.userId,
+        optString(args, "organizationId") ?? ctx.orgHint,
+      );
       const db = getDb();
       const today = todayStr();
       const horizon = format(addDays(parseISO(today), days), "yyyy-MM-dd");
@@ -242,7 +245,10 @@ export const tools: Record<string, ToolDef> = {
       additionalProperties: false,
     },
     execute: async (args, ctx) => {
-      const orgId = await resolveOrgId(ctx.userId, optString(args, "organizationId"));
+      const orgId = await resolveOrgId(
+        ctx.userId,
+        optString(args, "organizationId") ?? ctx.orgHint,
+      );
       const db = getDb();
       const today = todayStr();
       const rows = await db
@@ -290,7 +296,10 @@ export const tools: Record<string, ToolDef> = {
       additionalProperties: false,
     },
     execute: async (args, ctx) => {
-      const orgId = await resolveOrgId(ctx.userId, optString(args, "organizationId"));
+      const orgId = await resolveOrgId(
+        ctx.userId,
+        optString(args, "organizationId") ?? ctx.orgHint,
+      );
       const status = optString(args, "status");
       const db = getDb();
       const today = todayStr();
@@ -346,7 +355,10 @@ export const tools: Record<string, ToolDef> = {
       additionalProperties: false,
     },
     execute: async (args, ctx) => {
-      const orgId = await resolveOrgId(ctx.userId, optString(args, "organizationId"));
+      const orgId = await resolveOrgId(
+        ctx.userId,
+        optString(args, "organizationId") ?? ctx.orgHint,
+      );
       const status = optString(args, "status");
       const customerPartyId = optNumber(args, "customerPartyId");
       const db = getDb();
@@ -389,7 +401,10 @@ export const tools: Record<string, ToolDef> = {
       additionalProperties: false,
     },
     execute: async (args, ctx) => {
-      const orgId = await resolveOrgId(ctx.userId, optString(args, "organizationId"));
+      const orgId = await resolveOrgId(
+        ctx.userId,
+        optString(args, "organizationId") ?? ctx.orgHint,
+      );
       const status = optString(args, "status");
       const db = getDb();
       const where = status
@@ -429,7 +444,10 @@ export const tools: Record<string, ToolDef> = {
       additionalProperties: false,
     },
     execute: async (args, ctx) => {
-      const orgId = await resolveOrgId(ctx.userId, optString(args, "organizationId"));
+      const orgId = await resolveOrgId(
+        ctx.userId,
+        optString(args, "organizationId") ?? ctx.orgHint,
+      );
       const status = optString(args, "status");
       const db = getDb();
       const where = status
@@ -459,7 +477,10 @@ export const tools: Record<string, ToolDef> = {
       additionalProperties: false,
     },
     execute: async (args, ctx) => {
-      const orgId = await resolveOrgId(ctx.userId, optString(args, "organizationId"));
+      const orgId = await resolveOrgId(
+        ctx.userId,
+        optString(args, "organizationId") ?? ctx.orgHint,
+      );
       const db = getDb();
       return db
         .select({
@@ -502,7 +523,10 @@ export const tools: Record<string, ToolDef> = {
     execute: async (args, ctx) => {
       const id = requireNumber(args, "receivableId");
       const paidAt = optDate(args, "paidAt") ?? todayStr();
-      const orgId = await resolveOrgId(ctx.userId, optString(args, "organizationId"));
+      const orgId = await resolveOrgId(
+        ctx.userId,
+        optString(args, "organizationId") ?? ctx.orgHint,
+      );
       const db = getDb();
       const existing = await db
         .select()
@@ -567,7 +591,10 @@ export const tools: Record<string, ToolDef> = {
       const projectId = optNumber(args, "projectId") ?? null;
       const subscriptionId = optNumber(args, "subscriptionId") ?? null;
       const contractId = optNumber(args, "contractId") ?? null;
-      const orgId = await resolveOrgId(ctx.userId, optString(args, "organizationId"));
+      const orgId = await resolveOrgId(
+        ctx.userId,
+        optString(args, "organizationId") ?? ctx.orgHint,
+      );
       const db = getDb();
 
       const customer = await db
