@@ -20,6 +20,7 @@ import {
   UserCog,
   Settings,
   Plug,
+  Link2,
 } from "lucide-react";
 
 import {
@@ -53,6 +54,7 @@ const clients = [
   { title: "專案", href: "/projects", icon: FolderKanban },
   { title: "訂閱 / 月費", href: "/subscriptions", icon: Repeat },
   { title: "合約", href: "/contracts", icon: FileSignature },
+  { title: "連結", href: "/links", icon: Link2 },
   { title: "應收帳款", href: "/receivables", icon: HandCoins },
   { title: "報表", href: "/reports", icon: BarChart3 },
 ];

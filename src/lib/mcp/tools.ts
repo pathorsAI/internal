@@ -22,6 +22,7 @@ import { accountingTools } from "./tools-accounting";
 import { transactionTools } from "./tools-transactions";
 import { clientTools } from "./tools-client";
 import { hrTools } from "./tools-hr";
+import { linkTools } from "./tools-links";
 
 export type { ToolContext, ToolDef };
 
@@ -522,4 +523,5 @@ export const tools: Record<string, ToolDef> = {
   ...transactionTools,
   ...clientTools,
   ...hrTools,
+  ...linkTools,
 };

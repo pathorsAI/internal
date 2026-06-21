@@ -435,3 +435,23 @@ export const receivables = pgTable("receivables", {
 		}),
 	check("chk_receivable_status", sql`status = ANY (ARRAY['open'::text, 'paid'::text, 'void'::text])`),
 ]);
+
+export const links = pgTable("links", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "links_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id"),
+	title: text().notNull(),
+	url: text().notNull(),
+	note: text(),
+	partyId: bigint("party_id", { mode: "number" }),
+	projectId: bigint("project_id", { mode: "number" }),
+	contractId: bigint("contract_id", { mode: "number" }),
+	subscriptionId: bigint("subscription_id", { mode: "number" }),
+	receivableId: bigint("receivable_id", { mode: "number" }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	foreignKey({ columns: [table.partyId], foreignColumns: [parties.id], name: "links_party_id_fkey" }).onDelete("set null"),
+	foreignKey({ columns: [table.projectId], foreignColumns: [projects.id], name: "links_project_id_fkey" }).onDelete("set null"),
+	foreignKey({ columns: [table.contractId], foreignColumns: [contracts.id], name: "links_contract_id_fkey" }).onDelete("set null"),
+	foreignKey({ columns: [table.subscriptionId], foreignColumns: [subscriptions.id], name: "links_subscription_id_fkey" }).onDelete("set null"),
+	foreignKey({ columns: [table.receivableId], foreignColumns: [receivables.id], name: "links_receivable_id_fkey" }).onDelete("set null"),
+]);

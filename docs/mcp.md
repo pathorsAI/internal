@@ -76,6 +76,10 @@ invoices: `list_invoices`/`get_invoice`/`create_invoice`/`delete_invoice`.
 `create_*`/`update_*`/`delete_*` (`list_customers` is a convenience filter of
 `list_parties`).
 
+**Links** — `list_links`, `create_link`, `update_link`, `delete_link`: paste a URL
+(e.g. a Google Drive contract) and attach it to a party / project / contract /
+subscription / receivable.
+
 **HR / payroll / recon** — employees: `list_employees`/`get_employee`/
 `create_employee`/`update_employee`/`delete_employee`; payroll:
 `list_payroll_runs`, `list_payslips`, `list_salary_status` (who's paid for a month

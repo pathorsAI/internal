@@ -16,6 +16,7 @@ import {
   subscriptions,
   contracts,
   receivables,
+  links,
 } from "./schema";
 import { oauthApplication, oauthAccessToken, member, organization } from "./auth-schema";
 
@@ -738,4 +739,48 @@ export async function listMyOrgs(userId: string): Promise<MyOrg[]> {
     .innerJoin(organization, eq(organization.id, member.organizationId))
     .where(eq(member.userId, userId))
     .orderBy(organization.name);
+}
+
+// ---- 連結 (external document links, e.g. Google Drive) ----
+
+export async function listLinks(
+  orgId: string,
+  filters?: {
+    partyId?: number;
+    projectId?: number;
+    contractId?: number;
+    subscriptionId?: number;
+    receivableId?: number;
+  },
+) {
+  const conds = [eq(links.organizationId, orgId)];
+  if (filters?.partyId !== undefined) conds.push(eq(links.partyId, filters.partyId));
+  if (filters?.projectId !== undefined) conds.push(eq(links.projectId, filters.projectId));
+  if (filters?.contractId !== undefined) conds.push(eq(links.contractId, filters.contractId));
+  if (filters?.subscriptionId !== undefined)
+    conds.push(eq(links.subscriptionId, filters.subscriptionId));
+  if (filters?.receivableId !== undefined)
+    conds.push(eq(links.receivableId, filters.receivableId));
+  return getDb()
+    .select({
+      id: links.id,
+      title: links.title,
+      url: links.url,
+      note: links.note,
+      partyId: links.partyId,
+      projectId: links.projectId,
+      contractId: links.contractId,
+      subscriptionId: links.subscriptionId,
+      receivableId: links.receivableId,
+      createdAt: links.createdAt,
+      partyName: parties.name,
+      projectName: projects.name,
+      contractTitle: contracts.title,
+    })
+    .from(links)
+    .leftJoin(parties, eq(links.partyId, parties.id))
+    .leftJoin(projects, eq(links.projectId, projects.id))
+    .leftJoin(contracts, eq(links.contractId, contracts.id))
+    .where(and(...conds))
+    .orderBy(desc(links.id));
 }

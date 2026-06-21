@@ -19,6 +19,7 @@ import {
   subscriptions,
   contracts,
   receivables,
+  links,
 } from "./schema";
 import { oauthApplication, member } from "./auth-schema";
 import { uploadDocument, deleteDocument } from "@/lib/storage";
@@ -1572,5 +1573,79 @@ export async function revokeMcpClient(clientId: string): Promise<ActionState> {
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "撤銷失敗" };
+  }
+}
+
+// ---- 連結 (external document links, e.g. Google Drive) ----
+export async function createLink(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const title = str(formData.get("title"));
+  const url = str(formData.get("url"));
+  if (!title) return { ok: false, error: "請輸入標題" };
+  if (!url) return { ok: false, error: "請貼上連結" };
+  try {
+    const { orgId } = await requireOrg();
+    await getDb().insert(links).values({
+      organizationId: orgId,
+      title,
+      url,
+      note: str(formData.get("note")),
+      partyId: num(formData.get("partyId")),
+      projectId: num(formData.get("projectId")),
+      contractId: num(formData.get("contractId")),
+      subscriptionId: num(formData.get("subscriptionId")),
+      receivableId: num(formData.get("receivableId")),
+    });
+    revalidatePath("/links");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "新增失敗" };
+  }
+}
+
+export async function updateLink(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const id = num(formData.get("id"));
+  const title = str(formData.get("title"));
+  const url = str(formData.get("url"));
+  if (!id) return { ok: false, error: "缺少 ID" };
+  if (!title) return { ok: false, error: "請輸入標題" };
+  if (!url) return { ok: false, error: "請貼上連結" };
+  try {
+    const { orgId } = await requireOrg();
+    await getDb()
+      .update(links)
+      .set({
+        title,
+        url,
+        note: str(formData.get("note")),
+        partyId: num(formData.get("partyId")),
+        projectId: num(formData.get("projectId")),
+        contractId: num(formData.get("contractId")),
+        subscriptionId: num(formData.get("subscriptionId")),
+        receivableId: num(formData.get("receivableId")),
+      })
+      .where(and(eq(links.organizationId, orgId), eq(links.id, id)));
+    revalidatePath("/links");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
+  }
+}
+
+export async function deleteLink(id: number): Promise<ActionState> {
+  try {
+    const { orgId } = await requireOrg();
+    await getDb()
+      .delete(links)
+      .where(and(eq(links.organizationId, orgId), eq(links.id, id)));
+    revalidatePath("/links");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
   }
 }
