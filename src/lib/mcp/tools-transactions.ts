@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   bankAccounts,
@@ -70,6 +70,58 @@ async function getOrCreateEmployee(db: Db, orgId: string, name: string): Promise
     .values({ organizationId: orgId, name })
     .returning({ id: employees.id });
   return created.id;
+}
+
+// Resolve many party names to ids in two round trips (one select + one insert),
+// creating any that don't exist yet. Used by bulk_create_transactions to avoid
+// a getOrCreateParty round trip per row. `labelByName` carries the label to use
+// when a name has to be created (income → customer, expense/advance → vendor).
+async function resolvePartyNames(
+  db: Db,
+  orgId: string,
+  labelByName: Map<string, string>,
+): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  const names = [...labelByName.keys()];
+  if (names.length === 0) return map;
+  const existing = await db
+    .select({ id: parties.id, name: parties.name })
+    .from(parties)
+    .where(and(eq(parties.organizationId, orgId), inArray(parties.name, names)));
+  for (const r of existing) map.set(r.name, r.id);
+  const missing = names.filter((n) => !map.has(n));
+  if (missing.length) {
+    const created = await db
+      .insert(parties)
+      .values(missing.map((name) => ({ organizationId: orgId, name, label: labelByName.get(name)! })))
+      .returning({ id: parties.id, name: parties.name });
+    for (const r of created) map.set(r.name, r.id);
+  }
+  return map;
+}
+
+async function resolveEmployeeNames(
+  db: Db,
+  orgId: string,
+  names: Set<string>,
+): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  const list = [...names];
+  if (list.length === 0) return map;
+  const existing = await db
+    .select({ id: employees.id, name: employees.name })
+    .from(employees)
+    .where(and(eq(employees.organizationId, orgId), inArray(employees.name, list)));
+  for (const r of existing) map.set(r.name, r.id);
+  const missing = list.filter((n) => !map.has(n));
+  if (missing.length) {
+    const created = await db
+      .insert(employees)
+      .values(missing.map((name) => ({ organizationId: orgId, name })))
+      .returning({ id: employees.id, name: employees.name });
+    for (const r of created) map.set(r.name, r.id);
+  }
+  return map;
 }
 
 type TxnFields = {
@@ -268,6 +320,179 @@ export const transactionTools: Record<string, ToolDef> = {
         })
         .returning();
       return row;
+    },
+  },
+
+  bulk_create_transactions: {
+    description:
+      "Insert MANY ledger transactions in ONE call — use this instead of calling create_transaction in a loop. Pass `items`: an array where each element mirrors create_transaction's arguments (type, txnDate, amount, currency?, description?, reported?, accountId?, partyName?, categoryId?, settleEmployeeName?, fromAccountId?, toAccountId?, projectId?). Per-type requirements match create_transaction (expense/income: accountId+partyName+categoryId; advance: partyName+categoryId+settleEmployeeName; transfer: fromAccountId+toAccountId). Account/category/project ids are validated against your org; party/employee names are created on demand and deduped within the batch. All rows are written in a single INSERT. Returns the created count and ids. Max 1000 items per call.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          description: "Transactions to create; each item mirrors create_transaction's arguments.",
+          items: {
+            type: "object",
+            properties: {
+              type: { type: "string", enum: [...TXN_TYPES] },
+              txnDate: { type: "string", description: "YYYY-MM-DD." },
+              amount: { type: "number" },
+              currency: { type: "string", description: "3-letter; default TWD." },
+              description: { type: "string" },
+              reported: { type: "boolean", description: "Reported to tax (book=both). Default false." },
+              accountId: { type: "number", description: "expense=paying acct, income=receiving acct." },
+              partyName: { type: "string", description: "Vendor/customer; created if new." },
+              categoryId: { type: "number" },
+              settleEmployeeName: { type: "string", description: "For advance; employee created if new." },
+              fromAccountId: { type: "number", description: "For transfer." },
+              toAccountId: { type: "number", description: "For transfer." },
+              projectId: { type: "number", description: "Optional project tag." },
+            },
+            required: ["type", "txnDate", "amount"],
+            additionalProperties: false,
+          },
+        },
+        ...ORG_ARG,
+      },
+      required: ["items"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const items = args.items;
+      if (!Array.isArray(items) || items.length === 0) {
+        throw new Error('"items" must be a non-empty array.');
+      }
+      if (items.length > 1000) {
+        throw new Error(`"items" has ${items.length} rows; max 1000 per call.`);
+      }
+      const orgId = await resolveOrg(args, ctx);
+      const db = getDb();
+
+      // Load the org's valid FK ids once, so each row is validated in memory
+      // instead of issuing an assertInOrg round trip per row.
+      const [acctRows, catRows, projRows] = await Promise.all([
+        db.select({ id: bankAccounts.id }).from(bankAccounts).where(eq(bankAccounts.organizationId, orgId)),
+        db.select({ id: categories.id }).from(categories).where(eq(categories.organizationId, orgId)),
+        db.select({ id: projects.id }).from(projects).where(eq(projects.organizationId, orgId)),
+      ]);
+      const acctSet = new Set(acctRows.map((r) => r.id));
+      const catSet = new Set(catRows.map((r) => r.id));
+      const projSet = new Set(projRows.map((r) => r.id));
+
+      type Norm = {
+        type: string;
+        txnDate: string;
+        amount: string;
+        currency: string;
+        description: string | null;
+        reported: boolean;
+        projectId: number | null;
+        categoryId: number | null;
+        fromAccountId: number | null;
+        toAccountId: number | null;
+        partyName: string | null;
+        settleEmployeeName: string | null;
+      };
+      const norms: Norm[] = [];
+      const partyLabelByName = new Map<string, string>();
+      const employeeNames = new Set<string>();
+
+      items.forEach((raw, i) => {
+        if (typeof raw !== "object" || raw === null) {
+          throw new Error(`items[${i}] must be an object.`);
+        }
+        const it = raw as Record<string, unknown>;
+        const at = `items[${i}]`;
+        const type = requireString(it, "type");
+        if (!TXN_TYPES.includes(type as (typeof TXN_TYPES)[number])) {
+          throw new Error(`${at}.type must be one of: ${TXN_TYPES.join(", ")}.`);
+        }
+        const projectId = optNumber(it, "projectId") ?? null;
+        if (projectId !== null && !projSet.has(projectId)) {
+          throw new Error(`${at}.projectId ${projectId} not found in your organization.`);
+        }
+        const n: Norm = {
+          type,
+          txnDate: requireDate(it, "txnDate"),
+          amount: requireDecimal(it, "amount"),
+          currency: normalizeCurrency(it, "currency"),
+          description: optString(it, "description") ?? null,
+          reported: type === "transfer" || optBoolean(it, "reported") === true,
+          projectId,
+          categoryId: null,
+          fromAccountId: null,
+          toAccountId: null,
+          partyName: null,
+          settleEmployeeName: null,
+        };
+        if (type === "expense" || type === "income") {
+          const isIncome = type === "income";
+          const accountId = requireNumber(it, "accountId");
+          if (!acctSet.has(accountId)) {
+            throw new Error(`${at}.accountId ${accountId} not found in your organization.`);
+          }
+          const categoryId = requireNumber(it, "categoryId");
+          if (!catSet.has(categoryId)) {
+            throw new Error(`${at}.categoryId ${categoryId} not found in your organization.`);
+          }
+          const partyName = requireString(it, "partyName");
+          if (!partyLabelByName.has(partyName)) {
+            partyLabelByName.set(partyName, isIncome ? "customer" : "vendor");
+          }
+          n.categoryId = categoryId;
+          n.partyName = partyName;
+          n.fromAccountId = isIncome ? null : accountId;
+          n.toAccountId = isIncome ? accountId : null;
+        } else if (type === "advance") {
+          const categoryId = requireNumber(it, "categoryId");
+          if (!catSet.has(categoryId)) {
+            throw new Error(`${at}.categoryId ${categoryId} not found in your organization.`);
+          }
+          const partyName = requireString(it, "partyName");
+          if (!partyLabelByName.has(partyName)) partyLabelByName.set(partyName, "vendor");
+          const emp = requireString(it, "settleEmployeeName");
+          employeeNames.add(emp);
+          n.categoryId = categoryId;
+          n.partyName = partyName;
+          n.settleEmployeeName = emp;
+        } else if (type === "transfer") {
+          const fromAccountId = requireNumber(it, "fromAccountId");
+          const toAccountId = requireNumber(it, "toAccountId");
+          if (!acctSet.has(fromAccountId)) {
+            throw new Error(`${at}.fromAccountId ${fromAccountId} not found in your organization.`);
+          }
+          if (!acctSet.has(toAccountId)) {
+            throw new Error(`${at}.toAccountId ${toAccountId} not found in your organization.`);
+          }
+          n.fromAccountId = fromAccountId;
+          n.toAccountId = toAccountId;
+        }
+        norms.push(n);
+      });
+
+      const partyId = await resolvePartyNames(db, orgId, partyLabelByName);
+      const employeeId = await resolveEmployeeNames(db, orgId, employeeNames);
+
+      const values = norms.map((n) => ({
+        organizationId: orgId,
+        type: n.type,
+        txnDate: n.txnDate,
+        description: n.description,
+        categoryId: n.categoryId,
+        partyId: n.partyName ? (partyId.get(n.partyName) ?? null) : null,
+        settleEmployeeId: n.settleEmployeeName ? (employeeId.get(n.settleEmployeeName) ?? null) : null,
+        projectId: n.projectId,
+        amount: n.amount,
+        currency: n.currency,
+        amountTwd: n.currency === "TWD" ? n.amount : null,
+        fromAccountId: n.fromAccountId,
+        toAccountId: n.toAccountId,
+        book: n.reported ? "both" : "internal",
+        billedToCompanyTaxId: false,
+      }));
+      const inserted = await db.insert(transactions).values(values).returning({ id: transactions.id });
+      return { created: inserted.length, ids: inserted.map((r) => r.id) };
     },
   },
 
