@@ -53,6 +53,11 @@ With a single-org account it just uses that org automatically.
 
 ## Tools
 
+Every tool is categorized via MCP `annotations` (`readOnlyHint` / `destructiveHint`
+/ `idempotentHint`, derived from the verb) plus a `[read]` / `[write]` / `[delete]`
+tag prefixed to its description — so clients can group read vs write and gate
+destructive calls.
+
 **Discovery** — `list_organizations` (call first), `get_financial_overview`.
 
 **Billing / receivables** — `list_upcoming_billing` (who to bill & when),

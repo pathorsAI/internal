@@ -5,6 +5,13 @@ import { resolveOrgId } from "./org";
 
 export type ToolContext = { userId: string; orgHint?: string };
 
+export type ToolAnnotations = {
+  title?: string;
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
+};
+
 export type ToolDef = {
   description: string;
   inputSchema: {
@@ -13,6 +20,8 @@ export type ToolDef = {
     required?: string[];
     additionalProperties: boolean;
   };
+  // Optional override; otherwise derived from the tool's verb in the handler.
+  annotations?: ToolAnnotations;
   execute: (args: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;
 };
 

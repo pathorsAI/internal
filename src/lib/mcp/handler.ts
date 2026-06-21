@@ -1,4 +1,5 @@
 import { type ToolContext, tools } from "./tools";
+import { type ToolAnnotations } from "./shared";
 
 // Minimal MCP server over JSON-RPC 2.0 (Streamable HTTP, stateless). No SDK
 // dependency — Workers-friendly. Handles initialize / tools.list / tools.call /
@@ -36,6 +37,26 @@ function fail(id: JsonRpcId, code: number, message: string) {
   return { jsonrpc: "2.0", id, error: { code, message } };
 }
 
+// Categorize a tool from its verb (standard MCP annotations) so clients can
+// group read vs write and gate destructive ops. Explicit per-tool annotations win.
+function toolAnnotations(name: string, explicit?: ToolAnnotations): ToolAnnotations {
+  const read = name.startsWith("list_") || name.startsWith("get_");
+  const del = name.startsWith("delete_");
+  const update = name.startsWith("update_");
+  return {
+    readOnlyHint: read,
+    destructiveHint: del,
+    idempotentHint: read || update || del,
+    ...explicit,
+  };
+}
+
+function categoryTag(a: ToolAnnotations): string {
+  if (a.readOnlyHint) return "[read]";
+  if (a.destructiveHint) return "[delete]";
+  return "[write]";
+}
+
 async function handleMessage(
   msg: JsonRpcMessage,
   ctx: ToolContext,
@@ -62,11 +83,15 @@ async function handleMessage(
 
     case "tools/list":
       return ok(id, {
-        tools: Object.entries(tools).map(([name, t]) => ({
-          name,
-          description: t.description,
-          inputSchema: t.inputSchema,
-        })),
+        tools: Object.entries(tools).map(([name, t]) => {
+          const annotations = toolAnnotations(name, t.annotations);
+          return {
+            name,
+            description: `${categoryTag(annotations)} ${t.description}`,
+            inputSchema: t.inputSchema,
+            annotations,
+          };
+        }),
       });
 
     case "tools/call": {
