@@ -1,6 +1,16 @@
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { accountReconciliations, bankAccounts, documents, employees } from "@/db/schema";
+import {
+  accountReconciliations,
+  bankAccounts,
+  categories,
+  documents,
+  employees,
+  payrollRuns,
+  payslipItems,
+  payslips,
+  transactions,
+} from "@/db/schema";
 import {
   getEmployee,
   listAccountantNotices,
@@ -22,6 +32,7 @@ import {
   requireNumber,
   requireString,
   resolveOrg,
+  todayStr,
   type ToolDef,
 } from "./shared";
 
@@ -195,7 +206,7 @@ export const hrTools: Record<string, ToolDef> = {
     },
   },
 
-  // ---- payroll (read-only; payroll runs/payslips are created in the app) ----
+  // ---- payroll ----
   list_payroll_runs: {
     description: "List payroll runs with payslip counts and net totals.",
     inputSchema: {
@@ -214,6 +225,279 @@ export const hrTools: Record<string, ToolDef> = {
       additionalProperties: false,
     },
     execute: async (args, ctx) => listPayslipRecords(await resolveOrg(args, ctx), optNumber(args, "limit") ?? 200),
+  },
+
+  list_salary_status: {
+    description:
+      "Per-employee salary status for a month: who has been paid, on what date, and the net amount. Defaults to the current month. Answers 'did everyone get paid this month, and when'.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        periodYear: { type: "number", description: "Defaults to current year." },
+        periodMonth: { type: "number", description: "1-12. Defaults to current month." },
+        ...ORG_ARG,
+      },
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      const db = getDb();
+      const today = todayStr();
+      const year = optNumber(args, "periodYear") ?? Number(today.slice(0, 4));
+      const month = optNumber(args, "periodMonth") ?? Number(today.slice(5, 7));
+      const [run] = await db
+        .select({ id: payrollRuns.id, payDate: payrollRuns.payDate, status: payrollRuns.status })
+        .from(payrollRuns)
+        .where(
+          and(
+            eq(payrollRuns.organizationId, orgId),
+            eq(payrollRuns.periodYear, year),
+            eq(payrollRuns.periodMonth, month),
+          ),
+        )
+        .limit(1);
+      const emps = await db
+        .select({ id: employees.id, name: employees.name })
+        .from(employees)
+        .where(and(eq(employees.organizationId, orgId), eq(employees.isActive, true)))
+        .orderBy(asc(employees.name));
+      const slipByEmp = new Map<
+        number,
+        { netPay: string; paidTransactionId: number | null }
+      >();
+      if (run) {
+        const slips = await db
+          .select({
+            employeeId: payslips.employeeId,
+            netPay: payslips.netPay,
+            paidTransactionId: payslips.paidTransactionId,
+          })
+          .from(payslips)
+          .where(eq(payslips.payrollRunId, run.id));
+        for (const s of slips) slipByEmp.set(s.employeeId, s);
+      }
+      const rows = emps.map((e) => {
+        const s = slipByEmp.get(e.id);
+        const paid = !!s?.paidTransactionId;
+        return {
+          employeeId: e.id,
+          name: e.name,
+          paid,
+          netPay: s?.netPay ?? null,
+          payDate: paid ? (run?.payDate ?? null) : null,
+        };
+      });
+      return {
+        period: `${year}-${String(month).padStart(2, "0")}`,
+        runPayDate: run?.payDate ?? null,
+        paidCount: rows.filter((r) => r.paid).length,
+        totalActive: rows.length,
+        employees: rows,
+      };
+    },
+  },
+
+  pay_employee_salary: {
+    description:
+      "Record a salary payment for one employee for a month. Creates the payslip AND posts a salary-expense transaction to the ledger (same as the app). One payment per employee per month — re-paying an already-paid month is rejected. Find ids via list_employees / list_bank_accounts. Amounts are TWD.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        employeeId: { type: "number" },
+        periodYear: { type: "number" },
+        periodMonth: { type: "number", description: "1-12." },
+        payDate: { type: "string", description: "Pay date, YYYY-MM-DD." },
+        fromAccountId: { type: "number", description: "Account the salary is paid from." },
+        book: {
+          type: "string",
+          enum: ["both", "internal", "external"],
+          description: "Ledger book; default both (reported). Use internal to keep it off the tax books.",
+        },
+        items: {
+          type: "array",
+          description:
+            'Salary line items, e.g. [{"name":"底薪","amount":50000}]. Earnings are taxable by default; pass direction:"deduction" for deductions (e.g. 請假扣) and isTaxable:false for non-taxable allowances. Net = taxable + non-taxable − deductions.',
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              amount: { type: "number" },
+              direction: { type: "string", enum: ["earning", "deduction"] },
+              isTaxable: { type: "boolean" },
+            },
+            required: ["name", "amount"],
+            additionalProperties: false,
+          },
+        },
+        ...ORG_ARG,
+      },
+      required: ["employeeId", "periodYear", "periodMonth", "payDate", "fromAccountId", "items"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const employeeId = requireNumber(args, "employeeId");
+      const year = requireNumber(args, "periodYear");
+      const month = requireNumber(args, "periodMonth");
+      if (month < 1 || month > 12) throw new Error('"periodMonth" must be between 1 and 12.');
+      const payDate = requireDate(args, "payDate");
+      const fromAccountId = requireNumber(args, "fromAccountId");
+      const bookRaw = optString(args, "book") ?? "both";
+      const book = ["internal", "external", "both"].includes(bookRaw) ? bookRaw : "both";
+
+      const raw = args.items;
+      if (!Array.isArray(raw) || raw.length === 0) {
+        throw new Error('"items" must be a non-empty array of salary line items.');
+      }
+      const items = raw
+        .map((r, i) => {
+          const o = (r ?? {}) as Record<string, unknown>;
+          const name = typeof o.name === "string" ? o.name.trim() : "";
+          const amount = typeof o.amount === "number" ? o.amount : Number(o.amount);
+          if (!name) throw new Error(`items[${i}].name is required.`);
+          if (!Number.isFinite(amount)) throw new Error(`items[${i}].amount must be a number.`);
+          const direction = o.direction === "deduction" ? "deduction" : "earning";
+          const isTaxable =
+            direction === "deduction" ? false : o.isTaxable === undefined ? true : !!o.isTaxable;
+          return {
+            itemTypeId: typeof o.itemTypeId === "number" ? o.itemTypeId : null,
+            name,
+            direction,
+            isTaxable,
+            amount,
+          };
+        })
+        .filter((r) => r.amount !== 0);
+      if (items.length === 0) throw new Error("No non-zero salary items provided.");
+
+      let taxable = 0;
+      let nontaxable = 0;
+      let deduction = 0;
+      for (const r of items) {
+        if (r.direction === "deduction") deduction += r.amount;
+        else if (r.isTaxable) taxable += r.amount;
+        else nontaxable += r.amount;
+      }
+      if (taxable + nontaxable <= 0) {
+        throw new Error("Provide at least one earning (e.g. base salary).");
+      }
+      const net = taxable + nontaxable - deduction;
+
+      const orgId = await resolveOrg(args, ctx);
+      const db = getDb();
+      await assertInOrg(db, employees, employeeId, orgId, "Employee");
+      await assertInOrg(db, bankAccounts, fromAccountId, orgId, "Account");
+
+      // Find or create the month's payroll run.
+      let runId: number;
+      const [run] = await db
+        .select({ id: payrollRuns.id })
+        .from(payrollRuns)
+        .where(
+          and(
+            eq(payrollRuns.organizationId, orgId),
+            eq(payrollRuns.periodYear, year),
+            eq(payrollRuns.periodMonth, month),
+          ),
+        )
+        .limit(1);
+      if (run) {
+        runId = run.id;
+      } else {
+        const [created] = await db
+          .insert(payrollRuns)
+          .values({ organizationId: orgId, periodYear: year, periodMonth: month, payDate, status: "paid" })
+          .returning({ id: payrollRuns.id });
+        runId = created.id;
+      }
+
+      // One payslip per employee per month; block if already paid.
+      const [existing] = await db
+        .select({ id: payslips.id, paidTransactionId: payslips.paidTransactionId })
+        .from(payslips)
+        .where(and(eq(payslips.payrollRunId, runId), eq(payslips.employeeId, employeeId)))
+        .limit(1);
+      if (existing?.paidTransactionId) {
+        throw new Error("This employee has already been paid for this month.");
+      }
+
+      const [cat] = await db
+        .select({ id: categories.id })
+        .from(categories)
+        .where(and(eq(categories.organizationId, orgId), eq(categories.name, "薪資費用")))
+        .limit(1);
+      const [emp] = await db
+        .select({ name: employees.name })
+        .from(employees)
+        .where(and(eq(employees.organizationId, orgId), eq(employees.id, employeeId)))
+        .limit(1);
+      const period = `${year}-${String(month).padStart(2, "0")}`;
+
+      const [txn] = await db
+        .insert(transactions)
+        .values({
+          organizationId: orgId,
+          type: "expense",
+          txnDate: payDate,
+          description: `${period} 薪資 - ${emp?.name ?? ""}`.trim(),
+          categoryId: cat?.id ?? null,
+          settleEmployeeId: employeeId,
+          amount: String(net),
+          currency: "TWD",
+          amountTwd: String(net),
+          fromAccountId,
+          book,
+          billedToCompanyTaxId: false,
+        })
+        .returning({ id: transactions.id });
+
+      const slipValues = {
+        taxableTotal: String(taxable),
+        nontaxableTotal: String(nontaxable),
+        deductionTotal: String(deduction),
+        netPay: String(net),
+        paidTransactionId: txn.id,
+      };
+      let payslipId: number;
+      if (existing) {
+        payslipId = existing.id;
+        await db.update(payslips).set(slipValues).where(eq(payslips.id, payslipId));
+        await db.delete(payslipItems).where(eq(payslipItems.payslipId, payslipId));
+      } else {
+        const [ins] = await db
+          .insert(payslips)
+          .values({ payrollRunId: runId, employeeId, ...slipValues })
+          .returning({ id: payslips.id });
+        payslipId = ins.id;
+      }
+
+      await db.insert(payslipItems).values(
+        items.map((r) => ({
+          payslipId,
+          itemTypeId: r.itemTypeId,
+          name: r.name,
+          direction: r.direction,
+          isTaxable: r.isTaxable,
+          amount: String(r.amount),
+          hours: null,
+        })),
+      );
+
+      return {
+        payslipId,
+        payrollRunId: runId,
+        period,
+        payDate,
+        employeeId,
+        employeeName: emp?.name ?? null,
+        taxable,
+        nontaxable,
+        deduction,
+        netPay: net,
+        book,
+        transactionId: txn.id,
+        note: cat?.id ? undefined : "No '薪資費用' category found — the expense was recorded uncategorized.",
+      };
+    },
   },
 
   // ---- bank reconciliations ----

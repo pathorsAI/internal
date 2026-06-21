@@ -77,15 +77,16 @@ invoices: `list_invoices`/`get_invoice`/`create_invoice`/`delete_invoice`.
 `list_parties`).
 
 **HR / payroll / recon** — employees: `list_employees`/`get_employee`/
-`create_employee`/`update_employee`/`delete_employee`; payroll (read):
-`list_payroll_runs`, `list_payslips`; reconciliations: `list_reconciliations` +
+`create_employee`/`update_employee`/`delete_employee`; payroll:
+`list_payroll_runs`, `list_payslips`, `list_salary_status` (who's paid for a month
++ when), `pay_employee_salary` (records the payslip **and** posts the salary
+expense to the ledger); reconciliations: `list_reconciliations` +
 `create`/`update`/`delete`; accountant notices: `list_accountant_notices`,
 `mark_accountant_notified`, `unmark_accountant_notified`.
 
-**Not exposed (do in the app):** uploading invoice/receipt **files** (R2),
-running **payroll** (payslip generation), and multi-currency FX entry — these need
-file handling or multi-step UI. Deletes that would break references return a clear
-error suggesting deactivation/archiving instead.
+**Not exposed (do in the app):** uploading invoice/receipt **files** (R2) and
+multi-currency FX entry — these need file handling or extra UI. Deletes that would
+break references return a clear error suggesting deactivation/archiving instead.
 
 ## Setup
 
