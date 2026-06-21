@@ -9,6 +9,14 @@ import * as authSchema from "@/db/auth-schema";
 export const auth = betterAuth({
   secret: process.env.BETTER_AUTH_SECRET,
   baseURL: process.env.BETTER_AUTH_URL,
+  // Trust the custom domain, the *.workers.dev domain, and localhost (dev) so
+  // requests from any of them pass better-auth's CSRF/origin check. (baseURL
+  // alone — currently the workers.dev URL — would reject internal.pathors.com.)
+  trustedOrigins: [
+    "https://internal.pathors.com",
+    "https://pathors-internal.pathors.workers.dev",
+    "http://localhost:3000",
+  ],
   database: drizzleAdapter(getDb(), {
     provider: "pg",
     schema: authSchema,
