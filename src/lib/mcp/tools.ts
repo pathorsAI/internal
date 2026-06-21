@@ -22,7 +22,6 @@ import { accountingTools } from "./tools-accounting";
 import { transactionTools } from "./tools-transactions";
 import { clientTools } from "./tools-client";
 import { hrTools } from "./tools-hr";
-import { linkTools } from "./tools-links";
 
 export type { ToolContext, ToolDef };
 
@@ -336,6 +335,7 @@ const billingTools: Record<string, ToolDef> = {
           startDate: contracts.startDate,
           endDate: contracts.endDate,
           status: contracts.status,
+          fileUrl: contracts.fileUrl,
           customer: parties.name,
         })
         .from(contracts)
@@ -523,5 +523,4 @@ export const tools: Record<string, ToolDef> = {
   ...transactionTools,
   ...clientTools,
   ...hrTools,
-  ...linkTools,
 };

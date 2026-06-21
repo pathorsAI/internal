@@ -272,6 +272,7 @@ export const clientTools: Record<string, ToolDef> = {
         endDate: { type: "string", description: "YYYY-MM-DD." },
         status: { type: "string", enum: [...CONTRACT_STATUS], description: "Default active." },
         note: { type: "string" },
+        fileUrl: { type: "string", description: "Link to the signed contract file, e.g. Google Drive." },
         ...ORG_ARG,
       },
       required: ["customerPartyId", "title"],
@@ -298,6 +299,7 @@ export const clientTools: Record<string, ToolDef> = {
           endDate: optString(args, "endDate") ?? null,
           status: optString(args, "status") ?? "active",
           note: optString(args, "note") ?? null,
+          fileUrl: optString(args, "fileUrl") ?? null,
         })
         .returning();
       return row;
@@ -319,6 +321,7 @@ export const clientTools: Record<string, ToolDef> = {
         endDate: { type: "string", description: "YYYY-MM-DD." },
         status: { type: "string", enum: [...CONTRACT_STATUS] },
         note: { type: "string" },
+        fileUrl: { type: "string" },
         ...ORG_ARG,
       },
       required: ["id"],
@@ -343,6 +346,7 @@ export const clientTools: Record<string, ToolDef> = {
       if (optString(args, "endDate") !== undefined) patch.endDate = optString(args, "endDate");
       if (optString(args, "status") !== undefined) patch.status = optString(args, "status");
       if (optString(args, "note") !== undefined) patch.note = optString(args, "note");
+      if (optString(args, "fileUrl") !== undefined) patch.fileUrl = optString(args, "fileUrl");
       if (Object.keys(patch).length === 0) throw new Error("Nothing to update.");
       const [row] = await db
         .update(contracts)

@@ -147,6 +147,15 @@ export function NewContractDialog({
               <Label htmlFor="note">備註</Label>
               <Input id="note" name="note" placeholder="選填" />
             </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="fileUrl">合約檔案連結</Label>
+              <Input
+                id="fileUrl"
+                name="fileUrl"
+                type="url"
+                placeholder="https://drive.google.com/… （選填）"
+              />
+            </div>
           </div>
 
           <DialogFooter>

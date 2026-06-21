@@ -32,6 +32,7 @@ type Contract = {
   endDate: string | null;
   status: string;
   note: string | null;
+  fileUrl: string | null;
 };
 
 export function EditContractForm({
@@ -150,6 +151,16 @@ export function EditContractForm({
       <div className="space-y-1.5 sm:col-span-2">
         <Label htmlFor="note">備註</Label>
         <Input id="note" name="note" defaultValue={contract.note ?? ""} />
+      </div>
+      <div className="space-y-1.5 sm:col-span-2">
+        <Label htmlFor="fileUrl">合約檔案連結</Label>
+        <Input
+          id="fileUrl"
+          name="fileUrl"
+          type="url"
+          defaultValue={contract.fileUrl ?? ""}
+          placeholder="https://drive.google.com/…"
+        />
       </div>
 
       <DialogFooter className="mt-2 border-t pt-4 sm:col-span-2">

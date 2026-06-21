@@ -16,6 +16,7 @@ import {
 import { listContracts, listParties, listProjects } from "@/db/queries";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { NewContractDialog } from "./new-contract-dialog";
+import { ContractFileLink } from "./contract-file-link";
 import { requireOrg } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -59,13 +60,14 @@ export default async function ContractsPage() {
               <TableHead className="text-right">金額</TableHead>
               <TableHead>期間</TableHead>
               <TableHead>狀態</TableHead>
+              <TableHead>檔案</TableHead>
               <TableHead className="text-right">動作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                <TableCell colSpan={8} className="text-center text-muted-foreground">
                   尚無合約，點右上角新增
                 </TableCell>
               </TableRow>
@@ -92,6 +94,13 @@ export default async function ContractsPage() {
                           {statusMap[c.status] ?? c.status}
                         </Badge>
                       </TableCell>
+                      <TableCell>
+                        {c.fileUrl ? (
+                          <ContractFileLink url={c.fileUrl} />
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right">
                         <DeleteButton action={deleteContract} id={c.id} />
                       </TableCell>
@@ -110,6 +119,7 @@ export default async function ContractsPage() {
                       endDate: c.endDate,
                       status: c.status,
                       note: c.note,
+                      fileUrl: c.fileUrl,
                     }}
                     parties={partyOptions}
                     projects={projectOptions}
