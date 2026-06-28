@@ -22,15 +22,12 @@ export function LogoMark({ className }: { className?: string }) {
   );
 }
 
-/** Brand mark + Pathors wordmark, used in the sidebar header and login screen. */
+/** Brand mark + label, used in the sidebar header. */
 export function Logo({ className }: { className?: string }) {
   return (
     <div className={cn("flex items-center gap-2", className)}>
       <LogoMark />
-      <div className="flex flex-col leading-tight">
-        <span className="text-sm font-semibold tracking-tight">Pathors</span>
-        <span className="text-xs text-muted-foreground">內部管理後台</span>
-      </div>
+      <span className="text-sm font-semibold tracking-tight">內部管理</span>
     </div>
   );
 }
