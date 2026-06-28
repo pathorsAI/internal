@@ -123,7 +123,9 @@ export default async function ContractsPage() {
                   description="合約"
                   cells={
                     <>
-                      <TableCell className="font-medium">{c.title}</TableCell>
+                      <TableCell className="max-w-[26ch] truncate font-medium" title={c.title}>
+                        {c.title}
+                      </TableCell>
                       <TableCell>{c.customerName ?? "—"}</TableCell>
                       <TableCell className="text-muted-foreground">{c.projectName ?? "—"}</TableCell>
                       <TableCell>

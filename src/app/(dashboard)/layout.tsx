@@ -22,7 +22,7 @@ export default function DashboardLayout({
             內部管理後台
           </span>
         </header>
-        <main className="flex flex-1 flex-col gap-6 p-6">{children}</main>
+        <main className="flex min-w-0 flex-1 flex-col gap-6 p-6">{children}</main>
       </SidebarInset>
     </SidebarProvider>
   );
