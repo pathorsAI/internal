@@ -43,13 +43,12 @@ export default async function ProjectsPage() {
               <TableHead className="text-right">收入</TableHead>
               <TableHead className="text-right">支出</TableHead>
               <TableHead className="text-right">淨額</TableHead>
-              <TableHead className="text-right">動作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                <TableCell colSpan={6} className="text-center text-muted-foreground">
                   尚無專案，點右上角新增
                 </TableCell>
               </TableRow>
@@ -79,9 +78,6 @@ export default async function ProjectsPage() {
                       >
                         {formatCurrency(p.net)}
                       </TableCell>
-                      <TableCell className="text-right">
-                        <DeleteButton action={deleteProject} id={p.id} />
-                      </TableCell>
                     </>
                   }
                 >
@@ -94,6 +90,7 @@ export default async function ProjectsPage() {
                       description: p.description,
                     }}
                     parties={partyOptions}
+                    footer={<DeleteButton action={deleteProject} id={p.id} />}
                   />
                 </RowDialog>
               ))

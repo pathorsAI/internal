@@ -200,15 +200,11 @@ export const accountingTools: Record<string, ToolDef> = {
       const orgId = await resolveOrg(args, ctx);
       const db = getDb();
       await assertInOrg(db, parties, id, orgId, "Party");
-      try {
-        await db.delete(parties).where(and(eq(parties.organizationId, orgId), eq(parties.id, id)));
-        return { deleted: true, id };
-      } catch (e) {
-        throw fkError(
-          e,
-          "This party is used by transactions and can't be deleted. Deactivate it instead (update_party isActive=false).",
-        );
-      }
+      await db
+        .update(parties)
+        .set({ deletedAt: new Date().toISOString() })
+        .where(and(eq(parties.organizationId, orgId), eq(parties.id, id)));
+      return { deleted: true, id };
     },
   },
 
@@ -279,12 +275,11 @@ export const accountingTools: Record<string, ToolDef> = {
       const orgId = await resolveOrg(args, ctx);
       const db = getDb();
       await assertInOrg(db, categories, id, orgId, "Category");
-      try {
-        await db.delete(categories).where(and(eq(categories.organizationId, orgId), eq(categories.id, id)));
-        return { deleted: true, id };
-      } catch (e) {
-        throw fkError(e, "This category is used by transactions and can't be deleted — rename it instead.");
-      }
+      await db
+        .update(categories)
+        .set({ deletedAt: new Date().toISOString() })
+        .where(and(eq(categories.organizationId, orgId), eq(categories.id, id)));
+      return { deleted: true, id };
     },
   },
 
@@ -391,15 +386,11 @@ export const accountingTools: Record<string, ToolDef> = {
       const orgId = await resolveOrg(args, ctx);
       const db = getDb();
       await assertInOrg(db, bankAccounts, id, orgId, "Bank account");
-      try {
-        await db.delete(bankAccounts).where(and(eq(bankAccounts.organizationId, orgId), eq(bankAccounts.id, id)));
-        return { deleted: true, id };
-      } catch (e) {
-        throw fkError(
-          e,
-          "This account has transactions/reconciliations and can't be deleted. Deactivate it instead (update_bank_account isActive=false).",
-        );
-      }
+      await db
+        .update(bankAccounts)
+        .set({ deletedAt: new Date().toISOString() })
+        .where(and(eq(bankAccounts.organizationId, orgId), eq(bankAccounts.id, id)));
+      return { deleted: true, id };
     },
   },
 
@@ -493,12 +484,11 @@ export const accountingTools: Record<string, ToolDef> = {
       const orgId = await resolveOrg(args, ctx);
       const db = getDb();
       await assertInOrg(db, invoices, id, orgId, "Invoice");
-      try {
-        await db.delete(invoices).where(and(eq(invoices.organizationId, orgId), eq(invoices.id, id)));
-        return { deleted: true, id };
-      } catch (e) {
-        throw fkError(e, "This invoice is linked to a transaction and can't be deleted.");
-      }
+      await db
+        .update(invoices)
+        .set({ deletedAt: new Date().toISOString() })
+        .where(and(eq(invoices.organizationId, orgId), eq(invoices.id, id)));
+      return { deleted: true, id };
     },
   },
 };

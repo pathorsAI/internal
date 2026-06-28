@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useRowDialogClose } from "@/components/row-dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,6 +38,9 @@ export function DeleteButton({
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const router = useRouter();
+  // When rendered inside a RowDialog (e.g. in the edit sheet/dialog footer),
+  // close that dialog after a successful delete. No-op when used standalone.
+  const closeRowDialog = useRowDialogClose();
 
   function onConfirm() {
     start(async () => {
@@ -44,6 +48,7 @@ export function DeleteButton({
       if (res.ok) {
         setOpen(false);
         toast.success("已刪除");
+        closeRowDialog();
         if (redirectTo) router.push(redirectTo);
         else router.refresh();
       } else {

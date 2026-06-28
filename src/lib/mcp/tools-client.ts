@@ -3,7 +3,6 @@ import { getDb } from "@/db";
 import { contracts, parties, projects, subscriptions } from "@/db/schema";
 import {
   assertInOrg,
-  fkError,
   normalizeCurrency,
   optDecimal,
   optNumber,
@@ -115,12 +114,11 @@ export const clientTools: Record<string, ToolDef> = {
       const orgId = await resolveOrg(args, ctx);
       const db = getDb();
       await assertInOrg(db, projects, id, orgId, "Project");
-      try {
-        await db.delete(projects).where(and(eq(projects.organizationId, orgId), eq(projects.id, id)));
-        return { deleted: true, id };
-      } catch (e) {
-        throw fkError(e, "This project is referenced by other records — archive it instead (update_project status=archived).");
-      }
+      await db
+        .update(projects)
+        .set({ deletedAt: new Date().toISOString() })
+        .where(and(eq(projects.organizationId, orgId), eq(projects.id, id)));
+      return { deleted: true, id };
     },
   },
 
@@ -240,7 +238,10 @@ export const clientTools: Record<string, ToolDef> = {
       const orgId = await resolveOrg(args, ctx);
       const db = getDb();
       await assertInOrg(db, subscriptions, id, orgId, "Subscription");
-      await db.delete(subscriptions).where(and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, id)));
+      await db
+        .update(subscriptions)
+        .set({ deletedAt: new Date().toISOString() })
+        .where(and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, id)));
       return { deleted: true, id };
     },
   },
@@ -359,12 +360,11 @@ export const clientTools: Record<string, ToolDef> = {
       const orgId = await resolveOrg(args, ctx);
       const db = getDb();
       await assertInOrg(db, contracts, id, orgId, "Contract");
-      try {
-        await db.delete(contracts).where(and(eq(contracts.organizationId, orgId), eq(contracts.id, id)));
-        return { deleted: true, id };
-      } catch (e) {
-        throw fkError(e, "This contract still has transactions linked to it — unbind them first.");
-      }
+      await db
+        .update(contracts)
+        .set({ deletedAt: new Date().toISOString() })
+        .where(and(eq(contracts.organizationId, orgId), eq(contracts.id, id)));
+      return { deleted: true, id };
     },
   },
 };

@@ -1,15 +1,13 @@
 import { addDays, differenceInCalendarDays, format, parseISO } from "date-fns";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { contracts, parties, projects, subscriptions, transactions } from "@/db/schema";
-import { member, organization } from "@/db/auth-schema";
-import { listMyOrgs } from "@/db/queries";
+import { listActivity, listMyOrgs } from "@/db/queries";
 import {
   nextChargeDate,
   optNumber,
   optString,
   ORG_ARG,
-  requireString,
   resolveOrg,
   todayStr,
   type ToolContext,
@@ -50,97 +48,6 @@ const billingTools: Record<string, ToolDef> = {
     },
   },
 
-  create_organization: {
-    description:
-      "Create a brand-new organization (a fresh, empty set of books) and add you (the signed-in user) as its owner. Use this to spin up a new company or a demo workspace. Returns the new org's id and slug — pass that slug (or id) as organizationId on every subsequent tool call to operate inside it. Confirm the name with the user first; this is not reversible from here.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        name: {
-          type: "string",
-          description: "Display name, e.g. 示範科技股份有限公司.",
-        },
-        slug: {
-          type: "string",
-          description:
-            "Optional URL-safe handle (lowercase letters, digits, hyphens). Must be unique; auto-generated if omitted.",
-        },
-      },
-      required: ["name"],
-      additionalProperties: false,
-    },
-    execute: async (args, ctx) => {
-      const name = requireString(args, "name");
-      if (name.length > 120) throw new Error('"name" must be 120 characters or fewer.');
-      // Reject control characters (newlines, bidi, etc.) — the name is rendered
-      // verbatim in the UI and echoed back in tool output.
-      if (/[\u0000-\u001f\u007f]/.test(name)) {
-        throw new Error('"name" must not contain control characters.');
-      }
-      let slug = optString(args, "slug")?.toLowerCase();
-      const slugProvided = slug !== undefined;
-      if (slug !== undefined && !/^[a-z0-9-]+$/.test(slug)) {
-        throw new Error(
-          '"slug" may only contain lowercase letters, digits, and hyphens.',
-        );
-      }
-      // Auto-generated slug carries a random suffix so concurrent/retried calls
-      // don't collide on the millisecond timestamp.
-      if (slug === undefined) slug = `org-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
-
-      const db = getDb();
-      // better-auth uses opaque string ids; generate ones that won't collide
-      // with its own. createdAt is left to the column default (defaultNow()).
-      const orgId = `org_${crypto.randomUUID().replace(/-/g, "")}`;
-      const memberId = `mem_${crypto.randomUUID().replace(/-/g, "")}`;
-
-      let org: typeof organization.$inferSelect;
-      try {
-        [org] = await db
-          .insert(organization)
-          .values({ id: orgId, name, slug })
-          .returning();
-      } catch (e) {
-        const err = e as { code?: string; cause?: { code?: string } };
-        if (err?.code === "23505" || err?.cause?.code === "23505") {
-          throw new Error(
-            slugProvided
-              ? `An organization with slug "${slug}" already exists — choose a different slug.`
-              : "Could not allocate a unique slug — please retry.",
-          );
-        }
-        throw e instanceof Error ? e : new Error(String(e));
-      }
-
-      // Make the caller the owner so they can immediately operate on the org
-      // (resolveOrgId derives access from member rows). neon-http has no
-      // interactive transactions, so these two inserts aren't atomic: if the
-      // member insert fails, roll the org back by hand — otherwise it's an
-      // ownerless, unreachable orphan that also permanently burns the slug.
-      try {
-        await db
-          .insert(member)
-          .values({ id: memberId, organizationId: org.id, userId: ctx.userId, role: "owner" });
-      } catch (e) {
-        try {
-          await db.delete(organization).where(eq(organization.id, org.id));
-        } catch {
-          // best-effort cleanup; surface the original failure regardless
-        }
-        throw e instanceof Error ? e : new Error(String(e));
-      }
-
-      return {
-        organizationId: org.slug ?? org.id,
-        id: org.id,
-        slug: org.slug,
-        name: org.name,
-        role: "owner",
-        hint: "Pass organizationId on subsequent tool calls to work inside this org.",
-      };
-    },
-  },
-
   list_upcoming_billing: {
     description:
       "Projected upcoming charges from active recurring subscriptions (next charge computed from start_date + interval_months), within the next N days. Use this to answer 'who do I need to bill, and when'. One-off contract collection is tracked via contracts (已收/未收), not here.",
@@ -173,7 +80,11 @@ const billingTools: Record<string, ToolDef> = {
         .from(subscriptions)
         .leftJoin(parties, eq(subscriptions.customerPartyId, parties.id))
         .where(
-          and(eq(subscriptions.organizationId, orgId), eq(subscriptions.status, "active")),
+          and(
+            eq(subscriptions.organizationId, orgId),
+            eq(subscriptions.status, "active"),
+            isNull(subscriptions.deletedAt),
+          ),
         );
 
       type Item = {
@@ -235,8 +146,12 @@ const billingTools: Record<string, ToolDef> = {
       const db = getDb();
       const today = todayStr();
       const where = status
-        ? and(eq(subscriptions.organizationId, orgId), eq(subscriptions.status, status))
-        : eq(subscriptions.organizationId, orgId);
+        ? and(
+            eq(subscriptions.organizationId, orgId),
+            eq(subscriptions.status, status),
+            isNull(subscriptions.deletedAt),
+          )
+        : and(eq(subscriptions.organizationId, orgId), isNull(subscriptions.deletedAt));
       const rows = await db
         .select({
           id: subscriptions.id,
@@ -283,8 +198,12 @@ const billingTools: Record<string, ToolDef> = {
       const status = optString(args, "status");
       const db = getDb();
       const where = status
-        ? and(eq(contracts.organizationId, orgId), eq(contracts.status, status))
-        : eq(contracts.organizationId, orgId);
+        ? and(
+            eq(contracts.organizationId, orgId),
+            eq(contracts.status, status),
+            isNull(contracts.deletedAt),
+          )
+        : and(eq(contracts.organizationId, orgId), isNull(contracts.deletedAt));
       // 收款進度只計同幣別、綁定此合約的交易；income=已收，expense/advance=成本。
       const receivedSum = sql<string>`coalesce(sum(${transactions.amount}) filter (where ${transactions.type} = 'income'), 0)`;
       const costSum = sql<string>`coalesce(sum(${transactions.amount}) filter (where ${transactions.type} in ('expense','advance')), 0)`;
@@ -309,6 +228,7 @@ const billingTools: Record<string, ToolDef> = {
           and(
             eq(transactions.contractId, contracts.id),
             eq(transactions.currency, contracts.currency),
+            isNull(transactions.deletedAt),
           ),
         )
         .where(where)
@@ -341,8 +261,12 @@ const billingTools: Record<string, ToolDef> = {
       const status = optString(args, "status");
       const db = getDb();
       const where = status
-        ? and(eq(projects.organizationId, orgId), eq(projects.status, status))
-        : eq(projects.organizationId, orgId);
+        ? and(
+            eq(projects.organizationId, orgId),
+            eq(projects.status, status),
+            isNull(projects.deletedAt),
+          )
+        : and(eq(projects.organizationId, orgId), isNull(projects.deletedAt));
       return db
         .select({
           id: projects.id,
@@ -383,9 +307,33 @@ const billingTools: Record<string, ToolDef> = {
             eq(parties.organizationId, orgId),
             eq(parties.label, "customer"),
             eq(parties.isActive, true),
+            isNull(parties.deletedAt),
           ),
         )
         .orderBy(asc(parties.name));
+    },
+  },
+
+  list_activity: {
+    description:
+      "Org activity / audit log: who (web or MCP) did create/update/delete on which entity, newest first. Use to investigate mis-recorded or wrongly-deleted data. Filter by entityType (transaction, party, category, bank_account, employee, invoice, reconciliation, project, subscription, contract, document, payroll_run, payslip) and/or action (create|update|delete).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        entityType: { type: "string" },
+        action: { type: "string", enum: ["create", "update", "delete"] },
+        limit: { type: "number", description: "Default 200." },
+        ...ORG_ARG,
+      },
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      return listActivity(orgId, {
+        entityType: optString(args, "entityType"),
+        action: optString(args, "action"),
+        limit: optNumber(args, "limit"),
+      });
     },
   },
 

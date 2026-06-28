@@ -86,13 +86,12 @@ export default async function ReconciliationPage() {
                 <TableHead className="text-right">差額</TableHead>
                 <TableHead>狀態</TableHead>
                 <TableHead>備註</TableHead>
-                <TableHead className="text-right">動作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {recons.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center text-muted-foreground">
+                  <TableCell colSpan={7} className="text-center text-muted-foreground">
                     尚無對帳紀錄
                   </TableCell>
                 </TableRow>
@@ -138,9 +137,6 @@ export default async function ReconciliationPage() {
                           <TableCell className="text-xs text-muted-foreground">
                             {r.note ?? "—"}
                           </TableCell>
-                          <TableCell className="text-right">
-                            <DeleteButton action={deleteReconciliation} id={r.id} />
-                          </TableCell>
                         </>
                       }
                     >
@@ -157,6 +153,7 @@ export default async function ReconciliationPage() {
                           name: a.name,
                           currency: a.currency,
                         }))}
+                        footer={<DeleteButton action={deleteReconciliation} id={r.id} />}
                       />
                     </RowDialog>
                   );

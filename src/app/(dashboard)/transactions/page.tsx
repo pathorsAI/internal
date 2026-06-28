@@ -69,7 +69,7 @@ function groupByMonth(rows: TxnRow[]) {
   });
 }
 
-const COLUMNS = ["日期", "對象", "說明", "分類", "帳別", "帳戶", "金額", "動作"];
+const COLUMNS = ["日期", "對象", "說明", "分類", "帳別", "帳戶", "金額"];
 
 function TransactionRow({
   t,
@@ -121,9 +121,6 @@ function TransactionRow({
           <TableCell className={cn("text-right font-medium tabular-nums", txnAmountColor(t.type))}>
             {formatCurrency(t.amount, t.currency)}
           </TableCell>
-          <TableCell className="text-right">
-            <DeleteButton action={deleteTransaction} id={t.id} />
-          </TableCell>
         </>
       }
     >
@@ -152,6 +149,7 @@ function TransactionRow({
         projects={projects}
         contracts={contracts}
         docs={docs}
+        footer={<DeleteButton action={deleteTransaction} id={t.id} />}
       />
     </RowDialog>
   );
@@ -231,7 +229,7 @@ export default async function TransactionsPage({
                 <TableHeader>
                   <TableRow>
                     {COLUMNS.map((c) => (
-                      <TableHead key={c} className={c === "金額" || c === "動作" ? "text-right" : ""}>
+                      <TableHead key={c} className={c === "金額" ? "text-right" : ""}>
                         {c}
                       </TableHead>
                     ))}

@@ -1,4 +1,4 @@
-import { sql, eq, desc, and, or, lte, inArray, aliasedTable } from "drizzle-orm";
+import { sql, eq, desc, and, or, lte, inArray, isNull, aliasedTable } from "drizzle-orm";
 import { getDb } from "./index";
 import {
   transactions,
@@ -15,6 +15,7 @@ import {
   projects,
   subscriptions,
   contracts,
+  activityLog,
 } from "./schema";
 import { oauthApplication, oauthAccessToken, member, organization } from "./auth-schema";
 
@@ -35,6 +36,7 @@ export async function getOverview(orgId: string) {
       and(
         eq(transactions.organizationId, orgId),
         sql`${transactions.type} in ('income','expense','advance')`,
+        isNull(transactions.deletedAt),
       ),
     )
     .groupBy(transactions.currency)
@@ -111,6 +113,7 @@ export async function listTransactions(
           : undefined,
         projectId ? eq(transactions.projectId, projectId) : undefined,
         period ? sql`to_char(${transactions.txnDate}, 'YYYY-MM') = ${period}` : undefined,
+        isNull(transactions.deletedAt),
       ),
     )
     .orderBy(desc(transactions.txnDate), desc(transactions.id))
@@ -125,7 +128,7 @@ export async function listTransactionMonths(orgId: string): Promise<string[]> {
   const rows = await db
     .selectDistinct({ ym: sql<string>`to_char(${transactions.txnDate}, 'YYYY-MM')`.as("ym") })
     .from(transactions)
-    .where(eq(transactions.organizationId, orgId));
+    .where(and(eq(transactions.organizationId, orgId), isNull(transactions.deletedAt)));
   return rows
     .map((r) => r.ym)
     .filter((ym): ym is string => !!ym)
@@ -167,6 +170,7 @@ export async function listDocumentsForTransactions(
       and(
         eq(documents.organizationId, orgId),
         inArray(documents.transactionId, ids),
+        isNull(documents.deletedAt),
       ),
     )
     .orderBy(desc(documents.uploadedAt));
@@ -203,7 +207,12 @@ export async function listAccountantNotices(orgId: string) {
     .leftJoin(parties, eq(parties.id, transactions.partyId))
     .leftJoin(categories, eq(categories.id, transactions.categoryId))
     .where(
-      and(eq(documents.organizationId, orgId), eq(documents.invoiceKind, "paper")),
+      and(
+        eq(documents.organizationId, orgId),
+        eq(documents.invoiceKind, "paper"),
+        isNull(documents.deletedAt),
+        isNull(transactions.deletedAt),
+      ),
     )
     .orderBy(desc(transactions.txnDate), desc(documents.id));
 }
@@ -232,7 +241,8 @@ export async function listOutstandingAdvances(orgId: string) {
       and(
         eq(transactions.organizationId, orgId),
         eq(transactions.type, "advance"),
-        sql`NOT EXISTS (SELECT 1 FROM ${transactions} r WHERE r.related_to_id = ${transactions.id})`,
+        sql`NOT EXISTS (SELECT 1 FROM ${transactions} r WHERE r.related_to_id = ${transactions.id} AND r.deleted_at IS NULL)`,
+        isNull(transactions.deletedAt),
       ),
     )
     .orderBy(desc(transactions.txnDate));
@@ -243,7 +253,7 @@ export async function listInvoices(orgId: string, limit = 100) {
   return db
     .select()
     .from(invoices)
-    .where(eq(invoices.organizationId, orgId))
+    .where(and(eq(invoices.organizationId, orgId), isNull(invoices.deletedAt)))
     .orderBy(desc(invoices.invoiceDate), desc(invoices.id))
     .limit(limit);
 }
@@ -253,7 +263,7 @@ export async function listBankAccounts(orgId: string) {
   return db
     .select()
     .from(bankAccounts)
-    .where(eq(bankAccounts.organizationId, orgId))
+    .where(and(eq(bankAccounts.organizationId, orgId), isNull(bankAccounts.deletedAt)))
     .orderBy(desc(bankAccounts.isActive), bankAccounts.name);
 }
 
@@ -262,7 +272,7 @@ export async function listEmployees(orgId: string, limit = 200) {
   return db
     .select()
     .from(employees)
-    .where(eq(employees.organizationId, orgId))
+    .where(and(eq(employees.organizationId, orgId), isNull(employees.deletedAt)))
     .orderBy(desc(employees.isActive), employees.name)
     .limit(limit);
 }
@@ -282,14 +292,12 @@ export async function listParties(orgId: string) {
       note: parties.note,
       isActive: parties.isActive,
       accountName: bankAccounts.name,
-      txnCount: sql<number>`(select count(*)::int from ${transactions} t where t.party_id = ${parties.id})`,
-      txnIncome: sql<string>`coalesce((select sum(coalesce(t.amount_twd, t.amount)) from ${transactions} t where t.party_id = ${parties.id} and t.type = 'income'), 0)`,
-      txnExpense: sql<string>`coalesce((select sum(coalesce(t.amount_twd, t.amount)) from ${transactions} t where t.party_id = ${parties.id} and t.type = 'expense'), 0)`,
-      txnTotal: sql<string>`coalesce((select sum(coalesce(t.amount_twd, t.amount)) from ${transactions} t where t.party_id = ${parties.id}), 0)`,
+      txnCount: sql<number>`(select count(*)::int from ${transactions} t where t.party_id = ${parties.id} and t.deleted_at is null)`,
+      txnTotal: sql<string>`coalesce((select sum(coalesce(t.amount_twd, t.amount)) from ${transactions} t where t.party_id = ${parties.id} and t.deleted_at is null), 0)`,
     })
     .from(parties)
     .leftJoin(bankAccounts, eq(bankAccounts.id, parties.defaultAccountId))
-    .where(eq(parties.organizationId, orgId))
+    .where(and(eq(parties.organizationId, orgId), isNull(parties.deletedAt)))
     .orderBy(desc(parties.isActive), parties.name);
 }
 
@@ -298,7 +306,7 @@ export async function getParty(orgId: string, id: number) {
   const [row] = await db
     .select()
     .from(parties)
-    .where(and(eq(parties.organizationId, orgId), eq(parties.id, id)))
+    .where(and(eq(parties.organizationId, orgId), eq(parties.id, id), isNull(parties.deletedAt)))
     .limit(1);
   return row ?? null;
 }
@@ -308,7 +316,7 @@ export async function getBankAccount(orgId: string, id: number) {
   const [row] = await db
     .select()
     .from(bankAccounts)
-    .where(and(eq(bankAccounts.organizationId, orgId), eq(bankAccounts.id, id)))
+    .where(and(eq(bankAccounts.organizationId, orgId), eq(bankAccounts.id, id), isNull(bankAccounts.deletedAt)))
     .limit(1);
   return row ?? null;
 }
@@ -318,7 +326,7 @@ export async function getEmployee(orgId: string, id: number) {
   const [row] = await db
     .select()
     .from(employees)
-    .where(and(eq(employees.organizationId, orgId), eq(employees.id, id)))
+    .where(and(eq(employees.organizationId, orgId), eq(employees.id, id), isNull(employees.deletedAt)))
     .limit(1);
   return row ?? null;
 }
@@ -328,7 +336,7 @@ export async function getInvoice(orgId: string, id: number) {
   const [row] = await db
     .select()
     .from(invoices)
-    .where(and(eq(invoices.organizationId, orgId), eq(invoices.id, id)))
+    .where(and(eq(invoices.organizationId, orgId), eq(invoices.id, id), isNull(invoices.deletedAt)))
     .limit(1);
   return row ?? null;
 }
@@ -338,7 +346,7 @@ export async function getDocument(orgId: string, id: number) {
   const [row] = await db
     .select()
     .from(documents)
-    .where(and(eq(documents.organizationId, orgId), eq(documents.id, id)))
+    .where(and(eq(documents.organizationId, orgId), eq(documents.id, id), isNull(documents.deletedAt)))
     .limit(1);
   return row ?? null;
 }
@@ -352,6 +360,7 @@ export async function getReconciliation(orgId: string, id: number) {
       and(
         eq(accountReconciliations.organizationId, orgId),
         eq(accountReconciliations.id, id),
+        isNull(accountReconciliations.deletedAt),
       ),
     )
     .limit(1);
@@ -363,7 +372,7 @@ export async function getTransaction(orgId: string, id: number) {
   const [row] = await db
     .select()
     .from(transactions)
-    .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)))
+    .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id), isNull(transactions.deletedAt)))
     .limit(1);
   return row ?? null;
 }
@@ -373,7 +382,7 @@ export async function getPayrollRun(orgId: string, id: number) {
   const [row] = await db
     .select()
     .from(payrollRuns)
-    .where(and(eq(payrollRuns.organizationId, orgId), eq(payrollRuns.id, id)))
+    .where(and(eq(payrollRuns.organizationId, orgId), eq(payrollRuns.id, id), isNull(payrollRuns.deletedAt)))
     .limit(1);
   return row ?? null;
 }
@@ -383,7 +392,7 @@ export async function listCategories(orgId: string) {
   return db
     .select({ id: categories.id, name: categories.name, kind: categories.kind })
     .from(categories)
-    .where(and(eq(categories.organizationId, orgId), eq(categories.isActive, true)))
+    .where(and(eq(categories.organizationId, orgId), eq(categories.isActive, true), isNull(categories.deletedAt)))
     .orderBy(categories.kind, categories.name);
 }
 
@@ -410,15 +419,19 @@ export async function listAccountBalances(
     .from(bankAccounts)
     .leftJoin(
       transactions,
-      or(
-        eq(transactions.fromAccountId, bankAccounts.id),
-        eq(transactions.toAccountId, bankAccounts.id),
+      and(
+        or(
+          eq(transactions.fromAccountId, bankAccounts.id),
+          eq(transactions.toAccountId, bankAccounts.id),
+        ),
+        isNull(transactions.deletedAt),
       ),
     )
     .where(
       and(
         eq(bankAccounts.organizationId, orgId),
         opts.includeInactive ? undefined : eq(bankAccounts.isActive, true),
+        isNull(bankAccounts.deletedAt),
       ),
     )
     .groupBy(bankAccounts.id)
@@ -431,7 +444,7 @@ export async function listAccountBalances(
       last: sql<string>`max(${accountReconciliations.asOfDate})`,
     })
     .from(accountReconciliations)
-    .where(eq(accountReconciliations.organizationId, orgId))
+    .where(and(eq(accountReconciliations.organizationId, orgId), isNull(accountReconciliations.deletedAt)))
     .groupBy(accountReconciliations.accountId);
   const lastMap = new Map(lastRows.map((r) => [r.accountId, r.last]));
 
@@ -467,9 +480,10 @@ export async function listReconciliations(orgId: string, limit = 100) {
           eq(transactions.toAccountId, accountReconciliations.accountId),
         ),
         lte(transactions.txnDate, accountReconciliations.asOfDate),
+        isNull(transactions.deletedAt),
       ),
     )
-    .where(eq(accountReconciliations.organizationId, orgId))
+    .where(and(eq(accountReconciliations.organizationId, orgId), isNull(accountReconciliations.deletedAt)))
     .groupBy(accountReconciliations.id, bankAccounts.id)
     .orderBy(desc(accountReconciliations.asOfDate), desc(accountReconciliations.id))
     .limit(limit);
@@ -489,7 +503,7 @@ export async function listPayrollRuns(orgId: string, limit = 50) {
       netTotal: sql<string>`coalesce((select sum(ps.net_pay) from ${payslips} ps where ps.payroll_run_id = ${payrollRuns.id}), 0)`,
     })
     .from(payrollRuns)
-    .where(eq(payrollRuns.organizationId, orgId))
+    .where(and(eq(payrollRuns.organizationId, orgId), isNull(payrollRuns.deletedAt)))
     .orderBy(desc(payrollRuns.periodYear), desc(payrollRuns.periodMonth))
     .limit(limit);
 }
@@ -529,7 +543,7 @@ export async function listPayslipRecords(orgId: string, limit = 200) {
     .from(payslips)
     .innerJoin(payrollRuns, eq(payrollRuns.id, payslips.payrollRunId))
     .leftJoin(employees, eq(employees.id, payslips.employeeId))
-    .where(eq(payrollRuns.organizationId, orgId))
+    .where(and(eq(payrollRuns.organizationId, orgId), isNull(payslips.deletedAt)))
     .orderBy(desc(payrollRuns.periodYear), desc(payrollRuns.periodMonth), employees.name)
     .limit(limit);
 }
@@ -557,8 +571,11 @@ export async function listProjects(orgId: string) {
     })
     .from(projects)
     .leftJoin(client, eq(client.id, projects.clientPartyId))
-    .leftJoin(transactions, eq(transactions.projectId, projects.id))
-    .where(eq(projects.organizationId, orgId))
+    .leftJoin(
+      transactions,
+      and(eq(transactions.projectId, projects.id), isNull(transactions.deletedAt)),
+    )
+    .where(and(eq(projects.organizationId, orgId), isNull(projects.deletedAt)))
     .groupBy(projects.id, client.name)
     .orderBy(desc(projects.createdAt));
   return rows.map((r) => {
@@ -573,7 +590,7 @@ export async function getProject(orgId: string, id: number) {
   const [row] = await db
     .select()
     .from(projects)
-    .where(and(eq(projects.organizationId, orgId), eq(projects.id, id)))
+    .where(and(eq(projects.organizationId, orgId), eq(projects.id, id), isNull(projects.deletedAt)))
     .limit(1);
   return row ?? null;
 }
@@ -599,7 +616,7 @@ export async function listSubscriptions(orgId: string) {
     .from(subscriptions)
     .leftJoin(parties, eq(parties.id, subscriptions.customerPartyId))
     .leftJoin(projects, eq(projects.id, subscriptions.projectId))
-    .where(eq(subscriptions.organizationId, orgId))
+    .where(and(eq(subscriptions.organizationId, orgId), isNull(subscriptions.deletedAt)))
     .orderBy(desc(subscriptions.createdAt));
 }
 
@@ -616,7 +633,7 @@ export async function listContractOptions(orgId: string) {
     })
     .from(contracts)
     .leftJoin(parties, eq(parties.id, contracts.customerPartyId))
-    .where(eq(contracts.organizationId, orgId))
+    .where(and(eq(contracts.organizationId, orgId), isNull(contracts.deletedAt)))
     .orderBy(desc(contracts.createdAt));
 }
 
@@ -652,9 +669,10 @@ export async function listContracts(orgId: string) {
       and(
         eq(transactions.contractId, contracts.id),
         eq(transactions.currency, contracts.currency),
+        isNull(transactions.deletedAt),
       ),
     )
-    .where(eq(contracts.organizationId, orgId))
+    .where(and(eq(contracts.organizationId, orgId), isNull(contracts.deletedAt)))
     .groupBy(contracts.id, parties.name, projects.name)
     .orderBy(desc(contracts.createdAt));
   return rows.map((r) => {
@@ -682,6 +700,7 @@ export async function listVendorCosts(orgId: string) {
       and(
         eq(transactions.organizationId, orgId),
         sql`${transactions.type} in ('expense','advance')`,
+        isNull(transactions.deletedAt),
       ),
     )
     .groupBy(parties.id, parties.name, parties.label)
@@ -759,4 +778,37 @@ export async function listMyOrgs(userId: string): Promise<MyOrg[]> {
     .innerJoin(organization, eq(organization.id, member.organizationId))
     .where(eq(member.userId, userId))
     .orderBy(organization.name);
+}
+
+export type ActivityRow = {
+  id: number; actorName: string | null; actorEmail: string | null; channel: string;
+  action: string; entityType: string; entityId: number | null; summary: string | null; createdAt: string;
+};
+export async function listActivity(
+  orgId: string,
+  opts: { entityType?: string; action?: string; limit?: number } = {},
+): Promise<ActivityRow[]> {
+  const db = getDb();
+  return db
+    .select({
+      id: activityLog.id,
+      actorName: activityLog.actorName,
+      actorEmail: activityLog.actorEmail,
+      channel: activityLog.channel,
+      action: activityLog.action,
+      entityType: activityLog.entityType,
+      entityId: activityLog.entityId,
+      summary: activityLog.summary,
+      createdAt: activityLog.createdAt,
+    })
+    .from(activityLog)
+    .where(
+      and(
+        eq(activityLog.organizationId, orgId),
+        opts.entityType ? eq(activityLog.entityType, opts.entityType) : undefined,
+        opts.action ? eq(activityLog.action, opts.action) : undefined,
+      ),
+    )
+    .orderBy(desc(activityLog.createdAt))
+    .limit(opts.limit ?? 200);
 }
