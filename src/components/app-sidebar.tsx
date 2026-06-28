@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/sidebar";
 import { OrgSwitcher } from "@/components/org-switcher";
 import { UserMenu } from "@/components/user-menu";
+import { Logo } from "@/components/logo";
 
 const nav = [
   { title: "總覽", href: "/", icon: LayoutDashboard },
@@ -82,6 +83,7 @@ export function AppSidebar() {
   return (
     <Sidebar>
       <SidebarHeader>
+        <Logo className="px-1 py-1.5" />
         <OrgSwitcher />
       </SidebarHeader>
 
