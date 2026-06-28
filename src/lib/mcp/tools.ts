@@ -2,12 +2,14 @@ import { addDays, differenceInCalendarDays, format, parseISO } from "date-fns";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { contracts, parties, projects, subscriptions, transactions } from "@/db/schema";
+import { member, organization } from "@/db/auth-schema";
 import { listMyOrgs } from "@/db/queries";
 import {
   nextChargeDate,
   optNumber,
   optString,
   ORG_ARG,
+  requireString,
   resolveOrg,
   todayStr,
   type ToolContext,
@@ -44,6 +46,97 @@ const billingTools: Record<string, ToolDef> = {
           orgs.length > 1
             ? "Ask the user which organization to use, then pass its organizationId to the other tools."
             : "Single organization — you can call the other tools directly.",
+      };
+    },
+  },
+
+  create_organization: {
+    description:
+      "Create a brand-new organization (a fresh, empty set of books) and add you (the signed-in user) as its owner. Use this to spin up a new company or a demo workspace. Returns the new org's id and slug — pass that slug (or id) as organizationId on every subsequent tool call to operate inside it. Confirm the name with the user first; this is not reversible from here.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "Display name, e.g. 示範科技股份有限公司.",
+        },
+        slug: {
+          type: "string",
+          description:
+            "Optional URL-safe handle (lowercase letters, digits, hyphens). Must be unique; auto-generated if omitted.",
+        },
+      },
+      required: ["name"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const name = requireString(args, "name");
+      if (name.length > 120) throw new Error('"name" must be 120 characters or fewer.');
+      // Reject control characters (newlines, bidi, etc.) — the name is rendered
+      // verbatim in the UI and echoed back in tool output.
+      if (/[\u0000-\u001f\u007f]/.test(name)) {
+        throw new Error('"name" must not contain control characters.');
+      }
+      let slug = optString(args, "slug")?.toLowerCase();
+      const slugProvided = slug !== undefined;
+      if (slug !== undefined && !/^[a-z0-9-]+$/.test(slug)) {
+        throw new Error(
+          '"slug" may only contain lowercase letters, digits, and hyphens.',
+        );
+      }
+      // Auto-generated slug carries a random suffix so concurrent/retried calls
+      // don't collide on the millisecond timestamp.
+      if (slug === undefined) slug = `org-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+
+      const db = getDb();
+      // better-auth uses opaque string ids; generate ones that won't collide
+      // with its own. createdAt is left to the column default (defaultNow()).
+      const orgId = `org_${crypto.randomUUID().replace(/-/g, "")}`;
+      const memberId = `mem_${crypto.randomUUID().replace(/-/g, "")}`;
+
+      let org: typeof organization.$inferSelect;
+      try {
+        [org] = await db
+          .insert(organization)
+          .values({ id: orgId, name, slug })
+          .returning();
+      } catch (e) {
+        const err = e as { code?: string; cause?: { code?: string } };
+        if (err?.code === "23505" || err?.cause?.code === "23505") {
+          throw new Error(
+            slugProvided
+              ? `An organization with slug "${slug}" already exists — choose a different slug.`
+              : "Could not allocate a unique slug — please retry.",
+          );
+        }
+        throw e instanceof Error ? e : new Error(String(e));
+      }
+
+      // Make the caller the owner so they can immediately operate on the org
+      // (resolveOrgId derives access from member rows). neon-http has no
+      // interactive transactions, so these two inserts aren't atomic: if the
+      // member insert fails, roll the org back by hand — otherwise it's an
+      // ownerless, unreachable orphan that also permanently burns the slug.
+      try {
+        await db
+          .insert(member)
+          .values({ id: memberId, organizationId: org.id, userId: ctx.userId, role: "owner" });
+      } catch (e) {
+        try {
+          await db.delete(organization).where(eq(organization.id, org.id));
+        } catch {
+          // best-effort cleanup; surface the original failure regardless
+        }
+        throw e instanceof Error ? e : new Error(String(e));
+      }
+
+      return {
+        organizationId: org.slug ?? org.id,
+        id: org.id,
+        slug: org.slug,
+        name: org.name,
+        role: "owner",
+        hint: "Pass organizationId on subsequent tool calls to work inside this org.",
       };
     },
   },
