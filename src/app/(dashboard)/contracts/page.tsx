@@ -34,6 +34,50 @@ const statusVariant: Record<string, "default" | "secondary" | "outline"> = {
   cancelled: "outline",
 };
 
+// 收款進度欄：已收 / 合約金額 + 進度條，下方顯示未收與累計成本（成本不從合約金額扣）。
+function CollectionCell({
+  amount,
+  currency,
+  received,
+  cost,
+}: Readonly<{
+  amount: string | null;
+  currency: string;
+  received: number;
+  cost: number;
+}>) {
+  const total = amount == null ? null : Number(amount);
+  const pct = total && total > 0 ? Math.min(100, Math.round((received / total) * 100)) : null;
+  const remaining = total == null ? null : total - received;
+  return (
+    <div className="min-w-[170px] space-y-1">
+      <div className="flex items-baseline justify-between gap-2 text-sm tabular-nums">
+        <span className="font-medium">{formatCurrency(received, currency)}</span>
+        <span className="text-xs text-muted-foreground">
+          {total == null ? "未設金額" : `/ ${formatCurrency(total, currency)}`}
+        </span>
+      </div>
+      {pct != null && (
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+          <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
+        </div>
+      )}
+      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground tabular-nums">
+        <span>
+          {remaining == null
+            ? "—"
+            : remaining > 0
+              ? `未收 ${formatCurrency(remaining, currency)}`
+              : remaining < 0
+                ? `溢收 ${formatCurrency(-remaining, currency)}`
+                : "已收齊"}
+        </span>
+        {cost > 0 && <span>成本 {formatCurrency(cost, currency)}</span>}
+      </div>
+    </div>
+  );
+}
+
 export default async function ContractsPage() {
   const { orgId } = await requireOrg();
   const [rows, parties, projects] = await Promise.all([
@@ -57,7 +101,7 @@ export default async function ContractsPage() {
               <TableHead>合約</TableHead>
               <TableHead>客戶</TableHead>
               <TableHead>專案</TableHead>
-              <TableHead className="text-right">金額</TableHead>
+              <TableHead>收款進度</TableHead>
               <TableHead>期間</TableHead>
               <TableHead>狀態</TableHead>
               <TableHead>檔案</TableHead>
@@ -82,8 +126,13 @@ export default async function ContractsPage() {
                       <TableCell className="font-medium">{c.title}</TableCell>
                       <TableCell>{c.customerName ?? "—"}</TableCell>
                       <TableCell className="text-muted-foreground">{c.projectName ?? "—"}</TableCell>
-                      <TableCell className="text-right font-medium tabular-nums">
-                        {c.amount == null ? "—" : formatCurrency(c.amount, c.currency)}
+                      <TableCell>
+                        <CollectionCell
+                          amount={c.amount}
+                          currency={c.currency}
+                          received={c.received}
+                          cost={c.cost}
+                        />
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {c.startDate ? formatDate(c.startDate) : "—"}
@@ -123,6 +172,7 @@ export default async function ContractsPage() {
                     }}
                     parties={partyOptions}
                     projects={projectOptions}
+                    summary={{ received: c.received, cost: c.cost, remaining: c.remaining }}
                   />
                 </RowDialog>
               ))

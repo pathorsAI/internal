@@ -22,6 +22,7 @@ import {
 import { DatePicker } from "@/components/date-picker";
 import { CategoryCombobox } from "./category-combobox";
 import { PartyCombobox } from "./party-combobox";
+import { ContractCombobox, type ContractOption } from "./contract-combobox";
 
 const initial: ActionState = { ok: false };
 const DOC_KINDS: Record<string, string> = {
@@ -60,6 +61,7 @@ type Txn = {
   fromAccountId: number | null;
   toAccountId: number | null;
   projectId: number | null;
+  contractId: number | null;
 };
 
 export function EditTransactionForm({
@@ -69,6 +71,7 @@ export function EditTransactionForm({
   employees,
   accounts,
   projects,
+  contracts,
   docs = [],
   footer,
 }: Readonly<{
@@ -78,6 +81,7 @@ export function EditTransactionForm({
   employees: { id: number; name: string }[];
   accounts: Account[];
   projects: { id: number; name: string }[];
+  contracts: ContractOption[];
   docs?: TxnDocument[];
   footer?: React.ReactNode;
 }>) {
@@ -233,6 +237,10 @@ export function EditTransactionForm({
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label>合約</Label>
+              <ContractCombobox contracts={contracts} defaultId={txn.contractId} />
             </div>
           </>
         )}

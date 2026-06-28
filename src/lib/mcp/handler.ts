@@ -13,7 +13,7 @@ const PROTOCOL_VERSION = "2025-06-18";
 // before doing org-scoped work — important because the signed-in account may
 // belong to multiple organizations and we never guess.
 const INSTRUCTIONS = [
-  "This server is the operational surface for one organization's bookkeeping: ledger transactions (內外帳), parties, categories, bank accounts, invoices, projects, subscriptions, contracts, receivables, employees, payroll (read-only), and reconciliations.",
+  "This server is the operational surface for one organization's bookkeeping: ledger transactions (內外帳), parties, categories, bank accounts, invoices, projects, subscriptions, contracts, employees, payroll (read-only), and reconciliations.",
   "The signed-in account may belong to multiple organizations.",
   "At the START of each session, before calling any org-scoped tool, call list_organizations and ask the user which organization to work in.",
   "Then pass that value as organizationId on every subsequent tool call. Never guess the organization.",

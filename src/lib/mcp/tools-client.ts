@@ -1,14 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import {
-  bankAccounts,
-  contracts,
-  parties,
-  projects,
-  receivables,
-  subscriptions,
-  transactions,
-} from "@/db/schema";
+import { contracts, parties, projects, subscriptions } from "@/db/schema";
 import {
   assertInOrg,
   fkError,
@@ -236,7 +228,7 @@ export const clientTools: Record<string, ToolDef> = {
   },
 
   delete_subscription: {
-    description: "Delete a subscription. Fails if receivables reference it.",
+    description: "Delete a subscription.",
     inputSchema: {
       type: "object",
       properties: { id: { type: "number" }, ...ORG_ARG },
@@ -248,12 +240,8 @@ export const clientTools: Record<string, ToolDef> = {
       const orgId = await resolveOrg(args, ctx);
       const db = getDb();
       await assertInOrg(db, subscriptions, id, orgId, "Subscription");
-      try {
-        await db.delete(subscriptions).where(and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, id)));
-        return { deleted: true, id };
-      } catch (e) {
-        throw fkError(e, "This subscription is linked to receivables and can't be deleted.");
-      }
+      await db.delete(subscriptions).where(and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, id)));
+      return { deleted: true, id };
     },
   },
 
@@ -359,7 +347,7 @@ export const clientTools: Record<string, ToolDef> = {
   },
 
   delete_contract: {
-    description: "Delete a contract. Fails if receivables reference it.",
+    description: "Delete a contract. Fails if transactions are still linked to it (unbind them first).",
     inputSchema: {
       type: "object",
       properties: { id: { type: "number" }, ...ORG_ARG },
@@ -375,144 +363,8 @@ export const clientTools: Record<string, ToolDef> = {
         await db.delete(contracts).where(and(eq(contracts.organizationId, orgId), eq(contracts.id, id)));
         return { deleted: true, id };
       } catch (e) {
-        throw fkError(e, "This contract is linked to receivables and can't be deleted.");
+        throw fkError(e, "This contract still has transactions linked to it — unbind them first.");
       }
-    },
-  },
-
-  // ---- receivables (create_receivable / mark_receivable_paid live in tools.ts) ----
-  update_receivable: {
-    description:
-      "Update an open receivable's fields (only provided ones). Does not change paid status — use collect_receivable for that.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        id: { type: "number" },
-        customerPartyId: { type: "number" },
-        contractId: { type: "number" },
-        subscriptionId: { type: "number" },
-        projectId: { type: "number" },
-        description: { type: "string" },
-        amount: { type: "number" },
-        currency: { type: "string" },
-        dueDate: { type: "string", description: "YYYY-MM-DD." },
-        ...ORG_ARG,
-      },
-      required: ["id"],
-      additionalProperties: false,
-    },
-    execute: async (args, ctx) => {
-      const id = requireNumber(args, "id");
-      const orgId = await resolveOrg(args, ctx);
-      const db = getDb();
-      await assertInOrg(db, receivables, id, orgId, "Receivable");
-      const customerPartyId = optNumber(args, "customerPartyId");
-      if (customerPartyId !== undefined) await assertInOrg(db, parties, customerPartyId, orgId, "Customer");
-      const contractId = optNumber(args, "contractId");
-      if (contractId !== undefined) await assertInOrg(db, contracts, contractId, orgId, "Contract");
-      const subscriptionId = optNumber(args, "subscriptionId");
-      if (subscriptionId !== undefined)
-        await assertInOrg(db, subscriptions, subscriptionId, orgId, "Subscription");
-      const projectId = optNumber(args, "projectId");
-      if (projectId !== undefined) await assertInOrg(db, projects, projectId, orgId, "Project");
-      const patch: Record<string, unknown> = {};
-      if (customerPartyId !== undefined) patch.customerPartyId = customerPartyId;
-      if (contractId !== undefined) patch.contractId = contractId;
-      if (subscriptionId !== undefined) patch.subscriptionId = subscriptionId;
-      if (projectId !== undefined) patch.projectId = projectId;
-      if (optString(args, "description") !== undefined) patch.description = optString(args, "description");
-      if (optNumber(args, "amount") !== undefined) patch.amount = requireAmount(args, "amount");
-      if (optString(args, "currency") !== undefined) patch.currency = normalizeCurrency(args, "currency");
-      if (optString(args, "dueDate") !== undefined) patch.dueDate = optString(args, "dueDate");
-      if (Object.keys(patch).length === 0) throw new Error("Nothing to update.");
-      const [row] = await db
-        .update(receivables)
-        .set(patch)
-        .where(and(eq(receivables.organizationId, orgId), eq(receivables.id, id)))
-        .returning();
-      return row;
-    },
-  },
-
-  delete_receivable: {
-    description: "Delete a receivable.",
-    inputSchema: {
-      type: "object",
-      properties: { id: { type: "number" }, ...ORG_ARG },
-      required: ["id"],
-      additionalProperties: false,
-    },
-    execute: async (args, ctx) => {
-      const id = requireNumber(args, "id");
-      const orgId = await resolveOrg(args, ctx);
-      const db = getDb();
-      await assertInOrg(db, receivables, id, orgId, "Receivable");
-      await db.delete(receivables).where(and(eq(receivables.organizationId, orgId), eq(receivables.id, id)));
-      return { deleted: true, id };
-    },
-  },
-
-  collect_receivable: {
-    description:
-      "Properly collect a receivable: creates an income transaction into the chosen account AND marks the receivable paid. Prefer this over mark_receivable_paid (which only flags it without a ledger entry).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        id: { type: "number", description: "Receivable id." },
-        accountId: { type: "number", description: "Account receiving the payment; see list_bank_accounts." },
-        payDate: { type: "string", description: "YYYY-MM-DD." },
-        ...ORG_ARG,
-      },
-      required: ["id", "accountId", "payDate"],
-      additionalProperties: false,
-    },
-    execute: async (args, ctx) => {
-      const id = requireNumber(args, "id");
-      const accountId = requireNumber(args, "accountId");
-      const payDate = requireDate(args, "payDate");
-      const orgId = await resolveOrg(args, ctx);
-      const db = getDb();
-      await assertInOrg(db, bankAccounts, accountId, orgId, "Account");
-      const [ar] = await db
-        .select({
-          customerPartyId: receivables.customerPartyId,
-          projectId: receivables.projectId,
-          amount: receivables.amount,
-          currency: receivables.currency,
-          status: receivables.status,
-          description: receivables.description,
-        })
-        .from(receivables)
-        .where(and(eq(receivables.organizationId, orgId), eq(receivables.id, id)))
-        .limit(1);
-      if (!ar) throw new Error(`Receivable ${id} not found in your organization.`);
-      if (ar.status === "paid") throw new Error("This receivable is already collected.");
-
-      const currency = ar.currency ?? "TWD";
-      const [txn] = await db
-        .insert(transactions)
-        .values({
-          organizationId: orgId,
-          type: "income",
-          txnDate: payDate,
-          description: ar.description ?? "應收帳款收款",
-          partyId: ar.customerPartyId,
-          projectId: ar.projectId,
-          amount: ar.amount,
-          currency,
-          amountTwd: currency === "TWD" ? ar.amount : null,
-          toAccountId: accountId,
-          book: "both",
-          billedToCompanyTaxId: false,
-        })
-        .returning({ id: transactions.id });
-
-      const [row] = await db
-        .update(receivables)
-        .set({ status: "paid", paidTransactionId: txn.id, paidAt: payDate })
-        .where(and(eq(receivables.organizationId, orgId), eq(receivables.id, id)))
-        .returning();
-      return { receivable: row, transactionId: txn.id };
     },
   },
 };

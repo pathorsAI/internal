@@ -18,7 +18,6 @@ import {
   projects,
   subscriptions,
   contracts,
-  receivables,
 } from "./schema";
 import { oauthApplication, member } from "./auth-schema";
 import { uploadDocument, deleteDocument } from "@/lib/storage";
@@ -314,6 +313,7 @@ export async function createTransaction(
         partyId: f.partyId,
         settleEmployeeId: f.settleEmployeeId,
         projectId: num(formData.get("projectId")),
+        contractId: num(formData.get("contractId")),
         amount,
         currency,
         amountTwd: currency === "TWD" ? amount : null,
@@ -796,6 +796,7 @@ export async function updateTransaction(
         partyId: f.partyId,
         settleEmployeeId: f.settleEmployeeId,
         projectId: num(formData.get("projectId")),
+        contractId: num(formData.get("contractId")),
         fromAccountId: f.fromAccountId,
         toAccountId: f.toAccountId,
         book,
@@ -1297,7 +1298,7 @@ export async function deleteSubscription(id: number): Promise<ActionState> {
     revalidatePath("/subscriptions");
     return { ok: true };
   } catch (e) {
-    return fkError(e, "此訂閱已被應收帳款連結，無法刪除");
+    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
   }
 }
 
@@ -1394,158 +1395,7 @@ export async function deleteContract(id: number): Promise<ActionState> {
     revalidatePath("/contracts");
     return { ok: true };
   } catch (e) {
-    return fkError(e, "此合約已被應收帳款連結，無法刪除");
-  }
-}
-
-// ---- 應收帳款 ----
-function receivableValues(formData: FormData) {
-  return {
-    customerPartyId: num(formData.get("customerPartyId")),
-    contractId: num(formData.get("contractId")),
-    subscriptionId: num(formData.get("subscriptionId")),
-    projectId: num(formData.get("projectId")),
-    description: str(formData.get("description")),
-    amount: str(formData.get("amount")),
-    currency: str(formData.get("currency")) ?? "TWD",
-    dueDate: str(formData.get("dueDate")),
-  };
-}
-
-export async function createReceivable(
-  _prev: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  const v = receivableValues(formData);
-  if (!v.customerPartyId) return { ok: false, error: "請選擇客戶" };
-  if (v.amount === null) return { ok: false, error: "請輸入金額" };
-  try {
-    const { orgId } = await requireOrg();
-    await getDb()
-      .insert(receivables)
-      .values({
-        organizationId: orgId,
-        customerPartyId: v.customerPartyId,
-        contractId: v.contractId,
-        subscriptionId: v.subscriptionId,
-        projectId: v.projectId,
-        description: v.description,
-        amount: v.amount,
-        currency: v.currency,
-        dueDate: v.dueDate,
-        status: "open",
-      });
-    revalidatePath("/receivables");
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "新增失敗" };
-  }
-}
-
-export async function updateReceivable(
-  _prev: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  const id = num(formData.get("id"));
-  if (!id) return { ok: false, error: "缺少 ID" };
-  const v = receivableValues(formData);
-  if (!v.customerPartyId) return { ok: false, error: "請選擇客戶" };
-  if (v.amount === null) return { ok: false, error: "請輸入金額" };
-  try {
-    const { orgId } = await requireOrg();
-    await getDb()
-      .update(receivables)
-      .set({
-        customerPartyId: v.customerPartyId,
-        contractId: v.contractId,
-        subscriptionId: v.subscriptionId,
-        projectId: v.projectId,
-        description: v.description,
-        amount: v.amount,
-        currency: v.currency,
-        dueDate: v.dueDate,
-      })
-      .where(and(eq(receivables.organizationId, orgId), eq(receivables.id, id)));
-    revalidatePath("/receivables");
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
-  }
-}
-
-export async function deleteReceivable(id: number): Promise<ActionState> {
-  try {
-    const { orgId } = await requireOrg();
-    await getDb()
-      .delete(receivables)
-      .where(and(eq(receivables.organizationId, orgId), eq(receivables.id, id)));
-    revalidatePath("/receivables");
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
-  }
-}
-
-// 收款：把一筆 open 的應收帳款結掉 → 建一筆 type=income 收入交易（記到客戶 + 專案），
-// 並把應收標記為已收（連到該筆交易）。
-export async function collectReceivable(
-  _prev: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  const id = num(formData.get("id"));
-  const accountId = num(formData.get("accountId"));
-  const payDate = str(formData.get("payDate"));
-  if (!id) return { ok: false, error: "缺少應收帳款" };
-  if (!accountId) return { ok: false, error: "請選擇收款帳戶" };
-  if (!payDate) return { ok: false, error: "請選擇收款日期" };
-  try {
-    const { orgId } = await requireOrg();
-    const db = getDb();
-    const [ar] = await db
-      .select({
-        customerPartyId: receivables.customerPartyId,
-        projectId: receivables.projectId,
-        amount: receivables.amount,
-        currency: receivables.currency,
-        status: receivables.status,
-        description: receivables.description,
-      })
-      .from(receivables)
-      .where(and(eq(receivables.organizationId, orgId), eq(receivables.id, id)))
-      .limit(1);
-    if (!ar) return { ok: false, error: "找不到該應收帳款" };
-    if (ar.status === "paid") return { ok: false, error: "這筆已收款" };
-
-    const currency = ar.currency ?? "TWD";
-    const [txn] = await db
-      .insert(transactions)
-      .values({
-        organizationId: orgId,
-        type: "income",
-        txnDate: payDate,
-        description: ar.description ?? "應收帳款收款",
-        partyId: ar.customerPartyId,
-        projectId: ar.projectId,
-        amount: ar.amount,
-        currency,
-        amountTwd: currency === "TWD" ? ar.amount : null,
-        toAccountId: accountId,
-        book: "both",
-        billedToCompanyTaxId: false,
-      })
-      .returning({ id: transactions.id });
-
-    await db
-      .update(receivables)
-      .set({ status: "paid", paidTransactionId: txn.id, paidAt: payDate })
-      .where(and(eq(receivables.organizationId, orgId), eq(receivables.id, id)));
-
-    revalidatePath("/receivables");
-    revalidatePath("/transactions");
-    revalidatePath("/");
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "收款失敗" };
+    return fkError(e, "此合約已被交易連結，無法刪除（請先解除交易的合約綁定）");
   }
 }
 

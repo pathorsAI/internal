@@ -49,7 +49,7 @@ export const accountingTools: Record<string, ToolDef> = {
   // ---- parties (vendors / customers / gov) ----
   list_parties: {
     description:
-      "List transaction counterparties (vendors, customers, gov). Use to resolve a party id for transactions, contracts, subscriptions, receivables. Filter by label.",
+      "List transaction counterparties (vendors, customers, gov). Use to resolve a party id for transactions, contracts, subscriptions. Filter by label.",
     inputSchema: {
       type: "object",
       properties: {
@@ -291,7 +291,7 @@ export const accountingTools: Record<string, ToolDef> = {
   // ---- bank accounts ----
   list_bank_accounts: {
     description:
-      "List cash/bank accounts. Use to resolve fromAccountId/toAccountId/accountId for transactions and receivable collection.",
+      "List cash/bank accounts. Use to resolve fromAccountId/toAccountId/accountId for transactions.",
     inputSchema: { type: "object", properties: { ...ORG_ARG }, additionalProperties: false },
     execute: async (args, ctx) => listBankAccounts(await resolveOrg(args, ctx)),
   },
