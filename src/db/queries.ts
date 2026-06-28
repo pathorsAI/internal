@@ -283,6 +283,8 @@ export async function listParties(orgId: string) {
       isActive: parties.isActive,
       accountName: bankAccounts.name,
       txnCount: sql<number>`(select count(*)::int from ${transactions} t where t.party_id = ${parties.id})`,
+      txnIncome: sql<string>`coalesce((select sum(coalesce(t.amount_twd, t.amount)) from ${transactions} t where t.party_id = ${parties.id} and t.type = 'income'), 0)`,
+      txnExpense: sql<string>`coalesce((select sum(coalesce(t.amount_twd, t.amount)) from ${transactions} t where t.party_id = ${parties.id} and t.type = 'expense'), 0)`,
       txnTotal: sql<string>`coalesce((select sum(coalesce(t.amount_twd, t.amount)) from ${transactions} t where t.party_id = ${parties.id}), 0)`,
     })
     .from(parties)

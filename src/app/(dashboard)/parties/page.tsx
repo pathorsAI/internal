@@ -47,14 +47,15 @@ export default async function PartiesPage() {
               <TableHead>類型</TableHead>
               <TableHead>統編</TableHead>
               <TableHead className="text-right">交易數</TableHead>
-              <TableHead className="text-right">累計 (TWD)</TableHead>
+              <TableHead className="text-right">收入 (TWD)</TableHead>
+              <TableHead className="text-right">支出 (TWD)</TableHead>
               <TableHead className="text-right">動作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground">
+                <TableCell colSpan={7} className="text-center text-muted-foreground">
                   尚無交易對象，點右上角新增
                 </TableCell>
               </TableRow>
@@ -72,8 +73,11 @@ export default async function PartiesPage() {
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">{s.taxId ?? "—"}</TableCell>
                       <TableCell className="text-right tabular-nums">{s.txnCount}</TableCell>
-                      <TableCell className="text-right font-medium tabular-nums">
-                        {formatCurrency(s.txnTotal)}
+                      <TableCell className="text-right font-medium tabular-nums text-emerald-600">
+                        {Number(s.txnIncome) > 0 ? formatCurrency(s.txnIncome) : "—"}
+                      </TableCell>
+                      <TableCell className="text-right font-medium tabular-nums text-rose-600">
+                        {Number(s.txnExpense) > 0 ? formatCurrency(s.txnExpense) : "—"}
                       </TableCell>
                       <TableCell className="text-right">
                         <DeleteButton action={deleteParty} id={s.id} />
