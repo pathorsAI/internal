@@ -3,6 +3,7 @@
 import { useActionState, useEffect } from "react";
 import { toast } from "sonner";
 import { updateContract, type ActionState } from "@/db/mutations";
+import { formatCurrency } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label, Req } from "@/components/ui/label";
@@ -39,11 +40,13 @@ export function EditContractForm({
   contract,
   parties,
   projects,
+  summary,
   footer,
 }: Readonly<{
   contract: Contract;
   parties: { id: number; name: string }[];
   projects: { id: number; name: string }[];
+  summary?: { received: number; cost: number; remaining: number | null };
   footer?: React.ReactNode;
 }>) {
   const [state, action, pending] = useActionState(updateContract, initial);
@@ -64,6 +67,32 @@ export function EditContractForm({
   return (
     <form action={action} className="grid gap-4 sm:grid-cols-2">
       <input type="hidden" name="id" value={contract.id} />
+
+      {summary && (
+        <div className="grid grid-cols-3 gap-2 rounded-lg border bg-muted/30 p-3 text-center sm:col-span-2">
+          <div>
+            <div className="text-xs text-muted-foreground">已收</div>
+            <div className="text-sm font-medium tabular-nums">
+              {formatCurrency(summary.received, contract.currency)}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">未收</div>
+            <div className="text-sm font-medium tabular-nums">
+              {summary.remaining == null ? "—" : formatCurrency(summary.remaining, contract.currency)}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">累計成本</div>
+            <div className="text-sm font-medium tabular-nums">
+              {formatCurrency(summary.cost, contract.currency)}
+            </div>
+          </div>
+          <p className="col-span-3 text-xs text-muted-foreground">
+            已收來自綁定此合約的收入交易；成本僅供參考，不從合約金額扣除。
+          </p>
+        </div>
+      )}
 
       <div className="space-y-1.5">
         <Label>客戶<Req /></Label>

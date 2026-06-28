@@ -18,10 +18,12 @@ import {
   listParties,
   listEmployees,
   listProjects,
+  listContractOptions,
   listTransactionMonths,
   type Book,
   type TxnDocument,
 } from "@/db/queries";
+import type { ContractOption } from "./contract-combobox";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { NewTransactionDialog } from "./new-transaction-dialog";
@@ -76,6 +78,7 @@ function TransactionRow({
   employees,
   accounts,
   projects,
+  contracts,
   docs,
 }: Readonly<{
   t: TxnRow;
@@ -84,6 +87,7 @@ function TransactionRow({
   employees: Opt[];
   accounts: AccountOpt[];
   projects: Opt[];
+  contracts: ContractOption[];
   docs: TxnDocument[];
 }>) {
   return (
@@ -139,12 +143,14 @@ function TransactionRow({
           fromAccountId: t.fromAccountId,
           toAccountId: t.toAccountId,
           projectId: t.projectId,
+          contractId: t.contractId,
         }}
         categories={categories}
         parties={parties}
         employees={employees}
         accounts={accounts}
         projects={projects}
+        contracts={contracts}
         docs={docs}
       />
     </RowDialog>
@@ -163,20 +169,27 @@ export default async function TransactionsPage({
     | undefined;
   const categoryId = category && Number.isFinite(Number(category)) ? Number(category) : undefined;
   const accountId = account && Number.isFinite(Number(account)) ? Number(account) : undefined;
-  const [rows, accounts, categories, parties, employees, projects, months] = await Promise.all([
-    listTransactions(orgId, { book: active, categoryId, accountId, period }),
-    listBankAccounts(orgId),
-    listCategories(orgId),
-    listParties(orgId),
-    listEmployees(orgId),
-    listProjects(orgId),
-    listTransactionMonths(orgId),
-  ]);
+  const [rows, accounts, categories, parties, employees, projects, contracts, months] =
+    await Promise.all([
+      listTransactions(orgId, { book: active, categoryId, accountId, period }),
+      listBankAccounts(orgId),
+      listCategories(orgId),
+      listParties(orgId),
+      listEmployees(orgId),
+      listProjects(orgId),
+      listContractOptions(orgId),
+      listTransactionMonths(orgId),
+    ]);
   const docsMap = await listDocumentsForTransactions(orgId, rows.map((r) => r.id));
   const partyOpts = parties.map((s) => ({ id: s.id, name: s.name }));
   const employeeOpts = employees.map((e) => ({ id: e.id, name: e.name }));
   const accountOpts = accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }));
   const projectOpts = projects.map((p) => ({ id: p.id, name: p.name }));
+  // 合約下拉的顯示字串：標題（客戶），避免同名合約難以分辨
+  const contractOpts: ContractOption[] = contracts.map((c) => ({
+    id: c.id,
+    label: c.customerName ? `${c.title}（${c.customerName}）` : c.title,
+  }));
   const groups = groupByMonth(rows);
 
   return (
@@ -188,6 +201,7 @@ export default async function TransactionsPage({
           parties={parties.map((s) => ({ id: s.id, name: s.name }))}
           employees={employees.map((e) => ({ id: e.id, name: e.name }))}
           projects={projectOpts}
+          contracts={contractOpts}
         />
       </PageHeader>
 
@@ -233,6 +247,7 @@ export default async function TransactionsPage({
                       employees={employeeOpts}
                       accounts={accountOpts}
                       projects={projectOpts}
+                      contracts={contractOpts}
                       docs={docsMap.get(t.id) ?? []}
                     />
                   ))}

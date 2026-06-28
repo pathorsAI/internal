@@ -54,7 +54,7 @@ export default async function McpPage() {
     <>
       <PageHeader
         title="MCP"
-        description="把這個系統接到 Claude 等 MCP 用戶端，用對話查詢專案、訂閱、應收帳款與待收的款項"
+        description="把這個系統接到 Claude 等 MCP 用戶端，用對話查詢專案、訂閱、合約與收款狀況"
       />
 
       <div className="space-y-6">

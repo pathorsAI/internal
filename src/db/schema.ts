@@ -216,6 +216,9 @@ export const transactions = pgTable("transactions", {
 	// 專案標籤：vendor ≠ project，交易同時帶 party_id（廠商/客戶）與 project_id（專案）。
 	// FK 在 DB 端（migrations/0003）建立，這裡只放欄位避免與 projects 的宣告順序衝突。
 	projectId: bigint("project_id", { mode: "number" }),
+	// 合約綁定（選填）：收款進度用 income 交易追蹤已收/未收；expense/advance 僅算成本。
+	// FK 在 DB 端（migrations/0009）建立，這裡只放欄位避免宣告順序衝突。
+	contractId: bigint("contract_id", { mode: "number" }),
 }, (table) => [
 	index("idx_txn_book").using("btree", table.book.asc().nullsLast().op("text_ops")),
 	index("idx_txn_category").using("btree", table.categoryId.asc().nullsLast().op("int8_ops")),
@@ -318,7 +321,7 @@ export const documents = pgTable("documents", {
 	check("chk_doc_invoice_kind", sql`invoice_kind IS NULL OR invoice_kind = ANY (ARRAY['electronic'::text, 'paper'::text])`),
 ]);
 
-// ---- 客戶營運（專案 / 訂閱 / 合約 / 應收帳款）----
+// ---- 客戶營運（專案 / 訂閱 / 合約）----
 
 export const projects = pgTable("projects", {
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "projects_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
@@ -391,48 +394,4 @@ export const contracts = pgTable("contracts", {
 			name: "contracts_project_id_fkey"
 		}),
 	check("chk_contract_status", sql`status = ANY (ARRAY['draft'::text, 'active'::text, 'completed'::text, 'cancelled'::text])`),
-]);
-
-export const receivables = pgTable("receivables", {
-	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "receivables_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
-	organizationId: text("organization_id"),
-	customerPartyId: bigint("customer_party_id", { mode: "number" }).notNull(),
-	contractId: bigint("contract_id", { mode: "number" }),
-	subscriptionId: bigint("subscription_id", { mode: "number" }),
-	projectId: bigint("project_id", { mode: "number" }),
-	description: text(),
-	amount: numeric({ precision: 18, scale: 2 }).notNull(),
-	currency: char({ length: 3 }).default('TWD').notNull(),
-	dueDate: date("due_date"),
-	status: text().default('open').notNull(),
-	paidTransactionId: bigint("paid_transaction_id", { mode: "number" }),
-	paidAt: date("paid_at"),
-	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-}, (table) => [
-	foreignKey({
-			columns: [table.customerPartyId],
-			foreignColumns: [parties.id],
-			name: "receivables_customer_party_id_fkey"
-		}),
-	foreignKey({
-			columns: [table.contractId],
-			foreignColumns: [contracts.id],
-			name: "receivables_contract_id_fkey"
-		}),
-	foreignKey({
-			columns: [table.subscriptionId],
-			foreignColumns: [subscriptions.id],
-			name: "receivables_subscription_id_fkey"
-		}),
-	foreignKey({
-			columns: [table.projectId],
-			foreignColumns: [projects.id],
-			name: "receivables_project_id_fkey"
-		}),
-	foreignKey({
-			columns: [table.paidTransactionId],
-			foreignColumns: [transactions.id],
-			name: "receivables_paid_transaction_id_fkey"
-		}),
-	check("chk_receivable_status", sql`status = ANY (ARRAY['open'::text, 'paid'::text, 'void'::text])`),
 ]);

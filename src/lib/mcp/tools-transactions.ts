@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import {
   bankAccounts,
   categories,
+  contracts,
   documents,
   employees,
   parties,
@@ -200,6 +201,16 @@ async function optProjectId(
   return projectId;
 }
 
+async function optContractId(
+  db: Db,
+  args: Record<string, unknown>,
+  orgId: string,
+): Promise<number | undefined> {
+  const contractId = optNumber(args, "contractId");
+  if (contractId !== undefined) await assertInOrg(db, contracts, contractId, orgId, "Contract");
+  return contractId;
+}
+
 export const transactionTools: Record<string, ToolDef> = {
   list_transactions: {
     description:
@@ -282,6 +293,11 @@ export const transactionTools: Record<string, ToolDef> = {
         fromAccountId: { type: "number", description: "For transfer." },
         toAccountId: { type: "number", description: "For transfer." },
         projectId: { type: "number", description: "Optional project tag." },
+        contractId: {
+          type: "number",
+          description:
+            "Optional contract to link. income counts toward the contract's 已收/未收; expense/advance are cost-only (does not reduce the contract amount).",
+        },
         ...ORG_ARG,
       },
       required: ["type", "txnDate", "amount"],
@@ -296,6 +312,7 @@ export const transactionTools: Record<string, ToolDef> = {
       const db = getDb();
       const f = await resolveTxnFields(db, orgId, type, args);
       const projectId = await optProjectId(db, args, orgId);
+      const contractId = await optContractId(db, args, orgId);
       const amount = requireDecimal(args, "amount");
       const currency = normalizeCurrency(args, "currency");
       const reported = type === "transfer" || optBoolean(args, "reported") === true;
@@ -310,6 +327,7 @@ export const transactionTools: Record<string, ToolDef> = {
           partyId: f.partyId,
           settleEmployeeId: f.settleEmployeeId,
           projectId: projectId ?? null,
+          contractId: contractId ?? null,
           amount,
           currency,
           amountTwd: currency === "TWD" ? amount : null,
@@ -325,7 +343,7 @@ export const transactionTools: Record<string, ToolDef> = {
 
   bulk_create_transactions: {
     description:
-      "Insert MANY ledger transactions in ONE call — use this instead of calling create_transaction in a loop. Pass `items`: an array where each element mirrors create_transaction's arguments (type, txnDate, amount, currency?, description?, reported?, accountId?, partyName?, categoryId?, settleEmployeeName?, fromAccountId?, toAccountId?, projectId?). Per-type requirements match create_transaction (expense/income: accountId+partyName+categoryId; advance: partyName+categoryId+settleEmployeeName; transfer: fromAccountId+toAccountId). Account/category/project ids are validated against your org; party/employee names are created on demand and deduped within the batch. All rows are written in a single INSERT. Returns the created count and ids. Max 1000 items per call.",
+      "Insert MANY ledger transactions in ONE call — use this instead of calling create_transaction in a loop. Pass `items`: an array where each element mirrors create_transaction's arguments (type, txnDate, amount, currency?, description?, reported?, accountId?, partyName?, categoryId?, settleEmployeeName?, fromAccountId?, toAccountId?, projectId?, contractId?). Per-type requirements match create_transaction (expense/income: accountId+partyName+categoryId; advance: partyName+categoryId+settleEmployeeName; transfer: fromAccountId+toAccountId). Account/category/project/contract ids are validated against your org; party/employee names are created on demand and deduped within the batch. All rows are written in a single INSERT. Returns the created count and ids. Max 1000 items per call.",
     inputSchema: {
       type: "object",
       properties: {
@@ -348,6 +366,10 @@ export const transactionTools: Record<string, ToolDef> = {
               fromAccountId: { type: "number", description: "For transfer." },
               toAccountId: { type: "number", description: "For transfer." },
               projectId: { type: "number", description: "Optional project tag." },
+              contractId: {
+                type: "number",
+                description: "Optional contract to link (income → 已收; expense/advance → cost only).",
+              },
             },
             required: ["type", "txnDate", "amount"],
             additionalProperties: false,
@@ -371,14 +393,16 @@ export const transactionTools: Record<string, ToolDef> = {
 
       // Load the org's valid FK ids once, so each row is validated in memory
       // instead of issuing an assertInOrg round trip per row.
-      const [acctRows, catRows, projRows] = await Promise.all([
+      const [acctRows, catRows, projRows, contractRows] = await Promise.all([
         db.select({ id: bankAccounts.id }).from(bankAccounts).where(eq(bankAccounts.organizationId, orgId)),
         db.select({ id: categories.id }).from(categories).where(eq(categories.organizationId, orgId)),
         db.select({ id: projects.id }).from(projects).where(eq(projects.organizationId, orgId)),
+        db.select({ id: contracts.id }).from(contracts).where(eq(contracts.organizationId, orgId)),
       ]);
       const acctSet = new Set(acctRows.map((r) => r.id));
       const catSet = new Set(catRows.map((r) => r.id));
       const projSet = new Set(projRows.map((r) => r.id));
+      const contractSet = new Set(contractRows.map((r) => r.id));
 
       type Norm = {
         type: string;
@@ -388,6 +412,7 @@ export const transactionTools: Record<string, ToolDef> = {
         description: string | null;
         reported: boolean;
         projectId: number | null;
+        contractId: number | null;
         categoryId: number | null;
         fromAccountId: number | null;
         toAccountId: number | null;
@@ -412,6 +437,10 @@ export const transactionTools: Record<string, ToolDef> = {
         if (projectId !== null && !projSet.has(projectId)) {
           throw new Error(`${at}.projectId ${projectId} not found in your organization.`);
         }
+        const contractId = optNumber(it, "contractId") ?? null;
+        if (contractId !== null && !contractSet.has(contractId)) {
+          throw new Error(`${at}.contractId ${contractId} not found in your organization.`);
+        }
         const n: Norm = {
           type,
           txnDate: requireDate(it, "txnDate"),
@@ -420,6 +449,7 @@ export const transactionTools: Record<string, ToolDef> = {
           description: optString(it, "description") ?? null,
           reported: type === "transfer" || optBoolean(it, "reported") === true,
           projectId,
+          contractId,
           categoryId: null,
           fromAccountId: null,
           toAccountId: null,
@@ -483,6 +513,7 @@ export const transactionTools: Record<string, ToolDef> = {
         partyId: n.partyName ? (partyId.get(n.partyName) ?? null) : null,
         settleEmployeeId: n.settleEmployeeName ? (employeeId.get(n.settleEmployeeName) ?? null) : null,
         projectId: n.projectId,
+        contractId: n.contractId,
         amount: n.amount,
         currency: n.currency,
         amountTwd: n.currency === "TWD" ? n.amount : null,
@@ -498,7 +529,7 @@ export const transactionTools: Record<string, ToolDef> = {
 
   update_transaction: {
     description:
-      "Edit a transaction's date, amount, currency, description, category, project, or reported flag (only provided fields change). To change the account or counterparty, delete and recreate, or use the app.",
+      "Edit a transaction's date, amount, currency, description, category, project, contract, or reported flag (only provided fields change). To change the account or counterparty, delete and recreate, or use the app.",
     inputSchema: {
       type: "object",
       properties: {
@@ -509,6 +540,7 @@ export const transactionTools: Record<string, ToolDef> = {
         description: { type: "string" },
         categoryId: { type: "number" },
         projectId: { type: "number" },
+        contractId: { type: "number", description: "Link/relink to a contract; 0 to unset." },
         reported: { type: "boolean" },
         ...ORG_ARG,
       },
@@ -541,6 +573,15 @@ export const transactionTools: Record<string, ToolDef> = {
       }
       if (optNumber(args, "projectId") !== undefined) {
         patch.projectId = await optProjectId(db, args, orgId);
+      }
+      if (optNumber(args, "contractId") !== undefined) {
+        const contractId = requireNumber(args, "contractId");
+        if (contractId === 0) {
+          patch.contractId = null;
+        } else {
+          await assertInOrg(db, contracts, contractId, orgId, "Contract");
+          patch.contractId = contractId;
+        }
       }
       const amountProvided = optNumber(args, "amount") !== undefined;
       const currencyProvided = optString(args, "currency") !== undefined;

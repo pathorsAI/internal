@@ -26,6 +26,7 @@ import {
 import { DatePicker } from "@/components/date-picker";
 import { PartyCombobox } from "./party-combobox";
 import { CategoryCombobox } from "./category-combobox";
+import { ContractCombobox, type ContractOption } from "./contract-combobox";
 
 const initial: ActionState = { ok: false };
 
@@ -58,12 +59,14 @@ export function NewTransactionDialog({
   parties,
   employees,
   projects,
+  contracts,
 }: Readonly<{
   accounts: Account[];
   categories: { id: number; name: string; kind: string }[];
   parties: { id: number; name: string }[];
   employees: { id: number; name: string }[];
   projects: { id: number; name: string }[];
+  contracts: ContractOption[];
 }>) {
   const [open, setOpen] = useState(false);
   const [scenario, setScenario] = useState<Scenario | null>(null);
@@ -249,6 +252,16 @@ export function NewTransactionDialog({
                         ))}
                       </SelectContent>
                     </Select>
+                  </div>
+
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <Label>合約</Label>
+                    <ContractCombobox contracts={contracts} />
+                    <p className="text-xs text-muted-foreground">
+                      {scenario === "income"
+                        ? "綁合約後可在合約頁看到已收 / 未收。"
+                        : "可綁合約來追蹤這單花了多少（成本不會從合約金額扣除）。"}
+                    </p>
                   </div>
                 </>
               )}

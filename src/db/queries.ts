@@ -15,7 +15,6 @@ import {
   projects,
   subscriptions,
   contracts,
-  receivables,
 } from "./schema";
 import { oauthApplication, oauthAccessToken, member, organization } from "./auth-schema";
 
@@ -86,6 +85,7 @@ export async function listTransactions(
       settleEmployeeId: transactions.settleEmployeeId,
       projectId: transactions.projectId,
       projectName: projects.name,
+      contractId: transactions.contractId,
       fromAccount: fromAcct.name,
       toAccount: toAcct.name,
       partyName: parties.name,
@@ -532,7 +532,7 @@ export async function listPayslipRecords(orgId: string, limit = 200) {
     .limit(limit);
 }
 
-// ---- 客戶營運（專案 / 訂閱 / 合約 / 應收帳款）----
+// ---- 客戶營運（專案 / 訂閱 / 合約）----
 
 // 收支以 TWD 為主（amount_twd 缺值時退回 amount）做單一幣別彙總，報表用。
 const incomeTwd = sql<string>`coalesce(sum(coalesce(${transactions.amountTwd}, ${transactions.amount})) filter (where ${transactions.type} = 'income'), 0)`;
@@ -601,9 +601,30 @@ export async function listSubscriptions(orgId: string) {
     .orderBy(desc(subscriptions.createdAt));
 }
 
-export async function listContracts(orgId: string) {
+// 合約選單用的精簡清單（綁交易時的下拉選項）。
+export async function listContractOptions(orgId: string) {
   const db = getDb();
   return db
+    .select({
+      id: contracts.id,
+      title: contracts.title,
+      customerName: parties.name,
+      currency: contracts.currency,
+      status: contracts.status,
+    })
+    .from(contracts)
+    .leftJoin(parties, eq(parties.id, contracts.customerPartyId))
+    .where(eq(contracts.organizationId, orgId))
+    .orderBy(desc(contracts.createdAt));
+}
+
+export async function listContracts(orgId: string) {
+  const db = getDb();
+  // 收款進度：只看綁定此合約、且同幣別的交易（合約金額是單一幣別，不混算）。
+  // received = income（已收）；cost = expense/advance（成本，僅供參考，不從合約金額扣）。
+  const receivedSum = sql<string>`coalesce(sum(${transactions.amount}) filter (where ${transactions.type} = 'income'), 0)`;
+  const costSum = sql<string>`coalesce(sum(${transactions.amount}) filter (where ${transactions.type} in ('expense','advance')), 0)`;
+  const rows = await db
     .select({
       id: contracts.id,
       customerPartyId: contracts.customerPartyId,
@@ -618,40 +639,28 @@ export async function listContracts(orgId: string) {
       status: contracts.status,
       note: contracts.note,
       fileUrl: contracts.fileUrl,
+      received: receivedSum,
+      cost: costSum,
     })
     .from(contracts)
     .leftJoin(parties, eq(parties.id, contracts.customerPartyId))
     .leftJoin(projects, eq(projects.id, contracts.projectId))
+    .leftJoin(
+      transactions,
+      and(
+        eq(transactions.contractId, contracts.id),
+        eq(transactions.currency, contracts.currency),
+      ),
+    )
     .where(eq(contracts.organizationId, orgId))
+    .groupBy(contracts.id, parties.name, projects.name)
     .orderBy(desc(contracts.createdAt));
-}
-
-export async function listReceivables(orgId: string) {
-  const db = getDb();
-  return db
-    .select({
-      id: receivables.id,
-      customerPartyId: receivables.customerPartyId,
-      customerName: parties.name,
-      contractId: receivables.contractId,
-      contractTitle: contracts.title,
-      subscriptionId: receivables.subscriptionId,
-      projectId: receivables.projectId,
-      projectName: projects.name,
-      description: receivables.description,
-      amount: receivables.amount,
-      currency: receivables.currency,
-      dueDate: receivables.dueDate,
-      status: receivables.status,
-      paidTransactionId: receivables.paidTransactionId,
-      paidAt: receivables.paidAt,
-    })
-    .from(receivables)
-    .leftJoin(parties, eq(parties.id, receivables.customerPartyId))
-    .leftJoin(contracts, eq(contracts.id, receivables.contractId))
-    .leftJoin(projects, eq(projects.id, receivables.projectId))
-    .where(eq(receivables.organizationId, orgId))
-    .orderBy(receivables.status, receivables.dueDate);
+  return rows.map((r) => {
+    const received = Number(r.received);
+    const cost = Number(r.cost);
+    const remaining = r.amount == null ? null : Number(r.amount) - received;
+    return { ...r, received, cost, remaining };
+  });
 }
 
 // 廠商 / infra 成本報表：把支出（含代墊）依交易對象彙總（TWD）。

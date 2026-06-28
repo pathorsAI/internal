@@ -15,7 +15,6 @@ import {
   FolderKanban,
   Repeat,
   FileSignature,
-  HandCoins,
   BarChart3,
   UserCog,
   Settings,
@@ -54,7 +53,6 @@ const clients = [
   { title: "專案", href: "/projects", icon: FolderKanban },
   { title: "訂閱 / 月費", href: "/subscriptions", icon: Repeat },
   { title: "合約", href: "/contracts", icon: FileSignature },
-  { title: "應收帳款", href: "/receivables", icon: HandCoins },
   { title: "報表", href: "/reports", icon: BarChart3 },
 ];
 
