@@ -3,12 +3,12 @@
 This app exposes a [Model Context Protocol](https://modelcontextprotocol.io) server
 so an MCP client (Claude, etc.) can run essentially the whole app in natural
 language — the ledger (內外帳), parties, categories, bank accounts, invoices,
-projects, recurring subscriptions, contracts, receivables, employees, payroll
+projects, recurring subscriptions, contracts, employees, payroll
 (read), and reconciliations.
 
 A headline use: **never forget when to bill a client for recurring work.**
 `list_upcoming_billing` projects the next charge of every active subscription from
-`interval_months` + `start_date`, and surfaces overdue + soon-due receivables.
+`interval_months` + `start_date`. One-off collection is tracked on contracts (已收/未收).
 
 Design: read tools reuse the app's own query layer; writes are org-scoped and
 validate every referenced id against your org. Fixed value sets are exposed as
@@ -58,13 +58,12 @@ Every tool is categorized via MCP `annotations` (`readOnlyHint` / `destructiveHi
 tag prefixed to its description — so clients can group read vs write and gate
 destructive calls.
 
-**Discovery** — `list_organizations` (call first), `get_financial_overview`.
+**Discovery** — `list_organizations` (call first), `create_organization` (spin up a
+new org, makes you its owner), `get_financial_overview`.
 
-**Billing / receivables** — `list_upcoming_billing` (who to bill & when),
-`list_overdue_receivables`, `list_receivables`, `create_receivable`,
-`update_receivable`, `delete_receivable`, `collect_receivable` (records the income
-transaction **and** marks paid — preferred), `mark_receivable_paid` (lightweight
-flag, no ledger entry).
+**Billing** — `list_upcoming_billing` (who to bill & when, projected from active
+subscriptions). One-off collection is tracked on contracts (已收/未收, see
+`list_contracts`).
 
 **Ledger (內外帳)** — `list_transactions`, `get_transaction`,
 `list_outstanding_advances`, `create_transaction` (expense/income/advance/transfer),
