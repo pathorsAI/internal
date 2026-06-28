@@ -69,11 +69,12 @@ export function RowDialog({
         {row}
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetContent className="data-[side=right]:sm:max-w-xl">
-            <SheetHeader>
+            <SheetHeader className="shrink-0">
               <SheetTitle>{title}</SheetTitle>
               {description ? <SheetDescription>{description}</SheetDescription> : null}
             </SheetHeader>
-            <div className="flex-1 overflow-y-auto px-4 pb-4">
+            {/* 只有這個 body 會捲動；header 固定、表單底部的 footer 用 sticky 釘住 */}
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
               <CloseCtx.Provider value={close}>{children}</CloseCtx.Provider>
             </div>
           </SheetContent>
@@ -86,12 +87,15 @@ export function RowDialog({
     <>
       {row}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
+          <DialogHeader className="shrink-0 px-4 pt-4 pb-3">
             <DialogTitle>{title}</DialogTitle>
             {description ? <DialogDescription>{description}</DialogDescription> : null}
           </DialogHeader>
-          <CloseCtx.Provider value={close}>{children}</CloseCtx.Provider>
+          {/* 只有這個 body 會捲動；header 固定、表單底部的 footer 用 sticky 釘住 */}
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+            <CloseCtx.Provider value={close}>{children}</CloseCtx.Provider>
+          </div>
         </DialogContent>
       </Dialog>
     </>

@@ -1,5 +1,29 @@
 import { type ToolContext, tools } from "./tools";
-import { type ToolAnnotations } from "./shared";
+import { type ToolAnnotations, resolveOrg } from "./shared";
+import { logMcp, type ActivityAction } from "@/db/activity";
+
+// Derive an audit-log entry from a tool name + its result. Returns null for
+// read-only tools (list_/get_/...) so only writes get logged. Entity types match
+// the web side (transaction, party, bank_account, contract, ...).
+function deriveMcpAudit(
+  name: string,
+  out: unknown,
+): { action: ActivityAction; entityType: string; entityId: number | null } | null {
+  let entityId: number | null = null;
+  if (out && typeof out === "object") {
+    const o = out as Record<string, unknown>;
+    if (typeof o.id === "number") entityId = o.id;
+    else if (Array.isArray(o.ids) && typeof o.ids[0] === "number") entityId = o.ids[0];
+  }
+  if (name.startsWith("create_")) return { action: "create", entityType: name.slice(7), entityId };
+  if (name.startsWith("update_")) return { action: "update", entityType: name.slice(7), entityId };
+  if (name.startsWith("delete_")) return { action: "delete", entityType: name.slice(7), entityId };
+  if (name === "bulk_create_transactions") return { action: "create", entityType: "transaction", entityId };
+  if (name === "pay_employee_salary") return { action: "create", entityType: "payslip", entityId };
+  if (name === "mark_accountant_notified" || name === "unmark_accountant_notified")
+    return { action: "update", entityType: "transaction", entityId };
+  return null;
+}
 
 // Minimal MCP server over JSON-RPC 2.0 (Streamable HTTP, stateless). No SDK
 // dependency — Workers-friendly. Handles initialize / tools.list / tools.call /
@@ -106,6 +130,16 @@ async function handleMessage(
       }
       try {
         const out = await tool.execute(args, ctx);
+        // Best-effort audit log for MCP writes (never affects the response).
+        const audit = name ? deriveMcpAudit(name, out) : null;
+        if (audit) {
+          try {
+            const orgId = await resolveOrg(args, ctx);
+            await logMcp(orgId, ctx.userId, audit.action, audit.entityType, audit.entityId, name);
+          } catch {
+            // ignore audit failures
+          }
+        }
         return ok(id, {
           content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
         });

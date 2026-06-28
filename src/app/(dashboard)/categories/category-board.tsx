@@ -3,8 +3,6 @@
 import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { DeleteButton } from "@/components/delete-button";
-import { deleteCategory } from "@/db/mutations";
 import { CategoryFormDialog } from "./category-form-dialog";
 
 type Cat = { id: number; name: string; kind: string };
@@ -54,10 +52,7 @@ export function CategoryBoard({ categories }: Readonly<{ categories: Cat[] }>) {
             {list.map((c) => (
               <li key={c.id} className="flex items-center justify-between px-4 py-2.5">
                 <span className="text-sm">{c.name}</span>
-                <div className="flex items-center gap-1">
-                  <CategoryFormDialog kind={kind} category={{ id: c.id, name: c.name }} />
-                  <DeleteButton action={deleteCategory} id={c.id} />
-                </div>
+                <CategoryFormDialog kind={kind} category={{ id: c.id, name: c.name }} />
               </li>
             ))}
           </ul>

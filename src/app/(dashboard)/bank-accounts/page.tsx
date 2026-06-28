@@ -39,13 +39,12 @@ export default async function BankAccountsPage() {
               <TableHead>狀態</TableHead>
               <TableHead className="text-right">期初餘額</TableHead>
               <TableHead className="text-right">目前餘額</TableHead>
-              <TableHead className="text-right">動作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                <TableCell colSpan={6} className="text-center text-muted-foreground">
                   尚無帳戶
                 </TableCell>
               </TableRow>
@@ -75,9 +74,6 @@ export default async function BankAccountsPage() {
                       <TableCell className="text-right font-semibold tabular-nums">
                         {formatCurrency(a.bookBalance, a.currency)}
                       </TableCell>
-                      <TableCell className="text-right">
-                        <DeleteButton action={deleteBankAccount} id={a.id} />
-                      </TableCell>
                     </>
                   }
                 >
@@ -90,6 +86,7 @@ export default async function BankAccountsPage() {
                       openingBalance: a.openingBalance,
                       isActive: a.isActive,
                     }}
+                    footer={<DeleteButton action={deleteBankAccount} id={a.id} />}
                   />
                 </RowDialog>
               ))

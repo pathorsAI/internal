@@ -105,13 +105,12 @@ export default async function ContractsPage() {
               <TableHead>期間</TableHead>
               <TableHead>狀態</TableHead>
               <TableHead>檔案</TableHead>
-              <TableHead className="text-right">動作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center text-muted-foreground">
+                <TableCell colSpan={7} className="text-center text-muted-foreground">
                   尚無合約，點右上角新增
                 </TableCell>
               </TableRow>
@@ -152,9 +151,6 @@ export default async function ContractsPage() {
                           <span className="text-xs text-muted-foreground">—</span>
                         )}
                       </TableCell>
-                      <TableCell className="text-right">
-                        <DeleteButton action={deleteContract} id={c.id} />
-                      </TableCell>
                     </>
                   }
                 >
@@ -175,6 +171,7 @@ export default async function ContractsPage() {
                     parties={partyOptions}
                     projects={projectOptions}
                     summary={{ received: c.received, cost: c.cost, remaining: c.remaining }}
+                    footer={<DeleteButton action={deleteContract} id={c.id} />}
                   />
                 </RowDialog>
               ))

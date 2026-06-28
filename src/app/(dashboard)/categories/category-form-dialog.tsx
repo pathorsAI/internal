@@ -3,8 +3,9 @@
 import { useActionState, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Plus, Pencil } from "lucide-react";
-import { createCategory, updateCategory, type ActionState } from "@/db/mutations";
+import { createCategory, updateCategory, deleteCategory, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
+import { DeleteButton } from "@/components/delete-button";
 import { Input } from "@/components/ui/input";
 import { Label, Req } from "@/components/ui/label";
 import {
@@ -83,6 +84,11 @@ export function CategoryFormDialog({
             </div>
           </div>
           <DialogFooter>
+            {editing ? (
+              <div className="mr-auto">
+                <DeleteButton action={deleteCategory} id={category.id} />
+              </div>
+            ) : null}
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>
               取消
             </Button>

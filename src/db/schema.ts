@@ -6,6 +6,7 @@ import { sql } from "drizzle-orm"
 export const categories = pgTable("categories", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "categories_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
 	organizationId: text("organization_id"),
 	name: text().notNull(),
 	kind: text().notNull(),
@@ -17,6 +18,7 @@ export const categories = pgTable("categories", {
 export const bankAccounts = pgTable("bank_accounts", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "bank_accounts_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
 	organizationId: text("organization_id"),
 	name: text().notNull(),
 	kind: text().notNull(),
@@ -29,6 +31,7 @@ export const bankAccounts = pgTable("bank_accounts", {
 export const invoices = pgTable("invoices", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "invoices_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
 	organizationId: text("organization_id"),
 	direction: text().notNull(),
 	invoiceNumber: text("invoice_number"),
@@ -50,6 +53,7 @@ export const invoices = pgTable("invoices", {
 export const employees = pgTable("employees", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "employees_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
 	organizationId: text("organization_id"),
 	name: text().notNull(),
 	nationalId: text("national_id"),
@@ -73,6 +77,7 @@ export const employees = pgTable("employees", {
 export const payrollRuns = pgTable("payroll_runs", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "payroll_runs_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
 	organizationId: text("organization_id"),
 	periodYear: integer("period_year").notNull(),
 	periodMonth: integer("period_month").notNull(),
@@ -88,6 +93,7 @@ export const payrollRuns = pgTable("payroll_runs", {
 export const payslips = pgTable("payslips", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "payslips_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	payrollRunId: bigint("payroll_run_id", { mode: "number" }).notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
@@ -160,6 +166,7 @@ export const payrollItemTypes = pgTable("payroll_item_types", {
 export const parties = pgTable("parties", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "suppliers_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
 	organizationId: text("organization_id"),
 	name: text().notNull(),
 	label: text().default('vendor').notNull(),
@@ -185,6 +192,7 @@ export const parties = pgTable("parties", {
 export const transactions = pgTable("transactions", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "transactions_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
 	organizationId: text("organization_id"),
 	txnDate: date("txn_date").notNull(),
 	description: text(),
@@ -270,6 +278,7 @@ export const transactions = pgTable("transactions", {
 export const accountReconciliations = pgTable("account_reconciliations", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "account_reconciliations_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
 	organizationId: text("organization_id"),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	accountId: bigint("account_id", { mode: "number" }).notNull(),
@@ -288,6 +297,7 @@ export const accountReconciliations = pgTable("account_reconciliations", {
 
 export const documents = pgTable("documents", {
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "documents_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
 	organizationId: text("organization_id"),
 	docType: text("doc_type").notNull(),
 	r2Key: text("r2_key").notNull(),
@@ -325,6 +335,7 @@ export const documents = pgTable("documents", {
 
 export const projects = pgTable("projects", {
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "projects_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
 	organizationId: text("organization_id"),
 	name: text().notNull(),
 	clientPartyId: bigint("client_party_id", { mode: "number" }),
@@ -342,6 +353,7 @@ export const projects = pgTable("projects", {
 
 export const subscriptions = pgTable("subscriptions", {
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "subscriptions_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
 	organizationId: text("organization_id"),
 	customerPartyId: bigint("customer_party_id", { mode: "number" }).notNull(),
 	projectId: bigint("project_id", { mode: "number" }),
@@ -370,6 +382,7 @@ export const subscriptions = pgTable("subscriptions", {
 
 export const contracts = pgTable("contracts", {
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "contracts_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
 	organizationId: text("organization_id"),
 	customerPartyId: bigint("customer_party_id", { mode: "number" }).notNull(),
 	projectId: bigint("project_id", { mode: "number" }),
@@ -394,4 +407,24 @@ export const contracts = pgTable("contracts", {
 			name: "contracts_project_id_fkey"
 		}),
 	check("chk_contract_status", sql`status = ANY (ARRAY['draft'::text, 'active'::text, 'completed'::text, 'cancelled'::text])`),
+]);
+
+// ---- 操作紀錄（audit log）：org 內誰對哪個 entity 做了 create/update/delete，
+// web 與 OAuth MCP 都記錄，用來追查亂紀錄 / 亂刪除。----
+export const activityLog = pgTable("activity_log", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "activity_log_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id"),
+	actorUserId: text("actor_user_id"),
+	actorEmail: text("actor_email"),
+	actorName: text("actor_name"),
+	channel: text().default('web').notNull(),
+	action: text().notNull(),
+	entityType: text("entity_type").notNull(),
+	entityId: bigint("entity_id", { mode: "number" }),
+	summary: text(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_activity_org_time").using("btree", table.organizationId.asc().nullsLast(), table.createdAt.desc()),
+	check("chk_activity_channel", sql`channel = ANY (ARRAY['web'::text, 'mcp'::text])`),
+	check("chk_activity_action", sql`action = ANY (ARRAY['create'::text, 'update'::text, 'delete'::text])`),
 ]);

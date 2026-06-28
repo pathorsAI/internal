@@ -48,13 +48,12 @@ export default async function PartiesPage() {
               <TableHead>統編</TableHead>
               <TableHead className="text-right">交易數</TableHead>
               <TableHead className="text-right">累計 (TWD)</TableHead>
-              <TableHead className="text-right">動作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground">
+                <TableCell colSpan={5} className="text-center text-muted-foreground">
                   尚無交易對象，點右上角新增
                 </TableCell>
               </TableRow>
@@ -75,9 +74,6 @@ export default async function PartiesPage() {
                       <TableCell className="text-right font-medium tabular-nums">
                         {formatCurrency(s.txnTotal)}
                       </TableCell>
-                      <TableCell className="text-right">
-                        <DeleteButton action={deleteParty} id={s.id} />
-                      </TableCell>
                     </>
                   }
                 >
@@ -95,6 +91,7 @@ export default async function PartiesPage() {
                       isActive: s.isActive,
                     }}
                     accounts={accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }))}
+                    footer={<DeleteButton action={deleteParty} id={s.id} />}
                   />
                 </RowDialog>
               ))

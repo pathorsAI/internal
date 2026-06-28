@@ -20,8 +20,9 @@ import {
   contracts,
 } from "./schema";
 import { oauthApplication, member } from "./auth-schema";
-import { uploadDocument, deleteDocument } from "@/lib/storage";
+import { uploadDocument } from "@/lib/storage";
 import { requireOrg } from "@/lib/session";
+import { logWeb } from "@/db/activity";
 
 export type ActionState = { ok: boolean; error?: string };
 
@@ -91,7 +92,7 @@ export async function createParty(
 
   try {
     const { orgId } = await requireOrg();
-    await getDb()
+    const [inserted] = await getDb()
       .insert(parties)
       .values({
         organizationId: orgId,
@@ -103,7 +104,9 @@ export async function createParty(
         typicalAmount: str(formData.get("typicalAmount")),
         contact: str(formData.get("contact")),
         note: str(formData.get("note")),
-      });
+      })
+      .returning({ id: parties.id });
+    await logWeb(orgId, "create", "party", inserted.id, name);
     revalidatePath("/parties");
     return { ok: true };
   } catch (e) {
@@ -125,7 +128,7 @@ export async function createReconciliation(
 
   try {
     const { orgId } = await requireOrg();
-    await getDb()
+    const [inserted] = await getDb()
       .insert(accountReconciliations)
       .values({
         organizationId: orgId,
@@ -133,7 +136,9 @@ export async function createReconciliation(
         asOfDate,
         statementBalance,
         note: str(formData.get("note")),
-      });
+      })
+      .returning({ id: accountReconciliations.id });
+    await logWeb(orgId, "create", "reconciliation", inserted.id);
     revalidatePath("/reconciliation");
     return { ok: true };
   } catch (e) {
@@ -326,6 +331,8 @@ export async function createTransaction(
 
     await storeTransactionDocument(db, orgId, inserted.id, formData, billed);
 
+    await logWeb(orgId, "create", "transaction", inserted.id, str(formData.get("description")) ?? type);
+
     revalidatePath("/transactions");
     revalidatePath("/accountant-notices");
     revalidatePath("/");
@@ -360,6 +367,7 @@ export async function updateParty(
         isActive: formData.get("isActive") === "on",
       })
       .where(and(eq(parties.organizationId, orgId), eq(parties.id, id)));
+    await logWeb(orgId, "update", "party", id, name);
     revalidatePath("/parties");
     revalidatePath(`/parties/${id}`);
     return { ok: true };
@@ -402,19 +410,24 @@ export async function createReimbursement(
     if (!adv) return { ok: false, error: "找不到該代墊紀錄" };
     const advCurrency = adv.currency ?? "TWD";
 
-    await db.insert(transactions).values({
-      organizationId: orgId,
-      type: "reimbursement",
-      txnDate: payDate,
-      settleEmployeeId: adv.settleEmployeeId, // 付給代墊人（員工）
-      amount,
-      currency: advCurrency,
-      amountTwd: advCurrency === "TWD" ? amount : null,
-      fromAccountId,
-      book: "internal",
-      relatedToId: advanceId,
-      description: "撥款還代墊",
-    });
+    const [inserted] = await db
+      .insert(transactions)
+      .values({
+        organizationId: orgId,
+        type: "reimbursement",
+        txnDate: payDate,
+        settleEmployeeId: adv.settleEmployeeId, // 付給代墊人（員工）
+        amount,
+        currency: advCurrency,
+        amountTwd: advCurrency === "TWD" ? amount : null,
+        fromAccountId,
+        book: "internal",
+        relatedToId: advanceId,
+        description: "撥款還代墊",
+      })
+      .returning({ id: transactions.id });
+
+    await logWeb(orgId, "create", "transaction", inserted.id, "員工代墊撥款");
 
     revalidatePath("/advances");
     revalidatePath("/transactions");
@@ -424,13 +437,6 @@ export async function createReimbursement(
     return { ok: false, error: e instanceof Error ? e.message : "撥款失敗" };
   }
 }
-
-const fkError = (e: unknown, busy: string) => {
-  const err = e as { code?: string; message?: string };
-  const msg = err?.message ?? "";
-  const isFk = err?.code === "23503" || /foreign key|violates/i.test(msg);
-  return { ok: false as const, error: isFk ? busy : msg || "刪除失敗" };
-};
 
 // ---- 分類（科目）----
 const CATEGORY_KINDS = new Set(["income", "cogs", "expense"]);
@@ -445,7 +451,11 @@ export async function createCategory(
   if (!CATEGORY_KINDS.has(kind)) return { ok: false, error: "分類別不正確" };
   try {
     const { orgId } = await requireOrg();
-    await getDb().insert(categories).values({ organizationId: orgId, name, kind });
+    const [inserted] = await getDb()
+      .insert(categories)
+      .values({ organizationId: orgId, name, kind })
+      .returning({ id: categories.id });
+    await logWeb(orgId, "create", "category", inserted.id, name);
     revalidatePath("/categories");
     revalidatePath("/transactions");
     return { ok: true };
@@ -468,6 +478,7 @@ export async function updateCategory(
       .update(categories)
       .set({ name })
       .where(and(eq(categories.organizationId, orgId), eq(categories.id, id)));
+    await logWeb(orgId, "update", "category", id, name);
     revalidatePath("/categories");
     revalidatePath("/transactions");
     return { ok: true };
@@ -480,13 +491,15 @@ export async function deleteCategory(id: number): Promise<ActionState> {
   try {
     const { orgId } = await requireOrg();
     await getDb()
-      .delete(categories)
+      .update(categories)
+      .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(categories.organizationId, orgId), eq(categories.id, id)));
+    await logWeb(orgId, "delete", "category", id);
     revalidatePath("/categories");
     revalidatePath("/transactions");
     return { ok: true };
   } catch (e) {
-    return fkError(e, "此分類已被交易使用，無法刪除（可改名或先把相關交易換分類）");
+    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
   }
 }
 
@@ -499,14 +512,18 @@ export async function createBankAccount(
   if (!name) return { ok: false, error: "請輸入名稱" };
   try {
     const { orgId } = await requireOrg();
-    await getDb().insert(bankAccounts).values({
-      organizationId: orgId,
-      name,
-      kind: str(formData.get("kind")) ?? "bank",
-      currency: str(formData.get("currency")) ?? "TWD",
-      openingBalance: str(formData.get("openingBalance")) ?? "0",
-      isActive: true,
-    });
+    const [inserted] = await getDb()
+      .insert(bankAccounts)
+      .values({
+        organizationId: orgId,
+        name,
+        kind: str(formData.get("kind")) ?? "bank",
+        currency: str(formData.get("currency")) ?? "TWD",
+        openingBalance: str(formData.get("openingBalance")) ?? "0",
+        isActive: true,
+      })
+      .returning({ id: bankAccounts.id });
+    await logWeb(orgId, "create", "bank_account", inserted.id, name);
     revalidatePath("/bank-accounts");
     return { ok: true };
   } catch (e) {
@@ -534,6 +551,7 @@ export async function updateBankAccount(
         isActive: formData.get("isActive") === "on",
       })
       .where(and(eq(bankAccounts.organizationId, orgId), eq(bankAccounts.id, id)));
+    await logWeb(orgId, "update", "bank_account", id, name);
     revalidatePath("/bank-accounts");
     revalidatePath(`/bank-accounts/${id}`);
     return { ok: true };
@@ -546,12 +564,14 @@ export async function deleteBankAccount(id: number): Promise<ActionState> {
   try {
     const { orgId } = await requireOrg();
     await getDb()
-      .delete(bankAccounts)
+      .update(bankAccounts)
+      .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(bankAccounts.organizationId, orgId), eq(bankAccounts.id, id)));
+    await logWeb(orgId, "delete", "bank_account", id);
     revalidatePath("/bank-accounts");
     return { ok: true };
   } catch (e) {
-    return fkError(e, "此帳戶已被交易或對帳使用，無法刪除，請改為停用");
+    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
   }
 }
 
@@ -566,7 +586,7 @@ export async function createEmployee(
   const healthInsured = str(formData.get("healthInsuredSalary"));
   try {
     const { orgId } = await requireOrg();
-    await getDb()
+    const [inserted] = await getDb()
       .insert(employees)
       .values({
         organizationId: orgId,
@@ -583,7 +603,9 @@ export async function createEmployee(
         startDate: str(formData.get("startDate")),
         endDate: str(formData.get("endDate")),
         isActive: true,
-      });
+      })
+      .returning({ id: employees.id });
+    await logWeb(orgId, "create", "employee", inserted.id, name);
     revalidatePath("/employees");
     return { ok: true };
   } catch (e) {
@@ -621,6 +643,7 @@ export async function updateEmployee(
         isActive: formData.get("isActive") === "on",
       })
       .where(and(eq(employees.organizationId, orgId), eq(employees.id, id)));
+    await logWeb(orgId, "update", "employee", id, name);
     revalidatePath("/employees");
     revalidatePath(`/employees/${id}`);
     return { ok: true };
@@ -633,12 +656,14 @@ export async function deleteEmployee(id: number): Promise<ActionState> {
   try {
     const { orgId } = await requireOrg();
     await getDb()
-      .delete(employees)
+      .update(employees)
+      .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(employees.organizationId, orgId), eq(employees.id, id)));
+    await logWeb(orgId, "delete", "employee", id);
     revalidatePath("/employees");
     return { ok: true };
   } catch (e) {
-    return fkError(e, "這位員工已經有交易或薪資紀錄，不能直接刪除；請改用編輯把「在職」取消（改為離職）。");
+    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
   }
 }
 
@@ -647,12 +672,14 @@ export async function deleteParty(id: number): Promise<ActionState> {
   try {
     const { orgId } = await requireOrg();
     await getDb()
-      .delete(parties)
+      .update(parties)
+      .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(parties.organizationId, orgId), eq(parties.id, id)));
+    await logWeb(orgId, "delete", "party", id);
     revalidatePath("/parties");
     return { ok: true };
   } catch (e) {
-    return fkError(e, "此交易對象已被交易使用，無法刪除，請改為停用");
+    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
   }
 }
 
@@ -679,43 +706,42 @@ export async function deleteTransaction(id: number): Promise<ActionState> {
         error: "這筆是發薪產生的交易，不能直接刪；請到「薪資」頁撤銷該筆發放。",
       };
     }
-    // 先清掉這筆交易的憑證（R2 檔 + documents 列），不要留孤兒檔
-    const docs = await db
-      .select({ r2Key: documents.r2Key })
-      .from(documents)
+    // 軟刪除這筆交易的憑證（保留 R2 檔，不移除 storage）
+    await db
+      .update(documents)
+      .set({ deletedAt: new Date().toISOString() })
       .where(eq(documents.transactionId, id));
-    for (const d of docs) {
-      if (d.r2Key && !d.r2Key.startsWith("meta/")) await deleteDocument(d.r2Key);
-    }
-    if (docs.length > 0) {
-      await db.delete(documents).where(eq(documents.transactionId, id));
-    }
-    await db.delete(transactions).where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)));
+    await db
+      .update(transactions)
+      .set({ deletedAt: new Date().toISOString() })
+      .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)));
+    await logWeb(orgId, "delete", "transaction", id);
     revalidatePath("/transactions");
     revalidatePath("/advances");
     revalidatePath("/accountant-notices");
     revalidatePath("/");
     return { ok: true };
   } catch (e) {
-    return fkError(e, "這筆交易被其他紀錄連結（例如代墊已有撥款），請先處理那筆再刪。");
+    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
   }
 }
 
-// 刪除交易的某筆憑證（連同 R2 檔案）
+// 軟刪除交易的某筆憑證（保留 R2 檔，不移除 storage）
 export async function deleteTransactionDocument(id: number): Promise<ActionState> {
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
     const [doc] = await db
-      .select({ r2Key: documents.r2Key })
+      .select({ id: documents.id })
       .from(documents)
       .where(and(eq(documents.organizationId, orgId), eq(documents.id, id)))
       .limit(1);
     if (!doc) return { ok: false, error: "找不到該憑證" };
-    await db.delete(documents).where(and(eq(documents.organizationId, orgId), eq(documents.id, id)));
-    if (doc?.r2Key && !doc.r2Key.startsWith("meta/")) {
-      await deleteDocument(doc.r2Key);
-    }
+    await db
+      .update(documents)
+      .set({ deletedAt: new Date().toISOString() })
+      .where(and(eq(documents.organizationId, orgId), eq(documents.id, id)));
+    await logWeb(orgId, "delete", "document", id);
     revalidatePath("/transactions");
     return { ok: true };
   } catch (e) {
@@ -806,6 +832,7 @@ export async function updateTransaction(
       .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)));
     // 編輯時若有補上憑證，新增一筆 documents
     await storeTransactionDocument(db, orgId, id, formData, billed);
+    await logWeb(orgId, "update", "transaction", id);
     revalidatePath("/transactions");
     revalidatePath("/accountant-notices");
     revalidatePath("/");
@@ -838,7 +865,11 @@ export async function createInvoice(
 ): Promise<ActionState> {
   try {
     const { orgId } = await requireOrg();
-    await getDb().insert(invoices).values({ organizationId: orgId, ...invoiceValues(formData) });
+    const [inserted] = await getDb()
+      .insert(invoices)
+      .values({ organizationId: orgId, ...invoiceValues(formData) })
+      .returning({ id: invoices.id });
+    await logWeb(orgId, "create", "invoice", inserted.id);
     revalidatePath("/invoices");
     return { ok: true };
   } catch (e) {
@@ -858,6 +889,7 @@ export async function updateInvoice(
       .update(invoices)
       .set(invoiceValues(formData))
       .where(and(eq(invoices.organizationId, orgId), eq(invoices.id, id)));
+    await logWeb(orgId, "update", "invoice", id);
     revalidatePath("/invoices");
     revalidatePath(`/invoices/${id}`);
     return { ok: true };
@@ -870,12 +902,14 @@ export async function deleteInvoice(id: number): Promise<ActionState> {
   try {
     const { orgId } = await requireOrg();
     await getDb()
-      .delete(invoices)
+      .update(invoices)
+      .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(invoices.organizationId, orgId), eq(invoices.id, id)));
+    await logWeb(orgId, "delete", "invoice", id);
     revalidatePath("/invoices");
     return { ok: true };
   } catch (e) {
-    return fkError(e, "此發票已連結交易，無法刪除，請先解除連結");
+    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
   }
 }
 
@@ -898,6 +932,7 @@ export async function updateReconciliation(
       .update(accountReconciliations)
       .set({ accountId, asOfDate, statementBalance, note: str(formData.get("note")) })
       .where(and(eq(accountReconciliations.organizationId, orgId), eq(accountReconciliations.id, id)));
+    await logWeb(orgId, "update", "reconciliation", id);
     revalidatePath("/reconciliation");
     revalidatePath(`/reconciliation/${id}`);
     return { ok: true };
@@ -914,8 +949,10 @@ export async function deleteReconciliation(id: number): Promise<ActionState> {
   try {
     const { orgId } = await requireOrg();
     await getDb()
-      .delete(accountReconciliations)
+      .update(accountReconciliations)
+      .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(accountReconciliations.organizationId, orgId), eq(accountReconciliations.id, id)));
+    await logWeb(orgId, "delete", "reconciliation", id);
     revalidatePath("/reconciliation");
     return { ok: true };
   } catch (e) {
@@ -923,17 +960,25 @@ export async function deleteReconciliation(id: number): Promise<ActionState> {
   }
 }
 
-// ---- 薪資（刪除整期；payslips 隨之 cascade）----
+// ---- 薪資（軟刪除整期；payslips 隨之軟刪除）----
 export async function deletePayrollRun(id: number): Promise<ActionState> {
   try {
     const { orgId } = await requireOrg();
-    await getDb()
-      .delete(payrollRuns)
+    const db = getDb();
+    const deletedAt = new Date().toISOString();
+    await db
+      .update(payslips)
+      .set({ deletedAt })
+      .where(eq(payslips.payrollRunId, id));
+    await db
+      .update(payrollRuns)
+      .set({ deletedAt })
       .where(and(eq(payrollRuns.organizationId, orgId), eq(payrollRuns.id, id)));
+    await logWeb(orgId, "delete", "payroll_run", id);
     revalidatePath("/payroll");
     return { ok: true };
   } catch (e) {
-    return fkError(e, "此批次已有發放的薪資（連到交易），請先處理相關交易");
+    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
   }
 }
 
@@ -1096,6 +1141,8 @@ export async function payEmployeeSalary(
     }));
     if (allItems.length > 0) await db.insert(payslipItems).values(allItems);
 
+    await logWeb(orgId, "create", "transaction", txn.id, "發放薪資");
+
     revalidatePath("/payroll");
     revalidatePath("/employees");
     revalidatePath("/transactions");
@@ -1118,12 +1165,15 @@ export async function deletePayslip(id: number): Promise<ActionState> {
       .where(and(eq(payrollRuns.organizationId, orgId), eq(payslips.id, id)))
       .limit(1);
     if (!slip) return { ok: false, error: "找不到該薪資單" };
-    await db.delete(payslips).where(eq(payslips.id, id));
+    const deletedAt = new Date().toISOString();
+    await db.update(payslips).set({ deletedAt }).where(eq(payslips.id, id));
     if (slip?.paidTransactionId) {
       await db
-        .delete(transactions)
+        .update(transactions)
+        .set({ deletedAt })
         .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, slip.paidTransactionId)));
     }
+    await logWeb(orgId, "delete", "payslip", id);
     revalidatePath("/payroll");
     revalidatePath("/transactions");
     revalidatePath("/");
@@ -1146,13 +1196,17 @@ export async function createProject(
   if (!PROJECT_STATUS.has(status)) return { ok: false, error: "狀態不正確" };
   try {
     const { orgId } = await requireOrg();
-    await getDb().insert(projects).values({
-      organizationId: orgId,
-      name,
-      clientPartyId: num(formData.get("clientPartyId")),
-      status,
-      description: str(formData.get("description")),
-    });
+    const [inserted] = await getDb()
+      .insert(projects)
+      .values({
+        organizationId: orgId,
+        name,
+        clientPartyId: num(formData.get("clientPartyId")),
+        status,
+        description: str(formData.get("description")),
+      })
+      .returning({ id: projects.id });
+    await logWeb(orgId, "create", "project", inserted.id, name);
     revalidatePath("/projects");
     return { ok: true };
   } catch (e) {
@@ -1181,6 +1235,7 @@ export async function updateProject(
         description: str(formData.get("description")),
       })
       .where(and(eq(projects.organizationId, orgId), eq(projects.id, id)));
+    await logWeb(orgId, "update", "project", id, name);
     revalidatePath("/projects");
     return { ok: true };
   } catch (e) {
@@ -1192,12 +1247,14 @@ export async function deleteProject(id: number): Promise<ActionState> {
   try {
     const { orgId } = await requireOrg();
     await getDb()
-      .delete(projects)
+      .update(projects)
+      .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(projects.organizationId, orgId), eq(projects.id, id)));
+    await logWeb(orgId, "delete", "project", id);
     revalidatePath("/projects");
     return { ok: true };
   } catch (e) {
-    return fkError(e, "此專案已被交易或合約使用，無法刪除；可改為「封存」");
+    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
   }
 }
 
@@ -1231,7 +1288,7 @@ export async function createSubscription(
   if (!SUBSCRIPTION_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
   try {
     const { orgId } = await requireOrg();
-    await getDb()
+    const [inserted] = await getDb()
       .insert(subscriptions)
       .values({
         organizationId: orgId,
@@ -1245,7 +1302,9 @@ export async function createSubscription(
         endDate: v.endDate,
         status: v.status,
         note: v.note,
-      });
+      })
+      .returning({ id: subscriptions.id });
+    await logWeb(orgId, "create", "subscription", inserted.id, v.name ?? undefined);
     revalidatePath("/subscriptions");
     return { ok: true };
   } catch (e) {
@@ -1282,6 +1341,7 @@ export async function updateSubscription(
         note: v.note,
       })
       .where(and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, id)));
+    await logWeb(orgId, "update", "subscription", id, v.name ?? undefined);
     revalidatePath("/subscriptions");
     return { ok: true };
   } catch (e) {
@@ -1293,8 +1353,10 @@ export async function deleteSubscription(id: number): Promise<ActionState> {
   try {
     const { orgId } = await requireOrg();
     await getDb()
-      .delete(subscriptions)
+      .update(subscriptions)
+      .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, id)));
+    await logWeb(orgId, "delete", "subscription", id);
     revalidatePath("/subscriptions");
     return { ok: true };
   } catch (e) {
@@ -1330,7 +1392,7 @@ export async function createContract(
   if (!CONTRACT_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
   try {
     const { orgId } = await requireOrg();
-    await getDb()
+    const [inserted] = await getDb()
       .insert(contracts)
       .values({
         organizationId: orgId,
@@ -1344,7 +1406,9 @@ export async function createContract(
         status: v.status,
         note: v.note,
         fileUrl: v.fileUrl,
-      });
+      })
+      .returning({ id: contracts.id });
+    await logWeb(orgId, "create", "contract", inserted.id, v.title ?? undefined);
     revalidatePath("/contracts");
     return { ok: true };
   } catch (e) {
@@ -1379,6 +1443,7 @@ export async function updateContract(
         fileUrl: v.fileUrl,
       })
       .where(and(eq(contracts.organizationId, orgId), eq(contracts.id, id)));
+    await logWeb(orgId, "update", "contract", id, v.title ?? undefined);
     revalidatePath("/contracts");
     return { ok: true };
   } catch (e) {
@@ -1390,12 +1455,14 @@ export async function deleteContract(id: number): Promise<ActionState> {
   try {
     const { orgId } = await requireOrg();
     await getDb()
-      .delete(contracts)
+      .update(contracts)
+      .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(contracts.organizationId, orgId), eq(contracts.id, id)));
+    await logWeb(orgId, "delete", "contract", id);
     revalidatePath("/contracts");
     return { ok: true };
   } catch (e) {
-    return fkError(e, "此合約已被交易連結，無法刪除（請先解除交易的合約綁定）");
+    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
   }
 }
 

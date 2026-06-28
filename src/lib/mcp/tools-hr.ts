@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   accountReconciliations,
@@ -194,15 +194,11 @@ export const hrTools: Record<string, ToolDef> = {
       const orgId = await resolveOrg(args, ctx);
       const db = getDb();
       await assertInOrg(db, employees, id, orgId, "Employee");
-      try {
-        await db.delete(employees).where(and(eq(employees.organizationId, orgId), eq(employees.id, id)));
-        return { deleted: true, id };
-      } catch (e) {
-        throw fkError(
-          e,
-          "This employee has payroll or transaction records and can't be deleted. Deactivate instead (update_employee isActive=false).",
-        );
-      }
+      await db
+        .update(employees)
+        .set({ deletedAt: new Date().toISOString() })
+        .where(and(eq(employees.organizationId, orgId), eq(employees.id, id)));
+      return { deleted: true, id };
     },
   },
 
@@ -259,7 +255,13 @@ export const hrTools: Record<string, ToolDef> = {
       const emps = await db
         .select({ id: employees.id, name: employees.name })
         .from(employees)
-        .where(and(eq(employees.organizationId, orgId), eq(employees.isActive, true)))
+        .where(
+          and(
+            eq(employees.organizationId, orgId),
+            eq(employees.isActive, true),
+            isNull(employees.deletedAt),
+          ),
+        )
         .orderBy(asc(employees.name));
       const slipByEmp = new Map<
         number,
@@ -600,7 +602,8 @@ export const hrTools: Record<string, ToolDef> = {
       const db = getDb();
       await assertInOrg(db, accountReconciliations, id, orgId, "Reconciliation");
       await db
-        .delete(accountReconciliations)
+        .update(accountReconciliations)
+        .set({ deletedAt: new Date().toISOString() })
         .where(and(eq(accountReconciliations.organizationId, orgId), eq(accountReconciliations.id, id)));
       return { deleted: true, id };
     },

@@ -52,13 +52,12 @@ export default async function EmployeesPage() {
               <TableHead>勞健保投保</TableHead>
               <TableHead>狀態</TableHead>
               <TableHead className="text-right">底薪</TableHead>
-              <TableHead className="text-right">動作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                <TableCell colSpan={6} className="text-center text-muted-foreground">
                   尚無員工
                 </TableCell>
               </TableRow>
@@ -107,18 +106,6 @@ export default async function EmployeesPage() {
                       <TableCell className="text-right font-medium tabular-nums">
                         {e.baseSalary ? formatCurrency(e.baseSalary) : "—"}
                       </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          {e.isActive ? (
-                            <PaySalaryDialog
-                              employee={{ id: e.id, name: e.name, baseSalary: e.baseSalary }}
-                              itemTypes={itemTypes}
-                              accounts={accountList}
-                            />
-                          ) : null}
-                          <DeleteButton action={deleteEmployee} id={e.id} />
-                        </div>
-                      </TableCell>
                     </>
                   }
                 >
@@ -137,6 +124,18 @@ export default async function EmployeesPage() {
                       endDate: e.endDate,
                       isActive: e.isActive,
                     }}
+                    footer={
+                      <div className="flex items-center gap-1">
+                        {e.isActive ? (
+                          <PaySalaryDialog
+                            employee={{ id: e.id, name: e.name, baseSalary: e.baseSalary }}
+                            itemTypes={itemTypes}
+                            accounts={accountList}
+                          />
+                        ) : null}
+                        <DeleteButton action={deleteEmployee} id={e.id} />
+                      </div>
+                    }
                   />
                 </RowDialog>
               ))

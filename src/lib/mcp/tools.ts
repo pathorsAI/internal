@@ -1,8 +1,8 @@
 import { addDays, differenceInCalendarDays, format, parseISO } from "date-fns";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { contracts, parties, projects, subscriptions, transactions } from "@/db/schema";
-import { listMyOrgs } from "@/db/queries";
+import { listActivity, listMyOrgs } from "@/db/queries";
 import {
   nextChargeDate,
   optNumber,
@@ -80,7 +80,11 @@ const billingTools: Record<string, ToolDef> = {
         .from(subscriptions)
         .leftJoin(parties, eq(subscriptions.customerPartyId, parties.id))
         .where(
-          and(eq(subscriptions.organizationId, orgId), eq(subscriptions.status, "active")),
+          and(
+            eq(subscriptions.organizationId, orgId),
+            eq(subscriptions.status, "active"),
+            isNull(subscriptions.deletedAt),
+          ),
         );
 
       type Item = {
@@ -142,8 +146,12 @@ const billingTools: Record<string, ToolDef> = {
       const db = getDb();
       const today = todayStr();
       const where = status
-        ? and(eq(subscriptions.organizationId, orgId), eq(subscriptions.status, status))
-        : eq(subscriptions.organizationId, orgId);
+        ? and(
+            eq(subscriptions.organizationId, orgId),
+            eq(subscriptions.status, status),
+            isNull(subscriptions.deletedAt),
+          )
+        : and(eq(subscriptions.organizationId, orgId), isNull(subscriptions.deletedAt));
       const rows = await db
         .select({
           id: subscriptions.id,
@@ -190,8 +198,12 @@ const billingTools: Record<string, ToolDef> = {
       const status = optString(args, "status");
       const db = getDb();
       const where = status
-        ? and(eq(contracts.organizationId, orgId), eq(contracts.status, status))
-        : eq(contracts.organizationId, orgId);
+        ? and(
+            eq(contracts.organizationId, orgId),
+            eq(contracts.status, status),
+            isNull(contracts.deletedAt),
+          )
+        : and(eq(contracts.organizationId, orgId), isNull(contracts.deletedAt));
       // 收款進度只計同幣別、綁定此合約的交易；income=已收，expense/advance=成本。
       const receivedSum = sql<string>`coalesce(sum(${transactions.amount}) filter (where ${transactions.type} = 'income'), 0)`;
       const costSum = sql<string>`coalesce(sum(${transactions.amount}) filter (where ${transactions.type} in ('expense','advance')), 0)`;
@@ -216,6 +228,7 @@ const billingTools: Record<string, ToolDef> = {
           and(
             eq(transactions.contractId, contracts.id),
             eq(transactions.currency, contracts.currency),
+            isNull(transactions.deletedAt),
           ),
         )
         .where(where)
@@ -248,8 +261,12 @@ const billingTools: Record<string, ToolDef> = {
       const status = optString(args, "status");
       const db = getDb();
       const where = status
-        ? and(eq(projects.organizationId, orgId), eq(projects.status, status))
-        : eq(projects.organizationId, orgId);
+        ? and(
+            eq(projects.organizationId, orgId),
+            eq(projects.status, status),
+            isNull(projects.deletedAt),
+          )
+        : and(eq(projects.organizationId, orgId), isNull(projects.deletedAt));
       return db
         .select({
           id: projects.id,
@@ -290,9 +307,33 @@ const billingTools: Record<string, ToolDef> = {
             eq(parties.organizationId, orgId),
             eq(parties.label, "customer"),
             eq(parties.isActive, true),
+            isNull(parties.deletedAt),
           ),
         )
         .orderBy(asc(parties.name));
+    },
+  },
+
+  list_activity: {
+    description:
+      "Org activity / audit log: who (web or MCP) did create/update/delete on which entity, newest first. Use to investigate mis-recorded or wrongly-deleted data. Filter by entityType (transaction, party, category, bank_account, employee, invoice, reconciliation, project, subscription, contract, document, payroll_run, payslip) and/or action (create|update|delete).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        entityType: { type: "string" },
+        action: { type: "string", enum: ["create", "update", "delete"] },
+        limit: { type: "number", description: "Default 200." },
+        ...ORG_ARG,
+      },
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      return listActivity(orgId, {
+        entityType: optString(args, "entityType"),
+        action: optString(args, "action"),
+        limit: optNumber(args, "limit"),
+      });
     },
   },
 
