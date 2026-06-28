@@ -81,7 +81,7 @@ export const payrollRuns = pgTable("payroll_runs", {
 	note: text(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
-	unique("uq_run_period").on(table.periodYear, table.periodMonth),
+	unique("uq_run_period").on(table.organizationId, table.periodYear, table.periodMonth),
 	check("chk_run_status", sql`status = ANY (ARRAY['draft'::text, 'finalized'::text, 'paid'::text])`),
 ]);
 
