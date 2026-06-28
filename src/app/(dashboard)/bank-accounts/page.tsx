@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { listBankAccounts } from "@/db/queries";
+import { listAccountBalances } from "@/db/queries";
 import { formatCurrency } from "@/lib/format";
 import { NewBankAccountDialog } from "./new-bank-account-dialog";
 import { requireOrg } from "@/lib/session";
@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
 
 export default async function BankAccountsPage() {
   const { orgId } = await requireOrg();
-  const rows = await listBankAccounts(orgId);
+  const rows = await listAccountBalances(orgId, { includeInactive: true });
 
   return (
     <>
@@ -38,13 +38,14 @@ export default async function BankAccountsPage() {
               <TableHead>幣別</TableHead>
               <TableHead>狀態</TableHead>
               <TableHead className="text-right">期初餘額</TableHead>
+              <TableHead className="text-right">目前餘額</TableHead>
               <TableHead className="text-right">動作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground">
+                <TableCell colSpan={7} className="text-center text-muted-foreground">
                   尚無帳戶
                 </TableCell>
               </TableRow>
@@ -68,8 +69,11 @@ export default async function BankAccountsPage() {
                           {a.isActive ? "啟用" : "停用"}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right font-medium tabular-nums">
+                      <TableCell className="text-right tabular-nums text-muted-foreground">
                         {formatCurrency(a.openingBalance, a.currency)}
+                      </TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums">
+                        {formatCurrency(a.bookBalance, a.currency)}
                       </TableCell>
                       <TableCell className="text-right">
                         <DeleteButton action={deleteBankAccount} id={a.id} />
