@@ -1,0 +1,113 @@
+import { PageHeader } from "@/components/page-header";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { listActivity } from "@/db/queries";
+import { requireOrg } from "@/lib/session";
+
+export const dynamic = "force-dynamic";
+
+const actionLabel: Record<string, string> = {
+  create: "新增",
+  update: "修改",
+  delete: "刪除",
+};
+const actionVariant: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+  create: "secondary",
+  update: "outline",
+  delete: "destructive",
+};
+const entityLabel: Record<string, string> = {
+  transaction: "交易",
+  party: "交易對象",
+  category: "分類",
+  bank_account: "銀行帳戶",
+  employee: "員工",
+  invoice: "發票",
+  reconciliation: "對帳",
+  project: "專案",
+  subscription: "訂閱",
+  contract: "合約",
+  document: "憑證",
+  payroll_run: "薪資批次",
+  payslip: "薪資單",
+};
+
+function formatTs(ts: string) {
+  return new Intl.DateTimeFormat("zh-TW", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(new Date(ts));
+}
+
+export default async function ActivityPage() {
+  const { orgId } = await requireOrg();
+  const rows = await listActivity(orgId, { limit: 300 });
+
+  return (
+    <>
+      <PageHeader
+        title="操作紀錄"
+        description="誰在什麼時候新增 / 修改 / 刪除了哪筆資料（含透過 MCP 的操作），用來追查亂紀錄或亂刪除"
+      />
+      <Card>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>時間</TableHead>
+              <TableHead>操作人</TableHead>
+              <TableHead>來源</TableHead>
+              <TableHead>動作</TableHead>
+              <TableHead>對象</TableHead>
+              <TableHead>說明</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} className="text-center text-muted-foreground">
+                  尚無操作紀錄
+                </TableCell>
+              </TableRow>
+            ) : (
+              rows.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">
+                    {formatTs(r.createdAt)}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    {r.actorName ?? r.actorEmail ?? "—"}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={r.channel === "mcp" ? "default" : "outline"}>
+                      {r.channel === "mcp" ? "MCP" : "網頁"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={actionVariant[r.action] ?? "outline"}>
+                      {actionLabel[r.action] ?? r.action}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    {entityLabel[r.entityType] ?? r.entityType}
+                    {r.entityId != null ? ` #${r.entityId}` : ""}
+                  </TableCell>
+                  <TableCell className="max-w-[28ch] truncate text-muted-foreground" title={r.summary ?? ""}>
+                    {r.summary ?? "—"}
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </Card>
+    </>
+  );
+}

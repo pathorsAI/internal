@@ -19,6 +19,7 @@ import {
   UserCog,
   Settings,
   Plug,
+  History,
 } from "lucide-react";
 
 import {
@@ -63,6 +64,7 @@ const hr = [
 
 const org = [
   { title: "成員", href: "/members", icon: UserCog },
+  { title: "操作紀錄", href: "/activity", icon: History },
   { title: "MCP", href: "/settings/mcp", icon: Plug },
   { title: "組織設定", href: "/settings", icon: Settings },
 ];

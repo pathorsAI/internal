@@ -17,10 +17,8 @@ import {
   listOutstandingAdvances,
   listTransactions,
 } from "@/db/queries";
-import { deleteDocument } from "@/lib/storage";
 import {
   assertInOrg,
-  fkError,
   normalizeCurrency,
   optBoolean,
   optDate,
@@ -636,27 +634,16 @@ export const transactionTools: Record<string, ToolDef> = {
         );
       }
 
-      const docs = await db
-        .select({ r2Key: documents.r2Key })
-        .from(documents)
+      const deletedAt = new Date().toISOString();
+      await db
+        .update(documents)
+        .set({ deletedAt })
         .where(eq(documents.transactionId, id));
-      for (const d of docs) {
-        if (d.r2Key && !d.r2Key.startsWith("meta/")) await deleteDocument(d.r2Key);
-      }
-      if (docs.length > 0) {
-        await db.delete(documents).where(eq(documents.transactionId, id));
-      }
-      try {
-        await db
-          .delete(transactions)
-          .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)));
-        return { deleted: true, id };
-      } catch (e) {
-        throw fkError(
-          e,
-          "This transaction is linked from another record (e.g. an advance that already has a reimbursement); resolve that first.",
-        );
-      }
+      await db
+        .update(transactions)
+        .set({ deletedAt })
+        .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)));
+      return { deleted: true, id };
     },
   },
 

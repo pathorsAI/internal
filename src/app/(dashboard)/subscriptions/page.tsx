@@ -60,13 +60,12 @@ export default async function SubscriptionsPage() {
               <TableHead className="text-right">金額</TableHead>
               <TableHead>頻率</TableHead>
               <TableHead>狀態</TableHead>
-              <TableHead className="text-right">動作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                <TableCell colSpan={6} className="text-center text-muted-foreground">
                   尚無訂閱，點右上角新增
                 </TableCell>
               </TableRow>
@@ -90,9 +89,6 @@ export default async function SubscriptionsPage() {
                           {statusMap[s.status] ?? s.status}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right">
-                        <DeleteButton action={deleteSubscription} id={s.id} />
-                      </TableCell>
                     </>
                   }
                 >
@@ -112,6 +108,7 @@ export default async function SubscriptionsPage() {
                     }}
                     parties={partyOptions}
                     projects={projectOptions}
+                    footer={<DeleteButton action={deleteSubscription} id={s.id} />}
                   />
                 </RowDialog>
               ))

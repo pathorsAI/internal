@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   accountReconciliations,
@@ -194,15 +194,11 @@ export const hrTools: Record<string, ToolDef> = {
       const orgId = await resolveOrg(args, ctx);
       const db = getDb();
       await assertInOrg(db, employees, id, orgId, "Employee");
-      try {
-        await db.delete(employees).where(and(eq(employees.organizationId, orgId), eq(employees.id, id)));
-        return { deleted: true, id };
-      } catch (e) {
-        throw fkError(
-          e,
-          "This employee has payroll or transaction records and can't be deleted. Deactivate instead (update_employee isActive=false).",
-        );
-      }
+      await db
+        .update(employees)
+        .set({ deletedAt: new Date().toISOString() })
+        .where(and(eq(employees.organizationId, orgId), eq(employees.id, id)));
+      return { deleted: true, id };
     },
   },
 
@@ -259,7 +255,13 @@ export const hrTools: Record<string, ToolDef> = {
       const emps = await db
         .select({ id: employees.id, name: employees.name })
         .from(employees)
-        .where(and(eq(employees.organizationId, orgId), eq(employees.isActive, true)))
+        .where(
+          and(
+            eq(employees.organizationId, orgId),
+            eq(employees.isActive, true),
+            isNull(employees.deletedAt),
+          ),
+        )
         .orderBy(asc(employees.name));
       const slipByEmp = new Map<
         number,
@@ -403,32 +405,11 @@ export const hrTools: Record<string, ToolDef> = {
       if (run) {
         runId = run.id;
       } else {
-        try {
-          const [created] = await db
-            .insert(payrollRuns)
-            .values({ organizationId: orgId, periodYear: year, periodMonth: month, payDate, status: "paid" })
-            .returning({ id: payrollRuns.id });
-          runId = created.id;
-        } catch (e) {
-          // neon-http has no interactive transactions, so the select-then-insert
-          // above isn't atomic: a concurrent first call for the same org+month
-          // can win the unique (uq_run_period) race. Recover by re-selecting.
-          const err = e as { code?: string; cause?: { code?: string } };
-          if (err?.code !== "23505" && err?.cause?.code !== "23505") throw e;
-          const [existing] = await db
-            .select({ id: payrollRuns.id })
-            .from(payrollRuns)
-            .where(
-              and(
-                eq(payrollRuns.organizationId, orgId),
-                eq(payrollRuns.periodYear, year),
-                eq(payrollRuns.periodMonth, month),
-              ),
-            )
-            .limit(1);
-          if (!existing) throw e;
-          runId = existing.id;
-        }
+        const [created] = await db
+          .insert(payrollRuns)
+          .values({ organizationId: orgId, periodYear: year, periodMonth: month, payDate, status: "paid" })
+          .returning({ id: payrollRuns.id });
+        runId = created.id;
       }
 
       // One payslip per employee per month; block if already paid.
@@ -621,7 +602,8 @@ export const hrTools: Record<string, ToolDef> = {
       const db = getDb();
       await assertInOrg(db, accountReconciliations, id, orgId, "Reconciliation");
       await db
-        .delete(accountReconciliations)
+        .update(accountReconciliations)
+        .set({ deletedAt: new Date().toISOString() })
         .where(and(eq(accountReconciliations.organizationId, orgId), eq(accountReconciliations.id, id)));
       return { deleted: true, id };
     },
