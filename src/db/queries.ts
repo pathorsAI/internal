@@ -386,7 +386,10 @@ export async function listCategories(orgId: string) {
 }
 
 // 帳面餘額 = 期初 + 流入 − 流出。用 left join + filter 聚合（相關子查詢在 drizzle sql 模板會關聯失效）。
-export async function listAccountBalances(orgId: string) {
+export async function listAccountBalances(
+  orgId: string,
+  opts: { includeInactive?: boolean } = {},
+) {
   const db = getDb();
   const balances = await db
     .select({
@@ -394,6 +397,7 @@ export async function listAccountBalances(orgId: string) {
       name: bankAccounts.name,
       currency: bankAccounts.currency,
       kind: bankAccounts.kind,
+      isActive: bankAccounts.isActive,
       openingBalance: bankAccounts.openingBalance,
       bookBalance: sql<string>`(
         ${bankAccounts.openingBalance}
@@ -409,9 +413,14 @@ export async function listAccountBalances(orgId: string) {
         eq(transactions.toAccountId, bankAccounts.id),
       ),
     )
-    .where(and(eq(bankAccounts.organizationId, orgId), eq(bankAccounts.isActive, true)))
+    .where(
+      and(
+        eq(bankAccounts.organizationId, orgId),
+        opts.includeInactive ? undefined : eq(bankAccounts.isActive, true),
+      ),
+    )
     .groupBy(bankAccounts.id)
-    .orderBy(bankAccounts.name);
+    .orderBy(desc(bankAccounts.isActive), bankAccounts.name);
 
   // 最後對帳日（另外查，避免和上面的 join 產生笛卡兒積把金額重複加）
   const lastRows = await db
