@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { signIn } from "@/lib/auth-client";
+import { LogoMark } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -83,7 +84,8 @@ export default function LoginPage() {
     <div className="flex min-h-full flex-1 items-center justify-center p-6">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>登入</CardTitle>
+          <LogoMark className="size-10 mb-2" />
+          <CardTitle>登入 Pathors 內部後台</CardTitle>
           <CardDescription>用 Google 帳號進入後台</CardDescription>
         </CardHeader>
         <CardContent>
