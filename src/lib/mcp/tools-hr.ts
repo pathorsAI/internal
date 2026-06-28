@@ -403,11 +403,32 @@ export const hrTools: Record<string, ToolDef> = {
       if (run) {
         runId = run.id;
       } else {
-        const [created] = await db
-          .insert(payrollRuns)
-          .values({ organizationId: orgId, periodYear: year, periodMonth: month, payDate, status: "paid" })
-          .returning({ id: payrollRuns.id });
-        runId = created.id;
+        try {
+          const [created] = await db
+            .insert(payrollRuns)
+            .values({ organizationId: orgId, periodYear: year, periodMonth: month, payDate, status: "paid" })
+            .returning({ id: payrollRuns.id });
+          runId = created.id;
+        } catch (e) {
+          // neon-http has no interactive transactions, so the select-then-insert
+          // above isn't atomic: a concurrent first call for the same org+month
+          // can win the unique (uq_run_period) race. Recover by re-selecting.
+          const err = e as { code?: string; cause?: { code?: string } };
+          if (err?.code !== "23505" && err?.cause?.code !== "23505") throw e;
+          const [existing] = await db
+            .select({ id: payrollRuns.id })
+            .from(payrollRuns)
+            .where(
+              and(
+                eq(payrollRuns.organizationId, orgId),
+                eq(payrollRuns.periodYear, year),
+                eq(payrollRuns.periodMonth, month),
+              ),
+            )
+            .limit(1);
+          if (!existing) throw e;
+          runId = existing.id;
+        }
       }
 
       // One payslip per employee per month; block if already paid.
