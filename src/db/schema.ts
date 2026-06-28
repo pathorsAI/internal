@@ -86,7 +86,7 @@ export const payrollRuns = pgTable("payroll_runs", {
 	note: text(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
-	unique("uq_run_period").on(table.periodYear, table.periodMonth),
+	unique("uq_run_period").on(table.organizationId, table.periodYear, table.periodMonth),
 	check("chk_run_status", sql`status = ANY (ARRAY['draft'::text, 'finalized'::text, 'paid'::text])`),
 ]);
 
@@ -200,16 +200,11 @@ export const transactions = pgTable("transactions", {
 	categoryId: bigint("category_id", { mode: "number" }),
 	amount: numeric({ precision: 18, scale:  2 }).notNull(),
 	currency: char({ length: 3 }).notNull(),
-	originalAmount: numeric("original_amount", { precision: 18, scale:  2 }),
-	originalCurrency: char("original_currency", { length: 3 }),
-	fxRate: numeric("fx_rate", { precision: 18, scale:  8 }),
 	amountTwd: numeric("amount_twd", { precision: 18, scale:  2 }),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	fromAccountId: bigint("from_account_id", { mode: "number" }),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	toAccountId: bigint("to_account_id", { mode: "number" }),
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	transferGroupId: bigint("transfer_group_id", { mode: "number" }),
 	book: text().default('both').notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	invoiceId: bigint("invoice_id", { mode: "number" }),
@@ -306,7 +301,6 @@ export const documents = pgTable("documents", {
 	sizeBytes: bigint("size_bytes", { mode: "number" }),
 	transactionId: bigint("transaction_id", { mode: "number" }),
 	invoiceId: bigint("invoice_id", { mode: "number" }),
-	periodLabel: text("period_label"),
 	note: text(),
 	// 發票細分：電子發票(electronic)會計師會自動看到;其他發票(paper，三聯式等)要主動通知
 	invoiceKind: text("invoice_kind"),
