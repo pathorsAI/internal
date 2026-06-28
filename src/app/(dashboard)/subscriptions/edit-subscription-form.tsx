@@ -9,6 +9,7 @@ import { Label, Req } from "@/components/ui/label";
 import { DatePicker } from "@/components/date-picker";
 import { DialogFooter } from "@/components/ui/dialog";
 import { useRowDialogClose } from "@/components/row-dialog";
+import { PartyCombobox } from "@/components/party-combobox";
 import {
   Select,
   SelectContent,
@@ -47,8 +48,8 @@ export function EditSubscriptionForm({
   footer?: React.ReactNode;
 }>) {
   const [state, action, pending] = useActionState(updateSubscription, initial);
-  const partyItems = Object.fromEntries(parties.map((p) => [String(p.id), p.name]));
   const projectItems = Object.fromEntries(projects.map((p) => [String(p.id), p.name]));
+  const defaultCustomerName = parties.find((p) => p.id === subscription.customerPartyId)?.name ?? "";
 
   const close = useRowDialogClose();
   useEffect(() => {
@@ -67,18 +68,12 @@ export function EditSubscriptionForm({
 
       <div className="space-y-1.5">
         <Label>客戶<Req /></Label>
-        <Select name="customerPartyId" items={partyItems} defaultValue={String(subscription.customerPartyId)}>
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="選擇客戶" />
-          </SelectTrigger>
-          <SelectContent>
-            {parties.map((p) => (
-              <SelectItem key={p.id} value={String(p.id)}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <PartyCombobox
+          parties={parties}
+          name="customerPartyName"
+          defaultName={defaultCustomerName}
+          placeholder="輸入或選擇客戶…"
+        />
       </div>
       <div className="space-y-1.5">
         <Label>專案</Label>

@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label, Req } from "@/components/ui/label";
 import { DialogFooter } from "@/components/ui/dialog";
 import { useRowDialogClose } from "@/components/row-dialog";
+import { PartyCombobox } from "@/components/party-combobox";
 import {
   Select,
   SelectContent,
@@ -36,7 +37,7 @@ export function EditProjectForm({
   footer?: React.ReactNode;
 }>) {
   const [state, action, pending] = useActionState(updateProject, initial);
-  const partyItems = Object.fromEntries(parties.map((p) => [String(p.id), p.name]));
+  const defaultClientName = parties.find((p) => p.id === project.clientPartyId)?.name ?? "";
 
   const close = useRowDialogClose();
   useEffect(() => {
@@ -59,22 +60,12 @@ export function EditProjectForm({
       </div>
       <div className="space-y-1.5">
         <Label>客戶</Label>
-        <Select
-          name="clientPartyId"
-          items={partyItems}
-          defaultValue={project.clientPartyId == null ? undefined : String(project.clientPartyId)}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="— 未指定 —" />
-          </SelectTrigger>
-          <SelectContent>
-            {parties.map((p) => (
-              <SelectItem key={p.id} value={String(p.id)}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <PartyCombobox
+          parties={parties}
+          name="clientPartyName"
+          defaultName={defaultClientName}
+          placeholder="輸入或選擇客戶…"
+        />
       </div>
       <div className="space-y-1.5">
         <Label>狀態</Label>

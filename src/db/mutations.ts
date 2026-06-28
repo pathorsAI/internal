@@ -1146,14 +1146,20 @@ export async function createProject(
   if (!PROJECT_STATUS.has(status)) return { ok: false, error: "狀態不正確" };
   try {
     const { orgId } = await requireOrg();
-    await getDb().insert(projects).values({
+    const db = getDb();
+    const clientPartyName = str(formData.get("clientPartyName"));
+    const clientPartyId = clientPartyName
+      ? await getOrCreateParty(db, orgId, clientPartyName, "customer")
+      : null;
+    await db.insert(projects).values({
       organizationId: orgId,
       name,
-      clientPartyId: num(formData.get("clientPartyId")),
+      clientPartyId,
       status,
       description: str(formData.get("description")),
     });
     revalidatePath("/projects");
+    if (clientPartyName) revalidatePath("/parties");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "新增失敗" };
@@ -1172,16 +1178,22 @@ export async function updateProject(
   if (!PROJECT_STATUS.has(status)) return { ok: false, error: "狀態不正確" };
   try {
     const { orgId } = await requireOrg();
-    await getDb()
+    const db = getDb();
+    const clientPartyName = str(formData.get("clientPartyName"));
+    const clientPartyId = clientPartyName
+      ? await getOrCreateParty(db, orgId, clientPartyName, "customer")
+      : null;
+    await db
       .update(projects)
       .set({
         name,
-        clientPartyId: num(formData.get("clientPartyId")),
+        clientPartyId,
         status,
         description: str(formData.get("description")),
       })
       .where(and(eq(projects.organizationId, orgId), eq(projects.id, id)));
     revalidatePath("/projects");
+    if (clientPartyName) revalidatePath("/parties");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
@@ -1206,7 +1218,7 @@ const SUBSCRIPTION_STATUS = new Set(["active", "paused", "ended"]);
 
 function subscriptionValues(formData: FormData) {
   return {
-    customerPartyId: num(formData.get("customerPartyId")),
+    customerPartyName: str(formData.get("customerPartyName")),
     projectId: num(formData.get("projectId")),
     name: str(formData.get("name")),
     amount: str(formData.get("amount")),
@@ -1224,18 +1236,20 @@ export async function createSubscription(
   formData: FormData,
 ): Promise<ActionState> {
   const v = subscriptionValues(formData);
-  if (!v.customerPartyId) return { ok: false, error: "請選擇客戶" };
+  if (!v.customerPartyName) return { ok: false, error: "請輸入客戶" };
   if (!v.name) return { ok: false, error: "請輸入方案名稱" };
   if (v.amount === null) return { ok: false, error: "請輸入金額" };
   if (!v.startDate) return { ok: false, error: "請選擇開始日期" };
   if (!SUBSCRIPTION_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
   try {
     const { orgId } = await requireOrg();
-    await getDb()
+    const db = getDb();
+    const customerPartyId = await getOrCreateParty(db, orgId, v.customerPartyName, "customer");
+    await db
       .insert(subscriptions)
       .values({
         organizationId: orgId,
-        customerPartyId: v.customerPartyId,
+        customerPartyId,
         projectId: v.projectId,
         name: v.name,
         amount: v.amount,
@@ -1247,6 +1261,7 @@ export async function createSubscription(
         note: v.note,
       });
     revalidatePath("/subscriptions");
+    revalidatePath("/parties");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "新增失敗" };
@@ -1260,17 +1275,19 @@ export async function updateSubscription(
   const id = num(formData.get("id"));
   if (!id) return { ok: false, error: "缺少 ID" };
   const v = subscriptionValues(formData);
-  if (!v.customerPartyId) return { ok: false, error: "請選擇客戶" };
+  if (!v.customerPartyName) return { ok: false, error: "請輸入客戶" };
   if (!v.name) return { ok: false, error: "請輸入方案名稱" };
   if (v.amount === null) return { ok: false, error: "請輸入金額" };
   if (!v.startDate) return { ok: false, error: "請選擇開始日期" };
   if (!SUBSCRIPTION_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
   try {
     const { orgId } = await requireOrg();
-    await getDb()
+    const db = getDb();
+    const customerPartyId = await getOrCreateParty(db, orgId, v.customerPartyName, "customer");
+    await db
       .update(subscriptions)
       .set({
-        customerPartyId: v.customerPartyId,
+        customerPartyId,
         projectId: v.projectId,
         name: v.name,
         amount: v.amount,
@@ -1283,6 +1300,7 @@ export async function updateSubscription(
       })
       .where(and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, id)));
     revalidatePath("/subscriptions");
+    revalidatePath("/parties");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
@@ -1307,7 +1325,7 @@ const CONTRACT_STATUS = new Set(["draft", "active", "completed", "cancelled"]);
 
 function contractValues(formData: FormData) {
   return {
-    customerPartyId: num(formData.get("customerPartyId")),
+    customerPartyName: str(formData.get("customerPartyName")),
     projectId: num(formData.get("projectId")),
     title: str(formData.get("title")),
     amount: str(formData.get("amount")),
@@ -1325,16 +1343,18 @@ export async function createContract(
   formData: FormData,
 ): Promise<ActionState> {
   const v = contractValues(formData);
-  if (!v.customerPartyId) return { ok: false, error: "請選擇客戶" };
+  if (!v.customerPartyName) return { ok: false, error: "請輸入客戶" };
   if (!v.title) return { ok: false, error: "請輸入合約名稱" };
   if (!CONTRACT_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
   try {
     const { orgId } = await requireOrg();
-    await getDb()
+    const db = getDb();
+    const customerPartyId = await getOrCreateParty(db, orgId, v.customerPartyName, "customer");
+    await db
       .insert(contracts)
       .values({
         organizationId: orgId,
-        customerPartyId: v.customerPartyId,
+        customerPartyId,
         projectId: v.projectId,
         title: v.title,
         amount: v.amount,
@@ -1346,6 +1366,7 @@ export async function createContract(
         fileUrl: v.fileUrl,
       });
     revalidatePath("/contracts");
+    revalidatePath("/parties");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "新增失敗" };
@@ -1359,15 +1380,17 @@ export async function updateContract(
   const id = num(formData.get("id"));
   if (!id) return { ok: false, error: "缺少 ID" };
   const v = contractValues(formData);
-  if (!v.customerPartyId) return { ok: false, error: "請選擇客戶" };
+  if (!v.customerPartyName) return { ok: false, error: "請輸入客戶" };
   if (!v.title) return { ok: false, error: "請輸入合約名稱" };
   if (!CONTRACT_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
   try {
     const { orgId } = await requireOrg();
-    await getDb()
+    const db = getDb();
+    const customerPartyId = await getOrCreateParty(db, orgId, v.customerPartyName, "customer");
+    await db
       .update(contracts)
       .set({
-        customerPartyId: v.customerPartyId,
+        customerPartyId,
         projectId: v.projectId,
         title: v.title,
         amount: v.amount,
@@ -1380,6 +1403,7 @@ export async function updateContract(
       })
       .where(and(eq(contracts.organizationId, orgId), eq(contracts.id, id)));
     revalidatePath("/contracts");
+    revalidatePath("/parties");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };

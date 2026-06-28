@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/select";
 import { DatePicker } from "@/components/date-picker";
 import { CategoryCombobox } from "./category-combobox";
-import { PartyCombobox } from "./party-combobox";
+import { PartyCombobox } from "@/components/party-combobox";
 import { ContractCombobox, type ContractOption } from "./contract-combobox";
 
 const initial: ActionState = { ok: false };

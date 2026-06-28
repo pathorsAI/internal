@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label, Req } from "@/components/ui/label";
 import { DatePicker } from "@/components/date-picker";
+import { PartyCombobox } from "@/components/party-combobox";
 import {
   Select,
   SelectContent,
@@ -38,7 +39,6 @@ export function NewSubscriptionDialog({
 }>) {
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState(createSubscription, initial);
-  const partyItems = Object.fromEntries(parties.map((p) => [String(p.id), p.name]));
   const projectItems = Object.fromEntries(projects.map((p) => [String(p.id), p.name]));
 
   useEffect(() => {
@@ -66,18 +66,7 @@ export function NewSubscriptionDialog({
           <div className="grid gap-4 py-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label>客戶<Req /></Label>
-              <Select name="customerPartyId" items={partyItems}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="選擇客戶" />
-                </SelectTrigger>
-                <SelectContent>
-                  {parties.map((p) => (
-                    <SelectItem key={p.id} value={String(p.id)}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <PartyCombobox parties={parties} name="customerPartyName" placeholder="輸入或選擇客戶…" />
             </div>
             <div className="space-y-1.5">
               <Label>專案</Label>

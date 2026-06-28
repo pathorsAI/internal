@@ -7,6 +7,7 @@ import { createProject, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label, Req } from "@/components/ui/label";
+import { PartyCombobox } from "@/components/party-combobox";
 import {
   Select,
   SelectContent,
@@ -33,8 +34,6 @@ export function NewProjectDialog({
 }>) {
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState(createProject, initial);
-  const partyItems = Object.fromEntries(parties.map((p) => [String(p.id), p.name]));
-
   useEffect(() => {
     if (state.ok) {
       setOpen(false);
@@ -64,18 +63,7 @@ export function NewProjectDialog({
             </div>
             <div className="space-y-1.5">
               <Label>客戶</Label>
-              <Select name="clientPartyId" items={partyItems}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="— 未指定 —" />
-                </SelectTrigger>
-                <SelectContent>
-                  {parties.map((p) => (
-                    <SelectItem key={p.id} value={String(p.id)}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <PartyCombobox parties={parties} name="clientPartyName" placeholder="輸入或選擇客戶…" />
             </div>
             <div className="space-y-1.5">
               <Label>狀態</Label>
