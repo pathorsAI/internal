@@ -20,6 +20,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { TableCard } from "@/components/table-card";
+import { EmptyRow } from "@/components/empty-state";
+import { signColor } from "@/components/amount";
 import {
   listAccountBalances,
   listReconciliations,
@@ -28,6 +31,7 @@ import {
 import { formatCurrency, formatDate } from "@/lib/format";
 import { NewReconciliationDialog } from "./new-reconciliation-dialog";
 import { requireOrg } from "@/lib/session";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -70,13 +74,8 @@ export default async function ReconciliationPage() {
         ))}
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">對帳紀錄</CardTitle>
-          <CardDescription>每筆紀錄比對截止日的帳面餘額與實際餘額</CardDescription>
-        </CardHeader>
-        <CardContent className="p-0">
-          <Table>
+      <TableCard>
+        <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>截止日</TableHead>
@@ -90,11 +89,7 @@ export default async function ReconciliationPage() {
             </TableHeader>
             <TableBody>
               {recons.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground">
-                    尚無對帳紀錄
-                  </TableCell>
-                </TableRow>
+                <EmptyRow colSpan={7} message="尚無對帳紀錄" />
               ) : (
                 recons.map((r) => {
                   const diff = Number(r.statementBalance) - Number(r.bookBalance);
@@ -116,10 +111,10 @@ export default async function ReconciliationPage() {
                             {formatCurrency(r.statementBalance, r.currency ?? "TWD")}
                           </TableCell>
                           <TableCell
-                            className={
-                              "text-right font-medium tabular-nums " +
-                              (matched ? "text-muted-foreground" : "text-red-600")
-                            }
+                            className={cn(
+                              "text-right font-medium tabular-nums",
+                              matched ? "text-muted-foreground" : signColor(diff),
+                            )}
                           >
                             {formatCurrency(diff, r.currency ?? "TWD")}
                           </TableCell>
@@ -160,9 +155,8 @@ export default async function ReconciliationPage() {
                 })
               )}
             </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+        </Table>
+      </TableCard>
     </>
   );
 }

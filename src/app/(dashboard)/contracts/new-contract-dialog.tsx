@@ -56,7 +56,7 @@ export function NewContractDialog({
           <Plus className="size-4" /> 新增合約
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <form action={action}>
           <DialogHeader>
             <DialogTitle>新增合約</DialogTitle>

@@ -42,7 +42,12 @@ export function RowDialog({
   const [open, setOpen] = React.useState(false);
   const close = React.useCallback(() => setOpen(false), []);
 
-  function onRowClick(e: React.MouseEvent<HTMLTableRowElement>) {
+  // 點到列裡的按鈕 / 連結 / 輸入等互動元素 → 交給它們自己處理，不開啟編輯
+  function hitInteractive(target: EventTarget | null) {
+    return Boolean((target as HTMLElement | null)?.closest("button, a, input, label"));
+  }
+
+  function shouldOpen(target: EventTarget | null) {
     // 有對話框正開著 / 正在關閉時（例如點灰色背景關閉發放薪資 dialog，
     // 那個點擊會「穿透」到下面的列）→ 不要開啟這一列的編輯
     if (
@@ -50,15 +55,32 @@ export function RowDialog({
         '[data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"], [data-slot="sheet-overlay"]',
       )
     ) {
-      return;
+      return false;
     }
-    // 點到列裡的按鈕 / 連結等互動元素也不開啟（發放薪資、刪除等）
-    if ((e.target as HTMLElement).closest("button, a, input, label")) return;
-    setOpen(true);
+    return !hitInteractive(target);
+  }
+
+  function onRowClick(e: React.MouseEvent<HTMLTableRowElement>) {
+    if (shouldOpen(e.target)) setOpen(true);
+  }
+
+  function onRowKeyDown(e: React.KeyboardEvent<HTMLTableRowElement>) {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    // 鍵盤焦點在列內的按鈕/連結上時，讓該元素自己處理 Enter/Space
+    if (hitInteractive(e.target)) return;
+    e.preventDefault();
+    if (shouldOpen(e.target)) setOpen(true);
   }
 
   const row = (
-    <TableRow className="cursor-pointer hover:bg-muted/50" onClick={onRowClick}>
+    <TableRow
+      role="button"
+      tabIndex={0}
+      aria-haspopup="dialog"
+      className="cursor-pointer hover:bg-muted/50 focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+      onClick={onRowClick}
+      onKeyDown={onRowKeyDown}
+    >
       {cells}
     </TableRow>
   );

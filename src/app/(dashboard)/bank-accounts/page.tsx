@@ -4,7 +4,8 @@ import { deleteBankAccount } from "@/db/mutations";
 import { EditBankAccountForm } from "./edit-bank-account-form";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
+import { TableCard } from "@/components/table-card";
+import { EmptyRow } from "@/components/empty-state";
 import {
   Table,
   TableBody,
@@ -29,7 +30,7 @@ export default async function BankAccountsPage() {
       <PageHeader title="銀行帳戶" description="現金與銀行帳戶">
         <NewBankAccountDialog />
       </PageHeader>
-      <Card>
+      <TableCard>
         <Table>
           <TableHeader>
             <TableRow>
@@ -43,11 +44,7 @@ export default async function BankAccountsPage() {
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground">
-                  尚無帳戶
-                </TableCell>
-              </TableRow>
+              <EmptyRow colSpan={6} message="尚無帳戶" />
             ) : (
               rows.map((a) => (
                 <RowDialog
@@ -93,7 +90,7 @@ export default async function BankAccountsPage() {
             )}
           </TableBody>
         </Table>
-      </Card>
+      </TableCard>
     </>
   );
 }

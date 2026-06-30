@@ -56,7 +56,7 @@ export function NewSubscriptionDialog({
           <Plus className="size-4" /> 新增訂閱
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
         <form action={action}>
           <DialogHeader>
             <DialogTitle>新增訂閱 / 月費</DialogTitle>

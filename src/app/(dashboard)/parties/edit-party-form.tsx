@@ -133,7 +133,7 @@ export function EditPartyForm({
         <Input id="note" name="note" defaultValue={party.note ?? ""} />
       </div>
       <label className="flex items-center gap-2 text-sm sm:col-span-2">
-        <input type="checkbox" name="isActive" defaultChecked={party.isActive} className="size-4" />
+        <input type="checkbox" name="isActive" defaultChecked={party.isActive} className="size-4 accent-primary" />
         <span>啟用</span>
       </label>
 

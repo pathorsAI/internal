@@ -1,6 +1,7 @@
+import { EmptyRow } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
+import { TableCard } from "@/components/table-card";
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -10,6 +11,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { listActivity } from "@/db/queries";
+import { formatDateTime } from "@/lib/format";
 import { requireOrg } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -40,13 +42,6 @@ const entityLabel: Record<string, string> = {
   payslip: "薪資單",
 };
 
-function formatTs(ts: string) {
-  return new Intl.DateTimeFormat("zh-TW", {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(new Date(ts));
-}
-
 export default async function ActivityPage() {
   const { orgId } = await requireOrg();
   const rows = await listActivity(orgId, { limit: 300 });
@@ -57,7 +52,7 @@ export default async function ActivityPage() {
         title="操作紀錄"
         description="誰在什麼時候新增 / 修改 / 刪除了哪筆資料（含透過 MCP 的操作），用來追查亂紀錄或亂刪除"
       />
-      <Card>
+      <TableCard>
         <Table>
           <TableHeader>
             <TableRow>
@@ -71,24 +66,22 @@ export default async function ActivityPage() {
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground">
-                  尚無操作紀錄
-                </TableCell>
-              </TableRow>
+              <EmptyRow colSpan={6} message="尚無操作紀錄" />
             ) : (
               rows.map((r) => (
                 <TableRow key={r.id}>
                   <TableCell className="whitespace-nowrap text-muted-foreground">
-                    {formatTs(r.createdAt)}
+                    {formatDateTime(r.createdAt)}
                   </TableCell>
                   <TableCell className="whitespace-nowrap">
                     {r.actorName ?? r.actorEmail ?? "—"}
                   </TableCell>
                   <TableCell>
-                    <Badge variant={r.channel === "mcp" ? "default" : "outline"}>
-                      {r.channel === "mcp" ? "MCP" : "網頁"}
-                    </Badge>
+                    {r.channel === "mcp" ? (
+                      <Badge variant="secondary">MCP</Badge>
+                    ) : (
+                      <span className="text-muted-foreground">網頁</span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <Badge variant={actionVariant[r.action] ?? "outline"}>
@@ -107,7 +100,7 @@ export default async function ActivityPage() {
             )}
           </TableBody>
         </Table>
-      </Card>
+      </TableCard>
     </>
   );
 }

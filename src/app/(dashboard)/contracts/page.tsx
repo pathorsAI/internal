@@ -4,7 +4,8 @@ import { deleteContract } from "@/db/mutations";
 import { EditContractForm } from "./edit-contract-form";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
+import { TableCard } from "@/components/table-card";
+import { EmptyRow } from "@/components/empty-state";
 import {
   Table,
   TableBody,
@@ -15,6 +16,7 @@ import {
 } from "@/components/ui/table";
 import { listContracts, listParties, listProjects } from "@/db/queries";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { NewContractDialog } from "./new-contract-dialog";
 import { ContractFileLink } from "./contract-file-link";
 import { requireOrg } from "@/lib/session";
@@ -49,6 +51,9 @@ function CollectionCell({
   const total = amount == null ? null : Number(amount);
   const pct = total && total > 0 ? Math.min(100, Math.round((received / total) * 100)) : null;
   const remaining = total == null ? null : total - received;
+  // 進度條填色依收款狀態:溢收→支出色,已收齊→收入色,進行中→主色;無金額時留一條空軌維持等高。
+  const overCollected = total != null && received > total;
+  const fullyCollected = total != null && received >= total;
   return (
     <div className="min-w-[170px] space-y-1">
       <div className="flex items-baseline justify-between gap-2 text-sm tabular-nums">
@@ -57,11 +62,21 @@ function CollectionCell({
           {total == null ? "未設金額" : `/ ${formatCurrency(total, currency)}`}
         </span>
       </div>
-      {pct != null && (
-        <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-          <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
-        </div>
-      )}
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        {pct != null && (
+          <div
+            className={cn(
+              "h-full rounded-full",
+              overCollected
+                ? "bg-expense"
+                : fullyCollected
+                  ? "bg-income"
+                  : "bg-primary",
+            )}
+            style={{ width: `${pct}%` }}
+          />
+        )}
+      </div>
       <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground tabular-nums">
         <span>
           {remaining == null
@@ -94,7 +109,7 @@ export default async function ContractsPage() {
         <NewContractDialog parties={partyOptions} projects={projectOptions} />
       </PageHeader>
 
-      <Card>
+      <TableCard>
         <Table>
           <TableHeader>
             <TableRow>
@@ -109,11 +124,9 @@ export default async function ContractsPage() {
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
-                  尚無合約，點右上角新增
-                </TableCell>
-              </TableRow>
+              <EmptyRow colSpan={7} message="尚無合約">
+                點右上角新增
+              </EmptyRow>
             ) : (
               rows.map((c) => (
                 <RowDialog
@@ -178,7 +191,7 @@ export default async function ContractsPage() {
             )}
           </TableBody>
         </Table>
-      </Card>
+      </TableCard>
     </>
   );
 }

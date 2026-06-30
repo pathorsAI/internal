@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/empty-state";
 import { cn } from "@/lib/utils";
 import { CategoryFormDialog } from "./category-form-dialog";
 
@@ -44,9 +45,9 @@ export function CategoryBoard({ categories }: Readonly<{ categories: Cat[] }>) {
           <CategoryFormDialog kind={kind} addLabel={tab.add} />
         </div>
         {list.length === 0 ? (
-          <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-            尚無分類，點右上角新增
-          </p>
+          <EmptyState message="尚無分類">
+            <p className="text-sm text-muted-foreground">點右上角新增</p>
+          </EmptyState>
         ) : (
           <ul className="divide-y">
             {list.map((c) => (

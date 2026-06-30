@@ -26,6 +26,8 @@ import {
 } from "@/components/ui/dialog";
 import { DatePicker } from "@/components/date-picker";
 import { formatCurrency } from "@/lib/format";
+import { signColor } from "@/components/amount";
+import { cn } from "@/lib/utils";
 
 const initial: ActionState = { ok: false };
 const monthItems = Object.fromEntries(
@@ -154,7 +156,7 @@ export function PaySalaryDialog({
             <Banknote className="size-3.5" /> 發放薪資
           </Button>
         </DialogTrigger>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
           <form action={action}>
             <input type="hidden" name="employeeId" value={employee.id} />
             <input type="hidden" name="items" value={itemsJson} />
@@ -262,7 +264,9 @@ export function PaySalaryDialog({
 
             <div className="mt-4 flex items-center justify-between rounded-lg border p-3">
               <span className="text-sm text-muted-foreground">實發合計</span>
-              <span className="text-lg font-semibold tabular-nums">{formatCurrency(net)}</span>
+              <span className={cn("text-lg font-semibold tabular-nums", signColor(net))}>
+                {formatCurrency(net)}
+              </span>
             </div>
 
             <DialogFooter className="mt-4">

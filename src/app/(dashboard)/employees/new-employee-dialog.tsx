@@ -114,7 +114,7 @@ export function NewEmployeeDialog() {
               </div>
             </div>
             <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" name="hasPension" className="size-4" />
+              <input type="checkbox" name="hasPension" className="size-4 accent-primary" />
               <span>有提撥勞退（股東可不勾）</span>
             </label>
           </div>

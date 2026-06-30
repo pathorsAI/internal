@@ -4,7 +4,8 @@ import { deleteSubscription } from "@/db/mutations";
 import { EditSubscriptionForm } from "./edit-subscription-form";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
+import { TableCard } from "@/components/table-card";
+import { EmptyRow } from "@/components/empty-state";
 import {
   Table,
   TableBody,
@@ -50,7 +51,7 @@ export default async function SubscriptionsPage() {
         <NewSubscriptionDialog parties={partyOptions} projects={projectOptions} />
       </PageHeader>
 
-      <Card>
+      <TableCard>
         <Table>
           <TableHeader>
             <TableRow>
@@ -64,11 +65,7 @@ export default async function SubscriptionsPage() {
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground">
-                  尚無訂閱，點右上角新增
-                </TableCell>
-              </TableRow>
+              <EmptyRow colSpan={6} message="尚無訂閱，點右上角新增" />
             ) : (
               rows.map((s) => (
                 <RowDialog
@@ -115,7 +112,7 @@ export default async function SubscriptionsPage() {
             )}
           </TableBody>
         </Table>
-      </Card>
+      </TableCard>
     </>
   );
 }
