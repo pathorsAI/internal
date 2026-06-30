@@ -6,7 +6,8 @@ import { Banknote, Plus, Trash2 } from "lucide-react";
 import { payEmployeeSalary, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label, Req } from "@/components/ui/label";
+import { Label } from "@/components/ui/label";
+import { Req } from "@/components/req";
 import {
   Select,
   SelectContent,
@@ -71,10 +72,6 @@ export function PaySalaryDialog({
 
   // 非法定的項目（底薪/加班費/獎金/請假扣…）
   const optionTypes = useMemo(() => itemTypes.filter((t) => !t.isStatutory), [itemTypes]);
-  const typeItems = useMemo(
-    () => Object.fromEntries(optionTypes.map((t) => [String(t.id), t.name])),
-    [optionTypes],
-  );
 
   function reset() {
     const base = itemTypes.find((t) => t.name === "底薪");
@@ -149,16 +146,13 @@ export function PaySalaryDialog({
       })),
   );
 
-  const accountItems = Object.fromEntries(
-    accounts.map((a) => [String(a.id), `${a.name}（${a.currency}）`]),
-  );
 
   return (
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogTrigger
-          render={<Button size="sm" variant="outline" onClick={(e) => e.stopPropagation()} />}
-        >
-          <Banknote className="size-3.5" /> 發放薪資
+        <DialogTrigger asChild>
+          <Button size="sm" variant="outline" onClick={(e) => e.stopPropagation()}>
+            <Banknote className="size-3.5" /> 發放薪資
+          </Button>
         </DialogTrigger>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <form action={action}>
@@ -177,7 +171,7 @@ export function PaySalaryDialog({
               </div>
               <div className="space-y-1.5">
                 <Label>發薪月<Req /></Label>
-                <Select name="periodMonth" items={monthItems} defaultValue={String(now.getMonth() + 1)}>
+                <Select name="periodMonth" defaultValue={String(now.getMonth() + 1)}>
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
@@ -196,7 +190,7 @@ export function PaySalaryDialog({
               </div>
               <div className="space-y-1.5 sm:col-span-2">
                 <Label>付款帳戶<Req /></Label>
-                <Select name="fromAccountId" items={accountItems} required>
+                <Select name="fromAccountId" required>
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="— 選擇帳戶 —" />
                   </SelectTrigger>
@@ -211,7 +205,7 @@ export function PaySalaryDialog({
               </div>
               <div className="space-y-1.5">
                 <Label>帳別</Label>
-                <Select name="book" items={bookItems} defaultValue="both">
+                <Select name="book" defaultValue="both">
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
@@ -232,8 +226,7 @@ export function PaySalaryDialog({
                 <div key={r.key} className="flex items-center gap-2">
                   <div className="flex-1">
                     <Select
-                      items={typeItems}
-                      value={r.itemTypeId ? String(r.itemTypeId) : null}
+                      value={r.itemTypeId ? String(r.itemTypeId) : undefined}
                       onValueChange={(v) => pickType(r.key, v as string)}
                     >
                       <SelectTrigger className="w-full">

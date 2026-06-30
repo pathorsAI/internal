@@ -6,7 +6,8 @@ import { Plus } from "lucide-react";
 import { createParty, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label, Req } from "@/components/ui/label";
+import { Label } from "@/components/ui/label";
+import { Req } from "@/components/req";
 import {
   Select,
   SelectContent,
@@ -25,9 +26,7 @@ import {
 } from "@/components/ui/dialog";
 
 const initial: ActionState = { ok: false };
-const labelItems = { vendor: "廠商", customer: "客戶", gov: "政府機關", other: "其他" };
 const currencyList = ["TWD", "USD", "EUR", "JPY", "CNY"];
-const currencyItems = Object.fromEntries(currencyList.map((c) => [c, c]));
 
 export function NewPartyDialog({
   accounts,
@@ -36,9 +35,6 @@ export function NewPartyDialog({
 }>) {
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState(createParty, initial);
-  const accountItems = Object.fromEntries(
-    accounts.map((a) => [String(a.id), `${a.name}（${a.currency}）`]),
-  );
 
   useEffect(() => {
     if (state.ok) {
@@ -52,8 +48,10 @@ export function NewPartyDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="sm" />}>
-        <Plus className="size-4" /> 新增交易對象
+      <DialogTrigger asChild>
+        <Button size="sm">
+          <Plus className="size-4" /> 新增交易對象
+        </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
         <form action={action}>
@@ -69,7 +67,7 @@ export function NewPartyDialog({
             </div>
             <div className="space-y-1.5">
               <Label>類型</Label>
-              <Select name="label" items={labelItems} defaultValue="vendor">
+              <Select name="label" defaultValue="vendor">
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
@@ -87,7 +85,7 @@ export function NewPartyDialog({
             </div>
             <div className="space-y-1.5">
               <Label>預設幣別</Label>
-              <Select name="defaultCurrency" items={currencyItems} defaultValue="TWD">
+              <Select name="defaultCurrency" defaultValue="TWD">
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
@@ -102,7 +100,7 @@ export function NewPartyDialog({
             </div>
             <div className="space-y-1.5">
               <Label>預設帳戶</Label>
-              <Select name="defaultAccountId" items={accountItems}>
+              <Select name="defaultAccountId">
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="— 未指定 —" />
                 </SelectTrigger>

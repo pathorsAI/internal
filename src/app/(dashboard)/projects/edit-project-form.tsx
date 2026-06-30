@@ -5,7 +5,8 @@ import { toast } from "sonner";
 import { updateProject, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label, Req } from "@/components/ui/label";
+import { Label } from "@/components/ui/label";
+import { Req } from "@/components/req";
 import { DialogFooter } from "@/components/ui/dialog";
 import { useRowDialogClose } from "@/components/row-dialog";
 import {
@@ -36,7 +37,6 @@ export function EditProjectForm({
   footer?: React.ReactNode;
 }>) {
   const [state, action, pending] = useActionState(updateProject, initial);
-  const partyItems = Object.fromEntries(parties.map((p) => [String(p.id), p.name]));
 
   const close = useRowDialogClose();
   useEffect(() => {
@@ -61,7 +61,6 @@ export function EditProjectForm({
         <Label>客戶</Label>
         <Select
           name="clientPartyId"
-          items={partyItems}
           defaultValue={project.clientPartyId == null ? undefined : String(project.clientPartyId)}
         >
           <SelectTrigger className="w-full">
@@ -78,7 +77,7 @@ export function EditProjectForm({
       </div>
       <div className="space-y-1.5">
         <Label>狀態</Label>
-        <Select name="status" items={{ active: "進行中", archived: "封存" }} defaultValue={project.status}>
+        <Select name="status" defaultValue={project.status}>
           <SelectTrigger className="w-full">
             <SelectValue />
           </SelectTrigger>

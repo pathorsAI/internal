@@ -6,7 +6,8 @@ import { Plus } from "lucide-react";
 import { createBankAccount, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label, Req } from "@/components/ui/label";
+import { Label } from "@/components/ui/label";
+import { Req } from "@/components/req";
 import {
   Select,
   SelectContent,
@@ -44,8 +45,10 @@ export function NewBankAccountDialog() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="sm" />}>
-        <Plus className="size-4" /> 新增帳戶
+      <DialogTrigger asChild>
+        <Button size="sm">
+          <Plus className="size-4" /> 新增帳戶
+        </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <form action={action}>
@@ -61,7 +64,7 @@ export function NewBankAccountDialog() {
             </div>
             <div className="space-y-1.5">
               <Label>類型</Label>
-              <Select name="kind" items={kindItems} defaultValue="bank">
+              <Select name="kind" defaultValue="bank">
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
@@ -76,7 +79,7 @@ export function NewBankAccountDialog() {
             </div>
             <div className="space-y-1.5">
               <Label>幣別</Label>
-              <Select name="currency" items={currencyItems} defaultValue="TWD">
+              <Select name="currency" defaultValue="TWD">
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>

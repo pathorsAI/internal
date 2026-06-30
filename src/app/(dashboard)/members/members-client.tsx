@@ -193,7 +193,7 @@ export function MembersClient() {
               </div>
               <div className="w-36 space-y-1.5">
                 <Label>身分</Label>
-                <Select items={roleItems} value={role} onValueChange={(v) => v && setRole(v)}>
+                <Select value={role} onValueChange={(v) => v && setRole(v)}>
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>

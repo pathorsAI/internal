@@ -2,10 +2,8 @@
 
 import * as React from "react";
 import { Check, Plus } from "lucide-react";
-import { Autocomplete } from "@base-ui/react/autocomplete";
 
-const inputCls =
-  "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+import { Combobox } from "@/components/combobox";
 
 export function PartyCombobox({
   parties,
@@ -25,34 +23,15 @@ export function PartyCombobox({
 
   return (
     <div className="space-y-1">
-      <Autocomplete.Root items={names} value={value} onValueChange={setValue} openOnInputClick>
-        <Autocomplete.Input
-          name={name}
-          placeholder={placeholder}
-          className={inputCls}
-          autoComplete="off"
-        />
-        <Autocomplete.Portal>
-          <Autocomplete.Positioner className="z-50 outline-none" sideOffset={4}>
-            <Autocomplete.Popup className="max-h-64 w-(--anchor-width) overflow-y-auto rounded-md bg-popover p-1 text-sm text-popover-foreground shadow-md ring-1 ring-foreground/10">
-              <Autocomplete.Empty className="px-2 py-1.5 text-muted-foreground">
-                查無此對象，儲存後會自動新增
-              </Autocomplete.Empty>
-              <Autocomplete.List>
-                {(item: string) => (
-                  <Autocomplete.Item
-                    key={item}
-                    value={item}
-                    className="cursor-default rounded-sm px-2 py-1.5 outline-none data-highlighted:bg-accent data-highlighted:text-accent-foreground"
-                  >
-                    {item}
-                  </Autocomplete.Item>
-                )}
-              </Autocomplete.List>
-            </Autocomplete.Popup>
-          </Autocomplete.Positioner>
-        </Autocomplete.Portal>
-      </Autocomplete.Root>
+      {/* inputName=name：打的文字直接以該 name 送出，查無對象時於儲存時新建 */}
+      <Combobox
+        items={names}
+        value={value}
+        onValueChange={setValue}
+        inputName={name}
+        placeholder={placeholder}
+        emptyText="查無此對象，儲存後會自動新增"
+      />
 
       {trimmed &&
         (exists ? (

@@ -7,7 +7,8 @@ import { createCategory, updateCategory, deleteCategory, type ActionState } from
 import { Button } from "@/components/ui/button";
 import { DeleteButton } from "@/components/delete-button";
 import { Input } from "@/components/ui/input";
-import { Label, Req } from "@/components/ui/label";
+import { Label } from "@/components/ui/label";
+import { Req } from "@/components/req";
 import {
   Dialog,
   DialogContent,
@@ -47,21 +48,15 @@ export function CategoryFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger
-        render={
-          editing ? (
-            <Button variant="ghost" size="icon" aria-label="編輯" />
-          ) : (
-            <Button variant="ghost" size="sm" className="text-primary" />
-          )
-        }
-      >
+      <DialogTrigger asChild>
         {editing ? (
-          <Pencil className="size-4 text-muted-foreground" />
+          <Button variant="ghost" size="icon" aria-label="編輯">
+            <Pencil className="size-4 text-muted-foreground" />
+          </Button>
         ) : (
-          <>
+          <Button variant="ghost" size="sm" className="text-primary">
             <Plus className="size-4" /> {addLabel ?? "新增"}
-          </>
+          </Button>
         )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-sm">

@@ -6,7 +6,8 @@ import { Plus } from "lucide-react";
 import { createContract, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label, Req } from "@/components/ui/label";
+import { Label } from "@/components/ui/label";
+import { Req } from "@/components/req";
 import { DatePicker } from "@/components/date-picker";
 import {
   Select,
@@ -27,7 +28,6 @@ import {
 
 const initial: ActionState = { ok: false };
 const currencyList = ["TWD", "USD", "EUR", "JPY", "CNY"];
-const currencyItems = Object.fromEntries(currencyList.map((c) => [c, c]));
 
 export function NewContractDialog({
   parties,
@@ -38,8 +38,6 @@ export function NewContractDialog({
 }>) {
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState(createContract, initial);
-  const partyItems = Object.fromEntries(parties.map((p) => [String(p.id), p.name]));
-  const projectItems = Object.fromEntries(projects.map((p) => [String(p.id), p.name]));
 
   useEffect(() => {
     if (state.ok) {
@@ -53,8 +51,10 @@ export function NewContractDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="sm" />}>
-        <Plus className="size-4" /> 新增合約
+      <DialogTrigger asChild>
+        <Button size="sm">
+          <Plus className="size-4" /> 新增合約
+        </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
         <form action={action}>
@@ -66,7 +66,7 @@ export function NewContractDialog({
           <div className="grid gap-4 py-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label>客戶<Req /></Label>
-              <Select name="customerPartyId" items={partyItems}>
+              <Select name="customerPartyId">
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="選擇客戶" />
                 </SelectTrigger>
@@ -81,7 +81,7 @@ export function NewContractDialog({
             </div>
             <div className="space-y-1.5">
               <Label>專案</Label>
-              <Select name="projectId" items={projectItems}>
+              <Select name="projectId">
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="— 未指定 —" />
                 </SelectTrigger>
@@ -104,7 +104,7 @@ export function NewContractDialog({
             </div>
             <div className="space-y-1.5">
               <Label>幣別</Label>
-              <Select name="currency" items={currencyItems} defaultValue="TWD">
+              <Select name="currency" defaultValue="TWD">
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
@@ -121,7 +121,6 @@ export function NewContractDialog({
               <Label>狀態</Label>
               <Select
                 name="status"
-                items={{ draft: "草稿", active: "進行中", completed: "已完成", cancelled: "已取消" }}
                 defaultValue="active"
               >
                 <SelectTrigger className="w-full">

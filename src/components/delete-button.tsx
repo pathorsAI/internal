@@ -59,17 +59,15 @@ export function DeleteButton({
 
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
-      <AlertDialogTrigger
-        render={
-          <Button
-            type="button"
-            variant="destructive"
-            size="sm"
-            onClick={(e) => e.stopPropagation()}
-          />
-        }
-      >
-        <Trash2 className="size-4" /> {label}
+      <AlertDialogTrigger asChild>
+        <Button
+          type="button"
+          variant="destructive"
+          size="sm"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Trash2 className="size-4" /> {label}
+        </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>

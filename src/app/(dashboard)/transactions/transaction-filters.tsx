@@ -77,7 +77,6 @@ export function TransactionFilters({
       {filters.map((f) => (
         <Select
           key={f.key}
-          items={f.items}
           value={f.value}
           onValueChange={(v) => setParam(f.key, v as string)}
         >

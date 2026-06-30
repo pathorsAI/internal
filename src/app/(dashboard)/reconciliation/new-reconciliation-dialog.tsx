@@ -6,7 +6,8 @@ import { Plus } from "lucide-react";
 import { createReconciliation, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label, Req } from "@/components/ui/label";
+import { Label } from "@/components/ui/label";
+import { Req } from "@/components/req";
 import {
   Select,
   SelectContent,
@@ -35,9 +36,6 @@ export function NewReconciliationDialog({
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState(createReconciliation, initial);
   const today = new Date().toISOString().slice(0, 10);
-  const accountItems = Object.fromEntries(
-    accounts.map((a) => [String(a.id), `${a.name}（${a.currency}）`]),
-  );
 
   useEffect(() => {
     if (state.ok) {
@@ -51,8 +49,10 @@ export function NewReconciliationDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="sm" />}>
-        <Plus className="size-4" /> 新增對帳
+      <DialogTrigger asChild>
+        <Button size="sm">
+          <Plus className="size-4" /> 新增對帳
+        </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <form action={action}>
@@ -66,7 +66,7 @@ export function NewReconciliationDialog({
           <div className="grid gap-4 py-4">
             <div className="space-y-1.5">
               <Label>帳戶<Req /></Label>
-              <Select name="accountId" items={accountItems} required>
+              <Select name="accountId" required>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="— 請選擇 —" />
                 </SelectTrigger>

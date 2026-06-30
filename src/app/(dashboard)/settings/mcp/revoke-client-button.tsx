@@ -41,10 +41,10 @@ export function RevokeClientButton({
 
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
-      <AlertDialogTrigger
-        render={<Button type="button" variant="destructive" size="sm" />}
-      >
-        <Trash2 className="size-4" /> 撤銷
+      <AlertDialogTrigger asChild>
+        <Button type="button" variant="destructive" size="sm">
+          <Trash2 className="size-4" /> 撤銷
+        </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>

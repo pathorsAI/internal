@@ -5,7 +5,8 @@ import { toast } from "sonner";
 import { updateReconciliation, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label, Req } from "@/components/ui/label";
+import { Label } from "@/components/ui/label";
+import { Req } from "@/components/req";
 import { DialogFooter } from "@/components/ui/dialog";
 import { useRowDialogClose } from "@/components/row-dialog";
 import {
@@ -37,9 +38,6 @@ export function EditReconciliationForm({
   footer?: React.ReactNode;
 }>) {
   const [state, action, pending] = useActionState(updateReconciliation, initial);
-  const accountItems = Object.fromEntries(
-    accounts.map((a) => [String(a.id), `${a.name}（${a.currency}）`]),
-  );
   const close = useRowDialogClose();
   useEffect(() => {
     if (state.ok) {
@@ -56,7 +54,7 @@ export function EditReconciliationForm({
       <input type="hidden" name="id" value={recon.id} />
       <div className="space-y-1.5 sm:col-span-2">
         <Label>帳戶<Req /></Label>
-        <Select name="accountId" items={accountItems} defaultValue={String(recon.accountId)} required>
+        <Select name="accountId" defaultValue={String(recon.accountId)} required>
           <SelectTrigger className="w-full">
             <SelectValue />
           </SelectTrigger>

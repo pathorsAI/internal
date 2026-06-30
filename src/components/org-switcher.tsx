@@ -27,10 +27,6 @@ export function OrgSwitcher() {
   // Guard so the localStorage-driven auto-switch only runs once per mount.
   const restoredRef = useRef(false);
 
-  const items = Object.fromEntries(
-    (organizations ?? []).map((o) => [o.id, o.name]),
-  );
-
   // On first load, if the user previously picked a different org than the
   // session's active one, restore that choice from localStorage.
   useEffect(() => {
@@ -59,7 +55,6 @@ export function OrgSwitcher() {
 
   return (
     <Select
-      items={items}
       value={activeOrg?.id ?? ""}
       onValueChange={onChange}
       disabled={switching || (organizations?.length ?? 0) === 0}

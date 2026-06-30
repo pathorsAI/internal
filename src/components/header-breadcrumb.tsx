@@ -50,7 +50,9 @@ export function HeaderBreadcrumb() {
           {crumbs.length === 0 ? (
             <BreadcrumbPage>內部管理</BreadcrumbPage>
           ) : (
-            <BreadcrumbLink render={<Link href="/" />}>內部管理</BreadcrumbLink>
+            <BreadcrumbLink asChild>
+              <Link href="/">內部管理</Link>
+            </BreadcrumbLink>
           )}
         </BreadcrumbItem>
         {crumbs.map((crumb, index) => {
@@ -62,8 +64,8 @@ export function HeaderBreadcrumb() {
                 {isLast ? (
                   <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
                 ) : (
-                  <BreadcrumbLink render={<Link href={crumb.href} />}>
-                    {crumb.label}
+                  <BreadcrumbLink asChild>
+                    <Link href={crumb.href}>{crumb.label}</Link>
                   </BreadcrumbLink>
                 )}
               </BreadcrumbItem>
