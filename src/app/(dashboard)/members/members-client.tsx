@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { UserPlus, X, AlertTriangle } from "lucide-react";
+import { UserPlus, X, AlertTriangle, Users } from "lucide-react";
 import {
   authClient,
   useActiveMember,
@@ -31,6 +31,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { EmptyState } from "@/components/empty-state";
 
 type Member = {
   id: string;
@@ -69,6 +81,7 @@ export function MembersClient() {
   const [inviting, setInviting] = useState(false);
   const [cancelingId, setCancelingId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   const load = useCallback(async () => {
     const { data, error } = await authClient.organization.getFullOrganization();
@@ -125,10 +138,6 @@ export function MembersClient() {
 
   async function onDeleteOrg() {
     if (!activeOrg) return;
-    const confirmed = window.confirm(
-      `確定要刪除組織「${activeOrg.name}」嗎？此動作無法復原，組織內所有資料將一併刪除。`,
-    );
-    if (!confirmed) return;
     setDeleting(true);
     const { error } = await authClient.organization.delete({
       organizationId: activeOrg.id,
@@ -138,6 +147,7 @@ export function MembersClient() {
       toast.error(error.message || "刪除組織失敗");
       return;
     }
+    setDeleteDialogOpen(false);
     // Drop the deleted org from the localStorage preference so the switcher
     // doesn't try to restore it on the next load.
     if (localStorage.getItem(LAST_ORG_KEY) === activeOrg.id) {
@@ -219,26 +229,30 @@ export function MembersClient() {
           <CardTitle>成員（{members.length}）</CardTitle>
         </CardHeader>
         <CardContent>
-          <ul className="divide-y rounded-md border">
-            {members.map((m) => (
-              <li key={m.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
-                <div className="min-w-0 flex-1">
-                  <div className="truncate font-medium">
-                    {m.user.name || m.user.email}
-                    {m.user.id === session?.user.id ? (
-                      <span className="ml-2 text-xs text-muted-foreground">（你）</span>
-                    ) : null}
+          {members.length === 0 ? (
+            <EmptyState icon={Users} message="尚無成員" />
+          ) : (
+            <ul className="divide-y rounded-md border">
+              {members.map((m) => (
+                <li key={m.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium">
+                      {m.user.name || m.user.email}
+                      {m.user.id === session?.user.id ? (
+                        <span className="ml-2 text-xs text-muted-foreground">（你）</span>
+                      ) : null}
+                    </div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {m.user.email}
+                    </div>
                   </div>
-                  <div className="truncate text-xs text-muted-foreground">
-                    {m.user.email}
-                  </div>
-                </div>
-                <Badge variant={m.role === "owner" ? "default" : "secondary"}>
-                  {roleLabel[m.role] ?? m.role}
-                </Badge>
-              </li>
-            ))}
-          </ul>
+                  <Badge variant={m.role === "owner" ? "default" : "secondary"}>
+                    {roleLabel[m.role] ?? m.role}
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          )}
         </CardContent>
       </Card>
 
@@ -290,14 +304,36 @@ export function MembersClient() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={onDeleteOrg}
-              disabled={deleting}
-            >
-              {deleting ? "刪除中…" : `刪除「${activeOrg?.name ?? "組織"}」`}
-            </Button>
+            <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+              <AlertDialogTrigger asChild>
+                <Button type="button" variant="destructive" disabled={deleting}>
+                  {deleting ? "刪除中…" : `刪除「${activeOrg?.name ?? "組織"}」`}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>
+                    確定要刪除組織「{activeOrg?.name ?? "組織"}」嗎？
+                  </AlertDialogTitle>
+                  <AlertDialogDescription>
+                    此動作無法復原，組織內所有資料將一併刪除。
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
+                  <AlertDialogAction
+                    variant="destructive"
+                    disabled={deleting}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      onDeleteOrg();
+                    }}
+                  >
+                    {deleting ? "刪除中…" : "刪除"}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </CardContent>
         </Card>
       )}

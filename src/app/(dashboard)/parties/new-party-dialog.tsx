@@ -53,7 +53,7 @@ export function NewPartyDialog({
           <Plus className="size-4" /> 新增交易對象
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
         <form action={action}>
           <DialogHeader>
             <DialogTitle>新增交易對象</DialogTitle>

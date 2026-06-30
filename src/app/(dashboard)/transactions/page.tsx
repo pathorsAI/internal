@@ -1,7 +1,9 @@
+import { Fragment } from "react";
 import { PageHeader } from "@/components/page-header";
 import { BookBadge } from "@/components/book-badge";
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
+import { TableCard } from "@/components/table-card";
+import { EmptyState } from "@/components/empty-state";
 import {
   Table,
   TableBody,
@@ -32,15 +34,10 @@ import { deleteTransaction } from "@/db/mutations";
 import { RowDialog } from "@/components/row-dialog";
 import { EditTransactionForm } from "./edit-transaction-form";
 import { TransactionFilters } from "./transaction-filters";
+import { txnTypeColor } from "@/components/amount";
 import { requireOrg } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
-
-function txnAmountColor(type: string) {
-  if (type === "income") return "text-green-600";
-  if (type === "expense" || type === "advance") return "text-red-600";
-  return "";
-}
 
 const typeLabel: Record<string, string> = {
   expense: "一般支出",
@@ -69,7 +66,16 @@ function groupByMonth(rows: TxnRow[]) {
   });
 }
 
-const COLUMNS = ["日期", "對象", "說明", "分類", "帳別", "帳戶", "金額"];
+// table-fixed 下，欄寬由表頭決定，各月份共用同一組欄寬 → 金額欄永遠對齊
+const COLUMNS: { label: string; width: string; align?: "right" }[] = [
+  { label: "日期", width: "w-24" },
+  { label: "對象", width: "w-44" },
+  { label: "說明", width: "" },
+  { label: "分類", width: "w-28" },
+  { label: "帳別", width: "w-20" },
+  { label: "帳戶", width: "w-40" },
+  { label: "金額", width: "w-32", align: "right" },
+];
 
 function TransactionRow({
   t,
@@ -101,24 +107,24 @@ function TransactionRow({
             {formatDate(t.txnDate)}
           </TableCell>
           <TableCell>
-            <div className="flex flex-col gap-1">
-              <span>{t.partyName ?? t.settleName ?? "—"}</span>
+            <div className="flex min-w-0 flex-col gap-1">
+              <span className="truncate">{t.partyName ?? t.settleName ?? "—"}</span>
               <Badge variant="secondary" className="w-fit font-normal">
                 {typeLabel[t.type] ?? t.type}
               </Badge>
             </div>
           </TableCell>
-          <TableCell className="max-w-[20ch] truncate text-muted-foreground">
+          <TableCell className="truncate text-muted-foreground">
             {t.description ?? "—"}
           </TableCell>
-          <TableCell>{t.categoryName ?? "未分類"}</TableCell>
+          <TableCell className="truncate">{t.categoryName ?? "未分類"}</TableCell>
           <TableCell>
             <BookBadge book={t.book} />
           </TableCell>
-          <TableCell className="text-xs text-muted-foreground">
+          <TableCell className="truncate text-xs text-muted-foreground">
             {[t.fromAccount, t.toAccount].filter(Boolean).join(" → ") || "—"}
           </TableCell>
-          <TableCell className={cn("text-right font-medium tabular-nums", txnAmountColor(t.type))}>
+          <TableCell className={cn("text-right font-medium tabular-nums", txnTypeColor(t.type))}>
             {formatCurrency(t.amount, t.currency)}
           </TableCell>
         </>
@@ -214,28 +220,36 @@ export default async function TransactionsPage({
       />
 
       {groups.length === 0 ? (
-        <Card>
-          <div className="p-8 text-center text-sm text-muted-foreground">尚無交易</div>
-        </Card>
+        <TableCard>
+          <EmptyState message="尚無交易" />
+        </TableCard>
       ) : (
-        <div className="space-y-4">
-          {groups.map((g) => (
-            <Card key={g.ym}>
-              <div className="flex items-center justify-between border-b px-4 py-2.5">
-                <span className="font-medium">{g.label}</span>
-                <span className="text-xs text-muted-foreground">{g.rows.length} 筆</span>
-              </div>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    {COLUMNS.map((c) => (
-                      <TableHead key={c} className={c === "金額" ? "text-right" : ""}>
-                        {c}
-                      </TableHead>
-                    ))}
+        <TableCard>
+          <Table className="table-fixed">
+            <TableHeader>
+              <TableRow>
+                {COLUMNS.map((c) => (
+                  <TableHead
+                    key={c.label}
+                    className={cn(c.width, c.align === "right" && "text-right")}
+                  >
+                    {c.label}
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {groups.map((g) => (
+                <Fragment key={g.ym}>
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell
+                      colSpan={COLUMNS.length}
+                      className="bg-muted/50 py-1.5 text-xs"
+                    >
+                      <span className="font-medium text-foreground">{g.label}</span>
+                      <span className="ml-2 text-muted-foreground">{g.rows.length} 筆</span>
+                    </TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
                   {g.rows.map((t) => (
                     <TransactionRow
                       key={t.id}
@@ -249,11 +263,11 @@ export default async function TransactionsPage({
                       docs={docsMap.get(t.id) ?? []}
                     />
                   ))}
-                </TableBody>
-              </Table>
-            </Card>
-          ))}
-        </div>
+                </Fragment>
+              ))}
+            </TableBody>
+          </Table>
+        </TableCard>
       )}
     </>
   );

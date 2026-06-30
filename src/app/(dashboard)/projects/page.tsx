@@ -4,7 +4,9 @@ import { deleteProject } from "@/db/mutations";
 import { EditProjectForm } from "./edit-project-form";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
+import { TableCard } from "@/components/table-card";
+import { EmptyRow } from "@/components/empty-state";
+import { signColor, txnTypeColor } from "@/components/amount";
 import {
   Table,
   TableBody,
@@ -15,12 +17,17 @@ import {
 } from "@/components/ui/table";
 import { listProjects, listParties } from "@/db/queries";
 import { formatCurrency } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { NewProjectDialog } from "./new-project-dialog";
 import { requireOrg } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 const statusMap: Record<string, string> = { active: "進行中", archived: "封存" };
+const statusVariant: Record<string, "default" | "secondary" | "outline"> = {
+  active: "default",
+  archived: "secondary",
+};
 
 export default async function ProjectsPage() {
   const { orgId } = await requireOrg();
@@ -33,7 +40,7 @@ export default async function ProjectsPage() {
         <NewProjectDialog parties={partyOptions} />
       </PageHeader>
 
-      <Card>
+      <TableCard>
         <Table>
           <TableHeader>
             <TableRow>
@@ -47,11 +54,7 @@ export default async function ProjectsPage() {
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground">
-                  尚無專案，點右上角新增
-                </TableCell>
-              </TableRow>
+              <EmptyRow colSpan={6} message="尚無專案，點右上角新增" />
             ) : (
               rows.map((p) => (
                 <RowDialog
@@ -63,18 +66,18 @@ export default async function ProjectsPage() {
                       <TableCell className="font-medium">{p.name}</TableCell>
                       <TableCell className="text-muted-foreground">{p.clientName ?? "—"}</TableCell>
                       <TableCell>
-                        <Badge variant={p.status === "active" ? "default" : "outline"}>
+                        <Badge variant={statusVariant[p.status] ?? "outline"}>
                           {statusMap[p.status] ?? p.status}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right tabular-nums text-emerald-600">
+                      <TableCell className={cn("text-right tabular-nums", signColor(p.income))}>
                         {formatCurrency(p.income)}
                       </TableCell>
-                      <TableCell className="text-right tabular-nums text-rose-600">
+                      <TableCell className={cn("text-right tabular-nums", txnTypeColor("expense"))}>
                         {formatCurrency(p.expense)}
                       </TableCell>
                       <TableCell
-                        className={`text-right font-medium tabular-nums ${p.net < 0 ? "text-rose-600" : ""}`}
+                        className={cn("text-right font-medium tabular-nums", signColor(p.net))}
                       >
                         {formatCurrency(p.net)}
                       </TableCell>
@@ -97,7 +100,7 @@ export default async function ProjectsPage() {
             )}
           </TableBody>
         </Table>
-      </Card>
+      </TableCard>
     </>
   );
 }

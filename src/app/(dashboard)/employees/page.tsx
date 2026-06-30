@@ -4,7 +4,8 @@ import { deleteEmployee } from "@/db/mutations";
 import { EditEmployeeForm } from "./edit-employee-form";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
+import { TableCard } from "@/components/table-card";
+import { EmptyRow } from "@/components/empty-state";
 import {
   Table,
   TableBody,
@@ -42,7 +43,7 @@ export default async function EmployeesPage() {
       <PageHeader title="員工" description="員工名冊與勞健保 / 勞退投保狀態">
         <NewEmployeeDialog />
       </PageHeader>
-      <Card>
+      <TableCard title="員工名冊">
         <Table>
           <TableHeader>
             <TableRow>
@@ -56,11 +57,7 @@ export default async function EmployeesPage() {
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground">
-                  尚無員工
-                </TableCell>
-              </TableRow>
+              <EmptyRow colSpan={6} message="尚無員工" />
             ) : (
               rows.map((e) => (
                 <RowDialog
@@ -142,7 +139,7 @@ export default async function EmployeesPage() {
             )}
           </TableBody>
         </Table>
-      </Card>
+      </TableCard>
     </>
   );
 }

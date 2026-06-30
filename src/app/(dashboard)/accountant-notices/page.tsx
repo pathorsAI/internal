@@ -1,13 +1,8 @@
 import { Paperclip, BellRing, CheckCircle2 } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { TableCard } from "@/components/table-card";
+import { EmptyRow } from "@/components/empty-state";
 import {
   Table,
   TableBody,
@@ -27,25 +22,21 @@ type Notice = Awaited<ReturnType<typeof listAccountantNotices>>[number];
 
 function NoticeTable({ rows, done }: Readonly<{ rows: Notice[]; done: boolean }>) {
   return (
-    <Table>
+    <Table className="table-fixed">
       <TableHeader>
         <TableRow>
-          <TableHead>日期</TableHead>
+          <TableHead className="w-28">日期</TableHead>
           <TableHead>對象</TableHead>
           <TableHead>摘要</TableHead>
-          <TableHead className="text-right">金額</TableHead>
+          <TableHead className="w-32 text-right">金額</TableHead>
           <TableHead>憑證</TableHead>
-          {done ? <TableHead>通知時間</TableHead> : null}
+          <TableHead className="w-28">通知時間</TableHead>
           <TableHead className="text-right">動作</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {rows.length === 0 ? (
-          <TableRow>
-            <TableCell colSpan={done ? 7 : 6} className="text-center text-muted-foreground">
-              {done ? "尚無已通知紀錄" : "沒有待通知的其他發票 🎉"}
-            </TableCell>
-          </TableRow>
+          <EmptyRow colSpan={7} message={done ? "尚無已通知紀錄" : "沒有待通知的其他發票"} />
         ) : (
           rows.map((r) => (
             <TableRow key={r.id}>
@@ -74,11 +65,9 @@ function NoticeTable({ rows, done }: Readonly<{ rows: Notice[]; done: boolean }>
                   </a>
                 )}
               </TableCell>
-              {done ? (
-                <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                  {r.notifiedAt ? formatDate(r.notifiedAt) : "—"}
-                </TableCell>
-              ) : null}
+              <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                {r.notifiedAt ? formatDate(r.notifiedAt) : "—"}
+              </TableCell>
               <TableCell className="text-right">
                 <NotifyButton id={r.id} notified={done} />
               </TableCell>
@@ -103,33 +92,31 @@ export default async function AccountantNoticesPage() {
         description="電子發票會計師會自動看到;這裡是其他發票（三聯式等），要主動告訴會計師的清單"
       />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
+      <TableCard
+        title={
+          <span className="flex items-center gap-2">
             <BellRing className="size-4 text-amber-600" />
             待通知
             {pending.length > 0 ? (
               <Badge variant="destructive">{pending.length}</Badge>
             ) : null}
-          </CardTitle>
-          <CardDescription>告訴會計師後，按「標記已通知」</CardDescription>
-        </CardHeader>
-        <CardContent className="p-0">
-          <NoticeTable rows={pending} done={false} />
-        </CardContent>
-      </Card>
+          </span>
+        }
+        action="告訴會計師後，按「標記已通知」"
+      >
+        <NoticeTable rows={pending} done={false} />
+      </TableCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
+      <TableCard
+        title={
+          <span className="flex items-center gap-2">
             <CheckCircle2 className="size-4 text-muted-foreground" />
             已通知
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <NoticeTable rows={done} done={true} />
-        </CardContent>
-      </Card>
+          </span>
+        }
+      >
+        <NoticeTable rows={done} done={true} />
+      </TableCard>
     </>
   );
 }

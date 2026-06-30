@@ -4,7 +4,8 @@ import { deleteParty } from "@/db/mutations";
 import { EditPartyForm } from "./edit-party-form";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
+import { TableCard } from "@/components/table-card";
+import { EmptyRow } from "@/components/empty-state";
 import {
   Table,
   TableBody,
@@ -39,7 +40,7 @@ export default async function PartiesPage() {
         />
       </PageHeader>
 
-      <Card>
+      <TableCard>
         <Table>
           <TableHeader>
             <TableRow>
@@ -52,11 +53,7 @@ export default async function PartiesPage() {
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground">
-                  尚無交易對象，點右上角新增
-                </TableCell>
-              </TableRow>
+              <EmptyRow colSpan={5} message="尚無交易對象">點右上角新增</EmptyRow>
             ) : (
               rows.map((s) => (
                 <RowDialog
@@ -98,7 +95,7 @@ export default async function PartiesPage() {
             )}
           </TableBody>
         </Table>
-      </Card>
+      </TableCard>
     </>
   );
 }

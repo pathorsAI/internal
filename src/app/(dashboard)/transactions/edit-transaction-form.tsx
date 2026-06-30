@@ -10,7 +10,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Req } from "@/components/req";
 import { Badge } from "@/components/ui/badge";
-import { DialogFooter } from "@/components/ui/dialog";
 import { DeleteButton } from "@/components/delete-button";
 import { useRowDialogClose } from "@/components/row-dialog";
 import {
@@ -260,7 +259,7 @@ export function EditTransactionForm({
                 name="billedToCompanyTaxId"
                 checked={billed}
                 onChange={(e) => setBilled(e.target.checked)}
-                className="size-4"
+                className="size-4 accent-primary"
               />
               <span>這筆有報公司統編</span>
             </label>
@@ -268,15 +267,15 @@ export function EditTransactionForm({
           </div>
         )}
 
-        <DialogFooter className="mt-2 border-t pt-4 sm:col-span-2">
-          {footer ? <div className="mr-auto">{footer}</div> : null}
+        <div className="sticky bottom-0 z-10 -mx-4 mt-2 flex flex-col-reverse gap-2 border-t bg-background px-4 py-3 sm:col-span-2 sm:flex-row sm:items-center sm:justify-end">
+          {footer ? <div className="sm:mr-auto">{footer}</div> : null}
           <Button type="button" variant="outline" onClick={close}>
             取消
           </Button>
           <Button type="submit" disabled={pending}>
             {pending ? "儲存中…" : "儲存變更"}
           </Button>
-        </DialogFooter>
+        </div>
       </form>
     </>
   );

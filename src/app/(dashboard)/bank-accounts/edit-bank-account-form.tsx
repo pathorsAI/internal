@@ -97,7 +97,7 @@ export function EditBankAccountForm({
         />
       </div>
       <label className="flex items-center gap-2 text-sm sm:col-span-2">
-        <input type="checkbox" name="isActive" defaultChecked={account.isActive} className="size-4" />
+        <input type="checkbox" name="isActive" defaultChecked={account.isActive} className="size-4 accent-primary" />
         <span>啟用</span>
       </label>
       <DialogFooter className="mt-2 border-t pt-4 sm:col-span-2">

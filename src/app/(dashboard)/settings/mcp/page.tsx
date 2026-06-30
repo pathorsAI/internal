@@ -9,6 +9,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { TableCard } from "@/components/table-card";
+import { EmptyRow } from "@/components/empty-state";
 import {
   Table,
   TableBody,
@@ -104,17 +106,14 @@ export default async function McpPage() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>已連線的用戶端（{clients.length}）</CardTitle>
-            <CardDescription>
-              每個連線到 MCP 的 app 會在這裡列出（透過 OAuth 動態註冊）。
-              {canManage
-                ? "撤銷後對方需要重新授權。"
-                : "撤銷需要擁有者或管理員權限。"}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            每個連線到 MCP 的 app 會在這裡列出（透過 OAuth 動態註冊）。
+            {canManage
+              ? "撤銷後對方需要重新授權。"
+              : "撤銷需要擁有者或管理員權限。"}
+          </p>
+          <TableCard title="已連線的用戶端" action={`${clients.length} 筆`}>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -129,14 +128,9 @@ export default async function McpPage() {
               </TableHeader>
               <TableBody>
                 {clients.length === 0 ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={colSpan}
-                      className="text-center text-muted-foreground"
-                    >
-                      目前沒有任何 MCP 用戶端。把上面的網址加到 Claude 後就會出現在這裡。
-                    </TableCell>
-                  </TableRow>
+                  <EmptyRow colSpan={colSpan} message="目前沒有任何 MCP 用戶端">
+                    把上面的網址加到 Claude 後就會出現在這裡。
+                  </EmptyRow>
                 ) : (
                   clients.map((c) => (
                     <TableRow key={c.id}>
@@ -180,8 +174,8 @@ export default async function McpPage() {
                 )}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
+          </TableCard>
+        </div>
       </div>
     </>
   );

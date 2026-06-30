@@ -1,10 +1,21 @@
-import { TrendingUp, TrendingDown, Wallet, Landmark } from "lucide-react";
+import Link from "next/link";
+import {
+  TrendingUp,
+  TrendingDown,
+  Wallet,
+  Landmark,
+  ArrowLeftRight,
+  Receipt,
+} from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/page-header";
 import { getOverview, listTransactions, listAccountBalances } from "@/db/queries";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { signColor } from "@/components/amount";
+import { EmptyState } from "@/components/empty-state";
 import { BookBadge } from "@/components/book-badge";
 import { requireOrg } from "@/lib/session";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -55,7 +66,7 @@ export default async function DashboardPage() {
         </h2>
         {assetGroups.length === 0 ? (
           <Card>
-            <CardContent className="p-6 text-sm text-muted-foreground">尚無帳戶</CardContent>
+            <EmptyState icon={Landmark} message="尚無帳戶" />
           </Card>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -67,10 +78,10 @@ export default async function DashboardPage() {
                       {currencyLabel[g.currency] ?? g.currency} 總資產
                     </span>
                     <span
-                      className={
-                        "text-xl font-semibold tabular-nums " +
-                        (g.total < 0 ? "text-red-600" : "text-emerald-600")
-                      }
+                      className={cn(
+                        "text-xl font-semibold tabular-nums",
+                        signColor(g.total),
+                      )}
                     >
                       {formatCurrency(g.total, g.currency)}
                     </span>
@@ -102,10 +113,12 @@ export default async function DashboardPage() {
 
       {/* 收支概況：依幣別分組的收入 / 支出 / 淨額（流量，不含期初餘額） */}
       <section className="space-y-2">
-        <h2 className="text-sm font-medium text-muted-foreground">收支概況</h2>
+        <h2 className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+          <ArrowLeftRight className="size-4" /> 收支概況
+        </h2>
         <Card className="divide-y gap-0 p-0">
           {overview.length === 0 ? (
-            <div className="p-6 text-sm text-muted-foreground">尚無收支資料</div>
+            <EmptyState icon={ArrowLeftRight} message="尚無收支資料" />
           ) : (
             overview.map((c) => (
               <div key={c.currency} className="flex items-center gap-4 px-4 py-3">
@@ -115,12 +128,12 @@ export default async function DashboardPage() {
                 <div className="grid flex-1 grid-cols-3 gap-4">
                   {stats.map((m) => {
                     const value = c[m.key];
-                    const tone =
-                      m.key === "expense" || value < 0 ? "text-red-600" : "text-emerald-600";
+                    // 支出欄位金額為正，但語意為支出（紅）；以負值套用 signColor 維持原色。
+                    const tone = signColor(m.key === "expense" ? -value : value);
                     return (
                       <div key={m.label} className="space-y-0.5">
                         <div className="text-xs text-muted-foreground">{m.label}</div>
-                        <div className={"text-base font-semibold tabular-nums " + tone}>
+                        <div className={cn("text-base font-semibold tabular-nums", tone)}>
                           {formatCurrency(value, c.currency)}
                         </div>
                       </div>
@@ -133,38 +146,49 @@ export default async function DashboardPage() {
         </Card>
       </section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">最近交易</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {recent.length === 0 ? (
-            <p className="text-sm text-muted-foreground">尚無交易</p>
-          ) : (
-            recent.map((t) => (
-              <div
-                key={t.id}
-                className="flex items-center justify-between gap-4 border-b pb-2 last:border-0 last:pb-0"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">
-                    {t.description ?? t.partyName ?? t.categoryName ?? "—"}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {t.categoryName ?? "未分類"} · {formatDate(t.txnDate)}
-                  </p>
+      {/* 最近交易：僅顯示 6 筆，提供「查看全部」前往完整帳本 */}
+      <section className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+            <Receipt className="size-4" /> 最近交易
+          </h2>
+          <Link
+            href="/transactions"
+            className="text-xs text-primary hover:underline"
+          >
+            查看全部
+          </Link>
+        </div>
+        <Card>
+          <CardContent className="space-y-3">
+            {recent.length === 0 ? (
+              <EmptyState icon={Receipt} message="尚無交易" />
+            ) : (
+              recent.map((t) => (
+                <div
+                  key={t.id}
+                  className="flex items-center justify-between gap-4 border-b pb-2 last:border-0 last:pb-0"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">
+                      {t.description ?? t.partyName ?? t.categoryName ?? "—"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {t.categoryName ?? "未分類"} · {formatDate(t.txnDate)}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <BookBadge book={t.book} />
+                    <span className="text-sm font-medium tabular-nums">
+                      {formatCurrency(t.amount, t.currency)}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <BookBadge book={t.book} />
-                  <span className="text-sm font-medium tabular-nums">
-                    {formatCurrency(t.amount, t.currency)}
-                  </span>
-                </div>
-              </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      </section>
     </>
   );
 }
