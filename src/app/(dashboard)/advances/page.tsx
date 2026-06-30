@@ -21,6 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { EmptyRow } from "@/components/empty-state";
 import { listOutstandingAdvances, listBankAccounts } from "@/db/queries";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { RecordReimbursementDialog } from "./record-reimbursement-dialog";
@@ -81,11 +82,7 @@ export default async function AdvancesPage() {
             </TableHeader>
             <TableBody>
               {rows.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground">
-                    沒有未還的代墊
-                  </TableCell>
-                </TableRow>
+                <EmptyRow colSpan={6} message="沒有未還的代墊" />
               ) : (
                 rows.map((r) => (
                   <TableRow key={r.id}>
