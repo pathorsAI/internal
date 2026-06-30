@@ -6,7 +6,8 @@ import { Plus, ArrowLeft, Receipt, Banknote, HandCoins, ArrowLeftRight, Papercli
 import { createTransaction, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label, Req } from "@/components/ui/label";
+import { Label } from "@/components/ui/label";
+import { Req } from "@/components/req";
 import {
   Select,
   SelectContent,
@@ -83,11 +84,6 @@ export function NewTransactionDialog({
     if (state.error) toast.error(state.error);
   }, [state]);
 
-  const accountItems = Object.fromEntries(
-    accounts.map((a) => [String(a.id), `${a.name}（${a.currency}）`]),
-  );
-  const projectItems = Object.fromEntries(projects.map((p) => [String(p.id), p.name]));
-
   function handleOpenChange(next: boolean) {
     setOpen(next);
     if (!next) setScenario(null);
@@ -97,8 +93,10 @@ export function NewTransactionDialog({
 
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
-      <SheetTrigger render={<Button size="sm" />}>
-        <Plus className="size-4" /> 新增交易
+      <SheetTrigger asChild>
+        <Button size="sm">
+          <Plus className="size-4" /> 新增交易
+        </Button>
       </SheetTrigger>
       <SheetContent className="data-[side=right]:sm:max-w-xl">
         {scenario === null ? (
@@ -158,7 +156,7 @@ export function NewTransactionDialog({
                 <>
                   <div className="space-y-1.5">
                     <Label>轉出帳戶<Req /></Label>
-                    <Select name="fromAccountId" items={accountItems} required>
+                    <Select name="fromAccountId" required>
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder="— 選擇帳戶 —" />
                       </SelectTrigger>
@@ -173,7 +171,7 @@ export function NewTransactionDialog({
                   </div>
                   <div className="space-y-1.5">
                     <Label>轉入帳戶<Req /></Label>
-                    <Select name="toAccountId" items={accountItems} required>
+                    <Select name="toAccountId" required>
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder="— 選擇帳戶 —" />
                       </SelectTrigger>
@@ -223,7 +221,7 @@ export function NewTransactionDialog({
                         {scenario === "income" ? "收款帳戶" : "付款帳戶"}
                         <Req />
                       </Label>
-                      <Select name="accountId" items={accountItems} required>
+                      <Select name="accountId" required>
                         <SelectTrigger className="w-full">
                           <SelectValue placeholder="— 選擇帳戶 —" />
                         </SelectTrigger>
@@ -240,7 +238,7 @@ export function NewTransactionDialog({
 
                   <div className="space-y-1.5 sm:col-span-2">
                     <Label>專案</Label>
-                    <Select name="projectId" items={projectItems}>
+                    <Select name="projectId">
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder="— 未指定 —" />
                       </SelectTrigger>
@@ -348,7 +346,6 @@ function VoucherBox({ billed }: Readonly<{ billed: boolean }>) {
           <Select
             key={billed ? "billed" : "free"}
             name="docKind"
-            items={kindOptions}
             defaultValue="e_invoice"
           >
             <SelectTrigger className="w-full">

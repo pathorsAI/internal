@@ -6,7 +6,8 @@ import { Plus } from "lucide-react";
 import { createEmployee, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label, Req } from "@/components/ui/label";
+import { Label } from "@/components/ui/label";
+import { Req } from "@/components/req";
 import {
   Select,
   SelectContent,
@@ -49,8 +50,10 @@ export function NewEmployeeDialog() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="sm" />}>
-        <Plus className="size-4" /> 新增員工
+      <DialogTrigger asChild>
+        <Button size="sm">
+          <Plus className="size-4" /> 新增員工
+        </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
         <form action={action} className="grid gap-4 sm:grid-cols-2">
@@ -69,7 +72,7 @@ export function NewEmployeeDialog() {
           </div>
           <div className="space-y-1.5">
             <Label>雇用類型</Label>
-            <Select name="employmentType" items={typeItems} defaultValue="full_time">
+            <Select name="employmentType" defaultValue="full_time">
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>

@@ -6,7 +6,8 @@ import { updateContract, type ActionState } from "@/db/mutations";
 import { formatCurrency } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label, Req } from "@/components/ui/label";
+import { Label } from "@/components/ui/label";
+import { Req } from "@/components/req";
 import { DatePicker } from "@/components/date-picker";
 import { DialogFooter } from "@/components/ui/dialog";
 import { useRowDialogClose } from "@/components/row-dialog";
@@ -20,7 +21,6 @@ import {
 
 const initial: ActionState = { ok: false };
 const currencyList = ["TWD", "USD", "EUR", "JPY", "CNY"];
-const currencyItems = Object.fromEntries(currencyList.map((c) => [c, c]));
 
 type Contract = {
   id: number;
@@ -50,8 +50,6 @@ export function EditContractForm({
   footer?: React.ReactNode;
 }>) {
   const [state, action, pending] = useActionState(updateContract, initial);
-  const partyItems = Object.fromEntries(parties.map((p) => [String(p.id), p.name]));
-  const projectItems = Object.fromEntries(projects.map((p) => [String(p.id), p.name]));
 
   const close = useRowDialogClose();
   useEffect(() => {
@@ -96,7 +94,7 @@ export function EditContractForm({
 
       <div className="space-y-1.5">
         <Label>客戶<Req /></Label>
-        <Select name="customerPartyId" items={partyItems} defaultValue={String(contract.customerPartyId)}>
+        <Select name="customerPartyId" defaultValue={String(contract.customerPartyId)}>
           <SelectTrigger className="w-full">
             <SelectValue placeholder="選擇客戶" />
           </SelectTrigger>
@@ -113,7 +111,6 @@ export function EditContractForm({
         <Label>專案</Label>
         <Select
           name="projectId"
-          items={projectItems}
           defaultValue={contract.projectId == null ? undefined : String(contract.projectId)}
         >
           <SelectTrigger className="w-full">
@@ -138,7 +135,7 @@ export function EditContractForm({
       </div>
       <div className="space-y-1.5">
         <Label>幣別</Label>
-        <Select name="currency" items={currencyItems} defaultValue={contract.currency}>
+        <Select name="currency" defaultValue={contract.currency}>
           <SelectTrigger className="w-full">
             <SelectValue />
           </SelectTrigger>
@@ -155,7 +152,6 @@ export function EditContractForm({
         <Label>狀態</Label>
         <Select
           name="status"
-          items={{ draft: "草稿", active: "進行中", completed: "已完成", cancelled: "已取消" }}
           defaultValue={contract.status}
         >
           <SelectTrigger className="w-full">

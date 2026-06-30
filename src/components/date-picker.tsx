@@ -37,20 +37,18 @@ export function DatePicker({
     <>
       <input type="hidden" name={name} value={iso} />
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger
-          render={
-            <Button
-              type="button"
-              variant="outline"
-              className={cn(
-                "w-full justify-start text-left font-normal",
-                !date && "text-muted-foreground",
-              )}
-            />
-          }
-        >
-          <CalendarIcon className="mr-2 size-4" />
-          {iso || placeholder}
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            className={cn(
+              "w-full justify-start text-left font-normal",
+              !date && "text-muted-foreground",
+            )}
+          >
+            <CalendarIcon className="mr-2 size-4" />
+            {iso || placeholder}
+          </Button>
         </PopoverTrigger>
         <PopoverContent className="w-auto p-0" align="start">
           <Calendar

@@ -7,7 +7,8 @@ import { updateTransaction, deleteTransactionDocument, type ActionState } from "
 import type { TxnDocument } from "@/db/queries";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label, Req } from "@/components/ui/label";
+import { Label } from "@/components/ui/label";
+import { Req } from "@/components/req";
 import { Badge } from "@/components/ui/badge";
 import { DialogFooter } from "@/components/ui/dialog";
 import { DeleteButton } from "@/components/delete-button";
@@ -98,10 +99,6 @@ export function EditTransactionForm({
     if (state.error) toast.error(state.error);
   }, [state]);
 
-  const accountItems = Object.fromEntries(
-    accounts.map((a) => [String(a.id), `${a.name}（${a.currency}）`]),
-  );
-  const projectItems = Object.fromEntries(projects.map((p) => [String(p.id), p.name]));
   const isTransfer = txn.type === "transfer";
   const isIncome = txn.type === "income";
   const isAdvance = txn.type === "advance";
@@ -170,14 +167,12 @@ export function EditTransactionForm({
               name="fromAccountId"
               label="轉出帳戶"
               accounts={accounts}
-              items={accountItems}
               defaultValue={txn.fromAccountId}
             />
             <AccountField
               name="toAccountId"
               label="轉入帳戶"
               accounts={accounts}
-              items={accountItems}
               defaultValue={txn.toAccountId}
             />
           </>
@@ -215,7 +210,6 @@ export function EditTransactionForm({
                 name="accountId"
                 label={isIncome ? "收款帳戶" : "付款帳戶"}
                 accounts={accounts}
-                items={accountItems}
                 defaultValue={isIncome ? txn.toAccountId : txn.fromAccountId}
               />
             )}
@@ -223,7 +217,6 @@ export function EditTransactionForm({
               <Label>專案</Label>
               <Select
                 name="projectId"
-                items={projectItems}
                 defaultValue={txn.projectId == null ? undefined : String(txn.projectId)}
               >
                 <SelectTrigger className="w-full">
@@ -317,13 +310,11 @@ function AccountField({
   name,
   label,
   accounts,
-  items,
   defaultValue,
 }: Readonly<{
   name: string;
   label: string;
   accounts: Account[];
-  items: Record<string, string>;
   defaultValue: number | null;
 }>) {
   return (
@@ -334,7 +325,6 @@ function AccountField({
       </Label>
       <Select
         name={name}
-        items={items}
         defaultValue={defaultValue == null ? undefined : String(defaultValue)}
         required
       >
@@ -366,7 +356,7 @@ function VoucherFields({ billed }: Readonly<{ billed: boolean }>) {
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label>類型{billed ? <Req /> : null}</Label>
-          <Select key={billed ? "billed" : "free"} name="docKind" items={kindOptions} defaultValue="e_invoice">
+          <Select key={billed ? "billed" : "free"} name="docKind" defaultValue="e_invoice">
             <SelectTrigger className="w-full">
               <SelectValue />
             </SelectTrigger>

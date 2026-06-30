@@ -5,7 +5,8 @@ import { toast } from "sonner";
 import { updateBankAccount, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label, Req } from "@/components/ui/label";
+import { Label } from "@/components/ui/label";
+import { Req } from "@/components/req";
 import { DialogFooter } from "@/components/ui/dialog";
 import { useRowDialogClose } from "@/components/row-dialog";
 import {
@@ -57,7 +58,7 @@ export function EditBankAccountForm({
       </div>
       <div className="space-y-1.5">
         <Label>類型</Label>
-        <Select name="kind" items={kindItems} defaultValue={account.kind}>
+        <Select name="kind" defaultValue={account.kind}>
           <SelectTrigger className="w-full">
             <SelectValue />
           </SelectTrigger>
@@ -72,7 +73,7 @@ export function EditBankAccountForm({
       </div>
       <div className="space-y-1.5">
         <Label>幣別</Label>
-        <Select name="currency" items={currencyItems} defaultValue={account.currency}>
+        <Select name="currency" defaultValue={account.currency}>
           <SelectTrigger className="w-full">
             <SelectValue />
           </SelectTrigger>

@@ -45,16 +45,14 @@ export default async function AdvancesPage() {
             代墊
             <TooltipProvider>
               <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      className="text-muted-foreground hover:text-foreground"
-                      aria-label="代墊說明"
-                    />
-                  }
-                >
-                  <Info className="size-4" />
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="text-muted-foreground hover:text-foreground"
+                    aria-label="代墊說明"
+                  >
+                    <Info className="size-4" />
+                  </button>
                 </TooltipTrigger>
                 <TooltipContent>員工已代墊並納入帳務（進項），公司尚未撥款</TooltipContent>
               </Tooltip>

@@ -94,12 +94,11 @@ export function AppSidebar() {
             <SidebarMenu>
               {nav.map((item) => (
                 <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton
-                    isActive={isActive(item.href)}
-                    render={<Link href={item.href} />}
-                  >
-                    <item.icon />
-                    <span>{item.title}</span>
+                  <SidebarMenuButton asChild isActive={isActive(item.href)}>
+                    <Link href={item.href}>
+                      <item.icon />
+                      <span>{item.title}</span>
+                    </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
@@ -113,12 +112,11 @@ export function AppSidebar() {
             <SidebarMenu>
               {clients.map((item) => (
                 <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton
-                    isActive={isActive(item.href)}
-                    render={<Link href={item.href} />}
-                  >
-                    <item.icon />
-                    <span>{item.title}</span>
+                  <SidebarMenuButton asChild isActive={isActive(item.href)}>
+                    <Link href={item.href}>
+                      <item.icon />
+                      <span>{item.title}</span>
+                    </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
@@ -132,12 +130,11 @@ export function AppSidebar() {
             <SidebarMenu>
               {hr.map((item) => (
                 <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton
-                    isActive={isActive(item.href)}
-                    render={<Link href={item.href} />}
-                  >
-                    <item.icon />
-                    <span>{item.title}</span>
+                  <SidebarMenuButton asChild isActive={isActive(item.href)}>
+                    <Link href={item.href}>
+                      <item.icon />
+                      <span>{item.title}</span>
+                    </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
@@ -151,12 +148,11 @@ export function AppSidebar() {
             <SidebarMenu>
               {org.map((item) => (
                 <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton
-                    isActive={isActive(item.href)}
-                    render={<Link href={item.href} />}
-                  >
-                    <item.icon />
-                    <span>{item.title}</span>
+                  <SidebarMenuButton asChild isActive={isActive(item.href)}>
+                    <Link href={item.href}>
+                      <item.icon />
+                      <span>{item.title}</span>
+                    </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}

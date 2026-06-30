@@ -6,7 +6,8 @@ import { Plus } from "lucide-react";
 import { createProject, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label, Req } from "@/components/ui/label";
+import { Label } from "@/components/ui/label";
+import { Req } from "@/components/req";
 import {
   Select,
   SelectContent,
@@ -33,7 +34,6 @@ export function NewProjectDialog({
 }>) {
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState(createProject, initial);
-  const partyItems = Object.fromEntries(parties.map((p) => [String(p.id), p.name]));
 
   useEffect(() => {
     if (state.ok) {
@@ -47,8 +47,10 @@ export function NewProjectDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="sm" />}>
-        <Plus className="size-4" /> 新增專案
+      <DialogTrigger asChild>
+        <Button size="sm">
+          <Plus className="size-4" /> 新增專案
+        </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
         <form action={action}>
@@ -64,7 +66,7 @@ export function NewProjectDialog({
             </div>
             <div className="space-y-1.5">
               <Label>客戶</Label>
-              <Select name="clientPartyId" items={partyItems}>
+              <Select name="clientPartyId">
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="— 未指定 —" />
                 </SelectTrigger>
@@ -79,7 +81,7 @@ export function NewProjectDialog({
             </div>
             <div className="space-y-1.5">
               <Label>狀態</Label>
-              <Select name="status" items={{ active: "進行中", archived: "封存" }} defaultValue="active">
+              <Select name="status" defaultValue="active">
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>

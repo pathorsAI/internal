@@ -5,7 +5,8 @@ import { toast } from "sonner";
 import { updateParty, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label, Req } from "@/components/ui/label";
+import { Label } from "@/components/ui/label";
+import { Req } from "@/components/req";
 import { DialogFooter } from "@/components/ui/dialog";
 import { useRowDialogClose } from "@/components/row-dialog";
 import {
@@ -17,9 +18,7 @@ import {
 } from "@/components/ui/select";
 
 const initial: ActionState = { ok: false };
-const labelItems = { vendor: "廠商", customer: "客戶", gov: "政府機關", other: "其他" };
 const currencyList = ["TWD", "USD", "EUR", "JPY", "CNY"];
-const currencyItems = Object.fromEntries(currencyList.map((c) => [c, c]));
 
 type Party = {
   id: number;
@@ -44,9 +43,6 @@ export function EditPartyForm({
   footer?: React.ReactNode;
 }>) {
   const [state, action, pending] = useActionState(updateParty, initial);
-  const accountItems = Object.fromEntries(
-    accounts.map((a) => [String(a.id), `${a.name}（${a.currency}）`]),
-  );
 
   const close = useRowDialogClose();
   useEffect(() => {
@@ -69,7 +65,7 @@ export function EditPartyForm({
       </div>
       <div className="space-y-1.5">
         <Label>類型</Label>
-        <Select name="label" items={labelItems} defaultValue={party.label}>
+        <Select name="label" defaultValue={party.label}>
           <SelectTrigger className="w-full">
             <SelectValue />
           </SelectTrigger>
@@ -87,7 +83,7 @@ export function EditPartyForm({
       </div>
       <div className="space-y-1.5">
         <Label>預設幣別</Label>
-        <Select name="defaultCurrency" items={currencyItems} defaultValue={party.defaultCurrency ?? "TWD"}>
+        <Select name="defaultCurrency" defaultValue={party.defaultCurrency ?? "TWD"}>
           <SelectTrigger className="w-full">
             <SelectValue />
           </SelectTrigger>
@@ -104,7 +100,6 @@ export function EditPartyForm({
         <Label>預設帳戶</Label>
         <Select
           name="defaultAccountId"
-          items={accountItems}
           defaultValue={party.defaultAccountId == null ? undefined : String(party.defaultAccountId)}
         >
           <SelectTrigger className="w-full">

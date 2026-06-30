@@ -5,7 +5,8 @@ import { toast } from "sonner";
 import { updateSubscription, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label, Req } from "@/components/ui/label";
+import { Label } from "@/components/ui/label";
+import { Req } from "@/components/req";
 import { DatePicker } from "@/components/date-picker";
 import { DialogFooter } from "@/components/ui/dialog";
 import { useRowDialogClose } from "@/components/row-dialog";
@@ -19,7 +20,6 @@ import {
 
 const initial: ActionState = { ok: false };
 const currencyList = ["TWD", "USD", "EUR", "JPY", "CNY"];
-const currencyItems = Object.fromEntries(currencyList.map((c) => [c, c]));
 
 type Subscription = {
   id: number;
@@ -47,8 +47,6 @@ export function EditSubscriptionForm({
   footer?: React.ReactNode;
 }>) {
   const [state, action, pending] = useActionState(updateSubscription, initial);
-  const partyItems = Object.fromEntries(parties.map((p) => [String(p.id), p.name]));
-  const projectItems = Object.fromEntries(projects.map((p) => [String(p.id), p.name]));
 
   const close = useRowDialogClose();
   useEffect(() => {
@@ -67,7 +65,7 @@ export function EditSubscriptionForm({
 
       <div className="space-y-1.5">
         <Label>客戶<Req /></Label>
-        <Select name="customerPartyId" items={partyItems} defaultValue={String(subscription.customerPartyId)}>
+        <Select name="customerPartyId" defaultValue={String(subscription.customerPartyId)}>
           <SelectTrigger className="w-full">
             <SelectValue placeholder="選擇客戶" />
           </SelectTrigger>
@@ -84,7 +82,6 @@ export function EditSubscriptionForm({
         <Label>專案</Label>
         <Select
           name="projectId"
-          items={projectItems}
           defaultValue={subscription.projectId == null ? undefined : String(subscription.projectId)}
         >
           <SelectTrigger className="w-full">
@@ -109,7 +106,7 @@ export function EditSubscriptionForm({
       </div>
       <div className="space-y-1.5">
         <Label>幣別</Label>
-        <Select name="currency" items={currencyItems} defaultValue={subscription.currency}>
+        <Select name="currency" defaultValue={subscription.currency}>
           <SelectTrigger className="w-full">
             <SelectValue />
           </SelectTrigger>
@@ -136,7 +133,6 @@ export function EditSubscriptionForm({
         <Label>狀態</Label>
         <Select
           name="status"
-          items={{ active: "進行中", paused: "暫停", ended: "結束" }}
           defaultValue={subscription.status}
         >
           <SelectTrigger className="w-full">

@@ -5,7 +5,8 @@ import { toast } from "sonner";
 import { updateEmployee, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label, Req } from "@/components/ui/label";
+import { Label } from "@/components/ui/label";
+import { Req } from "@/components/req";
 import { DialogFooter } from "@/components/ui/dialog";
 import { useRowDialogClose } from "@/components/row-dialog";
 import {
@@ -72,7 +73,7 @@ export function EditEmployeeForm({
       </div>
       <div className="space-y-1.5">
         <Label>雇用類型</Label>
-        <Select name="employmentType" items={typeItems} defaultValue={employee.employmentType}>
+        <Select name="employmentType" defaultValue={employee.employmentType}>
           <SelectTrigger className="w-full">
             <SelectValue />
           </SelectTrigger>

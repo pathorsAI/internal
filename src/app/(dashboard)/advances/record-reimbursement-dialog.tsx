@@ -5,7 +5,8 @@ import { toast } from "sonner";
 import { createReimbursement, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/format";
-import { Label, Req } from "@/components/ui/label";
+import { Label } from "@/components/ui/label";
+import { Req } from "@/components/req";
 import {
   Select,
   SelectContent,
@@ -36,9 +37,6 @@ export function RecordReimbursementDialog({
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState(createReimbursement, initial);
   const today = new Date().toISOString().slice(0, 10);
-  const accountItems = Object.fromEntries(
-    accounts.map((a) => [String(a.id), `${a.name}（${a.currency}）`]),
-  );
 
   useEffect(() => {
     if (state.ok) {
@@ -52,7 +50,11 @@ export function RecordReimbursementDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="sm" variant="outline" />}>記錄撥款</DialogTrigger>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline">
+          記錄撥款
+        </Button>
+      </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <form action={action}>
           <input type="hidden" name="advanceId" value={advance.id} />
@@ -70,7 +72,7 @@ export function RecordReimbursementDialog({
             </div>
             <div className="space-y-1.5">
               <Label>付款帳戶<Req /></Label>
-              <Select name="fromAccountId" items={accountItems} required>
+              <Select name="fromAccountId" required>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="— 選擇帳戶 —" />
                 </SelectTrigger>
