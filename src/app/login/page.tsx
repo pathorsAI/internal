@@ -85,7 +85,7 @@ export default function LoginPage() {
       <Card className="w-full max-w-sm">
         <CardHeader>
           <LogoMark className="size-10 mb-2" />
-          <CardTitle>登入 Pathors 內部後台</CardTitle>
+          <CardTitle>登入內部管理系統</CardTitle>
           <CardDescription>用 Google 帳號進入後台</CardDescription>
         </CardHeader>
         <CardContent>
