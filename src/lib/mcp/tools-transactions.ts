@@ -150,8 +150,8 @@ async function resolveTxnFields(
     const isIncome = type === "income";
     const accountId = requireNumber(args, "accountId");
     await assertInOrg(db, bankAccounts, accountId, orgId, "Account");
-    const categoryId = requireNumber(args, "categoryId");
-    await assertInOrg(db, categories, categoryId, orgId, "Category");
+    const categoryId = optNumber(args, "categoryId") ?? null; // 可省略＝未分類
+    if (categoryId !== null) await assertInOrg(db, categories, categoryId, orgId, "Category");
     const partyId = await getOrCreateParty(
       db,
       orgId,
@@ -167,8 +167,8 @@ async function resolveTxnFields(
     };
   }
   if (type === "advance") {
-    const categoryId = requireNumber(args, "categoryId");
-    await assertInOrg(db, categories, categoryId, orgId, "Category");
+    const categoryId = optNumber(args, "categoryId") ?? null; // 可省略＝未分類
+    if (categoryId !== null) await assertInOrg(db, categories, categoryId, orgId, "Category");
     return {
       ...blank,
       categoryId,
@@ -286,7 +286,7 @@ export const transactionTools: Record<string, ToolDef> = {
 
   create_transaction: {
     description:
-      "Record a ledger transaction. Required per type — expense/income: accountId + partyName + categoryId; advance: partyName + categoryId + settleEmployeeName (no account); transfer: fromAccountId + toAccountId. Resolve ids with list_bank_accounts / list_categories / list_parties first. 'reported' (報稅/上外帳) sets the book to 'both', otherwise 'internal' (transfers are always 'both'). Invoice/統編 attachment must be done in the app. To reimburse an advance use create_reimbursement.",
+      "Record a ledger transaction. Required per type — expense/income: accountId + partyName; advance: partyName + settleEmployeeName (no account); transfer: fromAccountId + toAccountId. categoryId is OPTIONAL — omit it to leave the txn 未分類 (unclassified; no need for a separate holding account). Resolve ids with list_bank_accounts / list_categories / list_parties first. 'reported' (報稅/上外帳) sets the book to 'both', otherwise 'internal' (transfers are always 'both'). Set billedToCompanyTaxId=true to mark 有報公司統編 (the invoice attachment itself is done in the app). To reimburse an advance use create_reimbursement.",
     inputSchema: {
       type: "object",
       properties: {
@@ -317,6 +317,10 @@ export const transactionTools: Record<string, ToolDef> = {
           type: "string",
           description:
             "YYYY-MM-DD, the billing period's start date this payment covers. Required when subscriptionId is set.",
+        },
+        billedToCompanyTaxId: {
+          type: "boolean",
+          description: "有報公司統編（進項可扣抵）。Default false.",
         },
         ...ORG_ARG,
       },
@@ -363,7 +367,7 @@ export const transactionTools: Record<string, ToolDef> = {
           fromAccountId: f.fromAccountId,
           toAccountId: f.toAccountId,
           book: reported ? "both" : "internal",
-          billedToCompanyTaxId: false,
+          billedToCompanyTaxId: optBoolean(args, "billedToCompanyTaxId") ?? false,
         })
         .returning();
       return row;
@@ -372,7 +376,7 @@ export const transactionTools: Record<string, ToolDef> = {
 
   bulk_create_transactions: {
     description:
-      "Insert MANY ledger transactions in ONE call — use this instead of calling create_transaction in a loop. Pass `items`: an array where each element mirrors create_transaction's arguments (type, txnDate, amount, currency?, description?, reported?, accountId?, partyName?, categoryId?, settleEmployeeName?, fromAccountId?, toAccountId?, projectId?, contractId?, subscriptionId?, subscriptionPeriod?). Per-type requirements match create_transaction (expense/income: accountId+partyName+categoryId; advance: partyName+categoryId+settleEmployeeName; transfer: fromAccountId+toAccountId). Account/category/project/contract/subscription ids are validated against your org; party/employee names are created on demand and deduped within the batch. subscriptionPeriod (YYYY-MM-DD) is required on any item that sets subscriptionId. All rows are written in a single INSERT. Returns the created count and ids. Max 1000 items per call.",
+      "Insert MANY ledger transactions in ONE call — use this instead of calling create_transaction in a loop. Pass `items`: an array where each element mirrors create_transaction's arguments (type, txnDate, amount, currency?, description?, reported?, accountId?, partyName?, categoryId?, settleEmployeeName?, fromAccountId?, toAccountId?, projectId?, contractId?, subscriptionId?, subscriptionPeriod?). Per-type requirements match create_transaction (expense/income: accountId+partyName; advance: partyName+settleEmployeeName; transfer: fromAccountId+toAccountId); categoryId is optional (omit → 未分類, unclassified). Account/category/project/contract/subscription ids are validated against your org; party/employee names are created on demand and deduped within the batch. subscriptionPeriod (YYYY-MM-DD) is required on any item that sets subscriptionId. All rows are written in a single INSERT. Returns the created count and ids. Max 1000 items per call.",
     inputSchema: {
       type: "object",
       properties: {
@@ -407,6 +411,10 @@ export const transactionTools: Record<string, ToolDef> = {
                 type: "string",
                 description:
                   "YYYY-MM-DD period start this payment covers. Required when subscriptionId is set.",
+              },
+              billedToCompanyTaxId: {
+                type: "boolean",
+                description: "有報公司統編。Default false.",
               },
             },
             required: ["type", "txnDate", "amount"],
@@ -460,6 +468,7 @@ export const transactionTools: Record<string, ToolDef> = {
         toAccountId: number | null;
         partyName: string | null;
         settleEmployeeName: string | null;
+        billedToCompanyTaxId: boolean;
       };
       const norms: Norm[] = [];
       const partyLabelByName = new Map<string, string>();
@@ -507,6 +516,7 @@ export const transactionTools: Record<string, ToolDef> = {
           toAccountId: null,
           partyName: null,
           settleEmployeeName: null,
+          billedToCompanyTaxId: optBoolean(it, "billedToCompanyTaxId") === true,
         };
         if (type === "expense" || type === "income") {
           const isIncome = type === "income";
@@ -514,8 +524,8 @@ export const transactionTools: Record<string, ToolDef> = {
           if (!acctSet.has(accountId)) {
             throw new Error(`${at}.accountId ${accountId} not found in your organization.`);
           }
-          const categoryId = requireNumber(it, "categoryId");
-          if (!catSet.has(categoryId)) {
+          const categoryId = optNumber(it, "categoryId") ?? null; // 可省略＝未分類
+          if (categoryId !== null && !catSet.has(categoryId)) {
             throw new Error(`${at}.categoryId ${categoryId} not found in your organization.`);
           }
           const partyName = requireString(it, "partyName");
@@ -527,8 +537,8 @@ export const transactionTools: Record<string, ToolDef> = {
           n.fromAccountId = isIncome ? null : accountId;
           n.toAccountId = isIncome ? accountId : null;
         } else if (type === "advance") {
-          const categoryId = requireNumber(it, "categoryId");
-          if (!catSet.has(categoryId)) {
+          const categoryId = optNumber(it, "categoryId") ?? null; // 可省略＝未分類
+          if (categoryId !== null && !catSet.has(categoryId)) {
             throw new Error(`${at}.categoryId ${categoryId} not found in your organization.`);
           }
           const partyName = requireString(it, "partyName");
@@ -574,7 +584,7 @@ export const transactionTools: Record<string, ToolDef> = {
         fromAccountId: n.fromAccountId,
         toAccountId: n.toAccountId,
         book: n.reported ? "both" : "internal",
-        billedToCompanyTaxId: false,
+        billedToCompanyTaxId: n.billedToCompanyTaxId,
       }));
       const inserted = await db.insert(transactions).values(values).returning({ id: transactions.id });
       return { created: inserted.length, ids: inserted.map((r) => r.id) };
@@ -583,7 +593,7 @@ export const transactionTools: Record<string, ToolDef> = {
 
   update_transaction: {
     description:
-      "Edit a transaction's date, amount, currency, description, category, project, contract, subscription, subscription period, or reported flag (only provided fields change). To change the account or counterparty, delete and recreate, or use the app.",
+      "Edit a transaction's date, amount, currency, description, category (categoryId 0 clears it → 未分類), project, contract, subscription, subscription period, reported flag, or billedToCompanyTaxId (有報公司統編) — only provided fields change. To change the account or counterparty, delete and recreate, or use the app.",
     inputSchema: {
       type: "object",
       properties: {
@@ -601,6 +611,7 @@ export const transactionTools: Record<string, ToolDef> = {
           description: "Period start YYYY-MM-DD; empty string to unset.",
         },
         reported: { type: "boolean" },
+        billedToCompanyTaxId: { type: "boolean", description: "有報公司統編（進項可扣抵）。" },
         ...ORG_ARG,
       },
       required: ["id"],
@@ -627,8 +638,15 @@ export const transactionTools: Record<string, ToolDef> = {
         patch.description = optString(args, "description");
       if (optNumber(args, "categoryId") !== undefined) {
         const categoryId = requireNumber(args, "categoryId");
-        await assertInOrg(db, categories, categoryId, orgId, "Category");
-        patch.categoryId = categoryId;
+        if (categoryId === 0) {
+          patch.categoryId = null; // 0＝清除分類（未分類）
+        } else {
+          await assertInOrg(db, categories, categoryId, orgId, "Category");
+          patch.categoryId = categoryId;
+        }
+      }
+      if (optBoolean(args, "billedToCompanyTaxId") !== undefined) {
+        patch.billedToCompanyTaxId = optBoolean(args, "billedToCompanyTaxId");
       }
       if (optNumber(args, "projectId") !== undefined) {
         patch.projectId = await optProjectId(db, args, orgId);

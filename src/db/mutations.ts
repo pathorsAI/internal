@@ -216,8 +216,8 @@ async function resolveExpenseIncome(
   if (!accountId) return { error: isIncome ? "請選擇收款帳戶" : "請選擇付款帳戶" };
   const partyName = str(formData.get("partyName"));
   if (!partyName) return { error: isIncome ? "請輸入客戶" : "請輸入交易對象" };
+  // 分類可留空 → categoryId 為 null＝未分類（不再強制選分類，避免用另一個帳戶暫存）
   const categoryId = num(formData.get("categoryId"));
-  if (!categoryId) return { error: "請選擇分類" };
   const partyId = await getOrCreateParty(db, orgId, partyName, isIncome ? "customer" : "vendor");
   return {
     fields: {
@@ -237,8 +237,7 @@ async function resolveAdvance(
 ): Promise<TxnResult> {
   const partyName = str(formData.get("partyName"));
   if (!partyName) return { error: "請輸入廠商" };
-  const categoryId = num(formData.get("categoryId"));
-  if (!categoryId) return { error: "請選擇分類" };
+  const categoryId = num(formData.get("categoryId")); // 可留空＝未分類
   const settleName = str(formData.get("settleEmployeeName"));
   if (!settleName) return { error: "請輸入代墊人" };
   return {
