@@ -1,5 +1,7 @@
+import { addMonths, format, isAfter, parseISO } from "date-fns";
 import { sql, eq, desc, and, or, lte, inArray, isNull, aliasedTable } from "drizzle-orm";
 import { getDb } from "./index";
+import { nextChargeDate, todayStr } from "@/lib/mcp/shared";
 import {
   transactions,
   categories,
@@ -618,6 +620,163 @@ export async function listSubscriptions(orgId: string) {
     .leftJoin(projects, eq(projects.id, subscriptions.projectId))
     .where(and(eq(subscriptions.organizationId, orgId), isNull(subscriptions.deletedAt)))
     .orderBy(desc(subscriptions.createdAt));
+}
+
+export async function getSubscription(orgId: string, id: number) {
+  const db = getDb();
+  const [row] = await db
+    .select({
+      id: subscriptions.id,
+      customerPartyId: subscriptions.customerPartyId,
+      customerName: parties.name,
+      projectId: subscriptions.projectId,
+      name: subscriptions.name,
+      amount: subscriptions.amount,
+      currency: subscriptions.currency,
+      intervalMonths: subscriptions.intervalMonths,
+      startDate: subscriptions.startDate,
+      endDate: subscriptions.endDate,
+      status: subscriptions.status,
+    })
+    .from(subscriptions)
+    .leftJoin(parties, eq(parties.id, subscriptions.customerPartyId))
+    .where(and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, id), isNull(subscriptions.deletedAt)))
+    .limit(1);
+  return row ?? null;
+}
+
+// 某訂閱各期已收金額：綁定此訂閱、同幣別、type=income 的交易，依 subscription_period 分組加總。
+export async function subscriptionPaidByPeriod(
+  orgId: string,
+  subscriptionId: number,
+): Promise<{ periodStart: string; paid: number }[]> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      periodStart: transactions.subscriptionPeriod,
+      paid: sql<string>`coalesce(sum(${transactions.amount}), 0)`,
+    })
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.organizationId, orgId),
+        eq(transactions.subscriptionId, subscriptionId),
+        eq(transactions.type, "income"),
+        isNull(transactions.deletedAt),
+      ),
+    )
+    .groupBy(transactions.subscriptionPeriod);
+  return rows
+    .filter((r): r is { periodStart: string; paid: string } => r.periodStart != null)
+    .map((r) => ({ periodStart: r.periodStart, paid: Number(r.paid) }));
+}
+
+export type SubscriptionForSchedule = {
+  amount: string;
+  intervalMonths: number;
+  startDate: string;
+  endDate: string | null;
+};
+
+export type SubscriptionPeriodStatus = "paid" | "partial" | "overdue" | "upcoming";
+
+export type SubscriptionPeriod = {
+  periodStart: string;
+  periodLabel: string;
+  expected: number;
+  paid: number;
+  status: SubscriptionPeriodStatus;
+};
+
+// 純函式：把「排程期別」與「已收（依期別）」合併成各期收款狀態。
+// - 排程期別：從 startDate 起，每隔 intervalMonths 一期，涵蓋所有 ≤ today 的期別，
+//   再加上第一個 > today 的期別（下一期，標記 upcoming）；有 endDate 則不超過它。
+// - 另外把已收資料中出現、但不在排程上的期別（提前 / 轉換 / 臨時期）也一併納入。
+export function computeSubscriptionSchedule(
+  sub: SubscriptionForSchedule,
+  paidByPeriod: { periodStart: string; paid: number }[],
+  today: string,
+): { periods: SubscriptionPeriod[]; totalOutstanding: number } {
+  const expected = Number(sub.amount);
+  const paidMap = new Map(paidByPeriod.map((p) => [p.periodStart, p.paid]));
+
+  const starts = new Set<string>();
+  if (sub.startDate && sub.intervalMonths >= 1) {
+    const todayDate = parseISO(today);
+    const end = sub.endDate ? parseISO(sub.endDate) : null;
+    let d = parseISO(sub.startDate);
+    let guard = 0;
+    // 收集 ≤ today 的期別，並多帶一個 > today 的期別（下一期）。
+    while (guard < 1000) {
+      if (end && isAfter(d, end)) break;
+      const iso = format(d, "yyyy-MM-dd");
+      starts.add(iso);
+      if (isAfter(d, todayDate)) break; // 已收到第一個未到期的期別，停止
+      d = addMonths(d, sub.intervalMonths);
+      guard++;
+    }
+  }
+  // 已收資料中出現的期別也要顯示（即使不在排程上）。
+  for (const p of paidByPeriod) starts.add(p.periodStart);
+
+  const sorted = [...starts].sort();
+  let totalOutstanding = 0;
+  const periods: SubscriptionPeriod[] = sorted.map((periodStart) => {
+    const paid = paidMap.get(periodStart) ?? 0;
+    const upcoming = periodStart > today;
+    let status: SubscriptionPeriodStatus;
+    if (paid >= expected) status = "paid";
+    else if (paid > 0) status = "partial";
+    else if (upcoming) status = "upcoming";
+    else status = "overdue";
+    if (!upcoming) totalOutstanding += Math.max(0, expected - paid);
+    return { periodStart, periodLabel: periodStart, expected, paid, status };
+  });
+  return { periods, totalOutstanding };
+}
+
+export type SubscriptionSchedule = {
+  id: number;
+  name: string;
+  customerName: string | null;
+  amount: string;
+  currency: string;
+  intervalMonths: number;
+  startDate: string;
+  endDate: string | null;
+  status: string;
+  nextChargeDate: string | null;
+  periods: SubscriptionPeriod[];
+  totalOutstanding: number;
+};
+
+// 抓一張訂閱 + 各期已收，算出各期收款狀態。MCP 工具與訂閱頁共用。
+export async function getSubscriptionSchedule(
+  orgId: string,
+  id: number,
+): Promise<SubscriptionSchedule | null> {
+  const sub = await getSubscription(orgId, id);
+  if (!sub) return null;
+  const today = todayStr();
+  const paidByPeriod = await subscriptionPaidByPeriod(orgId, id);
+  const { periods, totalOutstanding } = computeSubscriptionSchedule(sub, paidByPeriod, today);
+  return {
+    id: sub.id,
+    name: sub.name,
+    customerName: sub.customerName,
+    amount: sub.amount,
+    currency: sub.currency,
+    intervalMonths: sub.intervalMonths,
+    startDate: sub.startDate,
+    endDate: sub.endDate,
+    status: sub.status,
+    nextChargeDate:
+      sub.status === "active"
+        ? nextChargeDate(sub.startDate, sub.intervalMonths, today, sub.endDate)
+        : null,
+    periods,
+    totalOutstanding,
+  };
 }
 
 // 合約選單用的精簡清單（綁交易時的下拉選項）。
