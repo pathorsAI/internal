@@ -14,7 +14,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { listSubscriptions, listParties, listProjects } from "@/db/queries";
+import {
+  listSubscriptions,
+  listParties,
+  listProjects,
+  getSubscriptionSchedule,
+  type SubscriptionSchedule,
+} from "@/db/queries";
 import { formatCurrency } from "@/lib/format";
 import { NewSubscriptionDialog } from "./new-subscription-dialog";
 import { requireOrg } from "@/lib/session";
@@ -27,6 +33,67 @@ const statusVariant: Record<string, "default" | "secondary" | "outline"> = {
   paused: "secondary",
   ended: "outline",
 };
+
+// 各期收款狀態 → 繁中標籤 + badge 樣式
+const periodStatusMap: Record<string, string> = {
+  paid: "已收",
+  partial: "部分",
+  overdue: "逾期",
+  upcoming: "未到期",
+};
+const periodStatusVariant: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+  paid: "default",
+  partial: "secondary",
+  overdue: "destructive",
+  upcoming: "outline",
+};
+
+function PeriodScheduleTable({ schedule }: { schedule: SubscriptionSchedule | null }) {
+  if (!schedule || schedule.periods.length === 0) {
+    return <p className="mt-6 text-sm text-muted-foreground">尚無收款期別</p>;
+  }
+  return (
+    <div className="mt-6">
+      <div className="mb-2 text-sm font-medium">各期收款</div>
+      <div className="rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>期別</TableHead>
+              <TableHead className="text-right">應收</TableHead>
+              <TableHead className="text-right">已收</TableHead>
+              <TableHead>狀態</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {schedule.periods.map((p) => (
+              <TableRow key={p.periodStart}>
+                <TableCell className="tabular-nums">{p.periodLabel}</TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {formatCurrency(p.expected, schedule.currency)}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {formatCurrency(p.paid, schedule.currency)}
+                </TableCell>
+                <TableCell>
+                  <Badge variant={periodStatusVariant[p.status] ?? "outline"}>
+                    {periodStatusMap[p.status] ?? p.status}
+                  </Badge>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      <p className="mt-2 text-right text-sm text-muted-foreground">
+        未收合計：
+        <span className="font-medium text-foreground tabular-nums">
+          {formatCurrency(schedule.totalOutstanding, schedule.currency)}
+        </span>
+      </p>
+    </div>
+  );
+}
 
 function intervalLabel(months: number) {
   if (months === 1) return "每月";
@@ -44,6 +111,9 @@ export default async function SubscriptionsPage() {
   ]);
   const partyOptions = parties.map((p) => ({ id: p.id, name: p.name }));
   const projectOptions = projects.map((p) => ({ id: p.id, name: p.name }));
+  // 訂閱不多，逐筆抓各期收款狀態即可（一次平行抓完）。
+  const schedules = await Promise.all(rows.map((s) => getSubscriptionSchedule(orgId, s.id)));
+  const scheduleById = new Map(schedules.filter((s) => s != null).map((s) => [s.id, s]));
 
   return (
     <>
@@ -107,6 +177,7 @@ export default async function SubscriptionsPage() {
                     projects={projectOptions}
                     footer={<DeleteButton action={deleteSubscription} id={s.id} />}
                   />
+                  <PeriodScheduleTable schedule={scheduleById.get(s.id) ?? null} />
                 </RowDialog>
               ))
             )}

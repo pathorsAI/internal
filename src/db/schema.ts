@@ -222,6 +222,10 @@ export const transactions = pgTable("transactions", {
 	// 合約綁定（選填）：收款進度用 income 交易追蹤已收/未收；expense/advance 僅算成本。
 	// FK 在 DB 端（migrations/0009）建立，這裡只放欄位避免宣告順序衝突。
 	contractId: bigint("contract_id", { mode: "number" }),
+	// 訂閱綁定（選填）：把週期性收款掛到某張 subscription 的「某一期」，對帳哪期已收/未收。
+	// subscriptionPeriod = 該期起始日。FK 在 DB 端（migrations/0013）建立，這裡只放欄位。
+	subscriptionId: bigint("subscription_id", { mode: "number" }),
+	subscriptionPeriod: date("subscription_period"),
 }, (table) => [
 	index("idx_txn_book").using("btree", table.book.asc().nullsLast().op("text_ops")),
 	index("idx_txn_category").using("btree", table.categoryId.asc().nullsLast().op("int8_ops")),
@@ -231,6 +235,7 @@ export const transactions = pgTable("transactions", {
 	index("idx_txn_to").using("btree", table.toAccountId.asc().nullsLast().op("int8_ops")),
 	index("idx_txn_settle").using("btree", table.settleEmployeeId.asc().nullsLast().op("int8_ops")),
 	index("idx_txn_related").using("btree", table.relatedToId.asc().nullsLast().op("int8_ops")),
+	index("idx_txn_subscription").using("btree", table.subscriptionId.asc().nullsLast().op("int8_ops")),
 	foreignKey({
 			columns: [table.categoryId],
 			foreignColumns: [categories.id],

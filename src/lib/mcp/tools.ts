@@ -2,12 +2,13 @@ import { addDays, differenceInCalendarDays, format, parseISO } from "date-fns";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { contracts, parties, projects, subscriptions, transactions } from "@/db/schema";
-import { listActivity, listMyOrgs } from "@/db/queries";
+import { getSubscriptionSchedule, listActivity, listMyOrgs } from "@/db/queries";
 import {
   nextChargeDate,
   optNumber,
   optString,
   ORG_ARG,
+  requireNumber,
   resolveOrg,
   todayStr,
   type ToolContext,
@@ -175,6 +176,27 @@ const billingTools: Record<string, ToolDef> = {
             ? nextChargeDate(s.startDate, s.intervalMonths, today, s.endDate)
             : null,
       }));
+    },
+  },
+
+  get_subscription_schedule: {
+    description:
+      "Per-period collection status for one subscription: lists each billing period (from start_date + interval_months, up to and including the next due one) with 應收/已收 and a status — paid (已收滿), partial (部分), overdue (未收且已到期), upcoming (未到期). Income transactions linked to the subscription via subscriptionId + subscriptionPeriod count toward that period's 已收. Use this to answer 'which 期/季 is collected vs outstanding'. totalOutstanding sums the未收 of every non-upcoming period.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        subscriptionId: { type: "number" },
+        ...ORG_ARG,
+      },
+      required: ["subscriptionId"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      const subscriptionId = requireNumber(args, "subscriptionId");
+      const schedule = await getSubscriptionSchedule(orgId, subscriptionId);
+      if (!schedule) throw new Error(`Subscription ${subscriptionId} not found in your organization.`);
+      return schedule;
     },
   },
 

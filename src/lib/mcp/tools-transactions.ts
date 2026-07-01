@@ -9,6 +9,7 @@ import {
   parties,
   payslips,
   projects,
+  subscriptions,
   transactions,
 } from "@/db/schema";
 import {
@@ -209,6 +210,17 @@ async function optContractId(
   return contractId;
 }
 
+async function optSubscriptionId(
+  db: Db,
+  args: Record<string, unknown>,
+  orgId: string,
+): Promise<number | undefined> {
+  const subscriptionId = optNumber(args, "subscriptionId");
+  if (subscriptionId !== undefined)
+    await assertInOrg(db, subscriptions, subscriptionId, orgId, "Subscription");
+  return subscriptionId;
+}
+
 export const transactionTools: Record<string, ToolDef> = {
   list_transactions: {
     description:
@@ -296,6 +308,16 @@ export const transactionTools: Record<string, ToolDef> = {
           description:
             "Optional contract to link. income counts toward the contract's 已收/未收; expense/advance are cost-only (does not reduce the contract amount).",
         },
+        subscriptionId: {
+          type: "number",
+          description:
+            "Optional subscription to link; income counts toward that subscription period's 已收.",
+        },
+        subscriptionPeriod: {
+          type: "string",
+          description:
+            "YYYY-MM-DD, the billing period's start date this payment covers. Required when subscriptionId is set.",
+        },
         ...ORG_ARG,
       },
       required: ["type", "txnDate", "amount"],
@@ -311,6 +333,13 @@ export const transactionTools: Record<string, ToolDef> = {
       const f = await resolveTxnFields(db, orgId, type, args);
       const projectId = await optProjectId(db, args, orgId);
       const contractId = await optContractId(db, args, orgId);
+      const subscriptionId = await optSubscriptionId(db, args, orgId);
+      const subscriptionPeriod = optDate(args, "subscriptionPeriod");
+      if (subscriptionId !== undefined && subscriptionPeriod === undefined) {
+        throw new Error(
+          '"subscriptionPeriod" (YYYY-MM-DD) is required when "subscriptionId" is set.',
+        );
+      }
       const amount = requireDecimal(args, "amount");
       const currency = normalizeCurrency(args, "currency");
       const reported = type === "transfer" || optBoolean(args, "reported") === true;
@@ -326,6 +355,8 @@ export const transactionTools: Record<string, ToolDef> = {
           settleEmployeeId: f.settleEmployeeId,
           projectId: projectId ?? null,
           contractId: contractId ?? null,
+          subscriptionId: subscriptionId ?? null,
+          subscriptionPeriod: subscriptionPeriod ?? null,
           amount,
           currency,
           amountTwd: currency === "TWD" ? amount : null,
@@ -341,7 +372,7 @@ export const transactionTools: Record<string, ToolDef> = {
 
   bulk_create_transactions: {
     description:
-      "Insert MANY ledger transactions in ONE call — use this instead of calling create_transaction in a loop. Pass `items`: an array where each element mirrors create_transaction's arguments (type, txnDate, amount, currency?, description?, reported?, accountId?, partyName?, categoryId?, settleEmployeeName?, fromAccountId?, toAccountId?, projectId?, contractId?). Per-type requirements match create_transaction (expense/income: accountId+partyName+categoryId; advance: partyName+categoryId+settleEmployeeName; transfer: fromAccountId+toAccountId). Account/category/project/contract ids are validated against your org; party/employee names are created on demand and deduped within the batch. All rows are written in a single INSERT. Returns the created count and ids. Max 1000 items per call.",
+      "Insert MANY ledger transactions in ONE call — use this instead of calling create_transaction in a loop. Pass `items`: an array where each element mirrors create_transaction's arguments (type, txnDate, amount, currency?, description?, reported?, accountId?, partyName?, categoryId?, settleEmployeeName?, fromAccountId?, toAccountId?, projectId?, contractId?, subscriptionId?, subscriptionPeriod?). Per-type requirements match create_transaction (expense/income: accountId+partyName+categoryId; advance: partyName+categoryId+settleEmployeeName; transfer: fromAccountId+toAccountId). Account/category/project/contract/subscription ids are validated against your org; party/employee names are created on demand and deduped within the batch. subscriptionPeriod (YYYY-MM-DD) is required on any item that sets subscriptionId. All rows are written in a single INSERT. Returns the created count and ids. Max 1000 items per call.",
     inputSchema: {
       type: "object",
       properties: {
@@ -368,6 +399,15 @@ export const transactionTools: Record<string, ToolDef> = {
                 type: "number",
                 description: "Optional contract to link (income → 已收; expense/advance → cost only).",
               },
+              subscriptionId: {
+                type: "number",
+                description: "Optional subscription to link (income → that period's 已收).",
+              },
+              subscriptionPeriod: {
+                type: "string",
+                description:
+                  "YYYY-MM-DD period start this payment covers. Required when subscriptionId is set.",
+              },
             },
             required: ["type", "txnDate", "amount"],
             additionalProperties: false,
@@ -391,16 +431,18 @@ export const transactionTools: Record<string, ToolDef> = {
 
       // Load the org's valid FK ids once, so each row is validated in memory
       // instead of issuing an assertInOrg round trip per row.
-      const [acctRows, catRows, projRows, contractRows] = await Promise.all([
+      const [acctRows, catRows, projRows, contractRows, subscriptionRows] = await Promise.all([
         db.select({ id: bankAccounts.id }).from(bankAccounts).where(eq(bankAccounts.organizationId, orgId)),
         db.select({ id: categories.id }).from(categories).where(eq(categories.organizationId, orgId)),
         db.select({ id: projects.id }).from(projects).where(eq(projects.organizationId, orgId)),
         db.select({ id: contracts.id }).from(contracts).where(eq(contracts.organizationId, orgId)),
+        db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.organizationId, orgId)),
       ]);
       const acctSet = new Set(acctRows.map((r) => r.id));
       const catSet = new Set(catRows.map((r) => r.id));
       const projSet = new Set(projRows.map((r) => r.id));
       const contractSet = new Set(contractRows.map((r) => r.id));
+      const subscriptionSet = new Set(subscriptionRows.map((r) => r.id));
 
       type Norm = {
         type: string;
@@ -411,6 +453,8 @@ export const transactionTools: Record<string, ToolDef> = {
         reported: boolean;
         projectId: number | null;
         contractId: number | null;
+        subscriptionId: number | null;
+        subscriptionPeriod: string | null;
         categoryId: number | null;
         fromAccountId: number | null;
         toAccountId: number | null;
@@ -439,6 +483,14 @@ export const transactionTools: Record<string, ToolDef> = {
         if (contractId !== null && !contractSet.has(contractId)) {
           throw new Error(`${at}.contractId ${contractId} not found in your organization.`);
         }
+        const subscriptionId = optNumber(it, "subscriptionId") ?? null;
+        if (subscriptionId !== null && !subscriptionSet.has(subscriptionId)) {
+          throw new Error(`${at}.subscriptionId ${subscriptionId} not found in your organization.`);
+        }
+        const subscriptionPeriod = optDate(it, "subscriptionPeriod") ?? null;
+        if (subscriptionId !== null && subscriptionPeriod === null) {
+          throw new Error(`${at}.subscriptionPeriod (YYYY-MM-DD) is required when subscriptionId is set.`);
+        }
         const n: Norm = {
           type,
           txnDate: requireDate(it, "txnDate"),
@@ -448,6 +500,8 @@ export const transactionTools: Record<string, ToolDef> = {
           reported: type === "transfer" || optBoolean(it, "reported") === true,
           projectId,
           contractId,
+          subscriptionId,
+          subscriptionPeriod,
           categoryId: null,
           fromAccountId: null,
           toAccountId: null,
@@ -512,6 +566,8 @@ export const transactionTools: Record<string, ToolDef> = {
         settleEmployeeId: n.settleEmployeeName ? (employeeId.get(n.settleEmployeeName) ?? null) : null,
         projectId: n.projectId,
         contractId: n.contractId,
+        subscriptionId: n.subscriptionId,
+        subscriptionPeriod: n.subscriptionPeriod,
         amount: n.amount,
         currency: n.currency,
         amountTwd: n.currency === "TWD" ? n.amount : null,
@@ -527,7 +583,7 @@ export const transactionTools: Record<string, ToolDef> = {
 
   update_transaction: {
     description:
-      "Edit a transaction's date, amount, currency, description, category, project, contract, or reported flag (only provided fields change). To change the account or counterparty, delete and recreate, or use the app.",
+      "Edit a transaction's date, amount, currency, description, category, project, contract, subscription, subscription period, or reported flag (only provided fields change). To change the account or counterparty, delete and recreate, or use the app.",
     inputSchema: {
       type: "object",
       properties: {
@@ -539,6 +595,11 @@ export const transactionTools: Record<string, ToolDef> = {
         categoryId: { type: "number" },
         projectId: { type: "number" },
         contractId: { type: "number", description: "Link/relink to a contract; 0 to unset." },
+        subscriptionId: { type: "number", description: "Link/relink to a subscription; 0 to unset." },
+        subscriptionPeriod: {
+          type: "string",
+          description: "Period start YYYY-MM-DD; empty string to unset.",
+        },
         reported: { type: "boolean" },
         ...ORG_ARG,
       },
@@ -580,6 +641,21 @@ export const transactionTools: Record<string, ToolDef> = {
           await assertInOrg(db, contracts, contractId, orgId, "Contract");
           patch.contractId = contractId;
         }
+      }
+      if (optNumber(args, "subscriptionId") !== undefined) {
+        const subscriptionId = requireNumber(args, "subscriptionId");
+        if (subscriptionId === 0) {
+          // 解除訂閱綁定時，期別一併清空。
+          patch.subscriptionId = null;
+          patch.subscriptionPeriod = null;
+        } else {
+          await assertInOrg(db, subscriptions, subscriptionId, orgId, "Subscription");
+          patch.subscriptionId = subscriptionId;
+        }
+      }
+      // 期別：空字串代表清除；未提供則不動。只有在沒有因 subscriptionId=0 清空時才處理。
+      if (args.subscriptionPeriod !== undefined && patch.subscriptionPeriod === undefined) {
+        patch.subscriptionPeriod = optDate(args, "subscriptionPeriod") ?? null;
       }
       const amountProvided = optNumber(args, "amount") !== undefined;
       const currencyProvided = optString(args, "currency") !== undefined;
