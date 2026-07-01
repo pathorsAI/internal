@@ -1,4 +1,4 @@
-import { pgTable, check, bigint, text, boolean, char, numeric, timestamp, date, unique, integer, foreignKey, index } from "drizzle-orm/pg-core"
+import { pgTable, check, bigint, text, boolean, char, numeric, timestamp, date, unique, integer, foreignKey, index, uniqueIndex } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 
@@ -377,6 +377,27 @@ export const subscriptions = pgTable("subscriptions", {
 			name: "subscriptions_project_id_fkey"
 		}),
 	check("chk_subscription_status", sql`status = ANY (ARRAY['active'::text, 'paused'::text, 'ended'::text])`),
+]);
+
+// 每期「應收金額」覆寫：同一張訂閱不同期別可有不同應收（如過渡期只收 2 個月）。
+// 沒有覆寫的期別退回 subscriptions.amount。FK 在 DB 端（migrations/0014）建立。
+export const subscriptionPeriods = pgTable("subscription_periods", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "subscription_periods_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id"),
+	subscriptionId: bigint("subscription_id", { mode: "number" }).notNull(),
+	periodStart: date("period_start").notNull(),
+	expectedAmount: numeric("expected_amount", { precision: 18, scale: 2 }).notNull(),
+	note: text(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+	index("idx_subscription_period_sub").using("btree", table.subscriptionId.asc().nullsLast().op("int8_ops")),
+	uniqueIndex("uq_subscription_period").on(table.subscriptionId, table.periodStart).where(sql`deleted_at IS NULL`),
+	foreignKey({
+			columns: [table.subscriptionId],
+			foreignColumns: [subscriptions.id],
+			name: "subscription_periods_subscription_id_fkey"
+		}),
 ]);
 
 export const contracts = pgTable("contracts", {
