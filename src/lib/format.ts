@@ -1,19 +1,6 @@
-const CURRENCY_PREFIX: Record<string, string> = {
-  TWD: "NT$",
-  USD: "US$",
-  EUR: "€",
-  JPY: "¥",
-  CNY: "CN¥",
-};
-
-export function formatCurrency(value: number | string, currency = "TWD") {
-  const n = typeof value === "string" ? Number(value) : value;
-  const prefix = CURRENCY_PREFIX[currency] ?? `${currency} `;
-  const num = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(
-    Math.abs(n),
-  );
-  return `${n < 0 ? "-" : ""}${prefix}${num}`;
-}
+// 金額格式化的唯一實作在 @/lib/currency（幣別的 single source of truth）。
+// 這裡再匯出一次，維持既有 `@/lib/format` 的 import 不變。
+export { formatCurrency } from "./currency";
 
 export function formatDate(value: Date | string) {
   const d = typeof value === "string" ? new Date(value) : value;

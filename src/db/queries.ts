@@ -280,9 +280,12 @@ export async function listEmployees(orgId: string, limit = 200) {
     .limit(limit);
 }
 
+/** 單一對象的往來累計：依幣別分開（不同幣別不能混加，本系統不做匯率換算）。 */
+export type PartyTotal = { currency: string; received: number; paid: number };
+
 export async function listParties(orgId: string) {
   const db = getDb();
-  return db
+  const rows = await db
     .select({
       id: parties.id,
       name: parties.name,
@@ -296,12 +299,45 @@ export async function listParties(orgId: string) {
       isActive: parties.isActive,
       accountName: bankAccounts.name,
       txnCount: sql<number>`(select count(*)::int from ${transactions} t where t.party_id = ${parties.id} and t.deleted_at is null)`,
-      txnTotal: sql<string>`coalesce((select sum(coalesce(t.amount_twd, t.amount)) from ${transactions} t where t.party_id = ${parties.id} and t.deleted_at is null), 0)`,
     })
     .from(parties)
     .leftJoin(bankAccounts, eq(bankAccounts.id, parties.defaultAccountId))
     .where(and(eq(parties.organizationId, orgId), isNull(parties.deletedAt)))
     .orderBy(desc(parties.isActive), parties.name);
+
+  // 往來金額依「對象 × 幣別」分組（不同幣別不能混加）：
+  // received = 對方付我們（type income）、paid = 我們付對方（type expense/advance）。
+  const totalRows = await db
+    .select({
+      partyId: transactions.partyId,
+      currency: transactions.currency,
+      received: sql<string>`coalesce(sum(${transactions.amount}) filter (where ${transactions.type} = 'income'), 0)`,
+      paid: sql<string>`coalesce(sum(${transactions.amount}) filter (where ${transactions.type} in ('expense','advance')), 0)`,
+    })
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.organizationId, orgId),
+        isNull(transactions.deletedAt),
+        sql`${transactions.partyId} is not null`,
+        sql`${transactions.type} in ('income','expense','advance')`,
+      ),
+    )
+    .groupBy(transactions.partyId, transactions.currency)
+    .orderBy(transactions.currency);
+
+  const byParty = new Map<number, PartyTotal[]>();
+  for (const t of totalRows) {
+    if (t.partyId == null) continue;
+    const received = Number(t.received);
+    const paid = Number(t.paid);
+    if (received === 0 && paid === 0) continue;
+    const list = byParty.get(t.partyId) ?? [];
+    list.push({ currency: t.currency, received, paid });
+    byParty.set(t.partyId, list);
+  }
+
+  return rows.map((r) => ({ ...r, totals: byParty.get(r.id) ?? [] }));
 }
 
 export async function getParty(orgId: string, id: number) {

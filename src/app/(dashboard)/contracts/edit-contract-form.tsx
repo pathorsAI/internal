@@ -18,9 +18,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { CurrencySelect } from "@/components/currency-select";
 
 const initial: ActionState = { ok: false };
-const currencyList = ["TWD", "USD", "EUR", "JPY", "CNY"];
 
 type Contract = {
   id: number;
@@ -135,18 +135,7 @@ export function EditContractForm({
       </div>
       <div className="space-y-1.5">
         <Label>幣別</Label>
-        <Select name="currency" defaultValue={contract.currency}>
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {currencyList.map((c) => (
-              <SelectItem key={c} value={c}>
-                {c}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <CurrencySelect defaultValue={contract.currency} />
       </div>
       <div className="space-y-1.5">
         <Label>狀態</Label>

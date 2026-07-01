@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { CurrencySelect } from "@/components/currency-select";
 import {
   Sheet,
   SheetContent,
@@ -130,25 +131,7 @@ export function NewTransactionDialog({
               </div>
               <div className="space-y-1.5">
                 <Label>幣別</Label>
-                <div className="inline-flex w-full rounded-md border p-0.5">
-                  {[
-                    { v: "TWD", l: "NT$ 台幣" },
-                    { v: "USD", l: "US$ 美金" },
-                  ].map((c, i) => (
-                    <label key={c.v} className="flex-1">
-                      <input
-                        type="radio"
-                        name="currency"
-                        value={c.v}
-                        defaultChecked={i === 0}
-                        className="peer sr-only"
-                      />
-                      <span className="block cursor-pointer rounded-[5px] px-3 py-1.5 text-center text-sm peer-checked:bg-foreground peer-checked:text-background">
-                        {c.l}
-                      </span>
-                    </label>
-                  ))}
-                </div>
+                <CurrencySelect />
               </div>
 
               {/* 帳戶互轉 */}

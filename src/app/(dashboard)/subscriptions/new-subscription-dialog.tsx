@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { CurrencySelect } from "@/components/currency-select";
 import {
   Dialog,
   DialogContent,
@@ -27,7 +28,6 @@ import {
 } from "@/components/ui/dialog";
 
 const initial: ActionState = { ok: false };
-const currencyList = ["TWD", "USD", "EUR", "JPY", "CNY"];
 
 export function NewSubscriptionDialog({
   parties,
@@ -104,18 +104,7 @@ export function NewSubscriptionDialog({
             </div>
             <div className="space-y-1.5">
               <Label>幣別</Label>
-              <Select name="currency" defaultValue="TWD">
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {currencyList.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <CurrencySelect />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="intervalMonths">每隔幾個月收一次</Label>

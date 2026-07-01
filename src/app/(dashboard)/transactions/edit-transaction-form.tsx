@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { CurrencySelect } from "@/components/currency-select";
 import { DatePicker } from "@/components/date-picker";
 import { CategoryCombobox } from "./category-combobox";
 import { PartyCombobox } from "./party-combobox";
@@ -157,7 +158,7 @@ export function EditTransactionForm({
         </div>
         <div className="space-y-1.5">
           <Label>幣別</Label>
-          <CurrencyToggle current={txn.currency} />
+          <CurrencySelect defaultValue={txn.currency} />
         </div>
 
         {isTransfer ? (
@@ -278,30 +279,6 @@ export function EditTransactionForm({
         </div>
       </form>
     </>
-  );
-}
-
-function CurrencyToggle({ current }: Readonly<{ current: string }>) {
-  return (
-    <div className="inline-flex w-full rounded-md border p-0.5">
-      {[
-        { v: "TWD", l: "NT$ 台幣" },
-        { v: "USD", l: "US$ 美金" },
-      ].map((c) => (
-        <label key={c.v} className="flex-1">
-          <input
-            type="radio"
-            name="currency"
-            value={c.v}
-            defaultChecked={current === c.v}
-            className="peer sr-only"
-          />
-          <span className="block cursor-pointer rounded-[5px] px-3 py-1.5 text-center text-sm peer-checked:bg-foreground peer-checked:text-background">
-            {c.l}
-          </span>
-        </label>
-      ))}
-    </div>
   );
 }
 

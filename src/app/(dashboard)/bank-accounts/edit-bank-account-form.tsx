@@ -16,10 +16,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { CurrencySelect } from "@/components/currency-select";
 
 const initial: ActionState = { ok: false };
 const kindItems: Record<string, string> = { bank: "銀行", wise: "Wise / 虛擬", cash: "現金" };
-const currencyItems: Record<string, string> = { TWD: "新台幣（NT$）", USD: "美金（US$）" };
 
 type Account = {
   id: number;
@@ -73,18 +73,7 @@ export function EditBankAccountForm({
       </div>
       <div className="space-y-1.5">
         <Label>幣別</Label>
-        <Select name="currency" defaultValue={account.currency}>
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {Object.entries(currencyItems).map(([v, l]) => (
-              <SelectItem key={v} value={v}>
-                {l}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <CurrencySelect defaultValue={account.currency} />
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="openingBalance">期初餘額</Label>

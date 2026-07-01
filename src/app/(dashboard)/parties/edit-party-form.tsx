@@ -16,9 +16,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { CurrencySelect } from "@/components/currency-select";
 
 const initial: ActionState = { ok: false };
-const currencyList = ["TWD", "USD", "EUR", "JPY", "CNY"];
 
 type Party = {
   id: number;
@@ -83,18 +83,7 @@ export function EditPartyForm({
       </div>
       <div className="space-y-1.5">
         <Label>預設幣別</Label>
-        <Select name="defaultCurrency" defaultValue={party.defaultCurrency ?? "TWD"}>
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {currencyList.map((c) => (
-              <SelectItem key={c} value={c}>
-                {c}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <CurrencySelect name="defaultCurrency" defaultValue={party.defaultCurrency ?? undefined} />
       </div>
       <div className="space-y-1.5">
         <Label>預設帳戶</Label>

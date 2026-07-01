@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/table";
 import { listAccountBalances } from "@/db/queries";
 import { formatCurrency } from "@/lib/format";
+import { CurrencyFlag } from "@/components/currency-flag";
 import { NewBankAccountDialog } from "./new-bank-account-dialog";
 import { requireOrg } from "@/lib/session";
 
@@ -59,7 +60,12 @@ export default async function BankAccountsPage() {
                           {a.kind === "bank" ? "實體" : "虛擬"}
                         </Badge>
                       </TableCell>
-                      <TableCell>{a.currency}</TableCell>
+                      <TableCell>
+                        <span className="flex items-center gap-2">
+                          <CurrencyFlag currency={a.currency} />
+                          {a.currency}
+                        </span>
+                      </TableCell>
                       <TableCell>
                         <Badge variant={a.isActive ? "outline" : "secondary"}>
                           {a.isActive ? "啟用" : "停用"}

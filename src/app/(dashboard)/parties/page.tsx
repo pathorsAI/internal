@@ -14,8 +14,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { listParties, listBankAccounts } from "@/db/queries";
+import { listParties, listBankAccounts, type PartyTotal } from "@/db/queries";
 import { formatCurrency } from "@/lib/format";
+import { CurrencyFlag } from "@/components/currency-flag";
+import { cn } from "@/lib/utils";
 import { NewPartyDialog } from "./new-party-dialog";
 import { requireOrg } from "@/lib/session";
 
@@ -28,13 +30,36 @@ const labelMap: Record<string, string> = {
   other: "其他",
 };
 
+/** 依幣別逐行顯示某方向（收款/付款）的累計；不同幣別分開，不換算。 */
+function MoneyLines({
+  totals,
+  field,
+  tone,
+}: Readonly<{ totals: PartyTotal[]; field: "received" | "paid"; tone: string }>) {
+  const lines = totals.filter((t) => t[field] !== 0);
+  if (lines.length === 0) return <span className="text-muted-foreground">—</span>;
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      {lines.map((t) => (
+        <span key={t.currency} className={cn("flex items-center justify-end gap-1.5 tabular-nums", tone)}>
+          <CurrencyFlag currency={t.currency} className="h-3" />
+          {formatCurrency(t[field], t.currency)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export default async function PartiesPage() {
   const { orgId } = await requireOrg();
   const [rows, accounts] = await Promise.all([listParties(orgId), listBankAccounts(orgId)]);
 
   return (
     <>
-      <PageHeader title="交易對象" description="往來的廠商、客戶、機關，點名稱可看詳細與編輯">
+      <PageHeader
+        title="交易對象"
+        description="往來的廠商、客戶、機關；收款＝對方付我們、付款＝我們付對方，依幣別分開加總"
+      >
         <NewPartyDialog
           accounts={accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }))}
         />
@@ -48,12 +73,13 @@ export default async function PartiesPage() {
               <TableHead>類型</TableHead>
               <TableHead>統編</TableHead>
               <TableHead className="text-right">交易數</TableHead>
-              <TableHead className="text-right">累計 (TWD)</TableHead>
+              <TableHead className="text-right">收款</TableHead>
+              <TableHead className="text-right">付款</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <EmptyRow colSpan={5} message="尚無交易對象">點右上角新增</EmptyRow>
+              <EmptyRow colSpan={6} message="尚無交易對象">點右上角新增</EmptyRow>
             ) : (
               rows.map((s) => (
                 <RowDialog
@@ -68,8 +94,11 @@ export default async function PartiesPage() {
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">{s.taxId ?? "—"}</TableCell>
                       <TableCell className="text-right tabular-nums">{s.txnCount}</TableCell>
-                      <TableCell className="text-right font-medium tabular-nums">
-                        {formatCurrency(s.txnTotal)}
+                      <TableCell className="text-right font-medium">
+                        <MoneyLines totals={s.totals} field="received" tone="text-income" />
+                      </TableCell>
+                      <TableCell className="text-right font-medium">
+                        <MoneyLines totals={s.totals} field="paid" tone="text-expense" />
                       </TableCell>
                     </>
                   }
