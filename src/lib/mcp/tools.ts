@@ -2,12 +2,20 @@ import { addDays, differenceInCalendarDays, format, parseISO } from "date-fns";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { contracts, parties, projects, subscriptions, transactions } from "@/db/schema";
-import { getSubscriptionSchedule, listActivity, listMyOrgs } from "@/db/queries";
 import {
+  deleteSubscriptionPeriod,
+  getSubscriptionSchedule,
+  listActivity,
+  listMyOrgs,
+  upsertSubscriptionPeriod,
+} from "@/db/queries";
+import {
+  assertInOrg,
   nextChargeDate,
   optNumber,
   optString,
   ORG_ARG,
+  requireDate,
   requireNumber,
   resolveOrg,
   todayStr,
@@ -197,6 +205,62 @@ const billingTools: Record<string, ToolDef> = {
       const schedule = await getSubscriptionSchedule(orgId, subscriptionId);
       if (!schedule) throw new Error(`Subscription ${subscriptionId} not found in your organization.`);
       return schedule;
+    },
+  },
+
+  set_subscription_period: {
+    description:
+      "Set (upsert) the expected amount 應收 for one billing period of a subscription. Use for irregular periods (e.g. a 2-month transition quarter). periodStart is the period's start date.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        subscriptionId: { type: "number" },
+        periodStart: { type: "string", description: "The period's start date (YYYY-MM-DD)." },
+        expectedAmount: { type: "number", description: "應收 for this period." },
+        note: { type: "string", description: "Optional reason for the override." },
+        ...ORG_ARG,
+      },
+      required: ["subscriptionId", "periodStart", "expectedAmount"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      const subscriptionId = requireNumber(args, "subscriptionId");
+      const db = getDb();
+      await assertInOrg(db, subscriptions, subscriptionId, orgId, "Subscription");
+      const periodStart = requireDate(args, "periodStart");
+      const expectedAmount = requireNumber(args, "expectedAmount");
+      const note = optString(args, "note") ?? null;
+      return upsertSubscriptionPeriod(orgId, subscriptionId, periodStart, expectedAmount, note);
+    },
+  },
+
+  delete_subscription_period: {
+    description:
+      "Remove the expected-amount 應收 override for one billing period of a subscription. The period falls back to the subscription's default amount.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        subscriptionId: { type: "number" },
+        periodStart: { type: "string", description: "The period's start date (YYYY-MM-DD)." },
+        ...ORG_ARG,
+      },
+      required: ["subscriptionId", "periodStart"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      const subscriptionId = requireNumber(args, "subscriptionId");
+      const db = getDb();
+      await assertInOrg(db, subscriptions, subscriptionId, orgId, "Subscription");
+      const periodStart = requireDate(args, "periodStart");
+      const deleted = await deleteSubscriptionPeriod(orgId, subscriptionId, periodStart);
+      if (!deleted) {
+        throw new Error(
+          `No 應收 override found for subscription ${subscriptionId} period ${periodStart}.`,
+        );
+      }
+      return { deleted: true, subscriptionId, periodStart };
     },
   },
 

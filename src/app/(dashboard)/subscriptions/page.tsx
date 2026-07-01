@@ -68,7 +68,12 @@ function PeriodScheduleTable({ schedule }: { schedule: SubscriptionSchedule | nu
           <TableBody>
             {schedule.periods.map((p) => (
               <TableRow key={p.periodStart}>
-                <TableCell className="tabular-nums">{p.periodLabel}</TableCell>
+                <TableCell className="tabular-nums">
+                  {p.periodLabel}
+                  {p.isOverride && p.note ? (
+                    <span className="mt-0.5 block text-xs text-muted-foreground">{p.note}</span>
+                  ) : null}
+                </TableCell>
                 <TableCell className="text-right tabular-nums">
                   {formatCurrency(p.expected, schedule.currency)}
                 </TableCell>

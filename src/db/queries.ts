@@ -16,6 +16,7 @@ import {
   documents,
   projects,
   subscriptions,
+  subscriptionPeriods,
   contracts,
   activityLog,
 } from "./schema";
@@ -686,19 +687,53 @@ export type SubscriptionPeriod = {
   expected: number;
   paid: number;
   status: SubscriptionPeriodStatus;
+  note: string | null;
+  isOverride: boolean;
 };
+
+// 某訂閱各期「應收金額」覆寫：未刪除的每期覆寫（含備註），依期別排序。
+export async function listSubscriptionPeriods(
+  orgId: string,
+  subscriptionId: number,
+): Promise<{ periodStart: string; expectedAmount: number; note: string | null }[]> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      periodStart: subscriptionPeriods.periodStart,
+      expectedAmount: subscriptionPeriods.expectedAmount,
+      note: subscriptionPeriods.note,
+    })
+    .from(subscriptionPeriods)
+    .where(
+      and(
+        eq(subscriptionPeriods.organizationId, orgId),
+        eq(subscriptionPeriods.subscriptionId, subscriptionId),
+        isNull(subscriptionPeriods.deletedAt),
+      ),
+    )
+    .orderBy(subscriptionPeriods.periodStart);
+  return rows.map((r) => ({
+    periodStart: r.periodStart,
+    expectedAmount: Number(r.expectedAmount),
+    note: r.note,
+  }));
+}
 
 // 純函式：把「排程期別」與「已收（依期別）」合併成各期收款狀態。
 // - 排程期別：從 startDate 起，每隔 intervalMonths 一期，涵蓋所有 ≤ today 的期別，
 //   再加上第一個 > today 的期別（下一期，標記 upcoming）；有 endDate 則不超過它。
 // - 另外把已收資料中出現、但不在排程上的期別（提前 / 轉換 / 臨時期）也一併納入。
+// - explicitPeriods：某期的「應收金額」覆寫（可含備註）；有覆寫的期別用覆寫金額，
+//   其餘退回 sub.amount。覆寫的期別也一律納入顯示（即使還沒排到 / 沒收款）。
 export function computeSubscriptionSchedule(
   sub: SubscriptionForSchedule,
   paidByPeriod: { periodStart: string; paid: number }[],
+  explicitPeriods: { periodStart: string; expectedAmount: number; note: string | null }[],
   today: string,
 ): { periods: SubscriptionPeriod[]; totalOutstanding: number } {
-  const expected = Number(sub.amount);
+  const defaultExpected = Number(sub.amount);
   const paidMap = new Map(paidByPeriod.map((p) => [p.periodStart, p.paid]));
+  const overrideByStart = new Map(explicitPeriods.map((p) => [p.periodStart, p]));
 
   const starts = new Set<string>();
   if (sub.startDate && sub.intervalMonths >= 1) {
@@ -718,10 +753,14 @@ export function computeSubscriptionSchedule(
   }
   // 已收資料中出現的期別也要顯示（即使不在排程上）。
   for (const p of paidByPeriod) starts.add(p.periodStart);
+  // 有應收覆寫的期別也一律納入。
+  for (const p of explicitPeriods) starts.add(p.periodStart);
 
   const sorted = [...starts].sort();
   let totalOutstanding = 0;
   const periods: SubscriptionPeriod[] = sorted.map((periodStart) => {
+    const override = overrideByStart.get(periodStart);
+    const expected = override?.expectedAmount ?? defaultExpected;
     const paid = paidMap.get(periodStart) ?? 0;
     const upcoming = periodStart > today;
     let status: SubscriptionPeriodStatus;
@@ -730,7 +769,15 @@ export function computeSubscriptionSchedule(
     else if (upcoming) status = "upcoming";
     else status = "overdue";
     if (!upcoming) totalOutstanding += Math.max(0, expected - paid);
-    return { periodStart, periodLabel: periodStart, expected, paid, status };
+    return {
+      periodStart,
+      periodLabel: periodStart,
+      expected,
+      paid,
+      status,
+      note: override?.note ?? null,
+      isOverride: overrideByStart.has(periodStart),
+    };
   });
   return { periods, totalOutstanding };
 }
@@ -758,8 +805,16 @@ export async function getSubscriptionSchedule(
   const sub = await getSubscription(orgId, id);
   if (!sub) return null;
   const today = todayStr();
-  const paidByPeriod = await subscriptionPaidByPeriod(orgId, id);
-  const { periods, totalOutstanding } = computeSubscriptionSchedule(sub, paidByPeriod, today);
+  const [paidByPeriod, explicitPeriods] = await Promise.all([
+    subscriptionPaidByPeriod(orgId, id),
+    listSubscriptionPeriods(orgId, id),
+  ]);
+  const { periods, totalOutstanding } = computeSubscriptionSchedule(
+    sub,
+    paidByPeriod,
+    explicitPeriods,
+    today,
+  );
   return {
     id: sub.id,
     name: sub.name,
@@ -777,6 +832,87 @@ export async function getSubscriptionSchedule(
     periods,
     totalOutstanding,
   };
+}
+
+export type SubscriptionPeriodRow = {
+  periodStart: string;
+  expectedAmount: number;
+  note: string | null;
+};
+
+// 新增 / 更新某訂閱某期的「應收金額」覆寫（org 內）。
+// 因為唯一索引是 partial（deleted_at IS NULL），drizzle 的 onConflict 不易表達，
+// 改用「先查存活的同期覆寫→有則更新、無則新增」的手動 upsert，語意較清楚。
+export async function upsertSubscriptionPeriod(
+  orgId: string,
+  subscriptionId: number,
+  periodStart: string,
+  expectedAmount: number,
+  note: string | null,
+): Promise<SubscriptionPeriodRow> {
+  const db = getDb();
+  const amountStr = expectedAmount.toString();
+  const [existing] = await db
+    .select({ id: subscriptionPeriods.id })
+    .from(subscriptionPeriods)
+    .where(
+      and(
+        eq(subscriptionPeriods.organizationId, orgId),
+        eq(subscriptionPeriods.subscriptionId, subscriptionId),
+        eq(subscriptionPeriods.periodStart, periodStart),
+        isNull(subscriptionPeriods.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  const [row] = existing
+    ? await db
+        .update(subscriptionPeriods)
+        .set({ expectedAmount: amountStr, note })
+        .where(eq(subscriptionPeriods.id, existing.id))
+        .returning({
+          periodStart: subscriptionPeriods.periodStart,
+          expectedAmount: subscriptionPeriods.expectedAmount,
+          note: subscriptionPeriods.note,
+        })
+    : await db
+        .insert(subscriptionPeriods)
+        .values({
+          organizationId: orgId,
+          subscriptionId,
+          periodStart,
+          expectedAmount: amountStr,
+          note,
+        })
+        .returning({
+          periodStart: subscriptionPeriods.periodStart,
+          expectedAmount: subscriptionPeriods.expectedAmount,
+          note: subscriptionPeriods.note,
+        });
+
+  return { periodStart: row.periodStart, expectedAmount: Number(row.expectedAmount), note: row.note };
+}
+
+// 軟刪某訂閱某期的應收覆寫（該期退回訂閱預設金額）。回傳是否有刪到。
+export async function deleteSubscriptionPeriod(
+  orgId: string,
+  subscriptionId: number,
+  periodStart: string,
+): Promise<boolean> {
+  const db = getDb();
+  const rows = await db
+    .update(subscriptionPeriods)
+    .set({ deletedAt: new Date().toISOString() })
+    .where(
+      and(
+        eq(subscriptionPeriods.organizationId, orgId),
+        eq(subscriptionPeriods.subscriptionId, subscriptionId),
+        eq(subscriptionPeriods.periodStart, periodStart),
+        isNull(subscriptionPeriods.deletedAt),
+      ),
+    )
+    .returning({ id: subscriptionPeriods.id });
+  return rows.length > 0;
 }
 
 // 合約選單用的精簡清單（綁交易時的下拉選項）。
