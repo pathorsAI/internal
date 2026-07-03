@@ -29,7 +29,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/empty-state";
 import { CurrencyFlag } from "@/components/currency-flag";
 import type { MonthlyTrends } from "@/db/queries";
-import { formatCurrency, currencyMeta, DEFAULT_CURRENCY } from "@/lib/currency";
+import { formatCurrency, currencyMeta, CURRENCIES, DEFAULT_CURRENCY } from "@/lib/currency";
 
 type AccountOption = { id: number; name: string; currency: string };
 
@@ -52,24 +52,31 @@ export function TrendCharts({
 }: Readonly<{ accounts: AccountOption[]; trends: MonthlyTrends }>) {
   const [range, setRange] = useState<"6" | "12">("6");
   const [scope, setScope] = useState<string>("all"); // "all" 或帳戶 id
-  // 幣別清單依 CURRENCIES 註冊順序排序，讓 TWD 永遠排最前
+  // 幣別清單依 CURRENCIES 註冊順序排序（TWD 最前），未登記的幣別排在最後。
   const currencies = useMemo(() => {
+    const order = new Map(CURRENCIES.map((c, i) => [c.code, i]));
     const present = new Set<string>([
       ...accounts.map((a) => a.currency),
       ...trends.totals.map((t) => t.currency),
     ]);
-    return [...present].sort((a, b) => a.localeCompare(b)).sort((a, b) => {
-      const rank = (c: string) => (c === DEFAULT_CURRENCY ? 0 : 1);
-      return rank(a) - rank(b);
-    });
+    return [...present].sort(
+      (a, b) => (order.get(a) ?? 99) - (order.get(b) ?? 99) || a.localeCompare(b),
+    );
   }, [accounts, trends.totals]);
-  const [allCurrency, setAllCurrency] = useState<string>(
-    currencies.includes(DEFAULT_CURRENCY) ? DEFAULT_CURRENCY : (currencies[0] ?? DEFAULT_CURRENCY),
+  const pickDefaultCurrency = (list: string[]) =>
+    list.includes(DEFAULT_CURRENCY) ? DEFAULT_CURRENCY : (list[0] ?? DEFAULT_CURRENCY);
+  const [allCurrency, setAllCurrency] = useState<string>(() =>
+    pickDefaultCurrency(currencies),
   );
+  // 若資料改變導致目前選的幣別已不存在（例如切換組織後 props 更新但元件未卸載），
+  // 自動退回預設幣別，避免圖表卡在空狀態。
+  const effectiveAllCurrency = currencies.includes(allCurrency)
+    ? allCurrency
+    : pickDefaultCurrency(currencies);
 
   const selectedAccount =
     scope === "all" ? undefined : accounts.find((a) => String(a.id) === scope);
-  const currency = selectedAccount?.currency ?? allCurrency;
+  const currency = selectedAccount?.currency ?? effectiveAllCurrency;
 
   const months = trends.months.slice(-Number(range));
 
@@ -155,7 +162,7 @@ export function TrendCharts({
         </h2>
         <div className="flex flex-wrap items-center gap-2">
           {scope === "all" && currencies.length > 1 && (
-            <Tabs value={allCurrency} onValueChange={setAllCurrency}>
+            <Tabs value={effectiveAllCurrency} onValueChange={setAllCurrency}>
               <TabsList className="h-8">
                 {currencies.map((c) => (
                   <TabsTrigger key={c} value={c} className="gap-1.5 px-2.5 text-xs">
