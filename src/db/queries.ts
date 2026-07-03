@@ -139,6 +139,132 @@ export async function listTransactionMonths(orgId: string): Promise<string[]> {
     .reverse();
 }
 
+// ---- 總覽頁趨勢圖表：近 N 個月的收支與各帳戶餘額走勢 ----
+
+export type MonthlyTrends = {
+  /** 視窗內的月份（YYYY-MM，由舊到新），含當月 */
+  months: string[];
+  /** 各幣別每月收支（全組織，口徑同 getOverview：收入=income，支出=expense+advance） */
+  totals: { month: string; currency: string; income: number; expense: number }[];
+  /** 各帳戶每月收支與淨流量（淨流量含轉帳，供餘額走勢累加用） */
+  accountFlows: {
+    month: string;
+    accountId: number;
+    income: number;
+    expense: number;
+    net: number;
+  }[];
+  /** 各帳戶在視窗起點前的餘額（期初餘額 + 起點前所有交易淨額） */
+  startBalances: { accountId: number; balance: number }[];
+};
+
+export async function getMonthlyTrends(
+  orgId: string,
+  monthsBack = 12,
+): Promise<MonthlyTrends> {
+  const db = getDb();
+  const now = new Date();
+  const months = Array.from({ length: monthsBack }, (_, i) =>
+    format(addMonths(now, i - (monthsBack - 1)), "yyyy-MM"),
+  );
+  const windowStart = `${months[0]}-01`;
+  const txnMonth = sql<string>`to_char(${transactions.txnDate}, 'YYYY-MM')`;
+
+  const [totals, accountFlows, startBalances] = await Promise.all([
+    db
+      .select({
+        month: txnMonth.as("month"),
+        currency: transactions.currency,
+        income: sql<string>`coalesce(sum(${transactions.amount}) filter (where ${transactions.type} = 'income'), 0)`,
+        expense: sql<string>`coalesce(sum(${transactions.amount}) filter (where ${transactions.type} in ('expense','advance')), 0)`,
+      })
+      .from(transactions)
+      .where(
+        and(
+          eq(transactions.organizationId, orgId),
+          sql`${transactions.txnDate} >= ${windowStart}`,
+          sql`${transactions.type} in ('income','expense','advance')`,
+          isNull(transactions.deletedAt),
+        ),
+      )
+      .groupBy(sql`1`, transactions.currency),
+    db
+      .select({
+        month: txnMonth.as("month"),
+        accountId: bankAccounts.id,
+        income: sql<string>`coalesce(sum(${transactions.amount}) filter (where ${transactions.toAccountId} = ${bankAccounts.id} and ${transactions.type} = 'income'), 0)`,
+        expense: sql<string>`coalesce(sum(${transactions.amount}) filter (where ${transactions.fromAccountId} = ${bankAccounts.id} and ${transactions.type} in ('expense','advance')), 0)`,
+        net: sql<string>`(
+          coalesce(sum(${transactions.amount}) filter (where ${transactions.toAccountId} = ${bankAccounts.id}), 0)
+          - coalesce(sum(${transactions.amount}) filter (where ${transactions.fromAccountId} = ${bankAccounts.id}), 0)
+        )`,
+      })
+      .from(bankAccounts)
+      .innerJoin(
+        transactions,
+        and(
+          or(
+            eq(transactions.fromAccountId, bankAccounts.id),
+            eq(transactions.toAccountId, bankAccounts.id),
+          ),
+          isNull(transactions.deletedAt),
+        ),
+      )
+      .where(
+        and(
+          eq(bankAccounts.organizationId, orgId),
+          isNull(bankAccounts.deletedAt),
+          sql`${transactions.txnDate} >= ${windowStart}`,
+        ),
+      )
+      .groupBy(sql`1`, bankAccounts.id),
+    db
+      .select({
+        accountId: bankAccounts.id,
+        balance: sql<string>`(
+          ${bankAccounts.openingBalance}
+          + coalesce(sum(${transactions.amount}) filter (where ${transactions.toAccountId} = ${bankAccounts.id}), 0)
+          - coalesce(sum(${transactions.amount}) filter (where ${transactions.fromAccountId} = ${bankAccounts.id}), 0)
+        )`,
+      })
+      .from(bankAccounts)
+      .leftJoin(
+        transactions,
+        and(
+          or(
+            eq(transactions.fromAccountId, bankAccounts.id),
+            eq(transactions.toAccountId, bankAccounts.id),
+          ),
+          isNull(transactions.deletedAt),
+          sql`${transactions.txnDate} < ${windowStart}`,
+        ),
+      )
+      .where(and(eq(bankAccounts.organizationId, orgId), isNull(bankAccounts.deletedAt)))
+      .groupBy(bankAccounts.id),
+  ]);
+
+  return {
+    months,
+    totals: totals.map((r) => ({
+      month: r.month,
+      currency: r.currency,
+      income: Number(r.income),
+      expense: Number(r.expense),
+    })),
+    accountFlows: accountFlows.map((r) => ({
+      month: r.month,
+      accountId: r.accountId,
+      income: Number(r.income),
+      expense: Number(r.expense),
+      net: Number(r.net),
+    })),
+    startBalances: startBalances.map((r) => ({
+      accountId: r.accountId,
+      balance: Number(r.balance),
+    })),
+  };
+}
+
 export type TxnDocument = {
   id: number;
   docType: string;
