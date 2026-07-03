@@ -9,7 +9,13 @@ import {
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/page-header";
-import { getOverview, listTransactions, listAccountBalances } from "@/db/queries";
+import {
+  getOverview,
+  listTransactions,
+  listAccountBalances,
+  getMonthlyTrends,
+} from "@/db/queries";
+import { TrendCharts } from "./trend-charts";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { signColor } from "@/components/amount";
 import { EmptyState } from "@/components/empty-state";
@@ -24,10 +30,11 @@ const kindLabel: Record<string, string> = { bank: "銀行", wise: "Wise / 虛擬
 
 export default async function DashboardPage() {
   const { orgId } = await requireOrg();
-  const [overview, balances, recent] = await Promise.all([
+  const [overview, balances, recent, trends] = await Promise.all([
     getOverview(orgId),
     listAccountBalances(orgId),
     listTransactions(orgId, undefined, 6),
+    getMonthlyTrends(orgId, 12),
   ]);
 
   // 依幣別彙整各帳戶餘額（含期初餘額），不同幣別不混加
@@ -110,6 +117,12 @@ export default async function DashboardPage() {
           </div>
         )}
       </section>
+
+      {/* 收支趨勢：每月收支長條圖 + 帳戶餘額走勢，可篩選帳戶與 6/12 個月 */}
+      <TrendCharts
+        accounts={balances.map((a) => ({ id: a.id, name: a.name, currency: a.currency }))}
+        trends={trends}
+      />
 
       {/* 收支概況：依幣別分組的收入 / 支出 / 淨額（流量，不含期初餘額） */}
       <section className="space-y-2">
