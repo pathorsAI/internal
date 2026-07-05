@@ -60,12 +60,44 @@ export type TxnFilters = {
   period?: string; // YYYY-MM
 };
 
+// 內外帳列表與筆數共用的 where（篩選條件的 single source of truth）
+function txnWhere(orgId: string, filters: TxnFilters) {
+  const { book, categoryId, accountId, projectId, period } = filters;
+  return and(
+    eq(transactions.organizationId, orgId),
+    book ? eq(transactions.book, book) : undefined,
+    categoryId ? eq(transactions.categoryId, categoryId) : undefined,
+    accountId
+      ? or(
+          eq(transactions.fromAccountId, accountId),
+          eq(transactions.toAccountId, accountId),
+        )
+      : undefined,
+    projectId ? eq(transactions.projectId, projectId) : undefined,
+    period ? sql`to_char(${transactions.txnDate}, 'YYYY-MM') = ${period}` : undefined,
+    isNull(transactions.deletedAt),
+  );
+}
+
+// 符合篩選條件的交易總筆數（分頁用）
+export async function countTransactions(
+  orgId: string,
+  filters: TxnFilters = {},
+): Promise<number> {
+  const db = getDb();
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(transactions)
+    .where(txnWhere(orgId, filters));
+  return row?.count ?? 0;
+}
+
 export async function listTransactions(
   orgId: string,
   filters: TxnFilters = {},
-  limit = 100,
+  limit = 50,
+  offset = 0,
 ) {
-  const { book, categoryId, accountId, projectId, period } = filters;
   const db = getDb();
   const fromAcct = aliasedTable(bankAccounts, "from_acct");
   const toAcct = aliasedTable(bankAccounts, "to_acct");
@@ -103,24 +135,10 @@ export async function listTransactions(
     .leftJoin(parties, eq(parties.id, transactions.partyId))
     .leftJoin(employees, eq(employees.id, transactions.settleEmployeeId))
     .leftJoin(projects, eq(projects.id, transactions.projectId))
-    .where(
-      and(
-        eq(transactions.organizationId, orgId),
-        book ? eq(transactions.book, book) : undefined,
-        categoryId ? eq(transactions.categoryId, categoryId) : undefined,
-        accountId
-          ? or(
-              eq(transactions.fromAccountId, accountId),
-              eq(transactions.toAccountId, accountId),
-            )
-          : undefined,
-        projectId ? eq(transactions.projectId, projectId) : undefined,
-        period ? sql`to_char(${transactions.txnDate}, 'YYYY-MM') = ${period}` : undefined,
-        isNull(transactions.deletedAt),
-      ),
-    )
+    .where(txnWhere(orgId, filters))
     .orderBy(desc(transactions.txnDate), desc(transactions.id))
-    .limit(limit);
+    .limit(limit)
+    .offset(offset);
 
   return rows;
 }
@@ -1268,4 +1286,70 @@ export async function listActivity(
     )
     .orderBy(desc(activityLog.createdAt))
     .limit(opts.limit ?? 200);
+}
+
+// 每筆資料的「誰、何時建立 / 最後修改」，從 activity_log 衍生（不需在各表加欄位）。
+// 一次查一批 id：取每個 entity 最後一筆 create 與最後一筆 update。
+// #15（操作紀錄）之前的舊資料在 log 裡沒有紀錄，呼叫端可退回該列自己的 createdAt。
+export type AuditMeta = {
+  createdBy: string | null;
+  createdChannel: string | null;
+  createdAt: string | null;
+  updatedBy: string | null;
+  updatedChannel: string | null;
+  updatedAt: string | null;
+};
+
+export async function getAuditMeta(
+  orgId: string,
+  entityType: string,
+  ids: number[],
+): Promise<Map<number, AuditMeta>> {
+  const map = new Map<number, AuditMeta>();
+  if (ids.length === 0) return map;
+  const db = getDb();
+  const rows = await db
+    .selectDistinctOn([activityLog.entityId, activityLog.action], {
+      entityId: activityLog.entityId,
+      action: activityLog.action,
+      actorName: activityLog.actorName,
+      actorEmail: activityLog.actorEmail,
+      channel: activityLog.channel,
+      createdAt: activityLog.createdAt,
+    })
+    .from(activityLog)
+    .where(
+      and(
+        eq(activityLog.organizationId, orgId),
+        eq(activityLog.entityType, entityType),
+        inArray(activityLog.entityId, ids),
+        inArray(activityLog.action, ["create", "update"]),
+      ),
+    )
+    // DISTINCT ON 要求排序前導欄位 = distinct 欄位；同一 (entity, action) 取最新那筆
+    .orderBy(activityLog.entityId, activityLog.action, desc(activityLog.createdAt));
+
+  for (const r of rows) {
+    if (r.entityId == null) continue;
+    const actor = r.actorName ?? r.actorEmail ?? null;
+    const meta = map.get(r.entityId) ?? {
+      createdBy: null,
+      createdChannel: null,
+      createdAt: null,
+      updatedBy: null,
+      updatedChannel: null,
+      updatedAt: null,
+    };
+    if (r.action === "create") {
+      meta.createdBy = actor;
+      meta.createdChannel = r.channel;
+      meta.createdAt = r.createdAt;
+    } else if (r.action === "update") {
+      meta.updatedBy = actor;
+      meta.updatedChannel = r.channel;
+      meta.updatedAt = r.createdAt;
+    }
+    map.set(r.entityId, meta);
+  }
+  return map;
 }

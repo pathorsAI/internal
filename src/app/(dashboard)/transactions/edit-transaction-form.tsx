@@ -4,7 +4,8 @@ import { useActionState, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Paperclip } from "lucide-react";
 import { updateTransaction, deleteTransactionDocument, type ActionState } from "@/db/mutations";
-import type { TxnDocument } from "@/db/queries";
+import type { TxnDocument, AuditMeta as AuditMetaData } from "@/db/queries";
+import { AuditMeta } from "@/components/audit-meta";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -74,6 +75,7 @@ export function EditTransactionForm({
   projects,
   contracts,
   docs = [],
+  audit,
   footer,
 }: Readonly<{
   txn: Txn;
@@ -84,6 +86,7 @@ export function EditTransactionForm({
   projects: { id: number; name: string }[];
   contracts: ContractOption[];
   docs?: TxnDocument[];
+  audit?: AuditMetaData;
   footer?: React.ReactNode;
 }>) {
   const [state, action, pending] = useActionState(updateTransaction, initial);
@@ -267,6 +270,12 @@ export function EditTransactionForm({
             <VoucherFields billed={billed} />
           </div>
         )}
+
+        {audit ? (
+          <div className="sm:col-span-2">
+            <AuditMeta meta={audit} />
+          </div>
+        ) : null}
 
         <div className="sticky bottom-0 z-10 -mx-4 mt-2 flex flex-col-reverse gap-2 border-t bg-background px-4 py-3 sm:col-span-2 sm:flex-row sm:items-center sm:justify-end">
           {footer ? <div className="sm:mr-auto">{footer}</div> : null}
