@@ -14,6 +14,8 @@ import {
 } from "@/components/ui/table";
 import {
   listTransactions,
+  countTransactions,
+  getAuditMeta,
   listDocumentsForTransactions,
   listBankAccounts,
   listCategories,
@@ -24,7 +26,9 @@ import {
   listTransactionMonths,
   type Book,
   type TxnDocument,
+  type AuditMeta,
 } from "@/db/queries";
+import { PaginationNav } from "@/components/pagination-nav";
 import type { ContractOption } from "./contract-combobox";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -86,6 +90,7 @@ function TransactionRow({
   projects,
   contracts,
   docs,
+  audit,
 }: Readonly<{
   t: TxnRow;
   categories: Opt[];
@@ -95,6 +100,7 @@ function TransactionRow({
   projects: Opt[];
   contracts: ContractOption[];
   docs: TxnDocument[];
+  audit?: AuditMeta;
 }>) {
   return (
     <RowDialog
@@ -155,27 +161,39 @@ function TransactionRow({
         projects={projects}
         contracts={contracts}
         docs={docs}
+        audit={audit}
         footer={<DeleteButton action={deleteTransaction} id={t.id} />}
       />
     </RowDialog>
   );
 }
 
+const PAGE_SIZE = 50;
+
 export default async function TransactionsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ book?: string; category?: string; account?: string; period?: string }>;
+  searchParams: Promise<{
+    book?: string;
+    category?: string;
+    account?: string;
+    period?: string;
+    page?: string;
+  }>;
 }) {
   const { orgId } = await requireOrg();
-  const { book, category, account, period } = await searchParams;
+  const { book, category, account, period, page: pageParam } = await searchParams;
   const active = (["internal", "external", "both"].includes(book ?? "") ? book : undefined) as
     | Book
     | undefined;
   const categoryId = category && Number.isFinite(Number(category)) ? Number(category) : undefined;
   const accountId = account && Number.isFinite(Number(account)) ? Number(account) : undefined;
-  const [rows, accounts, categories, parties, employees, projects, contracts, months] =
+  const page = Math.max(1, Math.trunc(Number(pageParam)) || 1);
+  const filters = { book: active, categoryId, accountId, period };
+  const [rows, total, accounts, categories, parties, employees, projects, contracts, months] =
     await Promise.all([
-      listTransactions(orgId, { book: active, categoryId, accountId, period }),
+      listTransactions(orgId, filters, PAGE_SIZE, (page - 1) * PAGE_SIZE),
+      countTransactions(orgId, filters),
       listBankAccounts(orgId),
       listCategories(orgId),
       listParties(orgId),
@@ -184,7 +202,11 @@ export default async function TransactionsPage({
       listContractOptions(orgId),
       listTransactionMonths(orgId),
     ]);
-  const docsMap = await listDocumentsForTransactions(orgId, rows.map((r) => r.id));
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const [docsMap, auditMap] = await Promise.all([
+    listDocumentsForTransactions(orgId, rows.map((r) => r.id)),
+    getAuditMeta(orgId, "transaction", rows.map((r) => r.id)),
+  ]);
   const partyOpts = parties.map((s) => ({ id: s.id, name: s.name }));
   const employeeOpts = employees.map((e) => ({ id: e.id, name: e.name }));
   const accountOpts = accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }));
@@ -221,7 +243,7 @@ export default async function TransactionsPage({
 
       {groups.length === 0 ? (
         <TableCard>
-          <EmptyState message="尚無交易" />
+          <EmptyState message={total === 0 ? "尚無交易" : "此頁沒有資料"} />
         </TableCard>
       ) : (
         <TableCard>
@@ -261,6 +283,7 @@ export default async function TransactionsPage({
                       projects={projectOpts}
                       contracts={contractOpts}
                       docs={docsMap.get(t.id) ?? []}
+                      audit={auditMap.get(t.id)}
                     />
                   ))}
                 </Fragment>
@@ -269,6 +292,14 @@ export default async function TransactionsPage({
           </Table>
         </TableCard>
       )}
+
+      <PaginationNav
+        page={page}
+        totalPages={totalPages}
+        total={total}
+        basePath="/transactions"
+        params={{ book, category, account, period }}
+      />
     </>
   );
 }
