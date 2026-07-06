@@ -52,6 +52,8 @@ type Txn = {
   id: number;
   type: string;
   txnDate: string;
+  createdAt: string;
+  updatedAt: string;
   description: string | null;
   amount: string;
   currency: string;
@@ -271,11 +273,13 @@ export function EditTransactionForm({
           </div>
         )}
 
-        {audit ? (
-          <div className="sm:col-span-2">
-            <AuditMeta meta={audit} />
-          </div>
-        ) : null}
+        <div className="sm:col-span-2">
+          <AuditMeta
+            meta={audit}
+            fallbackCreatedAt={txn.createdAt}
+            fallbackUpdatedAt={txn.updatedAt}
+          />
+        </div>
 
         <div className="sticky bottom-0 z-10 -mx-4 mt-2 flex flex-col-reverse gap-2 border-t bg-background px-4 py-3 sm:col-span-2 sm:flex-row sm:items-center sm:justify-end">
           {footer ? <div className="sm:mr-auto">{footer}</div> : null}
