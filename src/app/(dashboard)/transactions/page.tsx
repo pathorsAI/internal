@@ -30,7 +30,7 @@ import {
 } from "@/db/queries";
 import { PaginationNav } from "@/components/pagination-nav";
 import type { ContractOption } from "./contract-combobox";
-import { formatCurrency, formatDate } from "@/lib/format";
+import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { NewTransactionDialog } from "./new-transaction-dialog";
 import { DeleteButton } from "@/components/delete-button";
@@ -78,6 +78,7 @@ const COLUMNS: { label: string; width: string; align?: "right" }[] = [
   { label: "分類", width: "w-28" },
   { label: "帳別", width: "w-20" },
   { label: "帳戶", width: "w-40" },
+  { label: "最後更新", width: "w-36" },
   { label: "金額", width: "w-32", align: "right" },
 ];
 
@@ -102,6 +103,8 @@ function TransactionRow({
   docs: TxnDocument[];
   audit?: AuditMeta;
 }>) {
+  // 表格上「最後更新」的操作人：改過就顯示最後修改人，沒改過就顯示建立人
+  const updater = audit?.updatedBy ?? audit?.createdBy ?? null;
   return (
     <RowDialog
       variant="sheet"
@@ -130,6 +133,12 @@ function TransactionRow({
           <TableCell className="truncate text-xs text-muted-foreground">
             {[t.fromAccount, t.toAccount].filter(Boolean).join(" → ") || "—"}
           </TableCell>
+          <TableCell className="text-xs text-muted-foreground">
+            <div className="flex min-w-0 flex-col">
+              <span className="truncate">{formatDateTime(t.updatedAt)}</span>
+              {updater ? <span className="truncate">{updater}</span> : null}
+            </div>
+          </TableCell>
           <TableCell className={cn("text-right font-medium tabular-nums", txnTypeColor(t.type))}>
             {formatCurrency(t.amount, t.currency)}
           </TableCell>
@@ -141,6 +150,8 @@ function TransactionRow({
           id: t.id,
           type: t.type,
           txnDate: t.txnDate,
+          createdAt: t.createdAt,
+          updatedAt: t.updatedAt,
           description: t.description,
           amount: t.amount,
           currency: t.currency,

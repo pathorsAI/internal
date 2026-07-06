@@ -7,14 +7,17 @@ import type { AuditMeta as AuditMetaData } from "@/db/queries";
 export function AuditMeta({
   meta,
   fallbackCreatedAt,
+  fallbackUpdatedAt,
 }: Readonly<{
   meta?: AuditMetaData;
-  /** 舊資料（操作紀錄之前）在 log 裡沒有紀錄時，退回用該列自己的 createdAt */
+  /** 舊資料（操作紀錄之前）在 log 裡沒有操作人時，退回用該列自己的時間欄位 */
   fallbackCreatedAt?: string | null;
+  fallbackUpdatedAt?: string | null;
 }>) {
   const createdAt = meta?.createdAt ?? fallbackCreatedAt ?? null;
+  const updatedAt = meta?.updatedAt ?? fallbackUpdatedAt ?? null;
   // 修改時間與建立時間相同視為「未曾修改」，不重複顯示
-  const showUpdate = !!meta?.updatedAt && meta.updatedAt !== meta.createdAt;
+  const showUpdate = !!updatedAt && updatedAt !== createdAt;
   if (!createdAt && !showUpdate) return null;
 
   return (
@@ -27,7 +30,7 @@ export function AuditMeta({
       ) : null}
       {showUpdate ? (
         <span className="inline-flex items-center gap-1.5">
-          最後修改{meta?.updatedBy ? ` · ${meta.updatedBy}` : ""} · {formatDateTime(meta!.updatedAt!)}
+          最後修改{meta?.updatedBy ? ` · ${meta.updatedBy}` : ""} · {formatDateTime(updatedAt!)}
           {meta?.updatedChannel === "mcp" ? <McpTag /> : null}
         </span>
       ) : null}

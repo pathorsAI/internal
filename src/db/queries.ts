@@ -112,6 +112,8 @@ export async function listTransactions(
       amountTwd: transactions.amountTwd,
       book: transactions.book,
       type: transactions.type,
+      createdAt: transactions.createdAt,
+      updatedAt: transactions.updatedAt,
       categoryId: transactions.categoryId,
       billedToCompanyTaxId: transactions.billedToCompanyTaxId,
       categoryName: categories.name,
