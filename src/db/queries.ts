@@ -938,7 +938,7 @@ export function computeSubscriptionSchedule(
   // 有應收覆寫的期別也一律納入。
   for (const p of explicitPeriods) starts.add(p.periodStart);
 
-  const sorted = [...starts].sort();
+  const sorted = [...starts].sort((a, b) => a.localeCompare(b));
   let totalOutstanding = 0;
   const periods: SubscriptionPeriod[] = sorted.map((periodStart) => {
     const override = overrideByStart.get(periodStart);

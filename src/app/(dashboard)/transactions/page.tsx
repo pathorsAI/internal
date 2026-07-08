@@ -183,7 +183,7 @@ const PAGE_SIZE = 50;
 
 export default async function TransactionsPage({
   searchParams,
-}: {
+}: Readonly<{
   searchParams: Promise<{
     book?: string;
     category?: string;
@@ -191,7 +191,7 @@ export default async function TransactionsPage({
     period?: string;
     page?: string;
   }>;
-}) {
+}>) {
   const { orgId } = await requireOrg();
   const { book, category, account, period, page: pageParam } = await searchParams;
   const active = (["internal", "external", "both"].includes(book ?? "") ? book : undefined) as

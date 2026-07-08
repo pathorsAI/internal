@@ -21,7 +21,7 @@ function slugify(name: string) {
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+    .replace(/^-|-$/g, "");
 }
 
 type Invite = {
@@ -82,7 +82,8 @@ export default function OnboardingPage() {
   async function onCreate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
-    const name = String(form.get("name")).trim();
+    const nameField = form.get("name");
+    const name = (typeof nameField === "string" ? nameField : "").trim();
     const slug = slugify(name) || `org-${Date.now()}`;
     setCreating(true);
     const { data: org, error } = await authClient.organization.create({ name, slug });

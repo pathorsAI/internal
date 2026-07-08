@@ -2,11 +2,11 @@ export function PageHeader({
   title,
   description,
   children,
-}: {
+}: Readonly<{
   title: React.ReactNode;
   description?: string;
   children?: React.ReactNode;
-}) {
+}>) {
   return (
     <div className="flex flex-wrap items-end justify-between gap-4">
       <div className="space-y-1">

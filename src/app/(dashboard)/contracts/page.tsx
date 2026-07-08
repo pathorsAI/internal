@@ -54,6 +54,14 @@ function CollectionCell({
   // 進度條填色依收款狀態:溢收→支出色,已收齊→收入色,進行中→主色;無金額時留一條空軌維持等高。
   const overCollected = total != null && received > total;
   const fullyCollected = total != null && received >= total;
+  let barColor = "bg-primary";
+  if (overCollected) barColor = "bg-expense";
+  else if (fullyCollected) barColor = "bg-income";
+  let remainingLabel: string;
+  if (remaining == null) remainingLabel = "—";
+  else if (remaining > 0) remainingLabel = `未收 ${formatCurrency(remaining, currency)}`;
+  else if (remaining < 0) remainingLabel = `溢收 ${formatCurrency(-remaining, currency)}`;
+  else remainingLabel = "已收齊";
   return (
     <div className="min-w-[170px] space-y-1">
       <div className="flex items-baseline justify-between gap-2 text-sm tabular-nums">
@@ -65,28 +73,13 @@ function CollectionCell({
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
         {pct != null && (
           <div
-            className={cn(
-              "h-full rounded-full",
-              overCollected
-                ? "bg-expense"
-                : fullyCollected
-                  ? "bg-income"
-                  : "bg-primary",
-            )}
+            className={cn("h-full rounded-full", barColor)}
             style={{ width: `${pct}%` }}
           />
         )}
       </div>
       <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground tabular-nums">
-        <span>
-          {remaining == null
-            ? "—"
-            : remaining > 0
-              ? `未收 ${formatCurrency(remaining, currency)}`
-              : remaining < 0
-                ? `溢收 ${formatCurrency(-remaining, currency)}`
-                : "已收齊"}
-        </span>
+        <span>{remainingLabel}</span>
         {cost > 0 && <span>成本 {formatCurrency(cost, currency)}</span>}
       </div>
     </div>

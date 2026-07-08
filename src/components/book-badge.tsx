@@ -6,7 +6,7 @@ const map: Record<string, { label: string; variant: "default" | "secondary" | "o
   both: { label: "內外", variant: "outline" },
 };
 
-export function BookBadge({ book }: { book: string }) {
+export function BookBadge({ book }: Readonly<{ book: string }>) {
   const cfg = map[book] ?? { label: book, variant: "outline" as const };
   return <Badge variant={cfg.variant}>{cfg.label}</Badge>;
 }

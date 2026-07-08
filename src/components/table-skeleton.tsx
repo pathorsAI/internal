@@ -6,17 +6,19 @@ export function TableSkeleton({
   rows = 8,
   cols = 5,
 }: Readonly<{ rows?: number; cols?: number }>) {
+  const rowKeys = Array.from({ length: rows }, (_, i) => `row-${i}`);
+  const colKeys = Array.from({ length: cols }, (_, i) => `col-${i}`);
   return (
     <div className="overflow-hidden rounded-xl border">
       <div className="border-b px-4 py-2.5">
         <Skeleton className="h-4 w-24" />
       </div>
       <div className="divide-y">
-        {Array.from({ length: rows }).map((_, r) => (
-          <div key={r} className="flex items-center gap-4 px-4 py-3.5">
-            {Array.from({ length: cols }).map((_, c) => (
+        {rowKeys.map((rowKey) => (
+          <div key={rowKey} className="flex items-center gap-4 px-4 py-3.5">
+            {colKeys.map((colKey, c) => (
               <Skeleton
-                key={c}
+                key={colKey}
                 className={cn(
                   "h-4",
                   c === 0 && "w-24",

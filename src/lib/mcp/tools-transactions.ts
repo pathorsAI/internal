@@ -221,6 +221,229 @@ async function optSubscriptionId(
   return subscriptionId;
 }
 
+// ---- bulk_create_transactions helpers ----
+
+type Norm = {
+  type: string;
+  txnDate: string;
+  amount: string;
+  currency: string;
+  description: string | null;
+  reported: boolean;
+  projectId: number | null;
+  contractId: number | null;
+  subscriptionId: number | null;
+  subscriptionPeriod: string | null;
+  categoryId: number | null;
+  fromAccountId: number | null;
+  toAccountId: number | null;
+  partyName: string | null;
+  settleEmployeeName: string | null;
+  billedToCompanyTaxId: boolean;
+};
+
+type BulkTxnSets = {
+  acctSet: Set<number>;
+  catSet: Set<number>;
+  projSet: Set<number>;
+  contractSet: Set<number>;
+  subscriptionSet: Set<number>;
+};
+
+// A nullable FK, when present, must belong to the org's known ids.
+function assertOrgRef(id: number | null, set: Set<number>, at: string, field: string) {
+  if (id !== null && !set.has(id)) {
+    throw new Error(`${at}.${field} ${id} not found in your organization.`);
+  }
+}
+
+function fillIncomeExpense(
+  n: Norm,
+  it: Record<string, unknown>,
+  at: string,
+  acctSet: Set<number>,
+  catSet: Set<number>,
+  partyLabelByName: Map<string, string>,
+) {
+  const isIncome = n.type === "income";
+  const accountId = requireNumber(it, "accountId");
+  if (!acctSet.has(accountId)) {
+    throw new Error(`${at}.accountId ${accountId} not found in your organization.`);
+  }
+  const categoryId = optNumber(it, "categoryId") ?? null; // 可省略＝未分類
+  if (categoryId !== null && !catSet.has(categoryId)) {
+    throw new Error(`${at}.categoryId ${categoryId} not found in your organization.`);
+  }
+  const partyName = requireString(it, "partyName");
+  if (!partyLabelByName.has(partyName)) {
+    partyLabelByName.set(partyName, isIncome ? "customer" : "vendor");
+  }
+  n.categoryId = categoryId;
+  n.partyName = partyName;
+  n.fromAccountId = isIncome ? null : accountId;
+  n.toAccountId = isIncome ? accountId : null;
+}
+
+function fillAdvance(
+  n: Norm,
+  it: Record<string, unknown>,
+  at: string,
+  catSet: Set<number>,
+  partyLabelByName: Map<string, string>,
+  employeeNames: Set<string>,
+) {
+  const categoryId = optNumber(it, "categoryId") ?? null; // 可省略＝未分類
+  if (categoryId !== null && !catSet.has(categoryId)) {
+    throw new Error(`${at}.categoryId ${categoryId} not found in your organization.`);
+  }
+  const partyName = requireString(it, "partyName");
+  if (!partyLabelByName.has(partyName)) partyLabelByName.set(partyName, "vendor");
+  const emp = requireString(it, "settleEmployeeName");
+  employeeNames.add(emp);
+  n.categoryId = categoryId;
+  n.partyName = partyName;
+  n.settleEmployeeName = emp;
+}
+
+function fillTransfer(n: Norm, it: Record<string, unknown>, at: string, acctSet: Set<number>) {
+  const fromAccountId = requireNumber(it, "fromAccountId");
+  const toAccountId = requireNumber(it, "toAccountId");
+  if (!acctSet.has(fromAccountId)) {
+    throw new Error(`${at}.fromAccountId ${fromAccountId} not found in your organization.`);
+  }
+  if (!acctSet.has(toAccountId)) {
+    throw new Error(`${at}.toAccountId ${toAccountId} not found in your organization.`);
+  }
+  n.fromAccountId = fromAccountId;
+  n.toAccountId = toAccountId;
+}
+
+// Validate one raw bulk item and normalize it; accumulates party/employee names
+// so they can be resolved to ids in a single round trip afterwards.
+function normalizeBulkTxnItem(
+  raw: unknown,
+  i: number,
+  sets: BulkTxnSets,
+  partyLabelByName: Map<string, string>,
+  employeeNames: Set<string>,
+): Norm {
+  if (typeof raw !== "object" || raw === null) {
+    throw new Error(`items[${i}] must be an object.`);
+  }
+  const it = raw as Record<string, unknown>;
+  const at = `items[${i}]`;
+  const type = requireString(it, "type");
+  if (!TXN_TYPES.includes(type as (typeof TXN_TYPES)[number])) {
+    throw new Error(`${at}.type must be one of: ${TXN_TYPES.join(", ")}.`);
+  }
+  const projectId = optNumber(it, "projectId") ?? null;
+  assertOrgRef(projectId, sets.projSet, at, "projectId");
+  const contractId = optNumber(it, "contractId") ?? null;
+  assertOrgRef(contractId, sets.contractSet, at, "contractId");
+  const subscriptionId = optNumber(it, "subscriptionId") ?? null;
+  assertOrgRef(subscriptionId, sets.subscriptionSet, at, "subscriptionId");
+  const subscriptionPeriod = optDate(it, "subscriptionPeriod") ?? null;
+  if (subscriptionId !== null && subscriptionPeriod === null) {
+    throw new Error(`${at}.subscriptionPeriod (YYYY-MM-DD) is required when subscriptionId is set.`);
+  }
+  const n: Norm = {
+    type,
+    txnDate: requireDate(it, "txnDate"),
+    amount: requireDecimal(it, "amount"),
+    currency: normalizeCurrency(it, "currency"),
+    description: optString(it, "description") ?? null,
+    reported: type === "transfer" || optBoolean(it, "reported") === true,
+    projectId,
+    contractId,
+    subscriptionId,
+    subscriptionPeriod,
+    categoryId: null,
+    fromAccountId: null,
+    toAccountId: null,
+    partyName: null,
+    settleEmployeeName: null,
+    billedToCompanyTaxId: optBoolean(it, "billedToCompanyTaxId") === true,
+  };
+  if (type === "expense" || type === "income") {
+    fillIncomeExpense(n, it, at, sets.acctSet, sets.catSet, partyLabelByName);
+  } else if (type === "advance") {
+    fillAdvance(n, it, at, sets.catSet, partyLabelByName, employeeNames);
+  } else if (type === "transfer") {
+    fillTransfer(n, it, at, sets.acctSet);
+  }
+  return n;
+}
+
+// ---- update_transaction helpers ----
+
+// Apply the relation fields (category / project / contract / subscription) to
+// the patch. Each is only touched when its arg was provided; 0 clears the link.
+async function applyTxnRelationPatch(
+  patch: Record<string, unknown>,
+  db: Db,
+  args: Record<string, unknown>,
+  orgId: string,
+) {
+  if (optNumber(args, "categoryId") !== undefined) {
+    const categoryId = requireNumber(args, "categoryId");
+    if (categoryId === 0) {
+      patch.categoryId = null; // 0＝清除分類（未分類）
+    } else {
+      await assertInOrg(db, categories, categoryId, orgId, "Category");
+      patch.categoryId = categoryId;
+    }
+  }
+  if (optNumber(args, "projectId") !== undefined) {
+    patch.projectId = await optProjectId(db, args, orgId);
+  }
+  if (optNumber(args, "contractId") !== undefined) {
+    const contractId = requireNumber(args, "contractId");
+    if (contractId === 0) {
+      patch.contractId = null;
+    } else {
+      await assertInOrg(db, contracts, contractId, orgId, "Contract");
+      patch.contractId = contractId;
+    }
+  }
+  if (optNumber(args, "subscriptionId") !== undefined) {
+    const subscriptionId = requireNumber(args, "subscriptionId");
+    if (subscriptionId === 0) {
+      // 解除訂閱綁定時，期別一併清空。
+      patch.subscriptionId = null;
+      patch.subscriptionPeriod = null;
+    } else {
+      await assertInOrg(db, subscriptions, subscriptionId, orgId, "Subscription");
+      patch.subscriptionId = subscriptionId;
+    }
+  }
+  // 期別：空字串代表清除；未提供則不動。只有在沒有因 subscriptionId=0 清空時才處理。
+  if (args.subscriptionPeriod !== undefined && patch.subscriptionPeriod === undefined) {
+    patch.subscriptionPeriod = optDate(args, "subscriptionPeriod") ?? null;
+  }
+}
+
+// Apply amount/currency and the reported→book flag to the patch, falling back to
+// the existing row's values when only one of amount/currency is supplied.
+function applyTxnAmountPatch(
+  patch: Record<string, unknown>,
+  args: Record<string, unknown>,
+  existing: { type: string; amount: string; currency: string },
+) {
+  const amountProvided = optNumber(args, "amount") !== undefined;
+  const currencyProvided = optString(args, "currency") !== undefined;
+  if (amountProvided || currencyProvided) {
+    const amount = amountProvided ? requireDecimal(args, "amount") : existing.amount;
+    const currency = currencyProvided ? normalizeCurrency(args, "currency") : existing.currency;
+    patch.amount = amount;
+    patch.currency = currency;
+    patch.amountTwd = currency === "TWD" ? amount : null;
+  }
+  if (optBoolean(args, "reported") !== undefined) {
+    patch.book =
+      existing.type === "transfer" || optBoolean(args, "reported") ? "both" : "internal";
+  }
+}
+
 export const transactionTools: Record<string, ToolDef> = {
   list_transactions: {
     description:
@@ -452,116 +675,12 @@ export const transactionTools: Record<string, ToolDef> = {
       const contractSet = new Set(contractRows.map((r) => r.id));
       const subscriptionSet = new Set(subscriptionRows.map((r) => r.id));
 
-      type Norm = {
-        type: string;
-        txnDate: string;
-        amount: string;
-        currency: string;
-        description: string | null;
-        reported: boolean;
-        projectId: number | null;
-        contractId: number | null;
-        subscriptionId: number | null;
-        subscriptionPeriod: string | null;
-        categoryId: number | null;
-        fromAccountId: number | null;
-        toAccountId: number | null;
-        partyName: string | null;
-        settleEmployeeName: string | null;
-        billedToCompanyTaxId: boolean;
-      };
-      const norms: Norm[] = [];
+      const sets: BulkTxnSets = { acctSet, catSet, projSet, contractSet, subscriptionSet };
       const partyLabelByName = new Map<string, string>();
       const employeeNames = new Set<string>();
-
-      items.forEach((raw, i) => {
-        if (typeof raw !== "object" || raw === null) {
-          throw new Error(`items[${i}] must be an object.`);
-        }
-        const it = raw as Record<string, unknown>;
-        const at = `items[${i}]`;
-        const type = requireString(it, "type");
-        if (!TXN_TYPES.includes(type as (typeof TXN_TYPES)[number])) {
-          throw new Error(`${at}.type must be one of: ${TXN_TYPES.join(", ")}.`);
-        }
-        const projectId = optNumber(it, "projectId") ?? null;
-        if (projectId !== null && !projSet.has(projectId)) {
-          throw new Error(`${at}.projectId ${projectId} not found in your organization.`);
-        }
-        const contractId = optNumber(it, "contractId") ?? null;
-        if (contractId !== null && !contractSet.has(contractId)) {
-          throw new Error(`${at}.contractId ${contractId} not found in your organization.`);
-        }
-        const subscriptionId = optNumber(it, "subscriptionId") ?? null;
-        if (subscriptionId !== null && !subscriptionSet.has(subscriptionId)) {
-          throw new Error(`${at}.subscriptionId ${subscriptionId} not found in your organization.`);
-        }
-        const subscriptionPeriod = optDate(it, "subscriptionPeriod") ?? null;
-        if (subscriptionId !== null && subscriptionPeriod === null) {
-          throw new Error(`${at}.subscriptionPeriod (YYYY-MM-DD) is required when subscriptionId is set.`);
-        }
-        const n: Norm = {
-          type,
-          txnDate: requireDate(it, "txnDate"),
-          amount: requireDecimal(it, "amount"),
-          currency: normalizeCurrency(it, "currency"),
-          description: optString(it, "description") ?? null,
-          reported: type === "transfer" || optBoolean(it, "reported") === true,
-          projectId,
-          contractId,
-          subscriptionId,
-          subscriptionPeriod,
-          categoryId: null,
-          fromAccountId: null,
-          toAccountId: null,
-          partyName: null,
-          settleEmployeeName: null,
-          billedToCompanyTaxId: optBoolean(it, "billedToCompanyTaxId") === true,
-        };
-        if (type === "expense" || type === "income") {
-          const isIncome = type === "income";
-          const accountId = requireNumber(it, "accountId");
-          if (!acctSet.has(accountId)) {
-            throw new Error(`${at}.accountId ${accountId} not found in your organization.`);
-          }
-          const categoryId = optNumber(it, "categoryId") ?? null; // 可省略＝未分類
-          if (categoryId !== null && !catSet.has(categoryId)) {
-            throw new Error(`${at}.categoryId ${categoryId} not found in your organization.`);
-          }
-          const partyName = requireString(it, "partyName");
-          if (!partyLabelByName.has(partyName)) {
-            partyLabelByName.set(partyName, isIncome ? "customer" : "vendor");
-          }
-          n.categoryId = categoryId;
-          n.partyName = partyName;
-          n.fromAccountId = isIncome ? null : accountId;
-          n.toAccountId = isIncome ? accountId : null;
-        } else if (type === "advance") {
-          const categoryId = optNumber(it, "categoryId") ?? null; // 可省略＝未分類
-          if (categoryId !== null && !catSet.has(categoryId)) {
-            throw new Error(`${at}.categoryId ${categoryId} not found in your organization.`);
-          }
-          const partyName = requireString(it, "partyName");
-          if (!partyLabelByName.has(partyName)) partyLabelByName.set(partyName, "vendor");
-          const emp = requireString(it, "settleEmployeeName");
-          employeeNames.add(emp);
-          n.categoryId = categoryId;
-          n.partyName = partyName;
-          n.settleEmployeeName = emp;
-        } else if (type === "transfer") {
-          const fromAccountId = requireNumber(it, "fromAccountId");
-          const toAccountId = requireNumber(it, "toAccountId");
-          if (!acctSet.has(fromAccountId)) {
-            throw new Error(`${at}.fromAccountId ${fromAccountId} not found in your organization.`);
-          }
-          if (!acctSet.has(toAccountId)) {
-            throw new Error(`${at}.toAccountId ${toAccountId} not found in your organization.`);
-          }
-          n.fromAccountId = fromAccountId;
-          n.toAccountId = toAccountId;
-        }
-        norms.push(n);
-      });
+      const norms: Norm[] = items.map((raw, i) =>
+        normalizeBulkTxnItem(raw, i, sets, partyLabelByName, employeeNames),
+      );
 
       const partyId = await resolvePartyNames(db, orgId, partyLabelByName);
       const employeeId = await resolveEmployeeNames(db, orgId, employeeNames);
@@ -636,58 +755,11 @@ export const transactionTools: Record<string, ToolDef> = {
       if (optDate(args, "txnDate") !== undefined) patch.txnDate = optDate(args, "txnDate");
       if (optString(args, "description") !== undefined)
         patch.description = optString(args, "description");
-      if (optNumber(args, "categoryId") !== undefined) {
-        const categoryId = requireNumber(args, "categoryId");
-        if (categoryId === 0) {
-          patch.categoryId = null; // 0＝清除分類（未分類）
-        } else {
-          await assertInOrg(db, categories, categoryId, orgId, "Category");
-          patch.categoryId = categoryId;
-        }
-      }
       if (optBoolean(args, "billedToCompanyTaxId") !== undefined) {
         patch.billedToCompanyTaxId = optBoolean(args, "billedToCompanyTaxId");
       }
-      if (optNumber(args, "projectId") !== undefined) {
-        patch.projectId = await optProjectId(db, args, orgId);
-      }
-      if (optNumber(args, "contractId") !== undefined) {
-        const contractId = requireNumber(args, "contractId");
-        if (contractId === 0) {
-          patch.contractId = null;
-        } else {
-          await assertInOrg(db, contracts, contractId, orgId, "Contract");
-          patch.contractId = contractId;
-        }
-      }
-      if (optNumber(args, "subscriptionId") !== undefined) {
-        const subscriptionId = requireNumber(args, "subscriptionId");
-        if (subscriptionId === 0) {
-          // 解除訂閱綁定時，期別一併清空。
-          patch.subscriptionId = null;
-          patch.subscriptionPeriod = null;
-        } else {
-          await assertInOrg(db, subscriptions, subscriptionId, orgId, "Subscription");
-          patch.subscriptionId = subscriptionId;
-        }
-      }
-      // 期別：空字串代表清除；未提供則不動。只有在沒有因 subscriptionId=0 清空時才處理。
-      if (args.subscriptionPeriod !== undefined && patch.subscriptionPeriod === undefined) {
-        patch.subscriptionPeriod = optDate(args, "subscriptionPeriod") ?? null;
-      }
-      const amountProvided = optNumber(args, "amount") !== undefined;
-      const currencyProvided = optString(args, "currency") !== undefined;
-      if (amountProvided || currencyProvided) {
-        const amount = amountProvided ? requireDecimal(args, "amount") : existing.amount;
-        const currency = currencyProvided ? normalizeCurrency(args, "currency") : existing.currency;
-        patch.amount = amount;
-        patch.currency = currency;
-        patch.amountTwd = currency === "TWD" ? amount : null;
-      }
-      if (optBoolean(args, "reported") !== undefined) {
-        patch.book =
-          existing.type === "transfer" || optBoolean(args, "reported") ? "both" : "internal";
-      }
+      await applyTxnRelationPatch(patch, db, args, orgId);
+      applyTxnAmountPatch(patch, args, existing);
       const [row] = await db
         .update(transactions)
         .set(patch)

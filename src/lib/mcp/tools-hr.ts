@@ -44,6 +44,43 @@ function checkEmploymentType(v: string | undefined) {
   }
 }
 
+type SalaryItem = {
+  itemTypeId: number | null;
+  name: string;
+  direction: "earning" | "deduction";
+  isTaxable: boolean;
+  amount: number;
+};
+
+// Validate + normalize the raw salary line items into typed, non-zero rows.
+function parseSalaryItems(raw: unknown): SalaryItem[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error('"items" must be a non-empty array of salary line items.');
+  }
+  return raw
+    .map((r, i) => {
+      const o = (r ?? {}) as Record<string, unknown>;
+      const name = typeof o.name === "string" ? o.name.trim() : "";
+      const amount = typeof o.amount === "number" ? o.amount : Number(o.amount);
+      if (!name) throw new Error(`items[${i}].name is required.`);
+      if (!Number.isFinite(amount)) throw new Error(`items[${i}].amount must be a number.`);
+      const direction: "earning" | "deduction" =
+        o.direction === "deduction" ? "deduction" : "earning";
+      let isTaxable: boolean;
+      if (direction === "deduction") isTaxable = false;
+      else if (o.isTaxable === undefined) isTaxable = true;
+      else isTaxable = Boolean(o.isTaxable);
+      return {
+        itemTypeId: typeof o.itemTypeId === "number" ? o.itemTypeId : null,
+        name,
+        direction,
+        isTaxable,
+        amount,
+      };
+    })
+    .filter((r) => r.amount !== 0);
+}
+
 export const hrTools: Record<string, ToolDef> = {
   // ---- employees ----
   list_employees: {
@@ -346,29 +383,7 @@ export const hrTools: Record<string, ToolDef> = {
       const bookRaw = optString(args, "book") ?? "both";
       const book = ["internal", "external", "both"].includes(bookRaw) ? bookRaw : "both";
 
-      const raw = args.items;
-      if (!Array.isArray(raw) || raw.length === 0) {
-        throw new Error('"items" must be a non-empty array of salary line items.');
-      }
-      const items = raw
-        .map((r, i) => {
-          const o = (r ?? {}) as Record<string, unknown>;
-          const name = typeof o.name === "string" ? o.name.trim() : "";
-          const amount = typeof o.amount === "number" ? o.amount : Number(o.amount);
-          if (!name) throw new Error(`items[${i}].name is required.`);
-          if (!Number.isFinite(amount)) throw new Error(`items[${i}].amount must be a number.`);
-          const direction = o.direction === "deduction" ? "deduction" : "earning";
-          const isTaxable =
-            direction === "deduction" ? false : o.isTaxable === undefined ? true : !!o.isTaxable;
-          return {
-            itemTypeId: typeof o.itemTypeId === "number" ? o.itemTypeId : null,
-            name,
-            direction,
-            isTaxable,
-            amount,
-          };
-        })
-        .filter((r) => r.amount !== 0);
+      const items = parseSalaryItems(args.items);
       if (items.length === 0) throw new Error("No non-zero salary items provided.");
 
       let taxable = 0;

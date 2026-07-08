@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 
 /** Pathors brand mark — a minimal blue waypoint route. */
-export function LogoMark({ className }: { className?: string }) {
+export function LogoMark({ className }: Readonly<{ className?: string }>) {
   return (
     <svg
       viewBox="0 0 32 32"
@@ -23,7 +23,7 @@ export function LogoMark({ className }: { className?: string }) {
 }
 
 /** Brand mark + app name, used in the sidebar header. */
-export function Logo({ className }: { className?: string }) {
+export function Logo({ className }: Readonly<{ className?: string }>) {
   return (
     <div className={cn("flex items-center gap-2", className)}>
       <LogoMark className="size-6" />

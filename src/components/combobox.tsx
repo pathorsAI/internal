@@ -122,6 +122,7 @@ export function Combobox({
               <div
                 key={item}
                 role="option"
+                tabIndex={-1}
                 aria-selected={idx === activeIndex}
                 className={cn(
                   "cursor-default rounded-sm px-2 py-1.5 outline-none",
