@@ -37,6 +37,7 @@ import {
   todayStr,
   type ToolDef,
 } from "./shared";
+import { isValidEmail, maskBankAccount, maskNationalId } from "@/lib/pii";
 
 const EMPLOYMENT_TYPES = ["full_time", "part_time", "freelancer", "contractor"] as const;
 
@@ -44,6 +45,23 @@ function checkEmploymentType(v: string | undefined) {
   if (v !== undefined && !EMPLOYMENT_TYPES.includes(v as (typeof EMPLOYMENT_TYPES)[number])) {
     throw new Error(`"employmentType" must be one of: ${EMPLOYMENT_TYPES.join(", ")}.`);
   }
+}
+
+function checkEmailArg(args: Record<string, unknown>, key: string) {
+  const v = optString(args, key);
+  if (v && !isValidEmail(v)) throw new Error(`"${key}" is not a valid email address.`);
+}
+
+// 員工資料離開 MCP 前遮罩身分證字號與薪轉帳戶 — MCP 的用途（payroll、
+// 聯絡資訊查詢）不需要完整值；完整值只在網頁端看得到。
+function redactEmployee<T extends { nationalId: string | null; salaryAccount: string | null }>(
+  e: T,
+): T {
+  return {
+    ...e,
+    nationalId: maskNationalId(e.nationalId),
+    salaryAccount: maskBankAccount(e.salaryAccount),
+  };
 }
 
 /**
@@ -72,27 +90,32 @@ async function checkEmployeeUserBinding(orgId: string, userId: string, excludeEm
 export const hrTools: Record<string, ToolDef> = {
   // ---- employees ----
   list_employees: {
-    description: "List employees (for payroll, advances, reimbursements).",
+    description:
+      "List employees (for payroll, advances, reimbursements). National ID and salary account are masked; use the web app when the full values are needed.",
     inputSchema: {
       type: "object",
       properties: { limit: { type: "number", description: "Default 200." }, ...ORG_ARG },
       additionalProperties: false,
     },
-    execute: async (args, ctx) => listEmployees(await resolveOrg(args, ctx), optNumber(args, "limit") ?? 200),
+    execute: async (args, ctx) =>
+      (await listEmployees(await resolveOrg(args, ctx), optNumber(args, "limit") ?? 200)).map(
+        redactEmployee,
+      ),
   },
 
   get_employee: {
-    description: "Get one employee by id.",
+    description:
+      "Get one employee by id. National ID and salary account are masked; use the web app when the full values are needed.",
     inputSchema: {
       type: "object",
       properties: { id: { type: "number" }, ...ORG_ARG },
       required: ["id"],
       additionalProperties: false,
     },
-    execute: async (args, ctx) =>
-      (await getEmployee(await resolveOrg(args, ctx), requireNumber(args, "id"))) ?? {
-        error: "Not found.",
-      },
+    execute: async (args, ctx) => {
+      const row = await getEmployee(await resolveOrg(args, ctx), requireNumber(args, "id"));
+      return row ? redactEmployee(row) : { error: "Not found." };
+    },
   },
 
   list_org_members: {
@@ -136,6 +159,8 @@ export const hrTools: Record<string, ToolDef> = {
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       checkEmploymentType(optString(args, "employmentType"));
+      checkEmailArg(args, "workEmail");
+      checkEmailArg(args, "personalEmail");
       const laborInsuredSalary = optDecimal(args, "laborInsuredSalary") ?? null;
       const healthInsuredSalary = optDecimal(args, "healthInsuredSalary") ?? null;
       const userId = optString(args, "userId") ?? null;
@@ -166,7 +191,7 @@ export const hrTools: Record<string, ToolDef> = {
           hasPension: optBoolean(args, "hasPension") ?? false,
         })
         .returning();
-      return row;
+      return redactEmployee(row);
     },
   },
 
@@ -207,6 +232,8 @@ export const hrTools: Record<string, ToolDef> = {
       const id = requireNumber(args, "id");
       const orgId = await resolveOrg(args, ctx);
       checkEmploymentType(optString(args, "employmentType"));
+      checkEmailArg(args, "workEmail");
+      checkEmailArg(args, "personalEmail");
       const patch: Record<string, unknown> = {};
       if (optString(args, "name") !== undefined) patch.name = requireString(args, "name");
       if (optString(args, "nationalId") !== undefined) patch.nationalId = optString(args, "nationalId");
@@ -250,7 +277,7 @@ export const hrTools: Record<string, ToolDef> = {
         .where(and(eq(employees.organizationId, orgId), eq(employees.id, id)))
         .returning();
       if (!row) throw new Error(`Employee ${id} not found in your organization.`);
-      return row;
+      return redactEmployee(row);
     },
   },
 

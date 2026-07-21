@@ -4,7 +4,7 @@ import { activityLog } from "./schema";
 import { user } from "./auth-schema";
 import { getSession } from "@/lib/session";
 
-export type ActivityAction = "create" | "update" | "delete";
+export type ActivityAction = "create" | "update" | "delete" | "read";
 
 type RecordArgs = {
   orgId: string;

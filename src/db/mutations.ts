@@ -23,6 +23,7 @@ import { oauthApplication, member } from "./auth-schema";
 import { uploadDocument } from "@/lib/storage";
 import { requireOrg } from "@/lib/session";
 import { logWeb } from "@/db/activity";
+import { isValidEmail } from "@/lib/pii";
 
 export type ActionState = { ok: boolean; error?: string };
 
@@ -606,12 +607,23 @@ async function resolveEmployeeUserId(
   return raw;
 }
 
+/** 員工表單的 email 欄位檢查：空值放行，有填就要是合法格式。 */
+function employeeEmailError(formData: FormData): string | null {
+  const work = str(formData.get("workEmail"));
+  const personal = str(formData.get("personalEmail"));
+  if (work && !isValidEmail(work)) return "工作 Email 格式不正確";
+  if (personal && !isValidEmail(personal)) return "聯絡 Email 格式不正確";
+  return null;
+}
+
 export async function createEmployee(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
   const name = str(formData.get("name"));
   if (!name) return { ok: false, error: "請輸入姓名" };
+  const emailErr = employeeEmailError(formData);
+  if (emailErr) return { ok: false, error: emailErr };
   const laborInsured = str(formData.get("laborInsuredSalary"));
   const healthInsured = str(formData.get("healthInsuredSalary"));
   try {
@@ -657,6 +669,8 @@ export async function updateEmployee(
   const name = str(formData.get("name"));
   if (!id) return { ok: false, error: "缺少 ID" };
   if (!name) return { ok: false, error: "請輸入姓名" };
+  const emailErr = employeeEmailError(formData);
+  if (emailErr) return { ok: false, error: emailErr };
   const laborInsured = str(formData.get("laborInsuredSalary"));
   const healthInsured = str(formData.get("healthInsuredSalary"));
   try {
