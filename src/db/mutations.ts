@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { getDb } from "./index";
 import {
   parties,
@@ -577,6 +577,35 @@ export async function deleteBankAccount(id: number): Promise<ActionState> {
 }
 
 // ---- 員工 ----
+
+/**
+ * 員工表單的 user 綁定值 → user_id。空值/未選 = 不綁定（NULL）。
+ * 綁定前檢查：該 user 是本組織成員、且尚未綁到其他員工（不強制 1:1，但不能一人綁多筆）。
+ */
+async function resolveEmployeeUserId(
+  orgId: string,
+  raw: string | null,
+  excludeEmployeeId?: number,
+): Promise<string | null> {
+  if (!raw || raw === "none") return null;
+  const db = getDb();
+  const [m] = await db
+    .select({ userId: member.userId })
+    .from(member)
+    .where(and(eq(member.organizationId, orgId), eq(member.userId, raw)))
+    .limit(1);
+  if (!m) throw new Error("該使用者不是此組織成員");
+  const [taken] = await db
+    .select({ id: employees.id })
+    .from(employees)
+    .where(and(eq(employees.organizationId, orgId), eq(employees.userId, raw), isNull(employees.deletedAt)))
+    .limit(1);
+  if (taken && taken.id !== excludeEmployeeId) {
+    throw new Error("此使用者已綁定其他員工");
+  }
+  return raw;
+}
+
 export async function createEmployee(
   _prev: ActionState,
   formData: FormData,
@@ -587,6 +616,7 @@ export async function createEmployee(
   const healthInsured = str(formData.get("healthInsuredSalary"));
   try {
     const { orgId } = await requireOrg();
+    const userId = await resolveEmployeeUserId(orgId, str(formData.get("userId")));
     const [inserted] = await getDb()
       .insert(employees)
       .values({
@@ -603,6 +633,11 @@ export async function createEmployee(
         salaryAccount: str(formData.get("salaryAccount")),
         startDate: str(formData.get("startDate")),
         endDate: str(formData.get("endDate")),
+        workEmail: str(formData.get("workEmail")),
+        personalEmail: str(formData.get("personalEmail")),
+        phone: str(formData.get("phone")),
+        note: str(formData.get("note")),
+        userId,
         isActive: true,
       })
       .returning({ id: employees.id });
@@ -626,6 +661,7 @@ export async function updateEmployee(
   const healthInsured = str(formData.get("healthInsuredSalary"));
   try {
     const { orgId } = await requireOrg();
+    const userId = await resolveEmployeeUserId(orgId, str(formData.get("userId")), id);
     await getDb()
       .update(employees)
       .set({
@@ -641,6 +677,11 @@ export async function updateEmployee(
         salaryAccount: str(formData.get("salaryAccount")),
         startDate: str(formData.get("startDate")),
         endDate: str(formData.get("endDate")),
+        workEmail: str(formData.get("workEmail")),
+        personalEmail: str(formData.get("personalEmail")),
+        phone: str(formData.get("phone")),
+        note: str(formData.get("note")),
+        userId,
         isActive: formData.get("isActive") === "on",
       })
       .where(and(eq(employees.organizationId, orgId), eq(employees.id, id)));

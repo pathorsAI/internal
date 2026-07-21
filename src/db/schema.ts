@@ -70,6 +70,14 @@ export const employees = pgTable("employees", {
 	endDate: date("end_date"),
 	isActive: boolean("is_active").default(true).notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	// 基本聯絡資訊（migrations/0015）
+	workEmail: text("work_email"),
+	personalEmail: text("personal_email"),
+	phone: text(),
+	note: text(),
+	// 選填綁定登入使用者（"user".id）。NULL = 純名冊紀錄，不強制 1:1。
+	// FK 與 (org, user) 唯一索引在 DB 端（migrations/0015）建立，避免跨檔宣告順序衝突。
+	userId: text("user_id"),
 }, (table) => [
 	check("chk_emp_type", sql`employment_type = ANY (ARRAY['full_time'::text, 'part_time'::text, 'freelancer'::text, 'contractor'::text])`),
 ]);
