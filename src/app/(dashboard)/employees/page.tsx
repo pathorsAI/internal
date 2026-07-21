@@ -14,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { listEmployees, listPayrollItemTypes, listBankAccounts } from "@/db/queries";
+import { listEmployees, listPayrollItemTypes, listBankAccounts, listOrgMembers } from "@/db/queries";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { NewEmployeeDialog } from "./new-employee-dialog";
 import { PaySalaryDialog } from "./pay-salary-dialog";
@@ -31,17 +31,19 @@ const empType: Record<string, string> = {
 
 export default async function EmployeesPage() {
   const { orgId } = await requireOrg();
-  const [rows, itemTypes, accounts] = await Promise.all([
+  const [rows, itemTypes, accounts, members] = await Promise.all([
     listEmployees(orgId),
     listPayrollItemTypes(orgId),
     listBankAccounts(orgId),
+    listOrgMembers(orgId),
   ]);
   const accountList = accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }));
+  const memberByUserId = new Map(members.map((m) => [m.userId, m]));
 
   return (
     <>
-      <PageHeader title="員工" description="員工名冊與勞健保 / 勞退投保狀態">
-        <NewEmployeeDialog />
+      <PageHeader title="員工" description="員工名冊、基本聯絡資訊與勞健保 / 勞退投保狀態">
+        <NewEmployeeDialog members={members} />
       </PageHeader>
       <TableCard title="員工名冊">
         <Table>
@@ -49,6 +51,7 @@ export default async function EmployeesPage() {
             <TableRow>
               <TableHead>姓名</TableHead>
               <TableHead>類型</TableHead>
+              <TableHead>聯絡方式</TableHead>
               <TableHead>到職日</TableHead>
               <TableHead>勞健保投保</TableHead>
               <TableHead>狀態</TableHead>
@@ -57,7 +60,7 @@ export default async function EmployeesPage() {
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <EmptyRow colSpan={6} message="尚無員工" />
+              <EmptyRow colSpan={7} message="尚無員工" />
             ) : (
               rows.map((e) => (
                 <RowDialog
@@ -66,9 +69,29 @@ export default async function EmployeesPage() {
                   description="員工"
                   cells={
                     <>
-                      <TableCell className="font-medium">{e.name}</TableCell>
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-1.5">
+                          {e.name}
+                          {e.userId ? (
+                            <Badge variant="secondary" className="font-normal text-xs">
+                              {memberByUserId.get(e.userId)?.name ?? "已綁定"}
+                            </Badge>
+                          ) : null}
+                        </div>
+                      </TableCell>
                       <TableCell className="text-muted-foreground">
                         {empType[e.employmentType] ?? e.employmentType}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {e.workEmail || e.personalEmail || e.phone ? (
+                          <div className="flex flex-col text-xs">
+                            {e.workEmail ? <span>{e.workEmail}</span> : null}
+                            {e.personalEmail ? <span>{e.personalEmail}</span> : null}
+                            {e.phone ? <span>{e.phone}</span> : null}
+                          </div>
+                        ) : (
+                          "—"
+                        )}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {e.startDate ? formatDate(e.startDate) : "—"}
@@ -119,8 +142,14 @@ export default async function EmployeesPage() {
                       salaryAccount: e.salaryAccount,
                       startDate: e.startDate,
                       endDate: e.endDate,
+                      workEmail: e.workEmail,
+                      personalEmail: e.personalEmail,
+                      phone: e.phone,
+                      note: e.note,
+                      userId: e.userId,
                       isActive: e.isActive,
                     }}
+                    members={members}
                     footer={
                       <div className="flex items-center gap-1">
                         {e.isActive ? (

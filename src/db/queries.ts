@@ -20,7 +20,7 @@ import {
   contracts,
   activityLog,
 } from "./schema";
-import { oauthApplication, oauthAccessToken, member, organization } from "./auth-schema";
+import { oauthApplication, oauthAccessToken, member, organization, user } from "./auth-schema";
 
 export type Book = "internal" | "external" | "both";
 
@@ -1183,6 +1183,18 @@ export async function listVendorCosts(orgId: string) {
     .groupBy(parties.id, parties.name, parties.label)
     .orderBy(sql`coalesce(sum(coalesce(${transactions.amountTwd}, ${transactions.amount})), 0) desc`);
   return rows.map((r) => ({ ...r, total: Number(r.total), txnCount: Number(r.txnCount) }));
+}
+
+export type OrgMemberOption = { userId: string; name: string; email: string };
+
+/** 組織內可綁定到員工的登入使用者（member × user），給員工表單的綁定下拉用。 */
+export async function listOrgMembers(orgId: string): Promise<OrgMemberOption[]> {
+  return getDb()
+    .select({ userId: member.userId, name: user.name, email: user.email })
+    .from(member)
+    .innerJoin(user, eq(user.id, member.userId))
+    .where(eq(member.organizationId, orgId))
+    .orderBy(user.name);
 }
 
 // ---- MCP / OAuth clients ----

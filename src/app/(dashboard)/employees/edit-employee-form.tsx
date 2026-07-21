@@ -38,14 +38,23 @@ type Employee = {
   salaryAccount: string | null;
   startDate: string | null;
   endDate: string | null;
+  workEmail: string | null;
+  personalEmail: string | null;
+  phone: string | null;
+  note: string | null;
+  userId: string | null;
   isActive: boolean;
 };
 
+export type MemberOption = { userId: string; name: string; email: string };
+
 export function EditEmployeeForm({
   employee,
+  members,
   footer,
 }: Readonly<{
   employee: Employee;
+  members: MemberOption[];
   footer?: React.ReactNode;
 }>) {
   const [state, action, pending] = useActionState(updateEmployee, initial);
@@ -104,6 +113,57 @@ export function EditEmployeeForm({
           defaultValue={employee.salaryAccount ?? ""}
           placeholder="例：永豐銀行 帳號末四碼 1234"
         />
+      </div>
+
+      <div className="space-y-3 rounded-lg border p-3 sm:col-span-2">
+        <div className="text-sm font-medium">聯絡資訊</div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="workEmail" className="text-xs text-muted-foreground">
+              工作 Email
+            </Label>
+            <Input id="workEmail" name="workEmail" type="email" defaultValue={employee.workEmail ?? ""} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="personalEmail" className="text-xs text-muted-foreground">
+              聯絡 Email
+            </Label>
+            <Input
+              id="personalEmail"
+              name="personalEmail"
+              type="email"
+              defaultValue={employee.personalEmail ?? ""}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="phone" className="text-xs text-muted-foreground">
+              電話
+            </Label>
+            <Input id="phone" name="phone" defaultValue={employee.phone ?? ""} />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">綁定登入使用者（選填）</Label>
+            <Select name="userId" defaultValue={employee.userId ?? "none"}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">不綁定（僅名冊紀錄）</SelectItem>
+                {members.map((m) => (
+                  <SelectItem key={m.userId} value={m.userId}>
+                    {m.name}（{m.email}）
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="note" className="text-xs text-muted-foreground">
+            備註
+          </Label>
+          <Input id="note" name="note" defaultValue={employee.note ?? ""} />
+        </div>
       </div>
 
       <div className="space-y-3 rounded-lg border p-3 sm:col-span-2">
