@@ -20,11 +20,13 @@ const actionLabel: Record<string, string> = {
   create: "新增",
   update: "修改",
   delete: "刪除",
+  read: "讀取",
 };
 const actionVariant: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   create: "secondary",
   update: "outline",
   delete: "destructive",
+  read: "outline",
 };
 const entityLabel: Record<string, string> = {
   transaction: "交易",

@@ -402,12 +402,12 @@ const billingTools: Record<string, ToolDef> = {
 
   list_activity: {
     description:
-      "Org activity / audit log: who (web or MCP) did create/update/delete on which entity, newest first. Use to investigate mis-recorded or wrongly-deleted data. Filter by entityType (transaction, party, category, bank_account, employee, invoice, reconciliation, project, subscription, contract, document, payroll_run, payslip) and/or action (create|update|delete).",
+      "Org activity / audit log: who (web or MCP) did create/update/delete on which entity, newest first — plus 'read' entries for employee-PII reads via MCP. Use to investigate mis-recorded or wrongly-deleted data. Filter by entityType (transaction, party, category, bank_account, employee, invoice, reconciliation, project, subscription, contract, document, payroll_run, payslip) and/or action (create|update|delete|read).",
     inputSchema: {
       type: "object",
       properties: {
         entityType: { type: "string" },
-        action: { type: "string", enum: ["create", "update", "delete"] },
+        action: { type: "string", enum: ["create", "update", "delete", "read"] },
         limit: { type: "number", description: "Default 200." },
         ...ORG_ARG,
       },

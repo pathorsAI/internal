@@ -82,7 +82,11 @@ invoices: `list_invoices`/`get_invoice`/`create_invoice`/`delete_invoice`.
 file (e.g. a Google Drive link).
 
 **HR / payroll / recon** — employees: `list_employees`/`get_employee`/
-`create_employee`/`update_employee`/`delete_employee`; payroll:
+`create_employee`/`update_employee`/`delete_employee`. Employee PII is
+handled conservatively over MCP: national ID and salary account come back
+**masked** (full values are web-app only), and every employee read is written
+to the activity log as a `read` entry — so who pulled contact data, and when,
+is always answerable. Payroll:
 `list_payroll_runs`, `list_payslips`, `list_salary_status` (who's paid for a month
 + when), `pay_employee_salary` (records the payslip **and** posts the salary
 expense to the ledger); reconciliations: `list_reconciliations` +
