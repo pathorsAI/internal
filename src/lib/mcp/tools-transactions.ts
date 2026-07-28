@@ -20,6 +20,7 @@ import {
 } from "@/db/queries";
 import {
   assertInOrg,
+  getContractProgress,
   normalizeCurrency,
   optBoolean,
   optDate,
@@ -286,7 +287,7 @@ export const transactionTools: Record<string, ToolDef> = {
 
   create_transaction: {
     description:
-      "Record a ledger transaction. Required per type — expense/income: accountId + partyName; advance: partyName + settleEmployeeName (no account); transfer: fromAccountId + toAccountId. categoryId is OPTIONAL — omit it to leave the txn 未分類 (unclassified; no need for a separate holding account). Resolve ids with list_bank_accounts / list_categories / list_parties first. 'reported' (報稅/上外帳) sets the book to 'both', otherwise 'internal' (transfers are always 'both'). Set billedToCompanyTaxId=true to mark 有報公司統編 (the invoice attachment itself is done in the app). To reimburse an advance use create_reimbursement.",
+      "Record a ledger transaction. Required per type — expense/income: accountId + partyName; advance: partyName + settleEmployeeName (no account); transfer: fromAccountId + toAccountId. categoryId is OPTIONAL — omit it to leave the txn 未分類 (unclassified; no need for a separate holding account). Resolve ids with list_bank_accounts / list_categories / list_parties first. 'reported' (報稅/上外帳) sets the book to 'both', otherwise 'internal' (transfers are always 'both'). Set billedToCompanyTaxId=true to mark 有報公司統編 (the invoice attachment itself is done in the app). To reimburse an advance use create_reimbursement. When contractId is set, the result carries `contractProgress` (amount/received/remaining/fullyCollected) — if `fullyCollected` is true while the contract is still draft/active, TELL THE USER the contract is now fully collected and ASK whether to set it to completed (已完成); on a yes, call update_contract with status='completed'. Never flip the status without asking.",
     inputSchema: {
       type: "object",
       properties: {
@@ -306,7 +307,7 @@ export const transactionTools: Record<string, ToolDef> = {
         contractId: {
           type: "number",
           description:
-            "Optional contract to link. income counts toward the contract's 已收/未收; expense/advance are cost-only (does not reduce the contract amount).",
+            "Optional contract to link. income counts toward the contract's 已收/未收; expense/advance are cost-only (does not reduce the contract amount). The response returns the contract's updated collection progress — check `contractProgress.fullyCollected` and follow the tool description when it is true.",
         },
         subscriptionId: {
           type: "number",
@@ -370,13 +371,15 @@ export const transactionTools: Record<string, ToolDef> = {
           billedToCompanyTaxId: optBoolean(args, "billedToCompanyTaxId") ?? false,
         })
         .returning();
-      return row;
+      if (contractId === undefined) return row;
+      const [progress] = await getContractProgress(db, orgId, [contractId]);
+      return { ...row, contractProgress: progress ?? null };
     },
   },
 
   bulk_create_transactions: {
     description:
-      "Insert MANY ledger transactions in ONE call — use this instead of calling create_transaction in a loop. Pass `items`: an array where each element mirrors create_transaction's arguments (type, txnDate, amount, currency?, description?, reported?, accountId?, partyName?, categoryId?, settleEmployeeName?, fromAccountId?, toAccountId?, projectId?, contractId?, subscriptionId?, subscriptionPeriod?). Per-type requirements match create_transaction (expense/income: accountId+partyName; advance: partyName+settleEmployeeName; transfer: fromAccountId+toAccountId); categoryId is optional (omit → 未分類, unclassified). Account/category/project/contract/subscription ids are validated against your org; party/employee names are created on demand and deduped within the batch. subscriptionPeriod (YYYY-MM-DD) is required on any item that sets subscriptionId. All rows are written in a single INSERT. Returns the created count and ids. Max 1000 items per call.",
+      "Insert MANY ledger transactions in ONE call — use this instead of calling create_transaction in a loop. Pass `items`: an array where each element mirrors create_transaction's arguments (type, txnDate, amount, currency?, description?, reported?, accountId?, partyName?, categoryId?, settleEmployeeName?, fromAccountId?, toAccountId?, projectId?, contractId?, subscriptionId?, subscriptionPeriod?). Per-type requirements match create_transaction (expense/income: accountId+partyName; advance: partyName+settleEmployeeName; transfer: fromAccountId+toAccountId); categoryId is optional (omit → 未分類, unclassified). Account/category/project/contract/subscription ids are validated against your org; party/employee names are created on demand and deduped within the batch. subscriptionPeriod (YYYY-MM-DD) is required on any item that sets subscriptionId. All rows are written in a single INSERT. Returns the created count, the ids, and — for every contract any item linked to — `contractProgress` (amount/received/remaining/fullyCollected). For each entry with `fullyCollected` true while the contract is still draft/active, TELL THE USER that contract is now fully collected and ASK whether to set it to completed (已完成); on a yes, call update_contract with status='completed'. Never flip the status without asking. Max 1000 items per call.",
     inputSchema: {
       type: "object",
       properties: {
@@ -401,7 +404,8 @@ export const transactionTools: Record<string, ToolDef> = {
               projectId: { type: "number", description: "Optional project tag." },
               contractId: {
                 type: "number",
-                description: "Optional contract to link (income → 已收; expense/advance → cost only).",
+                description:
+                  "Optional contract to link (income → 已收; expense/advance → cost only). The response returns each linked contract's updated collection progress.",
               },
               subscriptionId: {
                 type: "number",
@@ -587,13 +591,21 @@ export const transactionTools: Record<string, ToolDef> = {
         billedToCompanyTaxId: n.billedToCompanyTaxId,
       }));
       const inserted = await db.insert(transactions).values(values).returning({ id: transactions.id });
-      return { created: inserted.length, ids: inserted.map((r) => r.id) };
+      const linkedContractIds = norms
+        .map((n) => n.contractId)
+        .filter((id): id is number => id !== null);
+      const contractProgress = await getContractProgress(db, orgId, linkedContractIds);
+      return {
+        created: inserted.length,
+        ids: inserted.map((r) => r.id),
+        ...(contractProgress.length ? { contractProgress } : {}),
+      };
     },
   },
 
   update_transaction: {
     description:
-      "Edit a transaction's date, amount, currency, description, category (categoryId 0 clears it → 未分類), project, contract, subscription, subscription period, reported flag, or billedToCompanyTaxId (有報公司統編) — only provided fields change. To change the account or counterparty, delete and recreate, or use the app.",
+      "Edit a transaction's date, amount, currency, description, category (categoryId 0 clears it → 未分類), project, contract, subscription, subscription period, reported flag, or billedToCompanyTaxId (有報公司統編) — only provided fields change. To change the account or counterparty, delete and recreate, or use the app. If the edit touches a contract-linked transaction, the result carries `contractProgress` for the contracts involved — when an entry is `fullyCollected` while the contract is still draft/active, tell the user and ask whether to set that contract to completed (已完成) via update_contract; never flip the status without asking.",
     inputSchema: {
       type: "object",
       properties: {
@@ -626,6 +638,7 @@ export const transactionTools: Record<string, ToolDef> = {
           type: transactions.type,
           amount: transactions.amount,
           currency: transactions.currency,
+          contractId: transactions.contractId,
         })
         .from(transactions)
         .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)))
@@ -693,7 +706,12 @@ export const transactionTools: Record<string, ToolDef> = {
         .set(patch)
         .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)))
         .returning();
-      return row;
+      // 進度受影響的合約：原本綁的（可能被解綁或金額變動）＋改綁的新合約。
+      const touchedContractIds = [existing.contractId, row.contractId].filter(
+        (cid): cid is number => cid != null,
+      );
+      const contractProgress = await getContractProgress(db, orgId, touchedContractIds);
+      return contractProgress.length ? { ...row, contractProgress } : row;
     },
   },
 

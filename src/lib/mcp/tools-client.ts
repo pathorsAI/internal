@@ -259,7 +259,12 @@ export const clientTools: Record<string, ToolDef> = {
         currency: { type: "string", description: "3-letter; default TWD." },
         startDate: { type: "string", description: "YYYY-MM-DD." },
         endDate: { type: "string", description: "YYYY-MM-DD." },
-        status: { type: "string", enum: [...CONTRACT_STATUS], description: "Default active." },
+        status: {
+          type: "string",
+          enum: [...CONTRACT_STATUS],
+          description:
+            "Default active (進行中). completed = 已完成（收款完成/結案），cancelled = 已取消。",
+        },
         note: { type: "string" },
         fileUrl: { type: "string", description: "Link to the signed contract file, e.g. Google Drive." },
         ...ORG_ARG,
@@ -296,7 +301,8 @@ export const clientTools: Record<string, ToolDef> = {
   },
 
   update_contract: {
-    description: "Update a contract (only provided fields).",
+    description:
+      "Update a contract (only provided fields). Status meanings: draft = 草稿/未生效, active = 進行中, completed = 已完成 (delivered and fully collected, 未收 0), cancelled = 已取消. A contract does NOT move to completed by itself — once its 已收 reaches the contract amount (see list_contracts / the contractProgress returned by the transaction tools), confirm with the user and then set status='completed' here.",
     inputSchema: {
       type: "object",
       properties: {
@@ -308,7 +314,11 @@ export const clientTools: Record<string, ToolDef> = {
         currency: { type: "string" },
         startDate: { type: "string", description: "YYYY-MM-DD." },
         endDate: { type: "string", description: "YYYY-MM-DD." },
-        status: { type: "string", enum: [...CONTRACT_STATUS] },
+        status: {
+          type: "string",
+          enum: [...CONTRACT_STATUS],
+          description: "completed = 收款完成/結案；設成 completed 前先跟使用者確認。",
+        },
         note: { type: "string" },
         fileUrl: { type: "string" },
         ...ORG_ARG,

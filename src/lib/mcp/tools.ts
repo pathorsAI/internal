@@ -266,7 +266,7 @@ const billingTools: Record<string, ToolDef> = {
 
   list_contracts: {
     description:
-      "Client contracts with amount, term (start/end), status (draft/active/completed/cancelled), and collection progress: received (已收, sum of linked income txns in the contract currency), remaining (未收 = amount - received), and cost (linked expense/advance — for reference only, NOT deducted from the amount).",
+      "Client contracts with amount, term (start/end), status (draft/active/completed/cancelled), and collection progress: received (已收, sum of linked income txns in the contract currency), remaining (未收 = amount - received), and cost (linked expense/advance — for reference only, NOT deducted from the amount). Status is stored, not derived: a contract stays active even after 未收 hits 0. Whenever a row is still draft/active with remaining <= 0, point it out to the user and ask whether to close it with update_contract status='completed' (已完成).",
     inputSchema: {
       type: "object",
       properties: {
