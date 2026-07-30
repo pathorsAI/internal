@@ -79,7 +79,14 @@ invoices: `list_invoices`/`get_invoice`/`create_invoice`/`delete_invoice`.
 **Client ops** — projects/subscriptions/contracts each have `list_*` +
 `create_*`/`update_*`/`delete_*` (`list_customers` is a convenience filter of
 `list_parties`). A contract carries a `fileUrl` — the link to the signed contract
-file (e.g. a Google Drive link).
+file (e.g. a Google Drive link). Contract status is stored, not derived: linking
+an income transaction that fills the contract does **not** move it to
+`completed` on its own. So `create_transaction` / `bulk_create_transactions` /
+`update_transaction` return `contractProgress` (amount / received / remaining /
+`fullyCollected`) for every contract they touched — when a contract comes back
+fully collected while still draft/active, the client is told to surface it and
+ask the user before calling `update_contract` with `status='completed'`. Status
+is never flipped automatically.
 
 **HR / payroll / recon** — employees: `list_employees`/`get_employee`/
 `create_employee`/`update_employee`/`delete_employee`. Employee PII is
