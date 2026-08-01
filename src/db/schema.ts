@@ -11,7 +11,7 @@ export const categories = pgTable("categories", {
 	name: text().notNull(),
 	kind: text().notNull(),
 	isActive: boolean("is_active").default(true).notNull(),
-}, (table) => [
+}, () => [
 	check("chk_category_kind", sql`kind = ANY (ARRAY['income'::text, 'cogs'::text, 'expense'::text, 'non_operating'::text, 'transfer'::text, 'equity'::text])`),
 ]);
 
@@ -86,7 +86,7 @@ export const employees = pgTable("employees", {
 	// 選填綁定登入使用者（"user".id）。NULL = 純名冊紀錄，不強制 1:1。
 	// FK 與 (org, user) 唯一索引在 DB 端（migrations/0015）建立，避免跨檔宣告順序衝突。
 	userId: text("user_id"),
-}, (table) => [
+}, () => [
 	check("chk_emp_type", sql`employment_type = ANY (ARRAY['full_time'::text, 'part_time'::text, 'freelancer'::text, 'contractor'::text])`),
 ]);
 
@@ -175,7 +175,7 @@ export const payrollItemTypes = pgTable("payroll_item_types", {
 	isTaxable: boolean("is_taxable").notNull(),
 	isStatutory: boolean("is_statutory").default(false).notNull(),
 	note: text(),
-}, (table) => [
+}, () => [
 	check("chk_pit_direction", sql`direction = ANY (ARRAY['earning'::text, 'deduction'::text])`),
 ]);
 
