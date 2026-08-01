@@ -1,7 +1,7 @@
 import { addDays, differenceInCalendarDays, format, parseISO } from "date-fns";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { contracts, parties, projects, subscriptions, transactions } from "@/db/schema";
+import { billingItems, contracts, parties, projects, subscriptions, transactions } from "@/db/schema";
 import {
   deleteSubscriptionPeriod,
   getSubscriptionSchedule,
@@ -26,6 +26,7 @@ import { accountingTools } from "./tools-accounting";
 import { transactionTools } from "./tools-transactions";
 import { clientTools } from "./tools-client";
 import { hrTools } from "./tools-hr";
+import { billingItemTools } from "./tools-billing";
 
 export type { ToolContext, ToolDef };
 
@@ -59,7 +60,7 @@ const billingTools: Record<string, ToolDef> = {
 
   list_upcoming_billing: {
     description:
-      "Projected upcoming charges from active recurring subscriptions (next charge computed from start_date + interval_months), within the next N days. Use this to answer 'who do I need to bill, and when'. One-off contract collection is tracked via contracts (已收/未收), not here.",
+      "Upcoming charges within the next N days, from BOTH active recurring subscriptions (next charge computed from start_date + interval_months) and scheduled one-off billing items (contract instalments / project milestones). Use this to answer 'who do I need to bill, and when'. For the full picture including overdue and unpaid items, use list_billing_status.",
     inputSchema: {
       type: "object",
       properties: {
@@ -97,7 +98,7 @@ const billingTools: Record<string, ToolDef> = {
         );
 
       type Item = {
-        kind: "subscription_projected";
+        kind: "subscription_projected" | "billing_item";
         id: number;
         customer: string | null;
         label: string;
@@ -107,6 +108,40 @@ const billingTools: Record<string, ToolDef> = {
         daysUntilDue: number;
       };
       const items: Item[] = [];
+
+      // 已排定但還沒請款的一次性項目（分期 / 里程碑）也算「接下來要請的款」。
+      const itemRows = await db
+        .select({
+          id: billingItems.id,
+          title: billingItems.title,
+          amount: billingItems.amount,
+          currency: billingItems.currency,
+          dueDate: billingItems.dueDate,
+          customer: parties.name,
+        })
+        .from(billingItems)
+        .leftJoin(parties, eq(billingItems.customerPartyId, parties.id))
+        .where(
+          and(
+            eq(billingItems.organizationId, orgId),
+            isNull(billingItems.deletedAt),
+            isNull(billingItems.billedOn),
+            sql`${billingItems.status} not in ('paid', 'cancelled')`,
+          ),
+        );
+      for (const b of itemRows) {
+        if (!b.dueDate || b.dueDate > horizon) continue;
+        items.push({
+          kind: "billing_item",
+          id: b.id,
+          customer: b.customer,
+          label: b.title,
+          amount: b.amount,
+          currency: b.currency,
+          date: b.dueDate,
+          daysUntilDue: differenceInCalendarDays(parseISO(b.dueDate), parseISO(today)),
+        });
+      }
 
       for (const s of subRows) {
         const next = nextChargeDate(s.startDate, s.intervalMonths, today, s.endDate);
@@ -129,7 +164,7 @@ const billingTools: Record<string, ToolDef> = {
         windowDays: days,
         upcomingCount: items.length,
         upcoming: items,
-        note: "subscription_projected rows are computed (not yet invoiced).",
+        note: "subscription_projected rows are computed from the subscription schedule; billing_item rows are explicitly scheduled charges that have not been billed yet. Overdue items are NOT included here — use list_billing_status for those.",
       };
     },
   },
@@ -427,6 +462,7 @@ const billingTools: Record<string, ToolDef> = {
 
 export const tools: Record<string, ToolDef> = {
   ...billingTools,
+  ...billingItemTools,
   ...accountingTools,
   ...transactionTools,
   ...clientTools,

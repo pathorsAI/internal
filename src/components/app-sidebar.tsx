@@ -15,6 +15,8 @@ import {
   FolderKanban,
   Repeat,
   FileSignature,
+  CalendarClock,
+  Receipt,
   BarChart3,
   UserCog,
   Settings,
@@ -51,9 +53,11 @@ const nav = [
 ];
 
 const clients = [
+  { title: "請款看板", href: "/billing", icon: CalendarClock },
   { title: "專案", href: "/projects", icon: FolderKanban },
   { title: "訂閱 / 月費", href: "/subscriptions", icon: Repeat },
   { title: "合約", href: "/contracts", icon: FileSignature },
+  { title: "發票", href: "/invoices", icon: Receipt },
   { title: "報表", href: "/reports", icon: BarChart3 },
 ];
 

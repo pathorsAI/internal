@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Building2 } from "lucide-react";
@@ -26,14 +26,13 @@ export function OrgSettingsClient() {
   const { data: activeMember } = useActiveMember();
   const canEdit = activeMember?.role === "owner" || activeMember?.role === "admin";
 
-  const [name, setName] = useState("");
+  // `draft` is null until the user actually types, so the field simply *shows*
+  // the active org's name rather than copying it into state via an effect.
+  // Switching orgs therefore updates the field for free, and clearing the draft
+  // after a save re-syncs it to whatever the server returned.
+  const [draft, setDraft] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-
-  // Prefill once the active org loads, and keep in sync if it changes
-  // (e.g. switching orgs without a full reload).
-  useEffect(() => {
-    if (activeOrg) setName(activeOrg.name);
-  }, [activeOrg]);
+  const name = draft ?? activeOrg?.name ?? "";
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -55,6 +54,7 @@ export function OrgSettingsClient() {
       return;
     }
     toast.success("已更新組織名稱");
+    setDraft(null);
     router.refresh();
   }
 
@@ -84,7 +84,7 @@ export function OrgSettingsClient() {
             <Input
               id="org-name"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => setDraft(e.target.value)}
               disabled={!canEdit || saving}
               required
             />

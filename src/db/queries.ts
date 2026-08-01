@@ -1,4 +1,4 @@
-import { addMonths, format, isAfter, parseISO } from "date-fns";
+import { addDays, addMonths, format, isAfter, parseISO } from "date-fns";
 import { sql, eq, desc, and, or, lte, inArray, isNull, aliasedTable } from "drizzle-orm";
 import { getDb } from "./index";
 import { nextChargeDate, todayStr } from "@/lib/mcp/shared";
@@ -18,6 +18,7 @@ import {
   subscriptions,
   subscriptionPeriods,
   contracts,
+  billingItems,
   activityLog,
 } from "./schema";
 import { oauthApplication, oauthAccessToken, member, organization, user } from "./auth-schema";
@@ -405,6 +406,66 @@ export async function listInvoices(orgId: string, limit = 100) {
     .where(and(eq(invoices.organizationId, orgId), isNull(invoices.deletedAt)))
     .orderBy(desc(invoices.invoiceDate), desc(invoices.id))
     .limit(limit);
+}
+
+/**
+ * 發票列表（含綁定的客戶／合約／請款項目名稱）。
+ * direction 預設 issued —— 「發票該開給誰」看的是開給客戶的那一邊。
+ */
+export async function listInvoicesDetailed(
+  orgId: string,
+  direction: "issued" | "received" = "issued",
+  limit = 200,
+) {
+  const db = getDb();
+  const rows = await db
+    .select({
+      id: invoices.id,
+      direction: invoices.direction,
+      invoiceNumber: invoices.invoiceNumber,
+      invoiceDate: invoices.invoiceDate,
+      counterpartyName: invoices.counterpartyName,
+      counterpartyTaxId: invoices.counterpartyTaxId,
+      amountNet: invoices.amountNet,
+      tax: invoices.tax,
+      amountGross: invoices.amountGross,
+      currency: invoices.currency,
+      status: invoices.status,
+      note: invoices.note,
+      partyId: invoices.partyId,
+      partyName: parties.name,
+      contractId: invoices.contractId,
+      contractTitle: contracts.title,
+      billingItemId: invoices.billingItemId,
+      billingItemTitle: billingItems.title,
+    })
+    .from(invoices)
+    .leftJoin(parties, eq(parties.id, invoices.partyId))
+    .leftJoin(contracts, eq(contracts.id, invoices.contractId))
+    .leftJoin(billingItems, eq(billingItems.id, invoices.billingItemId))
+    .where(
+      and(
+        eq(invoices.organizationId, orgId),
+        eq(invoices.direction, direction),
+        isNull(invoices.deletedAt),
+      ),
+    )
+    .orderBy(desc(invoices.invoiceDate), desc(invoices.id))
+    .limit(limit);
+  // 有綁 party 就以 parties.name 為準，否則退回手 key 的 counterparty_name。
+  return rows.map((r) => ({ ...r, displayName: r.partyName ?? r.counterpartyName }));
+}
+
+/** 尚未開發票的請款項目，給發票表單的「對應請款」下拉用。 */
+export async function listInvoiceableBillingItems(orgId: string) {
+  const rows = await listBillingBoard(orgId, { includeAllHistory: true });
+  return rows
+    .filter((r) => r.source === "billing_item" && r.billingItemId != null)
+    .map((r) => ({
+      id: r.billingItemId as number,
+      name: `${r.customerName ?? "—"} · ${r.title}`,
+      invoiced: r.invoicedOn != null,
+    }));
 }
 
 export async function listBankAccounts(orgId: string) {
@@ -871,19 +932,37 @@ export type SubscriptionPeriod = {
   status: SubscriptionPeriodStatus;
   note: string | null;
   isOverride: boolean;
+  // 該期的實際動作（migrations/0017）。訂閱期別本身是算出來的，只有這些「人做了什麼」
+  // 會落地到 subscription_periods。
+  dueDate: string | null;
+  billedOn: string | null;
+  invoicedOn: string | null;
 };
 
-// 某訂閱各期「應收金額」覆寫：未刪除的每期覆寫（含備註），依期別排序。
+/** 每期落地的資料：金額覆寫（可為 NULL＝不覆寫）與實際請款/開發票日。 */
+export type SubscriptionPeriodOverride = {
+  periodStart: string;
+  expectedAmount: number | null;
+  note: string | null;
+  dueDate: string | null;
+  billedOn: string | null;
+  invoicedOn: string | null;
+};
+
+// 某訂閱各期落地的資料：未刪除的每期覆寫與實際動作，依期別排序。
 export async function listSubscriptionPeriods(
   orgId: string,
   subscriptionId: number,
-): Promise<{ periodStart: string; expectedAmount: number; note: string | null }[]> {
+): Promise<SubscriptionPeriodOverride[]> {
   const db = getDb();
   const rows = await db
     .select({
       periodStart: subscriptionPeriods.periodStart,
       expectedAmount: subscriptionPeriods.expectedAmount,
       note: subscriptionPeriods.note,
+      dueDate: subscriptionPeriods.dueDate,
+      billedOn: subscriptionPeriods.billedOn,
+      invoicedOn: subscriptionPeriods.invoicedOn,
     })
     .from(subscriptionPeriods)
     .where(
@@ -896,8 +975,11 @@ export async function listSubscriptionPeriods(
     .orderBy(subscriptionPeriods.periodStart);
   return rows.map((r) => ({
     periodStart: r.periodStart,
-    expectedAmount: Number(r.expectedAmount),
+    expectedAmount: r.expectedAmount == null ? null : Number(r.expectedAmount),
     note: r.note,
+    dueDate: r.dueDate,
+    billedOn: r.billedOn,
+    invoicedOn: r.invoicedOn,
   }));
 }
 
@@ -910,7 +992,7 @@ export async function listSubscriptionPeriods(
 export function computeSubscriptionSchedule(
   sub: SubscriptionForSchedule,
   paidByPeriod: { periodStart: string; paid: number }[],
-  explicitPeriods: { periodStart: string; expectedAmount: number; note: string | null }[],
+  explicitPeriods: SubscriptionPeriodOverride[],
   today: string,
 ): { periods: SubscriptionPeriod[]; totalOutstanding: number } {
   const defaultExpected = Number(sub.amount);
@@ -942,6 +1024,7 @@ export function computeSubscriptionSchedule(
   let totalOutstanding = 0;
   const periods: SubscriptionPeriod[] = sorted.map((periodStart) => {
     const override = overrideByStart.get(periodStart);
+    // expectedAmount 可為 NULL（只記請款/開發票日、不覆寫金額）→ 退回 sub.amount。
     const expected = override?.expectedAmount ?? defaultExpected;
     const paid = paidMap.get(periodStart) ?? 0;
     const upcoming = periodStart > today;
@@ -958,7 +1041,10 @@ export function computeSubscriptionSchedule(
       paid,
       status,
       note: override?.note ?? null,
-      isOverride: overrideByStart.has(periodStart),
+      dueDate: override?.dueDate ?? null,
+      billedOn: override?.billedOn ?? null,
+      invoicedOn: override?.invoicedOn ?? null,
+      isOverride: override?.expectedAmount != null,
     };
   });
   return { periods, totalOutstanding };
@@ -1132,6 +1218,8 @@ export async function listContracts(orgId: string) {
       currency: contracts.currency,
       startDate: contracts.startDate,
       endDate: contracts.endDate,
+      signedDate: contracts.signedDate,
+      paymentTermsDays: contracts.paymentTermsDays,
       status: contracts.status,
       note: contracts.note,
       fileUrl: contracts.fileUrl,
@@ -1158,6 +1246,431 @@ export async function listContracts(orgId: string) {
     const remaining = r.amount == null ? null : Number(r.amount) - received;
     return { ...r, received, cost, remaining };
   });
+}
+
+// ============================================================================
+// 請款看板（migrations/0017）
+//
+// 兩個來源合併成同一種列：
+//   1. billing_items —— 一次性合約分期 / 專案里程碑 / 臨時請款（資料庫實列）
+//   2. subscriptions —— 週期性月費／年費（期別是算出來的，見 computeSubscriptionSchedule）
+// 刻意不把訂閱期別物化進 billing_items：那會產生兩份狀態、必然漂移。
+// ============================================================================
+
+export type BillingItemStatus =
+  | "upcoming" // 還沒到應請款日
+  | "due" // 該請款了（到期未請）
+  | "billed" // 已請款、等收款
+  | "partial" // 收了一部分
+  | "paid" // 已收齊
+  | "overdue"; // 已請款且超過應收期限仍未收齊
+
+export type BillingSource = "billing_item" | "subscription";
+
+export type BillingRow = {
+  /** 穩定 key，同時作為 Google 日曆事件的對應鍵：`bi:<id>` 或 `sub:<id>:<periodStart>` */
+  key: string;
+  source: BillingSource;
+  billingItemId: number | null;
+  subscriptionId: number | null;
+  periodStart: string | null;
+  customerPartyId: number | null;
+  customerName: string | null;
+  title: string;
+  contractId: number | null;
+  contractTitle: string | null;
+  projectId: number | null;
+  projectName: string | null;
+  dueDate: string | null;
+  billedOn: string | null;
+  paidOn: string | null;
+  invoicedOn: string | null;
+  /** 該開發票卻還沒開 */
+  needsInvoice: boolean;
+  expected: number;
+  paid: number;
+  currency: string;
+  /** 推導出來的顯示狀態 */
+  status: BillingItemStatus;
+  note: string | null;
+  /** billing_items 資料庫裡存的原始 status；訂閱期別沒有實體列故為 null。
+   *  看板的編輯表單要用它回填，不能拿推導出來的 status 覆寫。 */
+  rawStatus: string | null;
+};
+
+/**
+ * 純函式：由日期與金額推導請款狀態。獨立出來方便單獨驗證，
+ * 風格比照 computeSubscriptionSchedule。
+ *
+ * 逾期的判斷基準：有付款條件（月結 N 天）就用「實際請款日 + N 天」，
+ * 否則退回應請款日。兩者都沒有就永遠不算逾期（無從判斷）。
+ */
+export function deriveBillingStatus(
+  input: {
+    dueDate: string | null;
+    billedOn: string | null;
+    expected: number;
+    paid: number;
+    paymentTermsDays: number | null;
+    cancelled?: boolean;
+  },
+  today: string,
+): BillingItemStatus {
+  const { dueDate, billedOn, expected, paid, paymentTermsDays } = input;
+  if (paid >= expected && expected > 0) return "paid";
+  if (paid > 0) return "partial";
+
+  const deadline =
+    billedOn && paymentTermsDays != null
+      ? format(addDays(parseISO(billedOn), paymentTermsDays), "yyyy-MM-dd")
+      : dueDate;
+  if (billedOn) return deadline != null && deadline < today ? "overdue" : "billed";
+  if (dueDate != null && dueDate <= today) return "due";
+  return "upcoming";
+}
+
+/** 各請款項目已收金額：綁定該項目、type=income 的交易加總。 */
+async function billingItemPaidById(orgId: string): Promise<Map<number, number>> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      billingItemId: transactions.billingItemId,
+      paid: sql<string>`coalesce(sum(${transactions.amount}), 0)`,
+    })
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.organizationId, orgId),
+        eq(transactions.type, "income"),
+        isNull(transactions.deletedAt),
+        sql`${transactions.billingItemId} is not null`,
+      ),
+    )
+    .groupBy(transactions.billingItemId);
+  return new Map(
+    rows
+      .filter((r): r is { billingItemId: number; paid: string } => r.billingItemId != null)
+      .map((r) => [r.billingItemId, Number(r.paid)]),
+  );
+}
+
+/** 全 org 各訂閱、各期已收金額（一次查完，避免看板 N+1）。 */
+async function subscriptionPaidByPeriodAll(
+  orgId: string,
+): Promise<Map<number, { periodStart: string; paid: number }[]>> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      subscriptionId: transactions.subscriptionId,
+      periodStart: transactions.subscriptionPeriod,
+      paid: sql<string>`coalesce(sum(${transactions.amount}), 0)`,
+    })
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.organizationId, orgId),
+        eq(transactions.type, "income"),
+        isNull(transactions.deletedAt),
+        sql`${transactions.subscriptionId} is not null`,
+      ),
+    )
+    .groupBy(transactions.subscriptionId, transactions.subscriptionPeriod);
+  const out = new Map<number, { periodStart: string; paid: number }[]>();
+  for (const r of rows) {
+    if (r.subscriptionId == null || r.periodStart == null) continue;
+    const list = out.get(r.subscriptionId) ?? [];
+    list.push({ periodStart: r.periodStart, paid: Number(r.paid) });
+    out.set(r.subscriptionId, list);
+  }
+  return out;
+}
+
+/** 全 org 各訂閱的每期落地資料（一次查完，避免看板 N+1）。 */
+async function subscriptionPeriodsAll(
+  orgId: string,
+): Promise<Map<number, SubscriptionPeriodOverride[]>> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      subscriptionId: subscriptionPeriods.subscriptionId,
+      periodStart: subscriptionPeriods.periodStart,
+      expectedAmount: subscriptionPeriods.expectedAmount,
+      note: subscriptionPeriods.note,
+      dueDate: subscriptionPeriods.dueDate,
+      billedOn: subscriptionPeriods.billedOn,
+      invoicedOn: subscriptionPeriods.invoicedOn,
+    })
+    .from(subscriptionPeriods)
+    .where(
+      and(eq(subscriptionPeriods.organizationId, orgId), isNull(subscriptionPeriods.deletedAt)),
+    )
+    .orderBy(subscriptionPeriods.periodStart);
+  const out = new Map<number, SubscriptionPeriodOverride[]>();
+  for (const r of rows) {
+    const list = out.get(r.subscriptionId) ?? [];
+    list.push({
+      periodStart: r.periodStart,
+      expectedAmount: r.expectedAmount == null ? null : Number(r.expectedAmount),
+      note: r.note,
+      dueDate: r.dueDate,
+      billedOn: r.billedOn,
+      invoicedOn: r.invoicedOn,
+    });
+    out.set(r.subscriptionId, list);
+  }
+  return out;
+}
+
+/** 看板預設只回溯這麼多天的「已收齊」紀錄；未結清的項目不受此限，永遠留在板上。 */
+const BOARD_PAID_LOOKBACK_DAYS = 90;
+
+export type BillingBoardOptions = {
+  /** 顯示全部歷史（含久遠的已收齊項目）。預設 false。 */
+  includeAllHistory?: boolean;
+};
+
+/**
+ * 請款看板的單一資料來源：合併 billing_items 與各訂閱期別。
+ *
+ * 預設會濾掉「很久以前就已收齊」的列（看板要能一眼看完），但**任何未結清的項目
+ * 都不會被濾掉**，逾期的東西不會因為太舊就從板上消失。
+ */
+export async function listBillingBoard(
+  orgId: string,
+  opts: BillingBoardOptions = {},
+): Promise<BillingRow[]> {
+  const db = getDb();
+  const today = todayStr();
+  const cutoff = format(addDays(parseISO(today), -BOARD_PAID_LOOKBACK_DAYS), "yyyy-MM-dd");
+
+  const [itemRows, itemPaid, subRows, subPaidAll, subPeriodsAll] = await Promise.all([
+    db
+      .select({
+        id: billingItems.id,
+        customerPartyId: billingItems.customerPartyId,
+        customerName: parties.name,
+        contractId: billingItems.contractId,
+        contractTitle: contracts.title,
+        paymentTermsDays: contracts.paymentTermsDays,
+        projectId: billingItems.projectId,
+        projectName: projects.name,
+        title: billingItems.title,
+        amount: billingItems.amount,
+        currency: billingItems.currency,
+        dueDate: billingItems.dueDate,
+        billedOn: billingItems.billedOn,
+        paidOn: billingItems.paidOn,
+        invoicedOn: billingItems.invoicedOn,
+        needsInvoice: billingItems.needsInvoice,
+        status: billingItems.status,
+        note: billingItems.note,
+      })
+      .from(billingItems)
+      .leftJoin(parties, eq(parties.id, billingItems.customerPartyId))
+      .leftJoin(contracts, eq(contracts.id, billingItems.contractId))
+      .leftJoin(projects, eq(projects.id, billingItems.projectId))
+      .where(and(eq(billingItems.organizationId, orgId), isNull(billingItems.deletedAt)))
+      .orderBy(billingItems.dueDate),
+    billingItemPaidById(orgId),
+    db
+      .select({
+        id: subscriptions.id,
+        name: subscriptions.name,
+        customerPartyId: subscriptions.customerPartyId,
+        customerName: parties.name,
+        projectId: subscriptions.projectId,
+        projectName: projects.name,
+        amount: subscriptions.amount,
+        currency: subscriptions.currency,
+        intervalMonths: subscriptions.intervalMonths,
+        startDate: subscriptions.startDate,
+        endDate: subscriptions.endDate,
+        status: subscriptions.status,
+      })
+      .from(subscriptions)
+      .leftJoin(parties, eq(parties.id, subscriptions.customerPartyId))
+      .leftJoin(projects, eq(projects.id, subscriptions.projectId))
+      .where(and(eq(subscriptions.organizationId, orgId), isNull(subscriptions.deletedAt))),
+    subscriptionPaidByPeriodAll(orgId),
+    subscriptionPeriodsAll(orgId),
+  ]);
+
+  const rows: BillingRow[] = [];
+
+  for (const it of itemRows) {
+    if (it.status === "cancelled") continue;
+    const expected = Number(it.amount);
+    const paid = itemPaid.get(it.id) ?? 0;
+    const status = deriveBillingStatus(
+      {
+        dueDate: it.dueDate,
+        billedOn: it.billedOn,
+        expected,
+        paid,
+        paymentTermsDays: it.paymentTermsDays,
+      },
+      today,
+    );
+    rows.push({
+      key: `bi:${it.id}`,
+      source: "billing_item",
+      billingItemId: it.id,
+      subscriptionId: null,
+      periodStart: null,
+      customerPartyId: it.customerPartyId,
+      customerName: it.customerName,
+      title: it.title,
+      contractId: it.contractId,
+      contractTitle: it.contractTitle,
+      projectId: it.projectId,
+      projectName: it.projectName,
+      dueDate: it.dueDate,
+      billedOn: it.billedOn,
+      paidOn: it.paidOn,
+      invoicedOn: it.invoicedOn,
+      needsInvoice: it.needsInvoice && !it.invoicedOn && (it.billedOn != null || paid > 0),
+      expected,
+      paid,
+      currency: it.currency,
+      status,
+      note: it.note,
+      rawStatus: it.status,
+    });
+  }
+
+  for (const sub of subRows) {
+    if (sub.status === "ended") continue;
+    const { periods } = computeSubscriptionSchedule(
+      sub,
+      subPaidAll.get(sub.id) ?? [],
+      subPeriodsAll.get(sub.id) ?? [],
+      today,
+    );
+    for (const p of periods) {
+      // 訂閱沒有付款條件欄位，逾期以該期的應請款日（未設則為期別起日）判斷。
+      const dueDate = p.dueDate ?? p.periodStart;
+      const status = deriveBillingStatus(
+        {
+          dueDate,
+          billedOn: p.billedOn,
+          expected: p.expected,
+          paid: p.paid,
+          paymentTermsDays: null,
+        },
+        today,
+      );
+      rows.push({
+        key: `sub:${sub.id}:${p.periodStart}`,
+        source: "subscription",
+        billingItemId: null,
+        subscriptionId: sub.id,
+        periodStart: p.periodStart,
+        customerPartyId: sub.customerPartyId,
+        customerName: sub.customerName,
+        title: `${sub.name}（${p.periodLabel}）`,
+        contractId: null,
+        contractTitle: null,
+        projectId: sub.projectId,
+        projectName: sub.projectName,
+        dueDate,
+        billedOn: p.billedOn,
+        paidOn: null,
+        invoicedOn: p.invoicedOn,
+        needsInvoice: !p.invoicedOn && (p.billedOn != null || p.paid > 0),
+        expected: p.expected,
+        paid: p.paid,
+        currency: sub.currency,
+        status,
+        note: p.note,
+        rawStatus: null,
+      });
+    }
+  }
+
+  const visible = opts.includeAllHistory
+    ? rows
+    : rows.filter(
+        (r) =>
+          // 未結清的一律留著；已收齊的只留最近 N 天，避免看板被歷史淹沒。
+          r.status !== "paid" || r.needsInvoice || (r.dueDate ?? "9999-12-31") >= cutoff,
+      );
+
+  // 應請款日由近到遠；沒設日期的排最後。
+  return visible.sort((a, b) => (a.dueDate ?? "9999-12-31").localeCompare(b.dueDate ?? "9999-12-31"));
+}
+
+export type BillingBucket = { count: number; amounts: Record<string, number> };
+export type BillingSummary = {
+  due: BillingBucket;
+  awaiting: BillingBucket;
+  overdue: BillingBucket;
+  needsInvoice: BillingBucket;
+};
+
+/**
+ * 摘要卡數字：該請款 / 待收款 / 逾期 / 待開發票。
+ * 金額依幣別分開加總 —— 本系統一律不做匯率換算（比照 listContracts 只比同幣別交易）。
+ */
+export function summarizeBilling(rows: BillingRow[]): BillingSummary {
+  const empty = (): BillingBucket => ({ count: 0, amounts: {} });
+  const out: BillingSummary = {
+    due: empty(),
+    awaiting: empty(),
+    overdue: empty(),
+    needsInvoice: empty(),
+  };
+  const add = (bucket: BillingBucket, currency: string, amount: number) => {
+    bucket.count += 1;
+    bucket.amounts[currency] = (bucket.amounts[currency] ?? 0) + amount;
+  };
+  for (const r of rows) {
+    const outstanding = Math.max(0, r.expected - r.paid);
+    if (r.status === "due") add(out.due, r.currency, outstanding);
+    if (r.status === "billed" || r.status === "partial") add(out.awaiting, r.currency, outstanding);
+    if (r.status === "overdue") add(out.overdue, r.currency, outstanding);
+    if (r.needsInvoice) add(out.needsInvoice, r.currency, r.expected);
+  }
+  return out;
+}
+
+/** 單一合約底下的分期請款項目（合約編輯 dialog 用）。 */
+export async function listBillingItemsByContract(orgId: string, contractId: number) {
+  const db = getDb();
+  const [rows, paid] = await Promise.all([
+    db
+      .select()
+      .from(billingItems)
+      .where(
+        and(
+          eq(billingItems.organizationId, orgId),
+          eq(billingItems.contractId, contractId),
+          isNull(billingItems.deletedAt),
+        ),
+      )
+      .orderBy(billingItems.dueDate, billingItems.id),
+    billingItemPaidById(orgId),
+  ]);
+  return rows.map((r) => ({
+    ...r,
+    amount: Number(r.amount),
+    paid: paid.get(r.id) ?? 0,
+  }));
+}
+
+export async function getBillingItem(orgId: string, id: number) {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(billingItems)
+    .where(
+      and(
+        eq(billingItems.organizationId, orgId),
+        eq(billingItems.id, id),
+        isNull(billingItems.deletedAt),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
 }
 
 // 廠商 / infra 成本報表：把支出（含代墊）依交易對象彙總（TWD）。
