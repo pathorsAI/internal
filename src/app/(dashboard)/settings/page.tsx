@@ -1,6 +1,10 @@
 import { PageHeader } from "@/components/page-header";
-import { requireOrg } from "@/lib/session";
-import { getCalendarSettings, hasCalendarGrant } from "@/lib/google-calendar";
+import { canManageOrg, requireOrgWithRole } from "@/lib/session";
+import {
+  getCalendarOwnerLabel,
+  getCalendarSettings,
+  hasCalendarGrant,
+} from "@/lib/google-calendar";
 import { OrgSettingsClient } from "./org-settings-client";
 import { CalendarSettingsClient } from "./calendar-settings-client";
 
@@ -8,10 +12,11 @@ export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   // Guard: redirects to /login or /onboarding when needed.
-  const { orgId, userId } = await requireOrg();
-  const [calendar, granted] = await Promise.all([
+  const { orgId, userId, role } = await requireOrgWithRole();
+  const [calendar, granted, ownerLabel] = await Promise.all([
     getCalendarSettings(orgId),
     hasCalendarGrant(userId),
+    getCalendarOwnerLabel(orgId),
   ]);
 
   return (
@@ -22,6 +27,9 @@ export default async function SettingsPage() {
         connected={Boolean(calendar?.ownerUserId && calendar?.googleCalendarId)}
         granted={granted}
         reminderDays={calendar?.reminderDays ?? 3}
+        canManage={canManageOrg(role)}
+        ownerLabel={ownerLabel}
+        isOwner={calendar?.ownerUserId === userId}
       />
     </>
   );
