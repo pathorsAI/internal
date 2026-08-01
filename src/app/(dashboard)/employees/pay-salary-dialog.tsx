@@ -27,6 +27,7 @@ import {
 import { DatePicker } from "@/components/date-picker";
 import { formatCurrency } from "@/lib/format";
 import { signColor } from "@/components/amount";
+import { submitAction } from "@/lib/form-action";
 import { cn } from "@/lib/utils";
 
 const initial: ActionState = { ok: false };
@@ -165,7 +166,7 @@ export function PaySalaryDialog({
           </Button>
         </DialogTrigger>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
-          <form action={action}>
+          <form onSubmit={submitAction(action)}>
             <input type="hidden" name="employeeId" value={employee.id} />
             <input type="hidden" name="items" value={itemsJson} />
 

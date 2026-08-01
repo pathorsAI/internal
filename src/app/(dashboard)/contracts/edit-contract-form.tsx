@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CurrencySelect } from "@/components/currency-select";
+import { submitAction } from "@/lib/form-action";
 
 const initial: ActionState = { ok: false };
 
@@ -74,7 +75,7 @@ export function EditContractForm({
   );
 
   return (
-    <form action={action} className="grid gap-4 sm:grid-cols-2">
+    <form onSubmit={submitAction(action)} className="grid gap-4 sm:grid-cols-2">
       <input type="hidden" name="id" value={contract.id} />
 
       {summary && (

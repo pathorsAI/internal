@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CurrencySelect } from "@/components/currency-select";
+import { submitAction } from "@/lib/form-action";
 import {
   Dialog,
   DialogContent,
@@ -59,7 +60,7 @@ export function NewPartyDialog({
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
-        <form action={action}>
+        <form onSubmit={submitAction(action)}>
           <DialogHeader>
             <DialogTitle>新增交易對象</DialogTitle>
             <DialogDescription>往來的廠商、客戶或機關</DialogDescription>

@@ -24,6 +24,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { DatePicker } from "@/components/date-picker";
+import { submitAction } from "@/lib/form-action";
 
 const initial: ActionState = { ok: false };
 
@@ -62,7 +63,7 @@ export function RecordReimbursementDialog({
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
-        <form action={action}>
+        <form onSubmit={submitAction(action)}>
           <input type="hidden" name="advanceId" value={advance.id} />
           <DialogHeader>
             <DialogTitle>記錄撥款</DialogTitle>

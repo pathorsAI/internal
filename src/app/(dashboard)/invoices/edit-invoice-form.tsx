@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { updateInvoice, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { DialogFooter } from "@/components/ui/dialog";
+import { submitAction } from "@/lib/form-action";
 import { useRowDialogClose } from "@/components/row-dialog";
 import { InvoiceFields, type InvoiceFormValues, type Option } from "./invoice-fields";
 
@@ -45,7 +46,7 @@ export function EditInvoiceForm({
   );
 
   return (
-    <form action={action} className="grid gap-4 sm:grid-cols-2">
+    <form onSubmit={submitAction(action)} className="grid gap-4 sm:grid-cols-2">
       <input type="hidden" name="id" value={id} />
       <InvoiceFields
         parties={parties}

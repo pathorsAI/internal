@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Req } from "@/components/req";
 import { DialogFooter } from "@/components/ui/dialog";
+import { submitAction } from "@/lib/form-action";
 import { useRowDialogClose } from "@/components/row-dialog";
 import {
   Select,
@@ -56,7 +57,7 @@ export function EditProjectForm({
   );
 
   return (
-    <form action={action} className="grid gap-4 sm:grid-cols-2">
+    <form onSubmit={submitAction(action)} className="grid gap-4 sm:grid-cols-2">
       <input type="hidden" name="id" value={project.id} />
 
       <div className="space-y-1.5 sm:col-span-2">

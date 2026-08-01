@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CurrencySelect } from "@/components/currency-select";
+import { submitAction } from "@/lib/form-action";
 import {
   Dialog,
   DialogContent,
@@ -62,7 +63,7 @@ export function NewContractDialog({
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
-        <form action={action}>
+        <form onSubmit={submitAction(action)}>
           <DialogHeader>
             <DialogTitle>新增合約</DialogTitle>
             <DialogDescription>客戶合約，可連結到專案</DialogDescription>

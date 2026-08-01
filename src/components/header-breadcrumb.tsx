@@ -26,6 +26,8 @@ const labels: Record<string, string> = {
   "/projects": "專案",
   "/subscriptions": "訂閱 / 月費",
   "/contracts": "合約",
+  "/billing": "請款看板",
+  "/invoices": "發票",
   "/reports": "報表",
   "/employees": "員工",
   "/payroll": "薪資",

@@ -7,6 +7,7 @@ import { createProject, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { submitAction } from "@/lib/form-action";
 import { Req } from "@/components/req";
 import {
   Select,
@@ -58,7 +59,7 @@ export function NewProjectDialog({
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
-        <form action={action}>
+        <form onSubmit={submitAction(action)}>
           <DialogHeader>
             <DialogTitle>新增專案</DialogTitle>
             <DialogDescription>專案的收支由交易上的「專案」欄位彙總</DialogDescription>
