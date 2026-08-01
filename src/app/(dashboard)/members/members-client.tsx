@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { UserPlus, X, AlertTriangle, Users } from "lucide-react";
@@ -67,14 +67,20 @@ export function MembersClient() {
   const router = useRouter();
   const { data: session } = useSession();
   const { data: activeMember } = useActiveMember();
-  const { data: activeOrg } = useActiveOrganization();
+  const { data: activeOrg, isPending: orgPending } = useActiveOrganization();
   const { data: organizations } = useListOrganizations();
   const canManage = activeMember?.role === "owner" || activeMember?.role === "admin";
   const isOwner = activeMember?.role === "owner";
 
-  const [members, setMembers] = useState<Member[]>([]);
-  const [invitations, setInvitations] = useState<Invitation[]>([]);
-  const [loading, setLoading] = useState(true);
+  // 成員與邀請直接取自 useActiveOrganization() —— 它背後打的就是
+  // /organization/get-full-organization，跟這裡原本手動 fetch 的是同一支 API，
+  // 而且 better-auth 的 atom listener 會在任何 /organization/* 呼叫後自動重取。
+  // 所以不需要自己維護 state、不需要 effect、也不必在邀請/取消後手動 reload，
+  // 順便省掉掛載時重複打同一支 API 的那一次。
+  const members = (activeOrg?.members ?? []) as unknown as Member[];
+  const invitations = ((activeOrg?.invitations ?? []) as unknown as Invitation[]).filter(
+    (i) => i.status === "pending",
+  );
 
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("member");
@@ -82,25 +88,6 @@ export function MembersClient() {
   const [cancelingId, setCancelingId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-
-  const load = useCallback(async () => {
-    const { data, error } = await authClient.organization.getFullOrganization();
-    if (error || !data) {
-      setLoading(false);
-      return;
-    }
-    setMembers((data.members ?? []) as unknown as Member[]);
-    setInvitations(
-      ((data.invitations ?? []) as unknown as Invitation[]).filter(
-        (i) => i.status === "pending",
-      ),
-    );
-    setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
 
   async function onInvite(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -119,7 +106,6 @@ export function MembersClient() {
     toast.success(`已邀請 ${value}`);
     setEmail("");
     setRole("member");
-    load();
   }
 
   async function onCancel(id: string) {
@@ -133,7 +119,6 @@ export function MembersClient() {
       return;
     }
     toast.success("已取消邀請");
-    load();
   }
 
   async function onDeleteOrg() {
@@ -167,7 +152,7 @@ export function MembersClient() {
     router.refresh();
   }
 
-  if (loading) {
+  if (orgPending) {
     return (
       <Card>
         <div className="p-8 text-center text-sm text-muted-foreground">載入中…</div>
