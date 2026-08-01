@@ -124,6 +124,20 @@ export function NewContractDialog({
               </Select>
             </div>
             <div className="space-y-1.5">
+              <Label>簽約日</Label>
+              <DatePicker name="signedDate" allowEmpty placeholder="— 無 —" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="paymentTermsDays">付款條件（天）</Label>
+              <Input
+                id="paymentTermsDays"
+                name="paymentTermsDays"
+                type="number"
+                min="0"
+                placeholder="月結 30 天 → 30"
+              />
+            </div>
+            <div className="space-y-1.5">
               <Label>開始日期</Label>
               <DatePicker name="startDate" allowEmpty placeholder="— 無 —" />
             </div>

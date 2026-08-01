@@ -45,7 +45,15 @@ export const invoices = pgTable("invoices", {
 	status: text().default('valid').notNull(),
 	note: text(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	// 對象／來源綁定（選填，migrations/0017）。counterparty_name 純文字保留不動，
+	// 歷史資料與手 key 仍可用；有綁 party_id 時以 parties.name 為準。
+	// FK 在 DB 端建立，這裡只放欄位避免與 parties / contracts 的宣告順序衝突。
+	partyId: bigint("party_id", { mode: "number" }),
+	contractId: bigint("contract_id", { mode: "number" }),
+	billingItemId: bigint("billing_item_id", { mode: "number" }),
 }, (table) => [
+	index("idx_invoice_party").using("btree", table.partyId.asc().nullsLast().op("int8_ops")),
+	index("idx_invoice_billing_item").using("btree", table.billingItemId.asc().nullsLast().op("int8_ops")),
 	check("chk_invoice_direction", sql`direction = ANY (ARRAY['issued'::text, 'received'::text])`),
 	check("chk_invoice_status", sql`status = ANY (ARRAY['valid'::text, 'void'::text, 'allowance'::text])`),
 ]);
@@ -234,6 +242,9 @@ export const transactions = pgTable("transactions", {
 	// subscriptionPeriod = 該期起始日。FK 在 DB 端（migrations/0013）建立，這裡只放欄位。
 	subscriptionId: bigint("subscription_id", { mode: "number" }),
 	subscriptionPeriod: date("subscription_period"),
+	// 請款項目綁定（選填）：把 income 交易掛到某一筆 billing_items，讓該期「已收多少」
+	// 自動算出來。FK 在 DB 端（migrations/0017）建立，這裡只放欄位避免宣告順序衝突。
+	billingItemId: bigint("billing_item_id", { mode: "number" }),
 }, (table) => [
 	index("idx_txn_book").using("btree", table.book.asc().nullsLast().op("text_ops")),
 	index("idx_txn_category").using("btree", table.categoryId.asc().nullsLast().op("int8_ops")),
@@ -244,6 +255,7 @@ export const transactions = pgTable("transactions", {
 	index("idx_txn_settle").using("btree", table.settleEmployeeId.asc().nullsLast().op("int8_ops")),
 	index("idx_txn_related").using("btree", table.relatedToId.asc().nullsLast().op("int8_ops")),
 	index("idx_txn_subscription").using("btree", table.subscriptionId.asc().nullsLast().op("int8_ops")),
+	index("idx_txn_billing_item").using("btree", table.billingItemId.asc().nullsLast().op("int8_ops")),
 	foreignKey({
 			columns: [table.categoryId],
 			foreignColumns: [categories.id],
@@ -394,7 +406,14 @@ export const subscriptionPeriods = pgTable("subscription_periods", {
 	organizationId: text("organization_id"),
 	subscriptionId: bigint("subscription_id", { mode: "number" }).notNull(),
 	periodStart: date("period_start").notNull(),
-	expectedAmount: numeric("expected_amount", { precision: 18, scale: 2 }).notNull(),
+	// NULL = 沒有覆寫，退回 subscriptions.amount。0017 起本表也用來記「該期實際請款/
+	// 開發票日」，那種列不見得有金額覆寫，故放寬為可 NULL。
+	expectedAmount: numeric("expected_amount", { precision: 18, scale: 2 }),
+	// 該期的實際動作（migrations/0017）：訂閱期別本身是即時算出來的，不物化成資料列，
+	// 只有「人做了什麼」需要落地。
+	dueDate: date("due_date"),
+	billedOn: date("billed_on"),
+	invoicedOn: date("invoiced_on"),
 	note: text(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
@@ -419,6 +438,12 @@ export const contracts = pgTable("contracts", {
 	currency: char({ length: 3 }).default('TWD').notNull(),
 	startDate: date("start_date"),
 	endDate: date("end_date"),
+	// 簽約日：合約成立的日期，與 start_date（服務期間起日）刻意分開 —— 常常先簽約、
+	// 過一陣子才開始執行。migrations/0017。
+	signedDate: date("signed_date"),
+	// 付款條件：請款後幾天應收到款（月結 30 天 → 30）。NULL = 未約定，逾期改以
+	// 該期的應請款日判斷。
+	paymentTermsDays: integer("payment_terms_days"),
 	status: text().default('active').notNull(),
 	note: text(),
 	fileUrl: text("file_url"),
@@ -435,6 +460,56 @@ export const contracts = pgTable("contracts", {
 			name: "contracts_project_id_fkey"
 		}),
 	check("chk_contract_status", sql`status = ANY (ARRAY['draft'::text, 'active'::text, 'completed'::text, 'cancelled'::text])`),
+]);
+
+// ---- 請款項目（migrations/0017）：一次性合約分期 / 專案里程碑 / 臨時請款。
+// 0010_drop_receivables 指示日後的日期化應收要做成 contracts 的子表而非平行帳本；
+// 本表遵守該精神，但因為也要涵蓋專案里程碑與無合約的臨時請款，故 contract_id 與
+// project_id 皆可為 NULL，真正的不變式是「一定有客戶」（customer_party_id NOT NULL），
+// 因為看板是以客戶為中心。
+//
+// 訂閱的期別不進本表 —— 它由 start_date + interval_months 即時算出（見 queries.ts
+// 的 computeSubscriptionSchedule），物化會造成兩份狀態漂移。看板在 query 層合併。
+export const billingItems = pgTable("billing_items", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "billing_items_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id"),
+	customerPartyId: bigint("customer_party_id", { mode: "number" }).notNull(),
+	contractId: bigint("contract_id", { mode: "number" }),
+	projectId: bigint("project_id", { mode: "number" }),
+	// 這一期的名稱，例如「簽約金」「期中款」「尾款」
+	title: text().notNull(),
+	amount: numeric({ precision: 18, scale: 2 }).notNull(),
+	currency: char({ length: 3 }).default('TWD').notNull(),
+	dueDate: date("due_date"),           // 應請款日
+	billedOn: date("billed_on"),         // 實際請款日
+	paidOn: date("paid_on"),             // 收款日（人工註記；實收金額以綁定的交易為準）
+	invoicedOn: date("invoiced_on"),     // 開發票日
+	needsInvoice: boolean("needs_invoice").default(true).notNull(),
+	status: text().default('scheduled').notNull(),
+	note: text(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+	index("idx_billing_item_org_due").using("btree", table.organizationId.asc().nullsLast().op("text_ops"), table.dueDate.asc().nullsLast().op("date_ops")).where(sql`deleted_at IS NULL`),
+	index("idx_billing_item_contract").using("btree", table.contractId.asc().nullsLast().op("int8_ops")),
+	index("idx_billing_item_project").using("btree", table.projectId.asc().nullsLast().op("int8_ops")),
+	index("idx_billing_item_customer").using("btree", table.customerPartyId.asc().nullsLast().op("int8_ops")),
+	foreignKey({
+			columns: [table.customerPartyId],
+			foreignColumns: [parties.id],
+			name: "billing_items_customer_party_id_fkey"
+		}),
+	foreignKey({
+			columns: [table.contractId],
+			foreignColumns: [contracts.id],
+			name: "billing_items_contract_id_fkey"
+		}),
+	foreignKey({
+			columns: [table.projectId],
+			foreignColumns: [projects.id],
+			name: "billing_items_project_id_fkey"
+		}),
+	check("chk_billing_item_status", sql`status = ANY (ARRAY['scheduled'::text, 'billed'::text, 'paid'::text, 'cancelled'::text])`),
 ]);
 
 // ---- 操作紀錄（audit log）：org 內誰對哪個 entity 做了 create/update/delete，

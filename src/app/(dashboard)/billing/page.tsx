@@ -1,0 +1,248 @@
+import Link from "next/link";
+import { CalendarClock } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
+import { TableCard } from "@/components/table-card";
+import { EmptyRow } from "@/components/empty-state";
+import { RowDialog } from "@/components/row-dialog";
+import { DeleteButton } from "@/components/delete-button";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  listBillingBoard,
+  listContracts,
+  listParties,
+  listProjects,
+  summarizeBilling,
+  type BillingRow,
+} from "@/db/queries";
+import { deleteBillingItem } from "@/db/mutations";
+import { formatCurrency, formatDate } from "@/lib/format";
+import { requireOrg } from "@/lib/session";
+import { cn } from "@/lib/utils";
+import { BillingStatusBadge } from "./billing-status";
+import { SummaryCards, type BoardFilter } from "./summary-cards";
+import { NewBillingItemDialog } from "./new-billing-item-dialog";
+import { EditBillingItemForm } from "./edit-billing-item-form";
+import { QuickMark } from "./quick-actions";
+
+export const dynamic = "force-dynamic";
+
+const FILTERS = new Set<BoardFilter>(["due", "awaiting", "overdue", "invoice"]);
+
+function matchesFilter(row: BillingRow, filter: BoardFilter) {
+  switch (filter) {
+    case "due":
+      return row.status === "due";
+    case "awaiting":
+      return row.status === "billed" || row.status === "partial";
+    case "overdue":
+      return row.status === "overdue";
+    case "invoice":
+      return row.needsInvoice;
+  }
+}
+
+/** 已收 / 應收 + 未收差額，沿用合約頁「收款進度」的資訊密度。 */
+function AmountCell({ row }: Readonly<{ row: BillingRow }>) {
+  const outstanding = row.expected - row.paid;
+  return (
+    <div className="min-w-[150px] space-y-0.5 text-sm tabular-nums">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="font-medium">{formatCurrency(row.paid, row.currency)}</span>
+        <span className="text-xs text-muted-foreground">
+          / {formatCurrency(row.expected, row.currency)}
+        </span>
+      </div>
+      <div className="text-xs text-muted-foreground">
+        {outstanding > 0
+          ? `未收 ${formatCurrency(outstanding, row.currency)}`
+          : outstanding < 0
+            ? `溢收 ${formatCurrency(-outstanding, row.currency)}`
+            : "已收齊"}
+      </div>
+    </div>
+  );
+}
+
+export default async function BillingPage({
+  searchParams,
+}: Readonly<{ searchParams: Promise<{ filter?: string }> }>) {
+  const { orgId } = await requireOrg();
+  const { filter: rawFilter } = await searchParams;
+  const filter =
+    rawFilter && FILTERS.has(rawFilter as BoardFilter) ? (rawFilter as BoardFilter) : null;
+
+  const [rows, parties, projects, contracts] = await Promise.all([
+    listBillingBoard(orgId),
+    listParties(orgId),
+    listProjects(orgId),
+    listContracts(orgId),
+  ]);
+
+  // 摘要一律用全部資料算，篩選只影響下方表格 —— 否則點了卡片其他數字會跟著歸零。
+  const summary = summarizeBilling(rows);
+  const visible = filter ? rows.filter((r) => matchesFilter(r, filter)) : rows;
+
+  const partyOptions = parties.map((p) => ({ id: p.id, name: p.name }));
+  const projectOptions = projects.map((p) => ({ id: p.id, name: p.name }));
+  const contractOptions = contracts.map((c) => ({ id: c.id, name: c.title }));
+
+  return (
+    <>
+      <PageHeader
+        title="請款看板"
+        description="所有客戶的請款、收款與發票狀態，一頁看完"
+      >
+        <NewBillingItemDialog
+          parties={partyOptions}
+          contracts={contractOptions}
+          projects={projectOptions}
+        />
+      </PageHeader>
+
+      <SummaryCards summary={summary} active={filter} />
+
+      <TableCard
+        title={filter ? "已篩選" : "全部請款項目"}
+        action={
+          <span className="flex items-center gap-2">
+            {visible.length} 筆
+            {filter && (
+              <Button asChild size="sm" variant="ghost">
+                <Link href="/billing">清除篩選</Link>
+              </Button>
+            )}
+          </span>
+        }
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>客戶</TableHead>
+              <TableHead>項目</TableHead>
+              <TableHead>應請款日</TableHead>
+              <TableHead>已收 / 應收</TableHead>
+              <TableHead>狀態</TableHead>
+              <TableHead>發票</TableHead>
+              <TableHead>快捷</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {visible.length === 0 ? (
+              <EmptyRow colSpan={7} message={filter ? "這個篩選沒有項目" : "尚無請款項目"}>
+                {filter ? "換一張卡片或清除篩選" : "點右上角新增，或到「訂閱 / 月費」建立週期性收費"}
+              </EmptyRow>
+            ) : (
+              visible.map((row) => {
+                const isSubscription = row.source === "subscription";
+                const cells = (
+                  <>
+                    <TableCell className="font-medium">{row.customerName ?? "—"}</TableCell>
+                    <TableCell className="max-w-[24ch]">
+                      <div className="truncate" title={row.title}>
+                        {row.title}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {isSubscription ? "訂閱" : (row.contractTitle ?? row.projectName ?? "單筆")}
+                      </div>
+                    </TableCell>
+                    <TableCell
+                      className={cn(
+                        "text-sm tabular-nums",
+                        row.status === "overdue" && "text-expense",
+                      )}
+                    >
+                      {row.dueDate ? formatDate(row.dueDate) : "—"}
+                      {row.billedOn && (
+                        <div className="text-xs text-muted-foreground">
+                          已請款 {formatDate(row.billedOn)}
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <AmountCell row={row} />
+                    </TableCell>
+                    <TableCell>
+                      <BillingStatusBadge status={row.status} />
+                    </TableCell>
+                    <TableCell>
+                      {row.invoicedOn ? (
+                        <span className="text-xs tabular-nums text-muted-foreground">
+                          {formatDate(row.invoicedOn)}
+                        </span>
+                      ) : row.needsInvoice ? (
+                        <Badge variant="outline" className="border-expense/40 text-expense">
+                          待開立
+                        </Badge>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        <QuickMark rowKey={row.key} field="billedOn" value={row.billedOn} />
+                        <QuickMark rowKey={row.key} field="invoicedOn" value={row.invoicedOn} />
+                      </div>
+                    </TableCell>
+                  </>
+                );
+
+                // 訂閱期別沒有實體列可編輯，改導到訂閱頁；只有 billing_items 能開編輯表單。
+                if (isSubscription) {
+                  return <TableRow key={row.key}>{cells}</TableRow>;
+                }
+
+                return (
+                  <RowDialog
+                    key={row.key}
+                    title={row.title}
+                    description="請款項目"
+                    cells={cells}
+                  >
+                    <EditBillingItemForm
+                      id={row.billingItemId!}
+                      values={{
+                        customerPartyId: row.customerPartyId,
+                        contractId: row.contractId,
+                        projectId: row.projectId,
+                        title: row.title,
+                        amount: String(row.expected),
+                        currency: row.currency,
+                        dueDate: row.dueDate,
+                        billedOn: row.billedOn,
+                        paidOn: row.paidOn,
+                        invoicedOn: row.invoicedOn,
+                        needsInvoice: row.needsInvoice || row.invoicedOn != null,
+                        status: row.rawStatus ?? "scheduled",
+                        note: row.note,
+                      }}
+                      parties={partyOptions}
+                      contracts={contractOptions}
+                      projects={projectOptions}
+                      footer={
+                        <DeleteButton action={deleteBillingItem} id={row.billingItemId!} />
+                      }
+                    />
+                  </RowDialog>
+                );
+              })
+            )}
+          </TableBody>
+        </Table>
+      </TableCard>
+
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <CalendarClock className="size-3.5" />
+        週期性月費的期別由「訂閱 / 月費」自動推算，會直接出現在這裡，不需要另外建立。
+      </p>
+    </>
+  );
+}

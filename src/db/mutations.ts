@@ -17,7 +17,9 @@ import {
   payslipItems,
   projects,
   subscriptions,
+  subscriptionPeriods,
   contracts,
+  billingItems,
 } from "./schema";
 import { oauthApplication, member } from "./auth-schema";
 import { uploadDocument } from "@/lib/storage";
@@ -914,6 +916,10 @@ function invoiceValues(formData: FormData) {
     currency: str(formData.get("currency")) ?? "TWD",
     status: str(formData.get("status")) ?? "valid",
     note: str(formData.get("note")),
+    // 對象／來源綁定（migrations/0017）：讓「這張發票是哪個客戶、對應哪一筆請款」有答案。
+    partyId: num(formData.get("partyId")),
+    contractId: num(formData.get("contractId")),
+    billingItemId: num(formData.get("billingItemId")),
   };
 }
 
@@ -923,11 +929,27 @@ export async function createInvoice(
 ): Promise<ActionState> {
   try {
     const { orgId } = await requireOrg();
+    const v = invoiceValues(formData);
     const [inserted] = await getDb()
       .insert(invoices)
-      .values({ organizationId: orgId, ...invoiceValues(formData) })
+      .values({ organizationId: orgId, ...v })
       .returning({ id: invoices.id });
     await logWeb(orgId, "create", "invoice", inserted.id);
+    // 綁到請款項目時順手回填開發票日，看板的「待開發票」才會自己消掉，
+    // 不必再手動標記一次。已經有日期就不覆蓋。
+    if (v.billingItemId && v.invoiceDate) {
+      await getDb()
+        .update(billingItems)
+        .set({ invoicedOn: v.invoiceDate })
+        .where(
+          and(
+            eq(billingItems.organizationId, orgId),
+            eq(billingItems.id, v.billingItemId),
+            isNull(billingItems.invoicedOn),
+          ),
+        );
+      revalidatePath("/billing");
+    }
     revalidatePath("/invoices");
     return { ok: true };
   } catch (e) {
@@ -1434,6 +1456,8 @@ function contractValues(formData: FormData) {
     currency: str(formData.get("currency")) ?? "TWD",
     startDate: str(formData.get("startDate")),
     endDate: str(formData.get("endDate")),
+    signedDate: str(formData.get("signedDate")),
+    paymentTermsDays: num(formData.get("paymentTermsDays")),
     status: str(formData.get("status")) ?? "active",
     note: str(formData.get("note")),
     fileUrl: str(formData.get("fileUrl")),
@@ -1461,6 +1485,8 @@ export async function createContract(
         currency: v.currency,
         startDate: v.startDate,
         endDate: v.endDate,
+        signedDate: v.signedDate,
+        paymentTermsDays: v.paymentTermsDays,
         status: v.status,
         note: v.note,
         fileUrl: v.fileUrl,
@@ -1496,6 +1522,8 @@ export async function updateContract(
         currency: v.currency,
         startDate: v.startDate,
         endDate: v.endDate,
+        signedDate: v.signedDate,
+        paymentTermsDays: v.paymentTermsDays,
         status: v.status,
         note: v.note,
         fileUrl: v.fileUrl,
@@ -1521,6 +1549,216 @@ export async function deleteContract(id: number): Promise<ActionState> {
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
+  }
+}
+
+// ---- 請款項目（billing_items，migrations/0017）----
+
+const BILLING_ITEM_STATUS = new Set(["scheduled", "billed", "paid", "cancelled"]);
+
+function billingItemValues(formData: FormData) {
+  return {
+    customerPartyId: num(formData.get("customerPartyId")),
+    contractId: num(formData.get("contractId")),
+    projectId: num(formData.get("projectId")),
+    title: str(formData.get("title")),
+    amount: str(formData.get("amount")),
+    currency: str(formData.get("currency")) ?? "TWD",
+    dueDate: str(formData.get("dueDate")),
+    billedOn: str(formData.get("billedOn")),
+    paidOn: str(formData.get("paidOn")),
+    invoicedOn: str(formData.get("invoicedOn")),
+    needsInvoice: formData.get("needsInvoice") != null,
+    status: str(formData.get("status")) ?? "scheduled",
+    note: str(formData.get("note")),
+  };
+}
+
+/** 建立請款項目時，客戶沒指定就沿用合約的客戶（看板一定要有客戶才有意義）。 */
+async function resolveBillingCustomer(
+  orgId: string,
+  customerPartyId: number | null,
+  contractId: number | null,
+): Promise<number | null> {
+  if (customerPartyId) return customerPartyId;
+  if (!contractId) return null;
+  const [c] = await getDb()
+    .select({ customerPartyId: contracts.customerPartyId })
+    .from(contracts)
+    .where(and(eq(contracts.organizationId, orgId), eq(contracts.id, contractId)))
+    .limit(1);
+  return c?.customerPartyId ?? null;
+}
+
+function revalidateBilling() {
+  revalidatePath("/billing");
+  revalidatePath("/contracts");
+}
+
+export async function createBillingItem(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const v = billingItemValues(formData);
+  if (!v.title) return { ok: false, error: "請輸入項目名稱" };
+  if (!v.amount) return { ok: false, error: "請輸入金額" };
+  if (!BILLING_ITEM_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
+  try {
+    const { orgId } = await requireOrg();
+    const customerPartyId = await resolveBillingCustomer(orgId, v.customerPartyId, v.contractId);
+    if (!customerPartyId) return { ok: false, error: "請選擇客戶" };
+    const [inserted] = await getDb()
+      .insert(billingItems)
+      .values({
+        organizationId: orgId,
+        customerPartyId,
+        contractId: v.contractId,
+        projectId: v.projectId,
+        title: v.title,
+        amount: v.amount,
+        currency: v.currency,
+        dueDate: v.dueDate,
+        billedOn: v.billedOn,
+        paidOn: v.paidOn,
+        invoicedOn: v.invoicedOn,
+        needsInvoice: v.needsInvoice,
+        status: v.status,
+        note: v.note,
+      })
+      .returning({ id: billingItems.id });
+    await logWeb(orgId, "create", "billing_item", inserted.id, v.title ?? undefined);
+    revalidateBilling();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "新增失敗" };
+  }
+}
+
+export async function updateBillingItem(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const id = num(formData.get("id"));
+  if (!id) return { ok: false, error: "缺少 ID" };
+  const v = billingItemValues(formData);
+  if (!v.title) return { ok: false, error: "請輸入項目名稱" };
+  if (!v.amount) return { ok: false, error: "請輸入金額" };
+  if (!BILLING_ITEM_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
+  try {
+    const { orgId } = await requireOrg();
+    const customerPartyId = await resolveBillingCustomer(orgId, v.customerPartyId, v.contractId);
+    if (!customerPartyId) return { ok: false, error: "請選擇客戶" };
+    await getDb()
+      .update(billingItems)
+      .set({
+        customerPartyId,
+        contractId: v.contractId,
+        projectId: v.projectId,
+        title: v.title,
+        amount: v.amount,
+        currency: v.currency,
+        dueDate: v.dueDate,
+        billedOn: v.billedOn,
+        paidOn: v.paidOn,
+        invoicedOn: v.invoicedOn,
+        needsInvoice: v.needsInvoice,
+        status: v.status,
+        note: v.note,
+      })
+      .where(and(eq(billingItems.organizationId, orgId), eq(billingItems.id, id)));
+    await logWeb(orgId, "update", "billing_item", id, v.title ?? undefined);
+    revalidateBilling();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
+  }
+}
+
+export async function deleteBillingItem(id: number): Promise<ActionState> {
+  try {
+    const { orgId } = await requireOrg();
+    await getDb()
+      .update(billingItems)
+      .set({ deletedAt: new Date().toISOString() })
+      .where(and(eq(billingItems.organizationId, orgId), eq(billingItems.id, id)));
+    await logWeb(orgId, "delete", "billing_item", id);
+    revalidateBilling();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
+  }
+}
+
+/**
+ * 看板上的快捷動作：把某一列標記為「已請款 / 已收款 / 已開發票」，只寫日期欄位。
+ *
+ * 兩種來源分開處理：billing_items 直接 update；訂閱期別沒有實體列（期別是算出來的），
+ * 所以往 subscription_periods 做 upsert —— 只帶日期、不動 expected_amount，
+ * 才不會把「沒有金額覆寫」誤寫成覆寫。
+ */
+export async function markBillingRow(
+  key: string,
+  field: "billedOn" | "paidOn" | "invoicedOn",
+  date: string | null,
+): Promise<ActionState> {
+  try {
+    const { orgId } = await requireOrg();
+    const db = getDb();
+
+    if (key.startsWith("bi:")) {
+      const id = Number(key.slice(3));
+      if (!Number.isFinite(id)) return { ok: false, error: "項目代號不正確" };
+      await db
+        .update(billingItems)
+        .set({ [field]: date })
+        .where(and(eq(billingItems.organizationId, orgId), eq(billingItems.id, id)));
+      await logWeb(orgId, "update", "billing_item", id, field);
+      revalidateBilling();
+      return { ok: true };
+    }
+
+    if (key.startsWith("sub:")) {
+      // paid_on 在訂閱端沒有對應欄位（實收一律看綁定的交易），忽略。
+      if (field === "paidOn") return { ok: false, error: "訂閱的收款請用交易綁定期別紀錄" };
+      const [, rawId, periodStart] = key.split(":");
+      const subscriptionId = Number(rawId);
+      if (!Number.isFinite(subscriptionId) || !periodStart) {
+        return { ok: false, error: "期別代號不正確" };
+      }
+      const [existing] = await db
+        .select({ id: subscriptionPeriods.id })
+        .from(subscriptionPeriods)
+        .where(
+          and(
+            eq(subscriptionPeriods.organizationId, orgId),
+            eq(subscriptionPeriods.subscriptionId, subscriptionId),
+            eq(subscriptionPeriods.periodStart, periodStart),
+            isNull(subscriptionPeriods.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (existing) {
+        await db
+          .update(subscriptionPeriods)
+          .set({ [field]: date })
+          .where(eq(subscriptionPeriods.id, existing.id));
+      } else {
+        await db.insert(subscriptionPeriods).values({
+          organizationId: orgId,
+          subscriptionId,
+          periodStart,
+          [field]: date,
+        });
+      }
+      await logWeb(orgId, "update", "subscription", subscriptionId, `${periodStart} ${field}`);
+      revalidatePath("/billing");
+      revalidatePath("/subscriptions");
+      return { ok: true };
+    }
+
+    return { ok: false, error: "無法辨識的項目" };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
   }
 }
 

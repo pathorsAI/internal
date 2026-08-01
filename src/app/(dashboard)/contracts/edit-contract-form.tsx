@@ -31,6 +31,8 @@ type Contract = {
   currency: string;
   startDate: string | null;
   endDate: string | null;
+  signedDate: string | null;
+  paymentTermsDays: number | null;
   status: string;
   note: string | null;
   fileUrl: string | null;
@@ -41,12 +43,15 @@ export function EditContractForm({
   parties,
   projects,
   summary,
+  extra,
   footer,
 }: Readonly<{
   contract: Contract;
   parties: { id: number; name: string }[];
   projects: { id: number; name: string }[];
   summary?: { received: number; cost: number; remaining: number | null };
+  /** 額外區塊（分期請款清單），由 Server Component 傳進來 */
+  extra?: React.ReactNode;
   footer?: React.ReactNode;
 }>) {
   const [state, action, pending] = useActionState(updateContract, initial);
@@ -155,6 +160,21 @@ export function EditContractForm({
         </Select>
       </div>
       <div className="space-y-1.5">
+        <Label>簽約日</Label>
+        <DatePicker name="signedDate" allowEmpty placeholder="— 無 —" defaultValue={contract.signedDate ?? undefined} />
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="paymentTermsDays">付款條件（天）</Label>
+        <Input
+          id="paymentTermsDays"
+          name="paymentTermsDays"
+          type="number"
+          min="0"
+          placeholder="月結 30 天 → 30"
+          defaultValue={contract.paymentTermsDays ?? ""}
+        />
+      </div>
+      <div className="space-y-1.5">
         <Label>開始日期</Label>
         <DatePicker name="startDate" allowEmpty placeholder="— 無 —" defaultValue={contract.startDate ?? undefined} />
       </div>
@@ -176,6 +196,8 @@ export function EditContractForm({
           placeholder="https://drive.google.com/…"
         />
       </div>
+
+      {extra}
 
       <DialogFooter className="mt-2 border-t pt-4 sm:col-span-2">
         {footer ? <div className="mr-auto">{footer}</div> : null}

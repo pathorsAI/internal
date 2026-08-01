@@ -39,6 +39,7 @@ const entityLabel: Record<string, string> = {
   project: "專案",
   subscription: "訂閱",
   contract: "合約",
+  billing_item: "請款項目",
   document: "憑證",
   payroll_run: "薪資批次",
   payslip: "薪資單",

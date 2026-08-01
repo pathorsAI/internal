@@ -14,12 +14,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { listContracts, listParties, listProjects } from "@/db/queries";
+import { listBillingBoard, listContracts, listParties, listProjects } from "@/db/queries";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { NewContractDialog } from "./new-contract-dialog";
 import { ContractFileLink } from "./contract-file-link";
 import { requireOrg } from "@/lib/session";
+import { ContractBillingItems } from "./contract-billing-items";
 
 export const dynamic = "force-dynamic";
 
@@ -95,13 +96,23 @@ function CollectionCell({
 
 export default async function ContractsPage() {
   const { orgId } = await requireOrg();
-  const [rows, parties, projects] = await Promise.all([
+  const [rows, parties, projects, board] = await Promise.all([
     listContracts(orgId),
     listParties(orgId),
     listProjects(orgId),
+    listBillingBoard(orgId, { includeAllHistory: true }),
   ]);
   const partyOptions = parties.map((p) => ({ id: p.id, name: p.name }));
   const projectOptions = projects.map((p) => ({ id: p.id, name: p.name }));
+
+  // 一次抓完整個看板再依合約分組，避免每張合約各查一次（N+1）。
+  const billingByContract = new Map<number, typeof board>();
+  for (const r of board) {
+    if (r.source !== "billing_item" || r.contractId == null) continue;
+    const list = billingByContract.get(r.contractId) ?? [];
+    list.push(r);
+    billingByContract.set(r.contractId, list);
+  }
 
   return (
     <>
@@ -177,6 +188,8 @@ export default async function ContractsPage() {
                       currency: c.currency,
                       startDate: c.startDate,
                       endDate: c.endDate,
+                      signedDate: c.signedDate,
+                      paymentTermsDays: c.paymentTermsDays,
                       status: c.status,
                       note: c.note,
                       fileUrl: c.fileUrl,
@@ -184,6 +197,14 @@ export default async function ContractsPage() {
                     parties={partyOptions}
                     projects={projectOptions}
                     summary={{ received: c.received, cost: c.cost, remaining: c.remaining }}
+                    extra={
+                      <ContractBillingItems
+                        contractId={c.id}
+                        rows={billingByContract.get(c.id) ?? []}
+                        parties={partyOptions}
+                        projects={projectOptions}
+                      />
+                    }
                     footer={<DeleteButton action={deleteContract} id={c.id} />}
                   />
                 </RowDialog>
