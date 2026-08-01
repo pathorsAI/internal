@@ -26,12 +26,14 @@ import {
 import { deleteBillingItem } from "@/db/mutations";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { requireOrg } from "@/lib/session";
+import { getCalendarSettings } from "@/lib/google-calendar";
 import { cn } from "@/lib/utils";
 import { BillingStatusBadge } from "./billing-status";
 import { SummaryCards, type BoardFilter } from "./summary-cards";
 import { NewBillingItemDialog } from "./new-billing-item-dialog";
 import { EditBillingItemForm } from "./edit-billing-item-form";
 import { QuickMark } from "./quick-actions";
+import { SyncCalendarButton } from "./sync-calendar-button";
 
 export const dynamic = "force-dynamic";
 
@@ -80,11 +82,12 @@ export default async function BillingPage({
   const filter =
     rawFilter && FILTERS.has(rawFilter as BoardFilter) ? (rawFilter as BoardFilter) : null;
 
-  const [rows, parties, projects, contracts] = await Promise.all([
+  const [rows, parties, projects, contracts, calendar] = await Promise.all([
     listBillingBoard(orgId),
     listParties(orgId),
     listProjects(orgId),
     listContracts(orgId),
+    getCalendarSettings(orgId),
   ]);
 
   // 摘要一律用全部資料算，篩選只影響下方表格 —— 否則點了卡片其他數字會跟著歸零。
@@ -101,6 +104,9 @@ export default async function BillingPage({
         title="請款看板"
         description="所有客戶的請款、收款與發票狀態，一頁看完"
       >
+        <SyncCalendarButton
+          connected={Boolean(calendar?.ownerUserId && calendar?.googleCalendarId)}
+        />
         <NewBillingItemDialog
           parties={partyOptions}
           contracts={contractOptions}

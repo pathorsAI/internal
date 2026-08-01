@@ -1,10 +1,13 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { mcp, organization } from "better-auth/plugins";
+import { genericOAuth, mcp, organization } from "better-auth/plugins";
 import { nextCookies } from "better-auth/next-js";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import * as authSchema from "@/db/auth-schema";
+
+/** better-auth 的 provider id，用來取日曆的 access token。 */
+export const GOOGLE_CALENDAR_PROVIDER_ID = "google-calendar";
 
 export const auth = betterAuth({
   secret: process.env.BETTER_AUTH_SECRET,
@@ -57,6 +60,32 @@ export const auth = betterAuth({
   },
   plugins: [
     organization(),
+    // Google 日曆授權，刻意與上面的登入用 google provider 分開。
+    // 原因：Google 只在 access_type=offline + prompt=consent 時才給 refresh token，
+    // 而 prompt 是 provider 層設定、無法單次覆寫 —— 直接改登入那組會害每個人每次
+    // 登入都要多按一次「允許」。拆成獨立的 provider 後，只有真的要用日曆的人會看到
+    // 同意畫面，登入流程完全不受影響。token 一樣存在 account 表（providerId =
+    // 'google-calendar'），refresh 由 better-auth 的 getAccessToken 處理。
+    genericOAuth({
+      config: [
+        {
+          providerId: GOOGLE_CALENDAR_PROVIDER_ID,
+          clientId: process.env.GOOGLE_CLIENT_ID as string,
+          clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
+          authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+          tokenUrl: "https://oauth2.googleapis.com/token",
+          userInfoUrl: "https://openidconnect.googleapis.com/v1/userinfo",
+          scopes: [
+            "openid",
+            "email",
+            "https://www.googleapis.com/auth/calendar",
+          ],
+          accessType: "offline",
+          prompt: "consent",
+          pkce: true,
+        },
+      ],
+    }),
     // OAuth 2.0 / OIDC provider for MCP clients. Adds /api/auth/mcp/* endpoints
     // (authorize, token, register, get-session) + OAuth discovery. Unauthenticated
     // authorize requests are sent to loginPage, which redirects back after sign-in.

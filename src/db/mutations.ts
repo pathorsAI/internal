@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { eq, and, isNull } from "drizzle-orm";
 import { getDb } from "./index";
 import {
@@ -24,6 +25,7 @@ import {
 import { oauthApplication, member } from "./auth-schema";
 import { uploadDocument } from "@/lib/storage";
 import { requireOrg } from "@/lib/session";
+import { auth } from "@/lib/auth";
 import { logWeb } from "@/db/activity";
 import { isValidEmail } from "@/lib/pii";
 
@@ -1595,6 +1597,24 @@ function revalidateBilling() {
   revalidatePath("/contracts");
 }
 
+/**
+ * 請款資料一變動就順手把 Google 日曆推成最新 —— 使用者不必記得按同步。
+ *
+ * 一律 best-effort：日曆是輔助，Google 掛掉、token 過期或根本沒連結，都不該讓
+ * 存檔失敗。同步本身是冪等的，而且內容沒變的事件會被 content_hash 略過，
+ * 所以這裡重推整份的成本只有實際變動的那幾顆。
+ */
+async function syncCalendarBestEffort(orgId: string) {
+  try {
+    const { syncBillingCalendar } = await import("@/lib/google-calendar");
+    const orgs = await auth.api.listOrganizations({ headers: await headers() });
+    const name = orgs?.find((o) => o.id === orgId)?.name ?? "組織";
+    await syncBillingCalendar(orgId, name);
+  } catch {
+    // 沒連結日曆 / 授權失效 / Google 暫時不可用 —— 都不影響這筆資料已經存好了。
+  }
+}
+
 export async function createBillingItem(
   _prev: ActionState,
   formData: FormData,
@@ -1628,6 +1648,7 @@ export async function createBillingItem(
       .returning({ id: billingItems.id });
     await logWeb(orgId, "create", "billing_item", inserted.id, v.title ?? undefined);
     revalidateBilling();
+    await syncCalendarBestEffort(orgId);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "新增失敗" };
@@ -1668,6 +1689,7 @@ export async function updateBillingItem(
       .where(and(eq(billingItems.organizationId, orgId), eq(billingItems.id, id)));
     await logWeb(orgId, "update", "billing_item", id, v.title ?? undefined);
     revalidateBilling();
+    await syncCalendarBestEffort(orgId);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
@@ -1683,6 +1705,7 @@ export async function deleteBillingItem(id: number): Promise<ActionState> {
       .where(and(eq(billingItems.organizationId, orgId), eq(billingItems.id, id)));
     await logWeb(orgId, "delete", "billing_item", id);
     revalidateBilling();
+    await syncCalendarBestEffort(orgId);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
@@ -1714,6 +1737,7 @@ export async function markBillingRow(
         .where(and(eq(billingItems.organizationId, orgId), eq(billingItems.id, id)));
       await logWeb(orgId, "update", "billing_item", id, field);
       revalidateBilling();
+      await syncCalendarBestEffort(orgId);
       return { ok: true };
     }
 
@@ -1753,6 +1777,7 @@ export async function markBillingRow(
       await logWeb(orgId, "update", "subscription", subscriptionId, `${periodStart} ${field}`);
       revalidatePath("/billing");
       revalidatePath("/subscriptions");
+      await syncCalendarBestEffort(orgId);
       return { ok: true };
     }
 

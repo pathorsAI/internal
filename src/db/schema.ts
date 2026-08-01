@@ -531,3 +531,38 @@ export const activityLog = pgTable("activity_log", {
 	check("chk_activity_channel", sql`channel = ANY (ARRAY['web'::text, 'mcp'::text])`),
 	check("chk_activity_action", sql`action = ANY (ARRAY['create'::text, 'update'::text, 'delete'::text, 'read'::text])`),
 ]);
+
+// ---- Google 日曆同步（migrations/0018）。
+// 事件寫進 Google 之後提醒由 Google 自己發，所以本專案沒有、也不需要 cron。----
+
+// 每個組織一本專屬子日曆。OAuth token 存在 better-auth 的 account 表
+// （provider id = 'google-calendar'），這裡不重複存。
+export const calendarSettings = pgTable("calendar_settings", {
+	organizationId: text("organization_id").primaryKey(),
+	googleCalendarId: text("google_calendar_id"),
+	// 用誰的授權推事件；該成員取消授權後同步會失敗，需重新連結。
+	ownerUserId: text("owner_user_id"),
+	reminderDays: integer("reminder_days").default(3).notNull(),
+	enabled: boolean().default(true).notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, () => [
+	check("chk_calendar_reminder_days", sql`reminder_days >= 0 AND reminder_days <= 60`),
+]);
+
+// ERP 的一列 ↔ Google 事件的對應，讓同步是冪等的（改日期 patch 同一顆事件，
+// 不會每同步一次就多一顆）。content_hash 用來略過沒變動的列。
+export const calendarEventLinks = pgTable("calendar_event_links", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "calendar_event_links_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id").notNull(),
+	// 對應 BillingRow.key：'bi:<id>' 或 'sub:<id>:<periodStart>'
+	itemKey: text("item_key").notNull(),
+	kind: text().notNull(),
+	googleEventId: text("google_event_id").notNull(),
+	contentHash: text("content_hash").notNull(),
+	syncedAt: timestamp("synced_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	uniqueIndex("uq_calendar_event").on(table.organizationId, table.itemKey, table.kind),
+	index("idx_calendar_event_org").using("btree", table.organizationId.asc().nullsLast().op("text_ops")),
+	check("chk_calendar_event_kind", sql`kind = ANY (ARRAY['due'::text, 'payment'::text, 'invoice'::text])`),
+]);
