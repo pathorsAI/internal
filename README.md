@@ -58,6 +58,8 @@ Capture with fake data (e.g. a demo org on a local/dev database) to avoid leakin
 - **Dual books (內外帳)** — each transaction carries a `book` field separating internal vs. external ledgers.
 - **Accounting core** — transactions, categories, bank accounts, counterparties, reconciliation, and advances/reimbursements.
 - **Client finance** — track client income & expenses across projects, subscriptions, contracts, and accounts receivable.
+- **Billing board (請款看板)** — one page answering 誰該請款 / 誰已繳款 / 誰還沒繳 / 發票該開給誰, merging one-off contract instalments and project milestones with recurring subscription periods.
+- **Google Calendar** — billing, collection and invoicing dates are pushed to a dedicated "請款提醒" calendar, so the reminders come from Google itself. No cron needed.
 - **Payroll** — employees, payroll item types, and pay runs.
 - **Reports** — aggregated income/expense and receivables views.
 - **Documents** — file uploads to object storage (e.g. receipts attached to transactions).
@@ -102,7 +104,7 @@ The first user to sign in lands on `/onboarding`. To make someone the owner of a
 | `DATABASE_URL` | Postgres connection string (pooled) |
 | `BETTER_AUTH_SECRET` | Session signing secret (`openssl rand -base64 32`) |
 | `BETTER_AUTH_URL` | App base URL, no trailing slash |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth credentials |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth credentials (sign-in **and** the optional Google Calendar integration) |
 
 See [`.env.example`](.env.example) for the full template.
 

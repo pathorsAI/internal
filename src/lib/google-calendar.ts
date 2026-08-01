@@ -1,5 +1,4 @@
 import { and, eq, inArray } from "drizzle-orm";
-import { headers } from "next/headers";
 import { getDb } from "@/db";
 import { calendarEventLinks, calendarSettings } from "@/db/schema";
 import { listBillingBoard, type BillingRow } from "@/db/queries";
@@ -38,9 +37,10 @@ export class CalendarNotConnectedError extends Error {
  */
 async function getAccessToken(userId: string): Promise<string> {
   try {
+    // 這個 endpoint 不吃 session（只看 body 的 userId），所以不必傳 headers ——
+    // server action、MCP route、未來的排程都能共用同一條路徑。
     const res = await auth.api.getAccessToken({
       body: { providerId: GOOGLE_CALENDAR_PROVIDER_ID, userId },
-      headers: await headers(),
     });
     if (!res?.accessToken) throw new CalendarNotConnectedError();
     return res.accessToken;
