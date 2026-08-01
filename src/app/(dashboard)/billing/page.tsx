@@ -52,9 +52,16 @@ function matchesFilter(row: BillingRow, filter: BoardFilter) {
   }
 }
 
+/** 未收 / 溢收 / 已收齊 的說明文字。 */
+function outstandingLabel(expected: number, paid: number, currency: string) {
+  const outstanding = expected - paid;
+  if (outstanding > 0) return `未收 ${formatCurrency(outstanding, currency)}`;
+  if (outstanding < 0) return `溢收 ${formatCurrency(-outstanding, currency)}`;
+  return "已收齊";
+}
+
 /** 已收 / 應收 + 未收差額，沿用合約頁「收款進度」的資訊密度。 */
 function AmountCell({ row }: Readonly<{ row: BillingRow }>) {
-  const outstanding = row.expected - row.paid;
   return (
     <div className="min-w-[150px] space-y-0.5 text-sm tabular-nums">
       <div className="flex items-baseline justify-between gap-2">
@@ -64,14 +71,29 @@ function AmountCell({ row }: Readonly<{ row: BillingRow }>) {
         </span>
       </div>
       <div className="text-xs text-muted-foreground">
-        {outstanding > 0
-          ? `未收 ${formatCurrency(outstanding, row.currency)}`
-          : outstanding < 0
-            ? `溢收 ${formatCurrency(-outstanding, row.currency)}`
-            : "已收齊"}
+        {outstandingLabel(row.expected, row.paid, row.currency)}
       </div>
     </div>
   );
+}
+
+/** 發票欄：已開就顯示日期，該開沒開就標紅，不需要開就留白。 */
+function InvoiceCell({ row }: Readonly<{ row: BillingRow }>) {
+  if (row.invoicedOn) {
+    return (
+      <span className="text-xs tabular-nums text-muted-foreground">
+        {formatDate(row.invoicedOn)}
+      </span>
+    );
+  }
+  if (row.needsInvoice) {
+    return (
+      <Badge variant="outline" className="border-expense/40 text-expense">
+        待開立
+      </Badge>
+    );
+  }
+  return <span className="text-xs text-muted-foreground">—</span>;
 }
 
 export default async function BillingPage({
@@ -148,7 +170,9 @@ export default async function BillingPage({
               </EmptyRow>
             ) : (
               visible.map((row) => {
-                const isSubscription = row.source === "subscription";
+                // 訂閱期別是算出來的、沒有實體列，所以沒有 id 可編輯。先取出來讓
+                // 型別自己收斂成 number，下面就不需要 non-null assertion。
+                const itemId = row.source === "billing_item" ? row.billingItemId : null;
                 const cells = (
                   <>
                     <TableCell className="font-medium">{row.customerName ?? "—"}</TableCell>
@@ -157,7 +181,9 @@ export default async function BillingPage({
                         {row.title}
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        {isSubscription ? "訂閱" : (row.contractTitle ?? row.projectName ?? "單筆")}
+                        {row.source === "subscription"
+                          ? "訂閱"
+                          : (row.contractTitle ?? row.projectName ?? "單筆")}
                       </div>
                     </TableCell>
                     <TableCell
@@ -180,17 +206,7 @@ export default async function BillingPage({
                       <BillingStatusBadge status={row.status} />
                     </TableCell>
                     <TableCell>
-                      {row.invoicedOn ? (
-                        <span className="text-xs tabular-nums text-muted-foreground">
-                          {formatDate(row.invoicedOn)}
-                        </span>
-                      ) : row.needsInvoice ? (
-                        <Badge variant="outline" className="border-expense/40 text-expense">
-                          待開立
-                        </Badge>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
+                      <InvoiceCell row={row} />
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
@@ -201,8 +217,8 @@ export default async function BillingPage({
                   </>
                 );
 
-                // 訂閱期別沒有實體列可編輯，改導到訂閱頁；只有 billing_items 能開編輯表單。
-                if (isSubscription) {
+                // 只有 billing_items 能開編輯表單；訂閱期別在「訂閱 / 月費」頁維護。
+                if (itemId == null) {
                   return <TableRow key={row.key}>{cells}</TableRow>;
                 }
 
@@ -214,7 +230,7 @@ export default async function BillingPage({
                     cells={cells}
                   >
                     <EditBillingItemForm
-                      id={row.billingItemId!}
+                      id={itemId}
                       values={{
                         customerPartyId: row.customerPartyId,
                         contractId: row.contractId,
@@ -234,7 +250,7 @@ export default async function BillingPage({
                       contracts={contractOptions}
                       projects={projectOptions}
                       footer={
-                        <DeleteButton action={deleteBillingItem} id={row.billingItemId!} />
+                        <DeleteButton action={deleteBillingItem} id={itemId} />
                       }
                     />
                   </RowDialog>
