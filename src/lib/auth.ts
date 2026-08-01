@@ -75,9 +75,16 @@ export const auth = betterAuth({
           authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
           tokenUrl: "https://oauth2.googleapis.com/token",
           userInfoUrl: "https://openidconnect.googleapis.com/v1/userinfo",
+          // `profile` 不是為了拿頭像或名字來顯示，是 better-auth 的硬性要求：
+          // generic-oauth 在連結帳號前會檢查 userInfo.name，沒有就直接以
+          // `?error=name_is_missing` 中止（better-auth generic-oauth/routes）。
+          // 而 Google 的 userinfo 端點只在授予 profile 時才回傳 name，少了它
+          // 整個授權流程走完最後一步必定失敗。登入用的 google provider 本來
+          // 就帶 profile，所以使用者不會多看到任何額外的權限項目。
           scopes: [
             "openid",
             "email",
+            "profile",
             "https://www.googleapis.com/auth/calendar",
           ],
           accessType: "offline",
