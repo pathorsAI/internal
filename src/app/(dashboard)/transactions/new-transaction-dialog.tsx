@@ -26,6 +26,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { DatePicker } from "@/components/date-picker";
+import { submitAction } from "@/lib/form-action";
 import { PartyCombobox } from "./party-combobox";
 import { CategoryCombobox } from "./category-combobox";
 import { ContractCombobox, type ContractOption } from "./contract-combobox";
@@ -108,7 +109,7 @@ export function NewTransactionDialog({
         {scenario === null ? (
           <ScenarioPicker onPick={setScenario} />
         ) : (
-          <form action={action} className="flex min-h-0 flex-1 flex-col">
+          <form onSubmit={submitAction(action)} className="flex min-h-0 flex-1 flex-col">
             <input type="hidden" name="type" value={scenario} />
             <SheetHeader>
               <SheetTitle className="flex items-center gap-2">

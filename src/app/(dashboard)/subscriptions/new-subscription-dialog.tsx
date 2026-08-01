@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CurrencySelect } from "@/components/currency-select";
+import { submitAction } from "@/lib/form-action";
 import {
   Dialog,
   DialogContent,
@@ -62,7 +63,7 @@ export function NewSubscriptionDialog({
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
-        <form action={action}>
+        <form onSubmit={submitAction(action)}>
           <DialogHeader>
             <DialogTitle>新增訂閱 / 月費</DialogTitle>
             <DialogDescription>客戶定期收費的方案，「每隔幾個月收一次」</DialogDescription>

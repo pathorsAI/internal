@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { createInvoice, type ActionState } from "@/db/mutations";
+import { submitAction } from "@/lib/form-action";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -49,7 +50,7 @@ export function NewInvoiceDialog({
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
-        <form action={action}>
+        <form onSubmit={submitAction(action)}>
           <DialogHeader>
             <DialogTitle>新增發票</DialogTitle>
             <DialogDescription>

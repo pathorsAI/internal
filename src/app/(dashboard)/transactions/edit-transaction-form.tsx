@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CurrencySelect } from "@/components/currency-select";
+import { submitAction } from "@/lib/form-action";
 import { DatePicker } from "@/components/date-picker";
 import { CategoryCombobox } from "./category-combobox";
 import { PartyCombobox } from "./party-combobox";
@@ -150,7 +151,7 @@ export function EditTransactionForm({
         </div>
       )}
 
-      <form action={action} className="grid gap-4 sm:grid-cols-2">
+      <form onSubmit={submitAction(action)} className="grid gap-4 sm:grid-cols-2">
         <input type="hidden" name="id" value={txn.id} />
         <input type="hidden" name="type" value={txn.type} />
 

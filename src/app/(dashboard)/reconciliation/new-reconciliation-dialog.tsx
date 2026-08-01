@@ -25,6 +25,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { DatePicker } from "@/components/date-picker";
+import { submitAction } from "@/lib/form-action";
 
 const initial: ActionState = { ok: false };
 
@@ -61,7 +62,7 @@ export function NewReconciliationDialog({
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
-        <form action={action}>
+        <form onSubmit={submitAction(action)}>
           <DialogHeader>
             <DialogTitle>新增對帳紀錄</DialogTitle>
             <DialogDescription>

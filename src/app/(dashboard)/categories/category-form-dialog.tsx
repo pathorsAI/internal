@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { DeleteButton } from "@/components/delete-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { submitAction } from "@/lib/form-action";
 import { Req } from "@/components/req";
 import {
   Dialog,
@@ -62,7 +63,7 @@ export function CategoryFormDialog({
         )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-sm">
-        <form action={action}>
+        <form onSubmit={submitAction(action)}>
           {editing ? <input type="hidden" name="id" value={category.id} /> : null}
           <input type="hidden" name="kind" value={kind} />
           <DialogHeader>

@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { DatePicker } from "@/components/date-picker";
+import { submitAction } from "@/lib/form-action";
 
 const initial: ActionState = { ok: false };
 
@@ -57,7 +58,7 @@ export function EditReconciliationForm({
   );
 
   return (
-    <form action={action} className="grid gap-4 sm:grid-cols-2">
+    <form onSubmit={submitAction(action)} className="grid gap-4 sm:grid-cols-2">
       <input type="hidden" name="id" value={recon.id} />
       <div className="space-y-1.5 sm:col-span-2">
         <Label>帳戶<Req /></Label>

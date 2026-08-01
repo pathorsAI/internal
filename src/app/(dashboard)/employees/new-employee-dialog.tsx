@@ -25,6 +25,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { DatePicker } from "@/components/date-picker";
+import { submitAction } from "@/lib/form-action";
 import type { MemberOption } from "./edit-employee-form";
 
 const initial: ActionState = { ok: false };
@@ -62,7 +63,7 @@ export function NewEmployeeDialog({ members }: Readonly<{ members: MemberOption[
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
-        <form action={action} className="grid gap-4 sm:grid-cols-2">
+        <form onSubmit={submitAction(action)} className="grid gap-4 sm:grid-cols-2">
           <DialogHeader className="sm:col-span-2">
             <DialogTitle>新增員工</DialogTitle>
             <DialogDescription>正職、兼職、自由工作者或承攬皆可</DialogDescription>

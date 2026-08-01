@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { updateBillingItem, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { DialogFooter } from "@/components/ui/dialog";
+import { submitAction } from "@/lib/form-action";
 import { useRowDialogClose } from "@/components/row-dialog";
 import {
   BillingItemFields,
@@ -49,7 +50,7 @@ export function EditBillingItemForm({
   );
 
   return (
-    <form action={action} className="grid gap-4 sm:grid-cols-2">
+    <form onSubmit={submitAction(action)} className="grid gap-4 sm:grid-cols-2">
       <input type="hidden" name="id" value={id} />
       <BillingItemFields
         parties={parties}

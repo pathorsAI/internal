@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CurrencySelect } from "@/components/currency-select";
+import { submitAction } from "@/lib/form-action";
 import {
   Dialog,
   DialogContent,
@@ -56,7 +57,7 @@ export function NewBankAccountDialog() {
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
-        <form action={action}>
+        <form onSubmit={submitAction(action)}>
           <DialogHeader>
             <DialogTitle>新增銀行帳戶</DialogTitle>
             <DialogDescription>銀行、Wise / 虛擬帳戶或現金</DialogDescription>
