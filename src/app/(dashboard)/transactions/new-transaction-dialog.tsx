@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useState } from "react";
 import { toast } from "sonner";
 import { Plus, ArrowLeft, Receipt, Banknote, HandCoins, ArrowLeftRight, Paperclip } from "lucide-react";
 import { createTransaction, type ActionState } from "@/db/mutations";
@@ -73,17 +73,22 @@ export function NewTransactionDialog({
   const [open, setOpen] = useState(false);
   const [scenario, setScenario] = useState<Scenario | null>(null);
   const [billed, setBilled] = useState(true);
-  const [state, action, pending] = useActionState(createTransaction, initial);
-
-  useEffect(() => {
-    if (state.ok) {
-      setOpen(false);
-      toast.success("已新增交易");
-    }
-  }, [state]);
-  useEffect(() => {
-    if (state.error) toast.error(state.error);
-  }, [state]);
+  // 成功/失敗處理放在 action 內（跑在 transition 裡），不用 useEffect ——
+  // 既避免 effect 內 setState 的串聯 render，也讓每次送出都必定各吐一次 toast
+  // （舊寫法依賴 [state] 變化，連續兩次同樣的錯誤不會再跳）。
+  const [, action, pending] = useActionState(
+    async (prev: ActionState, formData: FormData) => {
+      const res = await createTransaction(prev, formData);
+      if (res.ok) {
+        setOpen(false);
+        toast.success("已新增交易");
+      } else if (res.error) {
+        toast.error(res.error);
+      }
+      return res;
+    },
+    initial,
+  );
 
   function handleOpenChange(next: boolean) {
     setOpen(next);

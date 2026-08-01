@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useState } from "react";
 import { toast } from "sonner";
 import { Plus, Pencil } from "lucide-react";
 import { createCategory, updateCategory, deleteCategory, type ActionState } from "@/db/mutations";
@@ -31,20 +31,22 @@ export function CategoryFormDialog({
 }>) {
   const editing = !!category;
   const [open, setOpen] = useState(false);
-  const [state, action, pending] = useActionState(
-    editing ? updateCategory : createCategory,
+  // 成功/失敗處理放在 action 內（跑在 transition 裡），不用 useEffect ——
+  // 既避免 effect 內 setState 的串聯 render，也讓每次送出都必定各吐一次 toast
+  // （舊寫法依賴 [state] 變化，連續兩次同樣的錯誤不會再跳）。
+  const [, action, pending] = useActionState(
+    async (prev: ActionState, formData: FormData) => {
+      const res = await (editing ? updateCategory : createCategory)(prev, formData);
+      if (res.ok) {
+        setOpen(false);
+        toast.success(editing ? "已更新分類" : "已新增分類");
+      } else if (res.error) {
+        toast.error(res.error);
+      }
+      return res;
+    },
     initial,
   );
-
-  useEffect(() => {
-    if (state.ok) {
-      setOpen(false);
-      toast.success(editing ? "已更新分類" : "已新增分類");
-    }
-  }, [state, editing]);
-  useEffect(() => {
-    if (state.error) toast.error(state.error);
-  }, [state]);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>

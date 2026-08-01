@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
+import { useActionState } from "react";
 import { toast } from "sonner";
 import { updateReconciliation, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
@@ -37,17 +37,24 @@ export function EditReconciliationForm({
   accounts: { id: number; name: string; currency: string }[];
   footer?: React.ReactNode;
 }>) {
-  const [state, action, pending] = useActionState(updateReconciliation, initial);
   const close = useRowDialogClose();
-  useEffect(() => {
-    if (state.ok) {
-      toast.success("已更新");
-      close();
-    }
-  }, [state]);
-  useEffect(() => {
-    if (state.error) toast.error(state.error);
-  }, [state]);
+
+  // 成功/失敗處理放在 action 內（跑在 transition 裡），不用 useEffect ——
+  // 既避免 effect 內 setState 的串聯 render，也讓每次送出都必定各吐一次 toast
+  // （舊寫法依賴 [state] 變化，連續兩次同樣的錯誤不會再跳）。
+  const [, action, pending] = useActionState(
+    async (prev: ActionState, formData: FormData) => {
+      const res = await updateReconciliation(prev, formData);
+      if (res.ok) {
+        toast.success("已更新");
+        close();
+      } else if (res.error) {
+        toast.error(res.error);
+      }
+      return res;
+    },
+    initial,
+  );
 
   return (
     <form action={action} className="grid gap-4 sm:grid-cols-2">

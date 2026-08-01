@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useRef, useState } from "react";
+import { useActionState, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Banknote, Plus, Trash2 } from "lucide-react";
 import { payEmployeeSalary, type ActionState } from "@/db/mutations";
@@ -66,7 +66,22 @@ export function PaySalaryDialog({
   accounts: Account[];
 }>) {
   const [open, setOpen] = useState(false);
-  const [state, action, pending] = useActionState(payEmployeeSalary, initial);
+  // 成功/失敗處理放在 action 內（跑在 transition 裡），不用 useEffect ——
+  // 既避免 effect 內 setState 的串聯 render，也讓每次送出都必定各吐一次 toast
+  // （舊寫法依賴 [state] 變化，連續兩次同樣的錯誤不會再跳）。
+  const [, action, pending] = useActionState(
+    async (prev: ActionState, formData: FormData) => {
+      const res = await payEmployeeSalary(prev, formData);
+      if (res.ok) {
+        setOpen(false);
+        toast.success("已發放薪資，並在交易產生薪資支出");
+      } else if (res.error) {
+        toast.error(res.error);
+      }
+      return res;
+    },
+    initial,
+  );
   const counter = useRef(0);
   const next = () => ++counter.current;
   const now = new Date();
@@ -89,19 +104,12 @@ export function PaySalaryDialog({
     ]);
   }
 
-  useEffect(() => {
-    if (open) reset();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-  useEffect(() => {
-    if (state.ok) {
-      setOpen(false);
-      toast.success("已發放薪資，並在交易產生薪資支出");
-    }
-  }, [state]);
-  useEffect(() => {
-    if (state.error) toast.error(state.error);
-  }, [state]);
+  // 開啟時把明細列重設成預設的一列底薪。以往用 effect 監看 open，但那是「回應
+  // 使用者操作」而不是同步外部狀態，直接在開關 handler 裡做才對。
+  function handleOpenChange(next: boolean) {
+    if (next) reset();
+    setOpen(next);
+  }
 
   function addRow() {
     setRows((r) => [
@@ -150,7 +158,7 @@ export function PaySalaryDialog({
 
 
   return (
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogTrigger asChild>
           <Button size="sm" variant="outline" onClick={(e) => e.stopPropagation()}>
             <Banknote className="size-3.5" /> 發放薪資
