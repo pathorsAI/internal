@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { calendarEventLinks, calendarSettings } from "@/db/schema";
+import { user } from "@/db/auth-schema";
 import { listBillingBoard, type BillingRow } from "@/db/queries";
 import { auth, GOOGLE_CALENDAR_PROVIDER_ID } from "@/lib/auth";
 import { formatCurrency } from "@/lib/currency";
@@ -340,14 +341,62 @@ export async function setCalendarOwner(orgId: string, userId: string) {
     });
 }
 
-/** 中斷連結：清掉本 org 的日曆設定與事件對應（不動 Google 上既有的事件）。 */
-export async function disconnectCalendar(orgId: string) {
+/** 目前是用誰的授權在推事件（顯示用；沒連結就回 null）。 */
+export async function getCalendarOwnerLabel(orgId: string): Promise<string | null> {
+  const [row] = await getDb()
+    .select({ name: user.name, email: user.email })
+    .from(calendarSettings)
+    .innerJoin(user, eq(user.id, calendarSettings.ownerUserId))
+    .where(eq(calendarSettings.organizationId, orgId))
+    .limit(1);
+  if (!row) return null;
+  return row.name || row.email;
+}
+
+export type DisconnectResult = {
+  /** Google 上那本子日曆是否已經不在了。false = 授權失效刪不掉，要人工去 Google 端刪。 */
+  calendarRemoved: boolean;
+};
+
+/**
+ * 中斷連結：先刪掉 Google 上那本專屬子日曆，再清掉本系統的設定與事件對應。
+ *
+ * 為什麼要真的刪日曆：那本日曆是建在「當初授權的那位成員」的 Google 帳號底下。如果
+ * 只清本系統的紀錄，日曆和裡面的事件會留在那個人的帳號裡，而且再也不會被更新或移除
+ * —— 訂閱過那本日曆的人會一直看到早就處理完的請款提醒。換人連結時最明顯：新的擁有
+ * 者拿自己的 token 讀不到舊日曆，會另外建一本，舊的那本就此變成沒人管的孤兒。
+ */
+export async function disconnectCalendar(orgId: string): Promise<DisconnectResult> {
   const db = getDb();
+  const settings = await getCalendarSettings(orgId);
+
+  // 沒建過日曆就沒有東西要清，直接視為已處理。
+  let calendarRemoved = true;
+  if (settings?.googleCalendarId && settings.ownerUserId) {
+    try {
+      // 必須用「當初授權的那位」的 token —— 日曆在他的帳號下，換別人刪不掉。
+      const token = await getAccessToken(settings.ownerUserId);
+      const res = await calendarFetch(
+        token,
+        `/calendars/${encodeURIComponent(settings.googleCalendarId)}`,
+        { method: "DELETE" },
+      );
+      // 404/410 = 早就被手動刪了，結果一樣。
+      calendarRemoved = res.ok || res.status === 404 || res.status === 410;
+    } catch {
+      // 授權已被撤銷或過期 → 刪不掉。本系統這邊還是要放手（否則使用者永遠卡在
+      // 連結狀態），改由 UI 提醒使用者自己到 Google 日曆刪那本。
+      calendarRemoved = false;
+    }
+  }
+
   await db.delete(calendarEventLinks).where(eq(calendarEventLinks.organizationId, orgId));
   await db
     .update(calendarSettings)
     .set({ ownerUserId: null, googleCalendarId: null, updatedAt: new Date().toISOString() })
     .where(eq(calendarSettings.organizationId, orgId));
+
+  return { calendarRemoved };
 }
 
 /** 只更新提醒提前天數。 */
