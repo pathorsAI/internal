@@ -1557,11 +1557,19 @@ function contractValues(formData: FormData) {
 
 type ContractValues = ReturnType<typeof contractValues>;
 
-/** 把合約表單的值轉成排程引擎吃的輸入。 */
-function scheduleInputOf(v: ContractValues): ScheduleInput {
+/**
+ * 把合約表單的值轉成排程引擎吃的輸入。
+ *
+ * amount 用明確的參數覆寫，而不是讓呼叫端寫 `{ ...scheduleInputOf(v), amount }`
+ * —— 那種寫法靠「後面的 key 蓋掉前面的」才會對，spread 一旦被移到後面，可重排
+ * 金額就會靜悄悄地變回合約總額，排出來的總和超過合約金額也不會有人發現。
+ */
+function scheduleInputOf(v: ContractValues, amount?: number | null): ScheduleInput {
+  // 沒指定覆寫（undefined）就用合約總額；明確傳 null 代表「沒有金額，展不出排程」。
+  const contractAmount = v.amount == null ? null : Number(v.amount);
   return {
     billingPlan: v.billingPlan as BillingPlan | null,
-    amount: v.amount == null ? null : Number(v.amount),
+    amount: amount === undefined ? contractAmount : amount,
     installmentCount: v.installmentCount,
     installmentSplit: v.installmentSplit,
     intervalMonths: v.billingIntervalMonths,
@@ -1620,7 +1628,7 @@ async function expandContractSchedule(
   // 鎖定的期別已經佔掉一部分合約金額，剩下的才拿去重排。
   const lockedTotal = locked.reduce((sum, r) => sum + Number(r.amount), 0);
   const total = v.amount == null ? null : Number(v.amount) - lockedTotal;
-  const rows = generateSchedule({ ...scheduleInputOf(v), amount: total });
+  const rows = generateSchedule(scheduleInputOf(v, total));
   if (rows.length === 0) return 0;
 
   if (removable.length > 0) {
