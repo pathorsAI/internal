@@ -241,6 +241,20 @@ function looksVoided(status: string | null): boolean {
 /** 金額差在 1 元以內視為相符（Simpany 匯出常有進位差）。 */
 const AMOUNT_TOLERANCE = 1;
 
+/** 兩邊都有這張發票時，判斷是相符還是哪裡對不上。 */
+function compare(inv: LocalInvoice, row: SimpanyRow): ReconcileVerdict {
+  // Simpany 那邊作廢、本系統這邊還記成有效 —— 這是最該先修的一種不一致。
+  if (looksVoided(row.status) && inv.status === "valid") return "voided_in_simpany";
+  if (
+    inv.amountGross != null &&
+    row.amount != null &&
+    Math.abs(inv.amountGross - row.amount) > AMOUNT_TOLERANCE
+  ) {
+    return "amount_mismatch";
+  }
+  return "matched";
+}
+
 /**
  * 雙邊比對。以發票號碼為鍵，四種結果：
  *   相符 / 金額不符 / Simpany 查無（本系統認為開了，那邊沒有）/ 本系統沒紀錄（漏登）。
@@ -275,14 +289,8 @@ export function reconcileInvoices(
       });
       continue;
     }
-    const mismatch =
-      inv.amountGross != null &&
-      row.amount != null &&
-      Math.abs(inv.amountGross - row.amount) > AMOUNT_TOLERANCE;
-    // Simpany 那邊作廢、本系統這邊還記成有效 —— 這是最該先修的一種不一致。
-    const staleVoid = looksVoided(row.status) && inv.status === "valid";
     out.push({
-      verdict: staleVoid ? "voided_in_simpany" : mismatch ? "amount_mismatch" : "matched",
+      verdict: compare(inv, row),
       number: row.number,
       localId: inv.id,
       localAmount: inv.amountGross,

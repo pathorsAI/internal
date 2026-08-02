@@ -17,6 +17,22 @@ import { formatCurrency } from "@/lib/format";
 /** 差額在 1 元以內視為已排完（分期尾差不該被當成漏排）。 */
 const TOLERANCE = 1;
 
+/** 未排欄：缺口 / 超排 / 已排完 / 無從比較（合約沒設金額）。 */
+function GapCell({ gap, currency }: Readonly<{ gap: number | null; currency: string }>) {
+  if (gap == null) return <span className="text-xs text-muted-foreground">—</span>;
+  if (gap > TOLERANCE) {
+    return (
+      <Badge variant="outline" className="border-expense/40 text-expense">
+        缺 {formatCurrency(gap, currency)}
+      </Badge>
+    );
+  }
+  if (gap < -TOLERANCE) {
+    return <Badge variant="outline">超排 {formatCurrency(-gap, currency)}</Badge>;
+  }
+  return <span className="text-xs text-muted-foreground">已排完</span>;
+}
+
 /**
  * 合約完整性：談了多少 → 排了多少 → 請了多少 → 收了多少。
  *
@@ -53,11 +69,7 @@ export function ContractCoverage({ rows }: Readonly<{ rows: ContractCoverageRow[
               到合約頁新增，設好請款方式就會自動展開排程
             </EmptyRow>
           ) : (
-            rows.map((r) => {
-              const gap = r.unscheduled;
-              const short = gap != null && gap > TOLERANCE;
-              const over = gap != null && gap < -TOLERANCE;
-              return (
+            rows.map((r) => (
                 <TableRow key={r.id}>
                   <TableCell className="max-w-[24ch] truncate font-medium" title={r.title}>
                     {r.title}
@@ -76,21 +88,10 @@ export function ContractCoverage({ rows }: Readonly<{ rows: ContractCoverageRow[
                     {formatCurrency(r.paid, r.currency)}
                   </TableCell>
                   <TableCell className="text-right">
-                    {gap == null ? (
-                      <span className="text-xs text-muted-foreground">—</span>
-                    ) : short ? (
-                      <Badge variant="outline" className="border-expense/40 text-expense">
-                        缺 {formatCurrency(gap, r.currency)}
-                      </Badge>
-                    ) : over ? (
-                      <Badge variant="outline">超排 {formatCurrency(-gap, r.currency)}</Badge>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">已排完</span>
-                    )}
+                    <GapCell gap={r.unscheduled} currency={r.currency} />
                   </TableCell>
                 </TableRow>
-              );
-            })
+              ))
           )}
         </TableBody>
       </Table>

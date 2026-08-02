@@ -65,7 +65,7 @@ export function ContractBillingPlanFields({
   const [split, setSplit] = React.useState<string>(
     defaults?.installmentSplit ?? formatSplit(defaultSplit(defaults?.installmentCount ?? 3)),
   );
-  const [interval, setInterval] = React.useState<string>(
+  const [intervalMonths, setIntervalMonths] = React.useState<string>(
     String(defaults?.billingIntervalMonths ?? 1),
   );
   const [dueRule, setDueRule] = React.useState<string>(defaults?.dueRule ?? "signed_date");
@@ -93,13 +93,13 @@ export function ContractBillingPlanFields({
         amount: numericAmount,
         installmentCount: Number(count) || 1,
         installmentSplit: split,
-        intervalMonths: Number(interval) || 1,
+        intervalMonths: Number(intervalMonths) || 1,
         dueRule: dueRule as DueRule,
         dueDay: Number(dueDay) || null,
         signedDate: signedDate || null,
         startDate: startDate || null,
       }),
-    [plan, numericAmount, count, split, interval, dueRule, dueDay, signedDate, startDate],
+    [plan, numericAmount, count, split, intervalMonths, dueRule, dueDay, signedDate, startDate],
   );
 
   const previewTotal = preview.reduce((sum, r) => sum + r.amount, 0);
@@ -169,8 +169,8 @@ export function ContractBillingPlanFields({
               type="number"
               min="1"
               max="12"
-              value={interval}
-              onChange={(e) => setInterval(e.target.value)}
+              value={intervalMonths}
+              onChange={(e) => setIntervalMonths(e.target.value)}
             />
           </div>
         )}

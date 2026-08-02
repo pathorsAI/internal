@@ -130,7 +130,9 @@ export function SimpanyReconcile({ local }: Readonly<{ local: LocalInvoice[] }>)
             type="file"
             accept=".xlsx,.csv,text/csv"
             className="hidden"
-            onChange={onFile}
+            onChange={(e) => {
+              void onFile(e);
+            }}
           />
         </label>
       }
@@ -200,7 +202,9 @@ export function SimpanyReconcile({ local }: Readonly<{ local: LocalInvoice[] }>)
                       size="sm"
                       variant="ghost"
                       disabled={pendingId === r.localId}
-                      onClick={() => markIssued(r)}
+                      onClick={() => {
+                        void markIssued(r);
+                      }}
                     >
                       <CheckCircle2 className="size-4" /> 標記已開立
                     </Button>

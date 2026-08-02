@@ -53,7 +53,7 @@ export function RecordPaymentDialog({
 
   // 開啟時才去查候選，而且只查一次 —— 查詢由「使用者按了開啟」這個事件觸發，
   // 不是由 open 這個 state 同步出來的，所以不用 effect（也避免串聯 render）。
-  async function onOpenChange(next: boolean) {
+  async function loadCandidates(next: boolean) {
     setOpen(next);
     if (!next || candidates !== null) return;
     setLoading(true);
@@ -80,7 +80,12 @@ export function RecordPaymentDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        void loadCandidates(next);
+      }}
+    >
       <DialogTrigger asChild>
         <Button type="button" size="sm" variant="outline">
           <Banknote className="size-4" /> 登記收款
@@ -139,7 +144,9 @@ export function RecordPaymentDialog({
                     type="button"
                     size="sm"
                     disabled={linking != null}
-                    onClick={() => link(c.id)}
+                    onClick={() => {
+                      void link(c.id);
+                    }}
                   >
                     {linking === c.id ? "配對中…" : "就是這筆"}
                   </Button>
