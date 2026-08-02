@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Req } from "@/components/req";
 import { DatePicker } from "@/components/date-picker";
 import { CurrencySelect } from "@/components/currency-select";
-import { PartyCombobox } from "@/components/party-combobox";
+import { PartyField } from "@/components/party-combobox";
 import {
   Select,
   SelectContent,
@@ -75,15 +75,12 @@ export function InvoiceFields({
         <DatePicker name="invoiceDate" defaultValue={values?.invoiceDate ?? undefined} />
       </div>
 
-      <div className="space-y-1.5">
-        <Label>對象</Label>
-        <PartyCombobox
-          parties={parties}
-          name="partyName"
-          defaultName={values?.partyName ?? ""}
-          placeholder="輸入或選擇對象…"
-        />
-      </div>
+      <PartyField
+        parties={parties}
+        name="partyName"
+        label="對象"
+        defaultName={values?.partyName ?? ""}
+      />
       <div className="space-y-1.5">
         <Label htmlFor="inv-number">發票號碼（Simpany 單號）</Label>
         <Input

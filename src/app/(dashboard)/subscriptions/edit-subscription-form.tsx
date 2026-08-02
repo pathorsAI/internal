@@ -18,7 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CurrencySelect } from "@/components/currency-select";
-import { PartyCombobox } from "@/components/party-combobox";
+import { PartyField } from "@/components/party-combobox";
 import { submitAction } from "@/lib/form-action";
 
 const initial: ActionState = { ok: false };
@@ -73,15 +73,12 @@ export function EditSubscriptionForm({
     <form onSubmit={submitAction(action)} className="grid gap-4 sm:grid-cols-2">
       <input type="hidden" name="id" value={subscription.id} />
 
-      <div className="space-y-1.5">
-        <Label>客戶<Req /></Label>
-        <PartyCombobox
-          parties={parties}
-          name="customerPartyName"
-          defaultName={subscription.customerName ?? ""}
-          placeholder="輸入或選擇客戶…"
-        />
-      </div>
+      <PartyField
+        parties={parties}
+        name="customerPartyName"
+        required
+        defaultName={subscription.customerName ?? ""}
+      />
       <div className="space-y-1.5">
         <Label>專案</Label>
         <Select

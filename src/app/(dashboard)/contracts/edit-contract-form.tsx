@@ -19,7 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CurrencySelect } from "@/components/currency-select";
-import { PartyCombobox } from "@/components/party-combobox";
+import { PartyField } from "@/components/party-combobox";
 import { submitAction } from "@/lib/form-action";
 import {
   ContractBillingPlanFields,
@@ -121,15 +121,12 @@ export function EditContractForm({
         </div>
       )}
 
-      <div className="space-y-1.5">
-        <Label>客戶<Req /></Label>
-        <PartyCombobox
-          parties={parties}
-          name="customerPartyName"
-          defaultName={contract.customerName ?? ""}
-          placeholder="輸入或選擇客戶…"
-        />
-      </div>
+      <PartyField
+        parties={parties}
+        name="customerPartyName"
+        required
+        defaultName={contract.customerName ?? ""}
+      />
       <div className="space-y-1.5">
         <Label>專案</Label>
         <Select

@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Req } from "@/components/req";
 import { DatePicker } from "@/components/date-picker";
 import { CurrencySelect } from "@/components/currency-select";
-import { PartyCombobox } from "@/components/party-combobox";
+import { PartyField } from "@/components/party-combobox";
 import {
   Select,
   SelectContent,
@@ -54,15 +54,12 @@ export function BillingItemFields({
 }>) {
   return (
     <>
-      <div className="space-y-1.5">
-        <Label>客戶<Req /></Label>
-        <PartyCombobox
-          parties={parties}
-          name="customerPartyName"
-          defaultName={values?.customerName ?? ""}
-          placeholder="輸入或選擇客戶…"
-        />
-      </div>
+      <PartyField
+        parties={parties}
+        name="customerPartyName"
+        required
+        defaultName={values?.customerName ?? ""}
+      />
 
       <div className="space-y-1.5">
         <Label htmlFor="bi-title">項目名稱<Req /></Label>

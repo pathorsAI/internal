@@ -17,7 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CurrencySelect } from "@/components/currency-select";
-import { PartyCombobox } from "@/components/party-combobox";
+import { PartyField } from "@/components/party-combobox";
 import { submitAction } from "@/lib/form-action";
 import {
   Dialog,
@@ -71,14 +71,7 @@ export function NewSubscriptionDialog({
           </DialogHeader>
 
           <div className="grid gap-4 py-4 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label>客戶<Req /></Label>
-              <PartyCombobox
-                parties={parties}
-                name="customerPartyName"
-                placeholder="輸入或選擇客戶…"
-              />
-            </div>
+            <PartyField parties={parties} name="customerPartyName" required />
             <div className="space-y-1.5">
               <Label>專案</Label>
               <Select name="projectId">

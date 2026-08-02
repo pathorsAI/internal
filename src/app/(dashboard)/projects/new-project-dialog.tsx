@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { submitAction } from "@/lib/form-action";
 import { Req } from "@/components/req";
-import { PartyCombobox } from "@/components/party-combobox";
+import { PartyField } from "@/components/party-combobox";
 import {
   Select,
   SelectContent,
@@ -71,14 +71,7 @@ export function NewProjectDialog({
               <Label htmlFor="name">專案名稱<Req /></Label>
               <Input id="name" name="name" required placeholder="例：官網改版、A 客戶系統" />
             </div>
-            <div className="space-y-1.5">
-              <Label>客戶</Label>
-              <PartyCombobox
-                parties={parties}
-                name="clientPartyName"
-                placeholder="輸入或選擇客戶（選填）…"
-              />
-            </div>
+            <PartyField parties={parties} name="clientPartyName" />
             <div className="space-y-1.5">
               <Label>狀態</Label>
               <Select name="status" defaultValue="active">

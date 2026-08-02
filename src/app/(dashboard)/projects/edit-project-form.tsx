@@ -10,7 +10,7 @@ import { Req } from "@/components/req";
 import { DialogFooter } from "@/components/ui/dialog";
 import { submitAction } from "@/lib/form-action";
 import { useRowDialogClose } from "@/components/row-dialog";
-import { PartyCombobox } from "@/components/party-combobox";
+import { PartyField } from "@/components/party-combobox";
 import {
   Select,
   SelectContent,
@@ -67,15 +67,11 @@ export function EditProjectForm({
         <Label htmlFor="name">專案名稱<Req /></Label>
         <Input id="name" name="name" required defaultValue={project.name} />
       </div>
-      <div className="space-y-1.5">
-        <Label>客戶</Label>
-        <PartyCombobox
-          parties={parties}
-          name="clientPartyName"
-          defaultName={project.clientName ?? ""}
-          placeholder="輸入或選擇客戶（選填）…"
-        />
-      </div>
+      <PartyField
+        parties={parties}
+        name="clientPartyName"
+        defaultName={project.clientName ?? ""}
+      />
       <div className="space-y-1.5">
         <Label>狀態</Label>
         <Select name="status" defaultValue={project.status}>
