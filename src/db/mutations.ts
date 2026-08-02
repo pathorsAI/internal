@@ -1565,9 +1565,11 @@ type ContractValues = ReturnType<typeof contractValues>;
  * 金額就會靜悄悄地變回合約總額，排出來的總和超過合約金額也不會有人發現。
  */
 function scheduleInputOf(v: ContractValues, amount?: number | null): ScheduleInput {
+  // 沒指定覆寫（undefined）就用合約總額；明確傳 null 代表「沒有金額，展不出排程」。
+  const contractAmount = v.amount == null ? null : Number(v.amount);
   return {
     billingPlan: v.billingPlan as BillingPlan | null,
-    amount: amount !== undefined ? amount : v.amount == null ? null : Number(v.amount),
+    amount: amount === undefined ? contractAmount : amount,
     installmentCount: v.installmentCount,
     installmentSplit: v.installmentSplit,
     intervalMonths: v.billingIntervalMonths,
