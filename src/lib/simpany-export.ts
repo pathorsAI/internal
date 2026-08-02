@@ -90,12 +90,13 @@ function scanQuoted(scanner: CsvScanner, ch: string, next: string | undefined): 
   return -1;
 }
 
-/** 引號外：處理分隔字元。 */
+/** 引號外：處理分隔字元。回傳是否進入引號狀態（引號本身不進 cell）。 */
 function scanPlain(scanner: CsvScanner, ch: string): boolean {
+  if (ch === '"') return true;
   if (ch === ",") scanner.endCell();
   else if (ch === "\n") scanner.endRow();
   else if (ch !== "\r") scanner.push(ch);
-  return ch === '"';
+  return false;
 }
 
 /** RFC4180 風格的 CSV 切割：支援引號包住的逗號與換行、跳脫的雙引號、CRLF、BOM。 */
