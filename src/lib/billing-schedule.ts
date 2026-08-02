@@ -60,8 +60,9 @@ export function formatSplit(split: number[]): string {
 export function splitAmount(total: number, split: number[]): number[] {
   const out = split.map((pct) => Math.round(((total * pct) / 100) * 100) / 100);
   const diff = Math.round((total - out.reduce((a, b) => a + b, 0)) * 100) / 100;
-  if (out.length > 0 && diff !== 0) {
-    out[out.length - 1] = Math.round((out[out.length - 1] + diff) * 100) / 100;
+  const lastIndex = out.length - 1;
+  if (lastIndex >= 0 && diff !== 0) {
+    out[lastIndex] = Math.round((out[lastIndex] + diff) * 100) / 100;
   }
   return out;
 }

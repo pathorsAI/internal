@@ -270,7 +270,7 @@ export function ContractBillingPlanFields({
               className="mt-0.5 size-4 accent-primary"
             />
             <span>
-              存檔時依上面的設定重新產生排程
+              <span>存檔時依上面的設定重新產生排程</span>
               <span className="mt-0.5 block text-xs text-muted-foreground">
                 這張合約已有 {existingCount} 期
                 {lockedCount > 0 && `，其中 ${lockedCount} 期已請款 / 已開票 / 已收款`}。

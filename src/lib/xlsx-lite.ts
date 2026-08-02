@@ -66,13 +66,16 @@ async function readEntry(buf: ArrayBuffer, entry: ZipEntry): Promise<string> {
   return new Response(stream).text();
 }
 
-/** 'BC12' → 54（0-based 欄索引） */
+const CODE_A = 65;
+const CODE_Z = 90;
+
+/** 'BC12' → 54（0-based 欄索引）。遇到第一個非 A-Z 就停（後面是列號）。 */
 function columnIndex(ref: string): number {
   let n = 0;
   for (const ch of ref) {
-    const code = ch.charCodeAt(0);
-    if (code < 65 || code > 90) break;
-    n = n * 26 + (code - 64);
+    const code = ch.codePointAt(0) ?? 0;
+    if (code < CODE_A || code > CODE_Z) break;
+    n = n * 26 + (code - CODE_A + 1);
   }
   return n - 1;
 }
@@ -88,7 +91,7 @@ const ENTITIES: Record<string, string> = {
 function unescapeXml(s: string): string {
   return s.replace(/&(#x?[0-9a-fA-F]+|[a-z]+);/g, (whole, body: string) => {
     if (body.startsWith("#x") || body.startsWith("#X")) {
-      return String.fromCodePoint(parseInt(body.slice(2), 16));
+      return String.fromCodePoint(Number.parseInt(body.slice(2), 16));
     }
     if (body.startsWith("#")) return String.fromCodePoint(Number(body.slice(1)));
     return ENTITIES[body] ?? whole;
@@ -104,6 +107,47 @@ function joinTextNodes(xml: string): string {
   return out;
 }
 
+const V_RE = /<v(?:\s[^>]*)?>([\s\S]*?)<\/v>/;
+
+/** 取 <c> 裡的 <v> 文字（已解 entity）。 */
+function cellValueText(body: string): string {
+  return unescapeXml(V_RE.exec(body)?.[1] ?? "");
+}
+
+/** 依 t 屬性解出儲存格的字串值。 */
+function cellValue(type: string | undefined, body: string, shared: string[]): string {
+  if (type === "s") return shared[Number(V_RE.exec(body)?.[1] ?? -1)] ?? "";
+  if (type === "inlineStr" || type === "str") return joinTextNodes(body) || cellValueText(body);
+  return cellValueText(body);
+}
+
+/** sharedStrings.xml → 依索引排好的字串表（沒有這個檔就是空的）。 */
+async function readSharedStrings(buf: ArrayBuffer, entries: ZipEntry[]): Promise<string[]> {
+  const entry = entries.find((e) => e.name === "xl/sharedStrings.xml");
+  if (!entry) return [];
+  const xml = await readEntry(buf, entry);
+  const out: string[] = [];
+  const re = /<si(?:\s[^>]*)?>([\s\S]*?)<\/si>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(xml)) !== null) out.push(joinTextNodes(m[1]));
+  return out;
+}
+
+/** 一列 <row> 的內容 → 依欄索引對齊的字串陣列（空格補空字串）。 */
+function parseRow(rowXml: string, shared: string[]): string[] {
+  // <c> 可能自閉合（<c r="B2"/>），也可能帶 <v> 或 <is><t>。
+  const cellRe = /<c\s([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
+  const cells: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = cellRe.exec(rowXml)) !== null) {
+    const idx = columnIndex(/r="([A-Z]+)/.exec(m[1])?.[1] ?? "");
+    if (idx < 0) continue;
+    while (cells.length < idx) cells.push("");
+    cells[idx] = cellValue(/t="([^"]+)"/.exec(m[1])?.[1], m[2] ?? "", shared);
+  }
+  return cells;
+}
+
 /**
  * 讀出活頁簿第一張工作表，回傳對齊欄位的字串表格。
  * 空白儲存格補空字串，這樣呼叫端可以直接用欄索引取值。
@@ -115,44 +159,14 @@ export async function readXlsxFirstSheet(buf: ArrayBuffer): Promise<string[][]> 
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))[0];
   if (!sheet) throw new Error("xlsx 裡找不到工作表");
 
-  const sharedEntry = entries.find((e) => e.name === "xl/sharedStrings.xml");
-  const shared: string[] = [];
-  if (sharedEntry) {
-    const xml = await readEntry(buf, sharedEntry);
-    const re = /<si(?:\s[^>]*)?>([\s\S]*?)<\/si>/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(xml)) !== null) shared.push(joinTextNodes(m[1]));
-  }
-
+  const shared = await readSharedStrings(buf, entries);
   const xml = await readEntry(buf, sheet);
+
   const table: string[][] = [];
-  // <row> 內的 <c>：可能自閉合（<c r="B2"/>），也可能帶 <v> 或 <is><t>。
   const rowRe = /<row(?:\s[^>]*)?>([\s\S]*?)<\/row>/g;
-  const cellRe = /<c\s([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
   let rowMatch: RegExpExecArray | null;
   while ((rowMatch = rowRe.exec(xml)) !== null) {
-    const cells: string[] = [];
-    let cellMatch: RegExpExecArray | null;
-    cellRe.lastIndex = 0;
-    while ((cellMatch = cellRe.exec(rowMatch[1])) !== null) {
-      const attrs = cellMatch[1];
-      const body = cellMatch[2] ?? "";
-      const idx = columnIndex(/r="([A-Z]+)/.exec(attrs)?.[1] ?? "");
-      if (idx < 0) continue;
-      const type = /t="([^"]+)"/.exec(attrs)?.[1];
-
-      let value: string;
-      if (type === "s") {
-        value = shared[Number(/<v(?:\s[^>]*)?>([\s\S]*?)<\/v>/.exec(body)?.[1] ?? -1)] ?? "";
-      } else if (type === "inlineStr" || type === "str") {
-        value = joinTextNodes(body) || unescapeXml(/<v(?:\s[^>]*)?>([\s\S]*?)<\/v>/.exec(body)?.[1] ?? "");
-      } else {
-        value = unescapeXml(/<v(?:\s[^>]*)?>([\s\S]*?)<\/v>/.exec(body)?.[1] ?? "");
-      }
-      while (cells.length < idx) cells.push("");
-      cells[idx] = value;
-    }
-    table.push(cells);
+    table.push(parseRow(rowMatch[1], shared));
   }
   return table.filter((r) => r.some((c) => c.trim() !== ""));
 }

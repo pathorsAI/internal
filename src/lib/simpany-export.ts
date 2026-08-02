@@ -48,48 +48,72 @@ const HEADER_HINTS: { field: keyof SimpanyRow; keywords: string[] }[] = [
   { field: "status", keywords: ["發票狀態", "狀態", "status"] },
 ];
 
-/** RFC4180 風格的 CSV 切割：支援引號包住的逗號與換行、跳脫的雙引號、CRLF。 */
+/** CSV 切割器的狀態：一路吃字元，遇到分隔就把 cell / row 收掉。 */
+class CsvScanner {
+  readonly rows: string[][] = [];
+  private row: string[] = [];
+  private cell = "";
+
+  endCell() {
+    this.row.push(this.cell);
+    this.cell = "";
+  }
+
+  endRow() {
+    this.endCell();
+    this.rows.push(this.row);
+    this.row = [];
+  }
+
+  push(ch: string) {
+    this.cell += ch;
+  }
+
+  /** 收尾：最後一列可能沒有換行結尾。 */
+  finish(): string[][] {
+    if (this.cell !== "" || this.row.length > 0) this.endRow();
+    return this.rows.filter((r) => r.some((c) => c.trim() !== ""));
+  }
+}
+
+/** 引號內：回傳「這個字元消化掉幾個位置」，-1 代表離開引號狀態。 */
+function scanQuoted(scanner: CsvScanner, ch: string, next: string | undefined): number {
+  if (ch !== '"') {
+    scanner.push(ch);
+    return 0;
+  }
+  // 連續兩個雙引號 = 一個跳脫的雙引號，否則就是引號結束。
+  if (next === '"') {
+    scanner.push('"');
+    return 1;
+  }
+  return -1;
+}
+
+/** 引號外：處理分隔字元。 */
+function scanPlain(scanner: CsvScanner, ch: string): boolean {
+  if (ch === ",") scanner.endCell();
+  else if (ch === "\n") scanner.endRow();
+  else if (ch !== "\r") scanner.push(ch);
+  return ch === '"';
+}
+
+/** RFC4180 風格的 CSV 切割：支援引號包住的逗號與換行、跳脫的雙引號、CRLF、BOM。 */
 export function parseCsv(text: string): string[][] {
-  const src = text.replace(/^﻿/, "");
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = "";
+  const src = text.replace(/^\ufeff/, "");
+  const scanner = new CsvScanner();
   let quoted = false;
 
   for (let i = 0; i < src.length; i += 1) {
-    const ch = src[i];
     if (quoted) {
-      if (ch === '"') {
-        if (src[i + 1] === '"') {
-          cell += '"';
-          i += 1;
-        } else {
-          quoted = false;
-        }
-      } else {
-        cell += ch;
-      }
+      const consumed = scanQuoted(scanner, src[i], src[i + 1]);
+      if (consumed < 0) quoted = false;
+      else i += consumed;
       continue;
     }
-    if (ch === '"') {
-      quoted = true;
-    } else if (ch === ",") {
-      row.push(cell);
-      cell = "";
-    } else if (ch === "\n") {
-      row.push(cell);
-      rows.push(row);
-      row = [];
-      cell = "";
-    } else if (ch !== "\r") {
-      cell += ch;
-    }
+    quoted = scanPlain(scanner, src[i]);
   }
-  if (cell !== "" || row.length > 0) {
-    row.push(cell);
-    rows.push(row);
-  }
-  return rows.filter((r) => r.some((c) => c.trim() !== ""));
+  return scanner.finish();
 }
 
 function matchHeaders(header: string[]): Partial<Record<keyof SimpanyRow, number>> {
@@ -176,24 +200,32 @@ export function parseSimpanyTable(table: string[][]): ParseResult {
     detected[field as keyof SimpanyRow] = header[idx]?.trim();
   }
 
-  const rows: SimpanyRow[] = [];
-  let skipped = 0;
-  for (const r of body) {
-    const number = (r[cols.number] ?? "").trim();
-    if (normalizeInvoiceNumber(number) === "") {
-      skipped += 1;
-      continue;
-    }
-    rows.push({
-      number,
-      date: cols.date == null ? null : parseDate(r[cols.date]),
-      amount: cols.amount == null ? null : parseAmount(r[cols.amount]),
-      name: cols.name == null ? null : (r[cols.name]?.trim() || null),
-      taxId: cols.taxId == null ? null : (r[cols.taxId]?.trim() || null),
-      status: cols.status == null ? null : (r[cols.status]?.trim() || null),
-    });
-  }
-  return { rows, detected, skipped };
+  // 沒有發票號碼的列無從比對（Simpany 匯出偶爾夾帶合計列），計數後略過。
+  const withNumber: ColumnMap = { ...cols, number: cols.number };
+  const rows = body.map((r) => toSimpanyRow(r, withNumber)).filter((r) => r !== null);
+  return { rows, detected, skipped: body.length - rows.length };
+}
+
+type ColumnMap = Partial<Record<keyof SimpanyRow, number>> & { number: number };
+
+/** 取某一欄的字串，欄位不存在或空白時回 null。 */
+function cellAt(row: string[], idx: number | undefined): string | null {
+  if (idx == null) return null;
+  return row[idx]?.trim() || null;
+}
+
+/** 一列原始資料 → SimpanyRow；沒有發票號碼就回 null。 */
+function toSimpanyRow(row: string[], cols: ColumnMap): SimpanyRow | null {
+  const number = (row[cols.number] ?? "").trim();
+  if (normalizeInvoiceNumber(number) === "") return null;
+  return {
+    number,
+    date: parseDate(cellAt(row, cols.date) ?? undefined),
+    amount: parseAmount(cellAt(row, cols.amount) ?? undefined),
+    name: cellAt(row, cols.name),
+    taxId: cellAt(row, cols.taxId),
+    status: cellAt(row, cols.status),
+  };
 }
 
 // ---- 比對 ----

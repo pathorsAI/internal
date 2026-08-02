@@ -57,7 +57,7 @@ COMMENT ON COLUMN contracts.due_day IS 'day_of_month 為第幾個日曆日；bus
 -- pending  本系統認為該開，Simpany 還沒開
 -- issued   Simpany 已開，external_ref 記其發票號碼
 -- void     Simpany 端已作廢
--- n_a      不需要在 Simpany 開（例如收到的進項發票 direction = 'received'）
+-- n_a      不需要在 Simpany 開（例如廠商開給我們的進項發票）
 ALTER TABLE invoices ADD COLUMN external_status text NOT NULL DEFAULT 'pending';
 ALTER TABLE invoices ADD CONSTRAINT chk_invoice_external_status
   CHECK (external_status = ANY (ARRAY['pending'::text, 'issued'::text, 'void'::text, 'n_a'::text]));
@@ -65,13 +65,17 @@ ALTER TABLE invoices ADD CONSTRAINT chk_invoice_external_status
 -- Simpany 端的單號 / 發票號碼，對帳時的比對鍵
 ALTER TABLE invoices ADD COLUMN external_ref text;
 
--- 進項發票（received）不經 Simpany 開立，既有資料一律標成不適用；
--- 銷項（issued）已經填了發票號碼的，視為 Simpany 已開，號碼即為對帳鍵。
+-- 既有資料回填。進項發票不經 Simpany 開立，一律標成不適用。
 UPDATE invoices SET external_status = 'n_a' WHERE direction = 'received';
+
+-- 銷項已經填了發票號碼的，視為 Simpany 已開，號碼即為對帳鍵；其餘維持預設的
+-- 「待開立」。nullif(btrim(...)) 把空字串與純空白一併正規化成 NULL，所以只需要
+-- 一次 IS NOT NULL 判斷，不必再對空字串另外比較。
 UPDATE invoices
    SET external_status = 'issued',
-       external_ref = invoice_number
- WHERE direction = 'issued' AND invoice_number IS NOT NULL AND invoice_number <> '';
+       external_ref = nullif(btrim(invoice_number), '')
+ WHERE direction <> 'received'
+   AND nullif(btrim(invoice_number), '') IS NOT NULL;
 
 CREATE INDEX idx_invoice_external_status ON invoices (organization_id, external_status) WHERE deleted_at IS NULL;
 
