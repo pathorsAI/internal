@@ -2,8 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, inArray, desc, sql } from "drizzle-orm";
 import { getDb } from "./index";
+import { billingItemPaidById } from "./queries";
 import {
   parties,
   employees,
@@ -28,6 +29,12 @@ import { requireOrg } from "@/lib/session";
 import { auth } from "@/lib/auth";
 import { logWeb } from "@/db/activity";
 import { isValidEmail } from "@/lib/pii";
+import {
+  generateSchedule,
+  type BillingPlan,
+  type DueRule,
+  type ScheduleInput,
+} from "@/lib/billing-schedule";
 
 export type ActionState = { ok: boolean; error?: string };
 
@@ -905,10 +912,38 @@ export async function updateTransaction(
 }
 
 // ---- 發票 ----
+const INVOICE_EXTERNAL_STATUS = new Set(["pending", "issued", "void", "n_a"]);
+
+/**
+ * Simpany 端的開立狀態（migrations/0019）。
+ *
+ * 表單有明確選就聽表單的；沒選就推導 —— 進項發票不經 Simpany（n_a）、
+ * 有號碼代表已經開出來了（issued）、沒號碼就是本系統認為該開但還沒開（pending）。
+ */
+function resolveExternalStatus(
+  raw: string | null,
+  direction: string,
+  externalRef: string | null,
+): string {
+  // 進項發票不經 Simpany，表單選了什麼都不算數。
+  if (direction === "received") return "n_a";
+  if (raw && INVOICE_EXTERNAL_STATUS.has(raw)) return raw;
+  return externalRef ? "issued" : "pending";
+}
+
 function invoiceValues(formData: FormData) {
+  const direction = str(formData.get("direction")) ?? "received";
+  // Simpany 的單號就是發票號碼，兩個欄位共用一個輸入框（任一有值即補齊另一個）。
+  const externalRef = str(formData.get("externalRef")) ?? str(formData.get("invoiceNumber"));
   return {
-    direction: str(formData.get("direction")) ?? "received",
-    invoiceNumber: str(formData.get("invoiceNumber")),
+    direction,
+    invoiceNumber: str(formData.get("invoiceNumber")) ?? externalRef,
+    externalRef,
+    externalStatus: resolveExternalStatus(
+      str(formData.get("externalStatus")),
+      direction,
+      externalRef,
+    ),
     invoiceDate: str(formData.get("invoiceDate")),
     counterpartyName: str(formData.get("counterpartyName")),
     counterpartyTaxId: str(formData.get("counterpartyTaxId")),
@@ -992,6 +1027,41 @@ export async function deleteInvoice(id: number): Promise<ActionState> {
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
+  }
+}
+
+/**
+ * 對帳頁的就地更新：把 Simpany 的實際狀態與單號寫回這張發票。
+ *
+ * 發票號碼與 Simpany 單號在台灣是同一個東西，所以兩個欄位一起寫，
+ * 之後不管從哪邊比對都對得起來。
+ */
+export async function markInvoiceExternal(
+  id: number,
+  externalStatus: string,
+  externalRef: string | null,
+): Promise<ActionState> {
+  if (!INVOICE_EXTERNAL_STATUS.has(externalStatus)) {
+    return { ok: false, error: "狀態不正確" };
+  }
+  try {
+    const { orgId } = await requireOrg();
+    const ref = externalRef?.trim() ? externalRef.trim() : null;
+    await getDb()
+      .update(invoices)
+      .set({
+        externalStatus,
+        externalRef: ref,
+        // 已開立才回填發票號碼；還沒開／作廢時不動既有號碼。
+        ...(externalStatus === "issued" && ref ? { invoiceNumber: ref } : {}),
+      })
+      .where(and(eq(invoices.organizationId, orgId), eq(invoices.id, id)));
+    await logWeb(orgId, "update", "invoice", id, `Simpany ${externalStatus}`);
+    revalidatePath("/invoices");
+    revalidatePath("/invoices/reconcile");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
   }
 }
 
@@ -1448,8 +1518,18 @@ export async function deleteSubscription(id: number): Promise<ActionState> {
 
 // ---- 合約 ----
 const CONTRACT_STATUS = new Set(["draft", "active", "completed", "cancelled"]);
+const CONTRACT_BILLING_PLAN = new Set(["single", "installments", "milestones", "subscription"]);
+const CONTRACT_DUE_RULE = new Set(["signed_date", "day_of_month", "business_day_of_month"]);
+
+/** 夾在合法區間內；超出範圍的值退回預設，不擋存檔。 */
+function clampInt(v: number | null, min: number, max: number, fallback: number | null) {
+  if (v == null || !Number.isFinite(v)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(v)));
+}
 
 function contractValues(formData: FormData) {
+  const billingPlan = str(formData.get("billingPlan"));
+  const dueRule = str(formData.get("dueRule"));
   return {
     customerPartyId: num(formData.get("customerPartyId")),
     projectId: num(formData.get("projectId")),
@@ -1463,7 +1543,114 @@ function contractValues(formData: FormData) {
     status: str(formData.get("status")) ?? "active",
     note: str(formData.get("note")),
     fileUrl: str(formData.get("fileUrl")),
+    // 請款計畫（migrations/0019）。不合法的值一律當成「未設定」——
+    // 計畫只是產生排程的參數，不值得為了它擋掉整張合約的存檔。
+    billingPlan: billingPlan && CONTRACT_BILLING_PLAN.has(billingPlan) ? billingPlan : null,
+    installmentCount: clampInt(num(formData.get("installmentCount")), 1, 60, null),
+    installmentSplit: str(formData.get("installmentSplit")),
+    billingIntervalMonths: clampInt(num(formData.get("billingIntervalMonths")), 1, 12, 1) ?? 1,
+    dueRule: dueRule && CONTRACT_DUE_RULE.has(dueRule) ? dueRule : "signed_date",
+    dueDay: clampInt(num(formData.get("dueDay")), 1, 31, null),
+    regenerateSchedule: formData.get("regenerateSchedule") != null,
   };
+}
+
+type ContractValues = ReturnType<typeof contractValues>;
+
+/** 把合約表單的值轉成排程引擎吃的輸入。 */
+function scheduleInputOf(v: ContractValues): ScheduleInput {
+  return {
+    billingPlan: v.billingPlan as BillingPlan | null,
+    amount: v.amount == null ? null : Number(v.amount),
+    installmentCount: v.installmentCount,
+    installmentSplit: v.installmentSplit,
+    intervalMonths: v.billingIntervalMonths,
+    dueRule: v.dueRule as DueRule,
+    dueDay: v.dueDay,
+    signedDate: v.signedDate,
+    startDate: v.startDate,
+  };
+}
+
+/**
+ * 依請款計畫展開 billing_items。
+ *
+ * 兩個時機會展開：新合約設了計畫、或既有合約還沒有任何排程時第一次設計畫。
+ * 已經有排程的合約要重排，必須明確勾「重新產生」（regenerate = true）——
+ * 而且已請款 / 已開票 / 已收款的期別絕不刪除，只重排沒動過的那些，並把已鎖定
+ * 期別的金額從總額裡扣掉，避免重排出來的總和超過合約金額。
+ */
+async function expandContractSchedule(
+  db: ReturnType<typeof getDb>,
+  orgId: string,
+  contractId: number,
+  customerPartyId: number,
+  v: ContractValues,
+  regenerate: boolean,
+): Promise<number> {
+  const existing = await db
+    .select({
+      id: billingItems.id,
+      amount: billingItems.amount,
+      billedOn: billingItems.billedOn,
+      paidOn: billingItems.paidOn,
+      invoicedOn: billingItems.invoicedOn,
+    })
+    .from(billingItems)
+    .where(
+      and(
+        eq(billingItems.organizationId, orgId),
+        eq(billingItems.contractId, contractId),
+        isNull(billingItems.deletedAt),
+      ),
+    );
+
+  if (existing.length > 0 && !regenerate) return 0;
+
+  const paidById = await billingItemPaidById(orgId);
+  const locked = existing.filter(
+    (r) =>
+      r.billedOn != null ||
+      r.paidOn != null ||
+      r.invoicedOn != null ||
+      (paidById.get(r.id) ?? 0) > 0,
+  );
+  const removable = existing.filter((r) => !locked.some((l) => l.id === r.id));
+
+  // 鎖定的期別已經佔掉一部分合約金額，剩下的才拿去重排。
+  const lockedTotal = locked.reduce((sum, r) => sum + Number(r.amount), 0);
+  const total = v.amount == null ? null : Number(v.amount) - lockedTotal;
+  const rows = generateSchedule({ ...scheduleInputOf(v), amount: total });
+  if (rows.length === 0) return 0;
+
+  if (removable.length > 0) {
+    await db
+      .update(billingItems)
+      .set({ deletedAt: new Date().toISOString() })
+      .where(
+        and(
+          eq(billingItems.organizationId, orgId),
+          inArray(
+            billingItems.id,
+            removable.map((r) => r.id),
+          ),
+        ),
+      );
+  }
+
+  await db.insert(billingItems).values(
+    rows.map((r) => ({
+      organizationId: orgId,
+      customerPartyId,
+      contractId,
+      projectId: v.projectId,
+      title: r.title,
+      amount: String(r.amount),
+      currency: v.currency,
+      dueDate: r.dueDate,
+    })),
+  );
+  return rows.length;
 }
 
 export async function createContract(
@@ -1492,10 +1679,29 @@ export async function createContract(
         status: v.status,
         note: v.note,
         fileUrl: v.fileUrl,
+        billingPlan: v.billingPlan,
+        installmentCount: v.installmentCount,
+        installmentSplit: v.installmentSplit,
+        billingIntervalMonths: v.billingIntervalMonths,
+        dueRule: v.dueRule,
+        dueDay: v.dueDay,
       })
       .returning({ id: contracts.id });
     await logWeb(orgId, "create", "contract", inserted.id, v.title ?? undefined);
+    // 新合約一定沒有既有排程，直接展開（展不出來就是 0 期，不是錯誤）。
+    const created = await expandContractSchedule(
+      getDb(),
+      orgId,
+      inserted.id,
+      v.customerPartyId,
+      v,
+      false,
+    );
     revalidatePath("/contracts");
+    if (created > 0) {
+      revalidatePath("/billing");
+      await syncCalendarBestEffort(orgId);
+    }
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "新增失敗" };
@@ -1529,10 +1735,29 @@ export async function updateContract(
         status: v.status,
         note: v.note,
         fileUrl: v.fileUrl,
+        billingPlan: v.billingPlan,
+        installmentCount: v.installmentCount,
+        installmentSplit: v.installmentSplit,
+        billingIntervalMonths: v.billingIntervalMonths,
+        dueRule: v.dueRule,
+        dueDay: v.dueDay,
       })
       .where(and(eq(contracts.organizationId, orgId), eq(contracts.id, id)));
     await logWeb(orgId, "update", "contract", id, v.title ?? undefined);
+    // 沒有排程時第一次設計畫 → 直接展開；已有排程 → 只有勾了「重新產生」才重排。
+    const changed = await expandContractSchedule(
+      getDb(),
+      orgId,
+      id,
+      v.customerPartyId,
+      v,
+      v.regenerateSchedule,
+    );
     revalidatePath("/contracts");
+    if (changed > 0) {
+      revalidatePath("/billing");
+      await syncCalendarBestEffort(orgId);
+    }
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
@@ -1784,6 +2009,198 @@ export async function markBillingRow(
     return { ok: false, error: "無法辨識的項目" };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
+  }
+}
+
+// ---- 看板就地推進：登記收款（migrations/0019 的配套，無 schema 變動）----
+
+export type PaymentCandidate = {
+  id: number;
+  txnDate: string;
+  description: string | null;
+  amount: number;
+  currency: string;
+  partyName: string | null;
+  /** 與該期應收金額差多少（0 = 完全吻合） */
+  gap: number;
+};
+
+/** 看板「登記收款」的候選交易：還沒綁到任何請款來源的收入。 */
+const PAYMENT_MATCH_LIMIT = 8;
+
+/**
+ * 找出可能就是這一期收款的既有交易。
+ *
+ * 只看「收入、尚未綁到任何請款項目或訂閱期別、同幣別」的交易 —— 已經綁走的
+ * 再列出來只會讓人重複綁。排序把同一個客戶、金額最接近的放前面；金額差距不設
+ * 硬門檻，因為部分收款、扣手續費、匯差都會讓數字對不齊，讓人自己判斷比較準。
+ */
+export async function suggestPaymentMatches(input: {
+  expected: number;
+  currency: string;
+  customerPartyId: number | null;
+}): Promise<PaymentCandidate[]> {
+  const { orgId } = await requireOrg();
+  const rows = await getDb()
+    .select({
+      id: transactions.id,
+      txnDate: transactions.txnDate,
+      description: transactions.description,
+      amount: transactions.amount,
+      currency: transactions.currency,
+      partyId: transactions.partyId,
+      partyName: parties.name,
+    })
+    .from(transactions)
+    .leftJoin(parties, eq(parties.id, transactions.partyId))
+    .where(
+      and(
+        eq(transactions.organizationId, orgId),
+        eq(transactions.type, "income"),
+        eq(transactions.currency, input.currency),
+        isNull(transactions.deletedAt),
+        isNull(transactions.billingItemId),
+        isNull(transactions.subscriptionId),
+      ),
+    )
+    .orderBy(desc(transactions.txnDate))
+    .limit(200);
+
+  const samePartyRank = (partyId: number | null) =>
+    input.customerPartyId != null && partyId === input.customerPartyId ? 0 : 1;
+
+  return rows
+    .slice()
+    .sort(
+      (a, b) =>
+        samePartyRank(a.partyId) - samePartyRank(b.partyId) ||
+        Math.abs(Number(a.amount) - input.expected) -
+          Math.abs(Number(b.amount) - input.expected),
+    )
+    .slice(0, PAYMENT_MATCH_LIMIT)
+    .map((r) => ({
+      id: r.id,
+      txnDate: r.txnDate,
+      description: r.description,
+      amount: Number(r.amount),
+      currency: r.currency,
+      partyName: r.partyName,
+      gap: Math.abs(Number(r.amount) - input.expected),
+    }));
+}
+
+/**
+ * 把一筆既有交易認列為某一期的收款。
+ *
+ * 綁定後「已收多少」由交易金額自動算出（見 queries 的 billingItemPaidById），
+ * 所以這裡只寫關聯與 paid_on，不去改任何金額欄位。
+ */
+export async function linkPaymentToBillingRow(
+  rowKey: string,
+  transactionId: number,
+): Promise<ActionState> {
+  try {
+    const { orgId } = await requireOrg();
+    const db = getDb();
+    const [txn] = await db
+      .select({ id: transactions.id, txnDate: transactions.txnDate })
+      .from(transactions)
+      .where(
+        and(
+          eq(transactions.organizationId, orgId),
+          eq(transactions.id, transactionId),
+          isNull(transactions.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (!txn) return { ok: false, error: "找不到這筆交易" };
+
+    if (rowKey.startsWith("bi:")) {
+      const itemId = Number(rowKey.slice(3));
+      if (!Number.isFinite(itemId)) return { ok: false, error: "項目代號不正確" };
+      const [item] = await db
+        .select({
+          id: billingItems.id,
+          contractId: billingItems.contractId,
+          projectId: billingItems.projectId,
+          customerPartyId: billingItems.customerPartyId,
+        })
+        .from(billingItems)
+        .where(
+          and(
+            eq(billingItems.organizationId, orgId),
+            eq(billingItems.id, itemId),
+            isNull(billingItems.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (!item) return { ok: false, error: "找不到這筆請款項目" };
+
+      // 交易上還沒填的關聯順手補上（已經有值的不覆蓋，人填的優先）。
+      await db
+        .update(transactions)
+        .set({
+          billingItemId: itemId,
+          partyId: sql`coalesce(${transactions.partyId}, ${item.customerPartyId})`,
+          contractId: sql`coalesce(${transactions.contractId}, ${item.contractId})`,
+          projectId: sql`coalesce(${transactions.projectId}, ${item.projectId})`,
+        })
+        .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, transactionId)));
+      await db
+        .update(billingItems)
+        .set({ paidOn: txn.txnDate })
+        .where(
+          and(
+            eq(billingItems.organizationId, orgId),
+            eq(billingItems.id, itemId),
+            isNull(billingItems.paidOn),
+          ),
+        );
+      await logWeb(orgId, "update", "billing_item", itemId, `收款配對 #${transactionId}`);
+    } else if (rowKey.startsWith("sub:")) {
+      const [, rawId, periodStart] = rowKey.split(":");
+      const subscriptionId = Number(rawId);
+      if (!Number.isFinite(subscriptionId) || !periodStart) {
+        return { ok: false, error: "期別代號不正確" };
+      }
+      const [sub] = await db
+        .select({
+          customerPartyId: subscriptions.customerPartyId,
+          projectId: subscriptions.projectId,
+        })
+        .from(subscriptions)
+        .where(
+          and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, subscriptionId)),
+        )
+        .limit(1);
+      if (!sub) return { ok: false, error: "找不到這張訂閱" };
+      await db
+        .update(transactions)
+        .set({
+          subscriptionId,
+          subscriptionPeriod: periodStart,
+          partyId: sql`coalesce(${transactions.partyId}, ${sub.customerPartyId})`,
+          projectId: sql`coalesce(${transactions.projectId}, ${sub.projectId})`,
+        })
+        .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, transactionId)));
+      await logWeb(
+        orgId,
+        "update",
+        "subscription",
+        subscriptionId,
+        `${periodStart} 收款配對 #${transactionId}`,
+      );
+      revalidatePath("/subscriptions");
+    } else {
+      return { ok: false, error: "無法辨識的項目" };
+    }
+
+    revalidateBilling();
+    revalidatePath("/transactions");
+    await syncCalendarBestEffort(orgId);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "配對失敗" };
   }
 }
 

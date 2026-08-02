@@ -14,7 +14,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { listBillingBoard, listContracts, listParties, listProjects } from "@/db/queries";
+import {
+  isLockedScheduleRow,
+  listBillingBoard,
+  listContracts,
+  listParties,
+  listProjects,
+} from "@/db/queries";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { NewContractDialog } from "./new-contract-dialog";
@@ -193,10 +199,20 @@ export default async function ContractsPage() {
                       status: c.status,
                       note: c.note,
                       fileUrl: c.fileUrl,
+                      billingPlan: c.billingPlan,
+                      installmentCount: c.installmentCount,
+                      installmentSplit: c.installmentSplit,
+                      billingIntervalMonths: c.billingIntervalMonths,
+                      dueRule: c.dueRule,
+                      dueDay: c.dueDay,
                     }}
                     parties={partyOptions}
                     projects={projectOptions}
                     summary={{ received: c.received, cost: c.cost, remaining: c.remaining }}
+                    scheduleCount={(billingByContract.get(c.id) ?? []).length}
+                    lockedScheduleCount={
+                      (billingByContract.get(c.id) ?? []).filter(isLockedScheduleRow).length
+                    }
                     extra={
                       <ContractBillingItems
                         contractId={c.id}

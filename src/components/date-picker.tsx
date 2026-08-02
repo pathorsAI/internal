@@ -19,12 +19,15 @@ export function DatePicker({
   defaultValue,
   placeholder = "選擇日期",
   allowEmpty = false,
+  onValueChange,
 }: Readonly<{
   name: string;
   /** YYYY-MM-DD */
   defaultValue?: string;
   placeholder?: string;
   allowEmpty?: boolean;
+  /** 選到日期時通知外層（hidden input 不會發 input 事件，要靠這個做連動預覽） */
+  onValueChange?: (iso: string) => void;
 }>) {
   const [date, setDate] = React.useState<Date | undefined>(() => {
     if (defaultValue) return new Date(`${defaultValue}T00:00:00`);
@@ -57,6 +60,7 @@ export function DatePicker({
             onSelect={(d) => {
               setDate(d);
               setOpen(false);
+              onValueChange?.(d ? toISO(d) : "");
             }}
             autoFocus
           />
