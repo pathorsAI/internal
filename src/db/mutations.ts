@@ -1488,15 +1488,47 @@ function subscriptionValues(formData: FormData) {
   };
 }
 
+type SubscriptionValues = ReturnType<typeof subscriptionValues>;
+
+/**
+ * 必填欄位驗證：過了就回傳收窄成 non-null 的值，讓 subscriptionColumns 直接可用。
+ * 散著寫 if-return 的話，型別收窄只在該函式內成立，抽出共用 helper 就會失效。
+ */
+function requiredSubscriptionFields(
+  v: SubscriptionValues,
+): { name: string; amount: string; startDate: string } | { error: string } {
+  if (!v.name) return { error: "請輸入方案名稱" };
+  if (v.amount === null) return { error: "請輸入金額" };
+  if (!v.startDate) return { error: "請選擇開始日期" };
+  if (!SUBSCRIPTION_STATUS.has(v.status)) return { error: "狀態不正確" };
+  return { name: v.name, amount: v.amount, startDate: v.startDate };
+}
+
+/** 新增與編輯寫入的是同一組欄位，集中在這裡定義，兩邊不會漂移。 */
+function subscriptionColumns(
+  v: SubscriptionValues,
+  customerPartyId: number,
+  required: { name: string; amount: string; startDate: string },
+) {
+  return {
+    ...required,
+    customerPartyId,
+    projectId: v.projectId,
+    currency: v.currency,
+    intervalMonths: v.intervalMonths,
+    endDate: v.endDate,
+    status: v.status,
+    note: v.note,
+  };
+}
+
 export async function createSubscription(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
   const v = subscriptionValues(formData);
-  if (!v.name) return { ok: false, error: "請輸入方案名稱" };
-  if (v.amount === null) return { ok: false, error: "請輸入金額" };
-  if (!v.startDate) return { ok: false, error: "請選擇開始日期" };
-  if (!SUBSCRIPTION_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
+  const required = requiredSubscriptionFields(v);
+  if ("error" in required) return { ok: false, error: required.error };
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
@@ -1504,19 +1536,7 @@ export async function createSubscription(
     if ("error" in customer) return { ok: false, error: customer.error };
     const [inserted] = await db
       .insert(subscriptions)
-      .values({
-        organizationId: orgId,
-        customerPartyId: customer.id,
-        projectId: v.projectId,
-        name: v.name,
-        amount: v.amount,
-        currency: v.currency,
-        intervalMonths: v.intervalMonths,
-        startDate: v.startDate,
-        endDate: v.endDate,
-        status: v.status,
-        note: v.note,
-      })
+      .values({ organizationId: orgId, ...subscriptionColumns(v, customer.id, required) })
       .returning({ id: subscriptions.id });
     await logWeb(orgId, "create", "subscription", inserted.id, v.name ?? undefined);
     revalidatePath("/subscriptions");
@@ -1534,10 +1554,8 @@ export async function updateSubscription(
   const id = num(formData.get("id"));
   if (!id) return { ok: false, error: "缺少 ID" };
   const v = subscriptionValues(formData);
-  if (!v.name) return { ok: false, error: "請輸入方案名稱" };
-  if (v.amount === null) return { ok: false, error: "請輸入金額" };
-  if (!v.startDate) return { ok: false, error: "請選擇開始日期" };
-  if (!SUBSCRIPTION_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
+  const required = requiredSubscriptionFields(v);
+  if ("error" in required) return { ok: false, error: required.error };
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
@@ -1545,18 +1563,7 @@ export async function updateSubscription(
     if ("error" in customer) return { ok: false, error: customer.error };
     await db
       .update(subscriptions)
-      .set({
-        customerPartyId: customer.id,
-        projectId: v.projectId,
-        name: v.name,
-        amount: v.amount,
-        currency: v.currency,
-        intervalMonths: v.intervalMonths,
-        startDate: v.startDate,
-        endDate: v.endDate,
-        status: v.status,
-        note: v.note,
-      })
+      .set(subscriptionColumns(v, customer.id, required))
       .where(and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, id)));
     await logWeb(orgId, "update", "subscription", id, v.name ?? undefined);
     revalidatePath("/subscriptions");
@@ -1719,13 +1726,44 @@ async function expandContractSchedule(
   return rows.length;
 }
 
+/** 必填欄位驗證，過了就回傳收窄成 non-null 的值（同 requiredSubscriptionFields 的理由）。 */
+function requiredContractFields(v: ContractValues): { title: string } | { error: string } {
+  if (!v.title) return { error: "請輸入合約名稱" };
+  if (!CONTRACT_STATUS.has(v.status)) return { error: "狀態不正確" };
+  return { title: v.title };
+}
+
+/** 合約的新增與編輯寫入同一組欄位（含請款計畫），集中定義避免兩邊漂移。 */
+function contractColumns(v: ContractValues, customerPartyId: number, title: string) {
+  return {
+    customerPartyId,
+    title,
+    projectId: v.projectId,
+    amount: v.amount,
+    currency: v.currency,
+    startDate: v.startDate,
+    endDate: v.endDate,
+    signedDate: v.signedDate,
+    paymentTermsDays: v.paymentTermsDays,
+    status: v.status,
+    note: v.note,
+    fileUrl: v.fileUrl,
+    billingPlan: v.billingPlan,
+    installmentCount: v.installmentCount,
+    installmentSplit: v.installmentSplit,
+    billingIntervalMonths: v.billingIntervalMonths,
+    dueRule: v.dueRule,
+    dueDay: v.dueDay,
+  };
+}
+
 export async function createContract(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
   const v = contractValues(formData);
-  if (!v.title) return { ok: false, error: "請輸入合約名稱" };
-  if (!CONTRACT_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
+  const required = requiredContractFields(v);
+  if ("error" in required) return { ok: false, error: required.error };
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
@@ -1733,27 +1771,7 @@ export async function createContract(
     if ("error" in customer) return { ok: false, error: customer.error };
     const [inserted] = await db
       .insert(contracts)
-      .values({
-        organizationId: orgId,
-        customerPartyId: customer.id,
-        projectId: v.projectId,
-        title: v.title,
-        amount: v.amount,
-        currency: v.currency,
-        startDate: v.startDate,
-        endDate: v.endDate,
-        signedDate: v.signedDate,
-        paymentTermsDays: v.paymentTermsDays,
-        status: v.status,
-        note: v.note,
-        fileUrl: v.fileUrl,
-        billingPlan: v.billingPlan,
-        installmentCount: v.installmentCount,
-        installmentSplit: v.installmentSplit,
-        billingIntervalMonths: v.billingIntervalMonths,
-        dueRule: v.dueRule,
-        dueDay: v.dueDay,
-      })
+      .values({ organizationId: orgId, ...contractColumns(v, customer.id, required.title) })
       .returning({ id: contracts.id });
     await logWeb(orgId, "create", "contract", inserted.id, v.title ?? undefined);
     // 新合約一定沒有既有排程，直接展開（展不出來就是 0 期，不是錯誤）。
@@ -1777,8 +1795,8 @@ export async function updateContract(
   const id = num(formData.get("id"));
   if (!id) return { ok: false, error: "缺少 ID" };
   const v = contractValues(formData);
-  if (!v.title) return { ok: false, error: "請輸入合約名稱" };
-  if (!CONTRACT_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
+  const required = requiredContractFields(v);
+  if ("error" in required) return { ok: false, error: required.error };
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
@@ -1786,26 +1804,7 @@ export async function updateContract(
     if ("error" in customer) return { ok: false, error: customer.error };
     await db
       .update(contracts)
-      .set({
-        customerPartyId: customer.id,
-        projectId: v.projectId,
-        title: v.title,
-        amount: v.amount,
-        currency: v.currency,
-        startDate: v.startDate,
-        endDate: v.endDate,
-        signedDate: v.signedDate,
-        paymentTermsDays: v.paymentTermsDays,
-        status: v.status,
-        note: v.note,
-        fileUrl: v.fileUrl,
-        billingPlan: v.billingPlan,
-        installmentCount: v.installmentCount,
-        installmentSplit: v.installmentSplit,
-        billingIntervalMonths: v.billingIntervalMonths,
-        dueRule: v.dueRule,
-        dueDay: v.dueDay,
-      })
+      .set(contractColumns(v, customer.id, required.title))
       .where(and(eq(contracts.organizationId, orgId), eq(contracts.id, id)));
     await logWeb(orgId, "update", "contract", id, v.title ?? undefined);
     // 沒有排程時第一次設計畫 → 直接展開；已有排程 → 只有勾了「重新產生」才重排。
