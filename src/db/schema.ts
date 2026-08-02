@@ -51,11 +51,17 @@ export const invoices = pgTable("invoices", {
 	partyId: bigint("party_id", { mode: "number" }),
 	contractId: bigint("contract_id", { mode: "number" }),
 	billingItemId: bigint("billing_item_id", { mode: "number" }),
+	// Simpany（外部發票系統）的開立狀態（migrations/0019）。Simpany 才是發票的真相
+	// 來源，本系統只負責「該開什麼」與「開了沒」，差異用對帳頁呈現而非硬要同步。
+	externalStatus: text("external_status").default('pending').notNull(),
+	externalRef: text("external_ref"),
 }, (table) => [
 	index("idx_invoice_party").using("btree", table.partyId.asc().nullsLast().op("int8_ops")),
 	index("idx_invoice_billing_item").using("btree", table.billingItemId.asc().nullsLast().op("int8_ops")),
+	index("idx_invoice_external_status").using("btree", table.organizationId.asc().nullsLast().op("text_ops"), table.externalStatus.asc().nullsLast().op("text_ops")).where(sql`deleted_at IS NULL`),
 	check("chk_invoice_direction", sql`direction = ANY (ARRAY['issued'::text, 'received'::text])`),
 	check("chk_invoice_status", sql`status = ANY (ARRAY['valid'::text, 'void'::text, 'allowance'::text])`),
+	check("chk_invoice_external_status", sql`external_status = ANY (ARRAY['pending'::text, 'issued'::text, 'void'::text, 'n_a'::text])`),
 ]);
 
 export const employees = pgTable("employees", {
@@ -448,6 +454,17 @@ export const contracts = pgTable("contracts", {
 	note: text(),
 	fileUrl: text("file_url"),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	// ---- 請款計畫（migrations/0019）：合約存檔即展開成 billing_items。
+	// 計畫只是產生器，展開後的實體列才是真相 —— 人改過的分期不會被計畫蓋掉，
+	// 除非明確按「重新產生」。
+	billingPlan: text("billing_plan"),
+	installmentCount: integer("installment_count"),
+	/** 各期百分比，逗號分隔（例 '30,40,30'）；NULL = 平均分攤 */
+	installmentSplit: text("installment_split"),
+	billingIntervalMonths: integer("billing_interval_months").default(1).notNull(),
+	dueRule: text("due_rule").default('signed_date').notNull(),
+	/** day_of_month 為第幾個日曆日；business_day_of_month 為第幾個工作日 */
+	dueDay: integer("due_day"),
 }, (table) => [
 	foreignKey({
 			columns: [table.customerPartyId],
@@ -460,6 +477,11 @@ export const contracts = pgTable("contracts", {
 			name: "contracts_project_id_fkey"
 		}),
 	check("chk_contract_status", sql`status = ANY (ARRAY['draft'::text, 'active'::text, 'completed'::text, 'cancelled'::text])`),
+	check("chk_contract_billing_plan", sql`billing_plan IS NULL OR billing_plan = ANY (ARRAY['single'::text, 'installments'::text, 'milestones'::text, 'subscription'::text])`),
+	check("chk_contract_installment_count", sql`installment_count IS NULL OR (installment_count >= 1 AND installment_count <= 60)`),
+	check("chk_contract_billing_interval", sql`billing_interval_months >= 1 AND billing_interval_months <= 12`),
+	check("chk_contract_due_rule", sql`due_rule = ANY (ARRAY['signed_date'::text, 'day_of_month'::text, 'business_day_of_month'::text])`),
+	check("chk_contract_due_day", sql`due_day IS NULL OR (due_day >= 1 AND due_day <= 31)`),
 ]);
 
 // ---- 請款項目（migrations/0017）：一次性合約分期 / 專案里程碑 / 臨時請款。

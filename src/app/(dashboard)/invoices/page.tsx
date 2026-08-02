@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Scale } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { TableCard } from "@/components/table-card";
 import { EmptyRow } from "@/components/empty-state";
@@ -39,6 +40,26 @@ const statusVariant: Record<string, "default" | "secondary" | "outline" | "destr
   allowance: "outline",
 };
 
+// Simpany（外部發票系統）的開立狀態。進項發票用不到，顯示成一條破折號。
+const externalLabel: Record<string, string> = {
+  pending: "待開立",
+  issued: "已開立",
+  void: "已作廢",
+  n_a: "—",
+};
+
+function ExternalStatusBadge({ status }: Readonly<{ status: string }>) {
+  if (status === "n_a") return <span className="text-xs text-muted-foreground">—</span>;
+  if (status === "pending") {
+    return (
+      <Badge variant="outline" className="border-expense/40 text-expense">
+        待開立
+      </Badge>
+    );
+  }
+  return <Badge variant="outline">{externalLabel[status] ?? status}</Badge>;
+}
+
 const directions = [
   { key: "issued" as const, label: "開給客戶" },
   { key: "received" as const, label: "廠商開給我" },
@@ -68,6 +89,11 @@ export default async function InvoicesPage({
   return (
     <>
       <PageHeader title="發票" description="開給客戶與廠商開給我的發票，點列可編輯">
+        <Button asChild size="sm" variant="outline">
+          <Link href="/invoices/reconcile">
+            <Scale className="size-4" /> Simpany 對帳
+          </Link>
+        </Button>
         <NewInvoiceDialog
           parties={partyOptions}
           contracts={contractOptions}
@@ -97,12 +123,13 @@ export default async function InvoicesPage({
               <TableHead>發票號碼</TableHead>
               <TableHead className="text-right">含稅金額</TableHead>
               <TableHead>對應請款</TableHead>
+              <TableHead>Simpany</TableHead>
               <TableHead>狀態</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <EmptyRow colSpan={6} message="尚無發票">
+              <EmptyRow colSpan={7} message="尚無發票">
                 點右上角新增
               </EmptyRow>
             ) : (
@@ -129,6 +156,9 @@ export default async function InvoicesPage({
                         {inv.billingItemTitle ?? inv.contractTitle ?? "—"}
                       </TableCell>
                       <TableCell>
+                        <ExternalStatusBadge status={inv.externalStatus} />
+                      </TableCell>
+                      <TableCell>
                         <Badge variant={statusVariant[inv.status] ?? "outline"}>
                           {statusLabel[inv.status] ?? inv.status}
                         </Badge>
@@ -153,6 +183,7 @@ export default async function InvoicesPage({
                       note: inv.note,
                       contractId: inv.contractId,
                       billingItemId: inv.billingItemId,
+                      externalStatus: inv.externalStatus,
                     }}
                     parties={partyOptions}
                     contracts={contractOptions}

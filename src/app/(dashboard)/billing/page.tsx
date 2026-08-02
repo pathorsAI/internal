@@ -33,6 +33,8 @@ import { SummaryCards, type BoardFilter } from "./summary-cards";
 import { NewBillingItemDialog } from "./new-billing-item-dialog";
 import { EditBillingItemForm } from "./edit-billing-item-form";
 import { QuickMark } from "./quick-actions";
+import { IssueInvoiceDialog } from "./issue-invoice-dialog";
+import { RecordPaymentDialog } from "./record-payment-dialog";
 import { SyncCalendarButton } from "./sync-calendar-button";
 
 export const dynamic = "force-dynamic";
@@ -94,6 +96,55 @@ function InvoiceCell({ row }: Readonly<{ row: BillingRow }>) {
     );
   }
   return <span className="text-xs text-muted-foreground">—</span>;
+}
+
+/**
+ * 就地推進：一列一次只提示「下一步該做什麼」，做完才換下一顆按鈕。
+ *
+ *   還沒請款 → 標記已請款
+ *   已請款   → 登記收款（有缺口時）＋ 開發票（該開未開時）
+ *
+ * 開發票走預填草稿，只有 billing_items 有實體列可綁；訂閱期別沒有 id 可綁，
+ * 退回單純的日期標記，發票本身到發票頁建立。
+ */
+function RowActions({ row }: Readonly<{ row: BillingRow }>) {
+  const itemId = row.source === "billing_item" ? row.billingItemId : null;
+  const outstanding = row.expected - row.paid;
+
+  if (!row.billedOn) {
+    return <QuickMark rowKey={row.key} field="billedOn" value={null} />;
+  }
+
+  return (
+    <>
+      {outstanding > 0 && (
+        <RecordPaymentDialog
+          rowKey={row.key}
+          expected={row.expected}
+          paid={row.paid}
+          currency={row.currency}
+          customerPartyId={row.customerPartyId}
+          customerName={row.customerName}
+        />
+      )}
+      {row.needsInvoice &&
+        (itemId != null ? (
+          <IssueInvoiceDialog
+            billingItemId={itemId}
+            contractId={row.contractId}
+            customerPartyId={row.customerPartyId}
+            customerName={row.customerName}
+            customerTaxId={row.customerTaxId}
+            title={row.title}
+            expected={row.expected}
+            currency={row.currency}
+          />
+        ) : (
+          <QuickMark rowKey={row.key} field="invoicedOn" value={row.invoicedOn} />
+        ))}
+      <QuickMark rowKey={row.key} field="billedOn" value={row.billedOn} />
+    </>
+  );
 }
 
 export default async function BillingPage({
@@ -160,7 +211,7 @@ export default async function BillingPage({
               <TableHead>已收 / 應收</TableHead>
               <TableHead>狀態</TableHead>
               <TableHead>發票</TableHead>
-              <TableHead>快捷</TableHead>
+              <TableHead>下一步</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -196,6 +247,10 @@ export default async function BillingPage({
                       {row.billedOn && (
                         <div className="text-xs text-muted-foreground">
                           已請款 {formatDate(row.billedOn)}
+                          {/* 有月結條件時期限會晚於應請款日，直接寫出來免得自己推算 */}
+                          {row.deadline && row.deadline !== row.dueDate && (
+                            <> · 期限 {formatDate(row.deadline)}</>
+                          )}
                         </div>
                       )}
                     </TableCell>
@@ -210,8 +265,7 @@ export default async function BillingPage({
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
-                        <QuickMark rowKey={row.key} field="billedOn" value={row.billedOn} />
-                        <QuickMark rowKey={row.key} field="invoicedOn" value={row.invoicedOn} />
+                        <RowActions row={row} />
                       </div>
                     </TableCell>
                   </>

@@ -30,7 +30,16 @@ export type InvoiceFormValues = {
   note: string | null;
   contractId: number | null;
   billingItemId: number | null;
+  externalStatus?: string | null;
 };
+
+/** Simpany（外部發票系統）的開立狀態。本系統不開票，只追這一欄。 */
+const EXTERNAL_STATUS_OPTIONS = [
+  { value: "pending", label: "待開立" },
+  { value: "issued", label: "已開立" },
+  { value: "void", label: "已作廢" },
+  { value: "n_a", label: "不適用" },
+];
 
 /** 新增與編輯共用的發票欄位群。 */
 export function InvoiceFields({
@@ -82,13 +91,29 @@ export function InvoiceFields({
         </Select>
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="inv-number">發票號碼</Label>
+        <Label htmlFor="inv-number">發票號碼（Simpany 單號）</Label>
         <Input
           id="inv-number"
           name="invoiceNumber"
           placeholder="例：AB-12345678"
           defaultValue={values?.invoiceNumber ?? ""}
         />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label>Simpany 開立狀態</Label>
+        <Select name="externalStatus" defaultValue={values?.externalStatus ?? "pending"}>
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {EXTERNAL_STATUS_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="space-y-1.5">

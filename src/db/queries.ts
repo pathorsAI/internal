@@ -438,6 +438,8 @@ export async function listInvoicesDetailed(
       contractTitle: contracts.title,
       billingItemId: invoices.billingItemId,
       billingItemTitle: billingItems.title,
+      externalStatus: invoices.externalStatus,
+      externalRef: invoices.externalRef,
     })
     .from(invoices)
     .leftJoin(parties, eq(parties.id, invoices.partyId))
@@ -454,6 +456,76 @@ export async function listInvoicesDetailed(
     .limit(limit);
   // 有綁 party 就以 parties.name 為準，否則退回手 key 的 counterparty_name。
   return rows.map((r) => ({ ...r, displayName: r.partyName ?? r.counterpartyName }));
+}
+
+// ============================================================================
+// Simpany 發票對帳（migrations/0019）
+//
+// Simpany 是發票的真相來源，本系統不假裝能開票。這裡回答兩個問題：
+//   1. 「該開卻還沒開」—— 已請款、需要發票、系統裡卻沒有對應發票的請款項目
+//   2. 「開了沒對上」—— 本系統有紀錄但 Simpany 沒有，或反過來（靠匯出檔比對）
+// ============================================================================
+
+export type MissingInvoiceRow = {
+  key: string;
+  billingItemId: number | null;
+  customerName: string | null;
+  title: string;
+  billedOn: string | null;
+  amount: number;
+  currency: string;
+};
+
+/**
+ * 該開未開清單：已請款（或已收到錢）、需要發票、卻還沒有開發票日的請款項目。
+ * 資料來源就是看板本身的 needsInvoice —— 兩邊用同一個判準，不會各說各話。
+ */
+export async function listMissingInvoices(orgId: string): Promise<MissingInvoiceRow[]> {
+  const rows = await listBillingBoard(orgId, { includeAllHistory: true });
+  return rows
+    .filter((r) => r.needsInvoice)
+    .map((r) => ({
+      key: r.key,
+      billingItemId: r.billingItemId,
+      customerName: r.customerName,
+      title: r.title,
+      billedOn: r.billedOn,
+      amount: r.expected,
+      currency: r.currency,
+    }));
+}
+
+/** 本系統這邊的銷項發票，供與 Simpany 匯出檔比對。 */
+export async function listIssuedInvoicesForReconcile(orgId: string) {
+  const db = getDb();
+  const rows = await db
+    .select({
+      id: invoices.id,
+      invoiceNumber: invoices.invoiceNumber,
+      invoiceDate: invoices.invoiceDate,
+      amountGross: invoices.amountGross,
+      currency: invoices.currency,
+      status: invoices.status,
+      externalStatus: invoices.externalStatus,
+      externalRef: invoices.externalRef,
+      counterpartyName: invoices.counterpartyName,
+      partyName: parties.name,
+    })
+    .from(invoices)
+    .leftJoin(parties, eq(parties.id, invoices.partyId))
+    .where(
+      and(
+        eq(invoices.organizationId, orgId),
+        eq(invoices.direction, "issued"),
+        isNull(invoices.deletedAt),
+      ),
+    )
+    .orderBy(desc(invoices.invoiceDate), desc(invoices.id));
+  return rows.map((r) => ({
+    ...r,
+    amountGross: r.amountGross == null ? null : Number(r.amountGross),
+    displayName: r.partyName ?? r.counterpartyName,
+  }));
 }
 
 /** 尚未開發票的請款項目，給發票表單的「對應請款」下拉用。 */
@@ -1223,6 +1295,12 @@ export async function listContracts(orgId: string) {
       status: contracts.status,
       note: contracts.note,
       fileUrl: contracts.fileUrl,
+      billingPlan: contracts.billingPlan,
+      installmentCount: contracts.installmentCount,
+      installmentSplit: contracts.installmentSplit,
+      billingIntervalMonths: contracts.billingIntervalMonths,
+      dueRule: contracts.dueRule,
+      dueDay: contracts.dueDay,
       received: receivedSum,
       cost: costSum,
     })
@@ -1276,12 +1354,17 @@ export type BillingRow = {
   periodStart: string | null;
   customerPartyId: number | null;
   customerName: string | null;
+  /** 開發票草稿要預填的統編 */
+  customerTaxId: string | null;
   title: string;
   contractId: number | null;
   contractTitle: string | null;
   projectId: number | null;
   projectName: string | null;
   dueDate: string | null;
+  /** 應該收到錢的那天：有付款條件就是「實際請款日 + 月結天數」，否則退回應請款日。
+   *  逾期判斷與應收帳齡都以此為準，兩邊不會各算各的。 */
+  deadline: string | null;
   billedOn: string | null;
   paidOn: string | null;
   invoicedOn: string | null;
@@ -1305,6 +1388,17 @@ export type BillingRow = {
  * 逾期的判斷基準：有付款條件（月結 N 天）就用「實際請款日 + N 天」，
  * 否則退回應請款日。兩者都沒有就永遠不算逾期（無從判斷）。
  */
+export function billingDeadline(input: {
+  dueDate: string | null;
+  billedOn: string | null;
+  paymentTermsDays: number | null;
+}): string | null {
+  const { dueDate, billedOn, paymentTermsDays } = input;
+  return billedOn && paymentTermsDays != null
+    ? format(addDays(parseISO(billedOn), paymentTermsDays), "yyyy-MM-dd")
+    : dueDate;
+}
+
 export function deriveBillingStatus(
   input: {
     dueDate: string | null;
@@ -1316,21 +1410,30 @@ export function deriveBillingStatus(
   },
   today: string,
 ): BillingItemStatus {
-  const { dueDate, billedOn, expected, paid, paymentTermsDays } = input;
+  const { dueDate, billedOn, expected, paid } = input;
   if (paid >= expected && expected > 0) return "paid";
   if (paid > 0) return "partial";
 
-  const deadline =
-    billedOn && paymentTermsDays != null
-      ? format(addDays(parseISO(billedOn), paymentTermsDays), "yyyy-MM-dd")
-      : dueDate;
+  const deadline = billingDeadline(input);
   if (billedOn) return deadline != null && deadline < today ? "overdue" : "billed";
   if (dueDate != null && dueDate <= today) return "due";
   return "upcoming";
 }
 
+/**
+ * 這一期「已經動過」了嗎 —— 請過款、開過票、或收到過錢。
+ *
+ * 合約按「重新產生排程」時，動過的期別一律不刪：那些日期與金額背後有實際發生的
+ * 事（帳單寄出去了、發票開了、錢進來了），被計畫覆寫等於竄改紀錄。
+ */
+export function isLockedScheduleRow(
+  row: Pick<BillingRow, "billedOn" | "paidOn" | "invoicedOn" | "paid">,
+): boolean {
+  return row.billedOn != null || row.paidOn != null || row.invoicedOn != null || row.paid > 0;
+}
+
 /** 各請款項目已收金額：綁定該項目、type=income 的交易加總。 */
-async function billingItemPaidById(orgId: string): Promise<Map<number, number>> {
+export async function billingItemPaidById(orgId: string): Promise<Map<number, number>> {
   const db = getDb();
   const rows = await db
     .select({
@@ -1449,6 +1552,7 @@ export async function listBillingBoard(
         id: billingItems.id,
         customerPartyId: billingItems.customerPartyId,
         customerName: parties.name,
+        customerTaxId: parties.taxId,
         contractId: billingItems.contractId,
         contractTitle: contracts.title,
         paymentTermsDays: contracts.paymentTermsDays,
@@ -1478,6 +1582,7 @@ export async function listBillingBoard(
         name: subscriptions.name,
         customerPartyId: subscriptions.customerPartyId,
         customerName: parties.name,
+        customerTaxId: parties.taxId,
         projectId: subscriptions.projectId,
         projectName: projects.name,
         amount: subscriptions.amount,
@@ -1519,12 +1624,18 @@ export async function listBillingBoard(
       periodStart: null,
       customerPartyId: it.customerPartyId,
       customerName: it.customerName,
+      customerTaxId: it.customerTaxId,
       title: it.title,
       contractId: it.contractId,
       contractTitle: it.contractTitle,
       projectId: it.projectId,
       projectName: it.projectName,
       dueDate: it.dueDate,
+      deadline: billingDeadline({
+        dueDate: it.dueDate,
+        billedOn: it.billedOn,
+        paymentTermsDays: it.paymentTermsDays,
+      }),
       billedOn: it.billedOn,
       paidOn: it.paidOn,
       invoicedOn: it.invoicedOn,
@@ -1567,12 +1678,15 @@ export async function listBillingBoard(
         periodStart: p.periodStart,
         customerPartyId: sub.customerPartyId,
         customerName: sub.customerName,
+        customerTaxId: sub.customerTaxId,
         title: `${sub.name}（${p.periodLabel}）`,
         contractId: null,
         contractTitle: null,
         projectId: sub.projectId,
         projectName: sub.projectName,
         dueDate,
+        // 訂閱沒有付款條件欄位，期限就是該期的應請款日。
+        deadline: dueDate,
         billedOn: p.billedOn,
         paidOn: null,
         invoicedOn: p.invoicedOn,
@@ -1631,6 +1745,199 @@ export function summarizeBilling(rows: BillingRow[]): BillingSummary {
     if (r.needsInvoice) add(out.needsInvoice, r.currency, r.expected);
   }
   return out;
+}
+
+// ============================================================================
+// 收入循環的三張報表（migrations/0019）
+//
+// 都建立在既有的看板資料之上，不另外開一本帳 —— 報表跟看板永遠是同一組數字。
+// 金額一律依幣別分開，本系統不做匯率換算。
+// ============================================================================
+
+/** 應收帳齡的分桶，以「應該收到錢的那天」起算的逾期天數為準。 */
+export const AGING_BUCKETS = ["current", "d1_30", "d31_60", "d61_90", "d90p"] as const;
+export type AgingBucket = (typeof AGING_BUCKETS)[number];
+
+export const AGING_LABELS: Record<AgingBucket, string> = {
+  current: "未逾期",
+  d1_30: "1–30 天",
+  d31_60: "31–60 天",
+  d61_90: "61–90 天",
+  d90p: "90 天以上",
+};
+
+export type AgingRow = {
+  customerPartyId: number | null;
+  customerName: string;
+  currency: string;
+  buckets: Record<AgingBucket, number>;
+  total: number;
+};
+
+function bucketOf(daysOverdue: number): AgingBucket {
+  if (daysOverdue <= 0) return "current";
+  if (daysOverdue <= 30) return "d1_30";
+  if (daysOverdue <= 60) return "d31_60";
+  if (daysOverdue <= 90) return "d61_90";
+  return "d90p";
+}
+
+/**
+ * 應收帳齡：誰欠我錢、欠多久了。
+ *
+ * 帳齡的基準日跟看板判斷逾期用同一個 —— 有付款條件就是「實際請款日 + 月結天數」，
+ * 否則退回應請款日。沒有任何日期可依據的項目歸到「未逾期」，不會憑空算出天數。
+ * 只算已請款而未收齊的部分：還沒請款的不叫應收帳款。
+ */
+export function computeReceivableAging(rows: BillingRow[], today: string): AgingRow[] {
+  const byKey = new Map<string, AgingRow>();
+
+  for (const r of rows) {
+    if (r.billedOn == null) continue;
+    const outstanding = r.expected - r.paid;
+    if (outstanding <= 0) continue;
+
+    const deadline = r.deadline;
+    const daysOverdue =
+      deadline == null
+        ? 0
+        : Math.floor(
+            (parseISO(today).getTime() - parseISO(deadline).getTime()) / (24 * 60 * 60 * 1000),
+          );
+    const key = `${r.customerPartyId ?? 0}:${r.currency}`;
+    const entry = byKey.get(key) ?? {
+      customerPartyId: r.customerPartyId,
+      customerName: r.customerName ?? "（未指定客戶）",
+      currency: r.currency,
+      buckets: { current: 0, d1_30: 0, d31_60: 0, d61_90: 0, d90p: 0 },
+      total: 0,
+    };
+    entry.buckets[bucketOf(daysOverdue)] += outstanding;
+    entry.total += outstanding;
+    byKey.set(key, entry);
+  }
+
+  return [...byKey.values()].sort((a, b) => b.total - a.total);
+}
+
+export type TaxPeriodSummary = {
+  /** 本系統認為這期該開的（已請款、需要發票的請款項目） */
+  shouldIssue: { count: number; amount: number };
+  /** 這期已經開出去的銷項發票（含稅） */
+  issued: { count: number; amount: number };
+  /** 已建立但 Simpany 還沒開 */
+  pending: { count: number; amount: number };
+  /** 該開卻連發票紀錄都還沒有的請款項目 */
+  missing: { count: number; amount: number };
+};
+
+/**
+ * 某一個營業稅期（雙月）的發票概況。
+ *
+ * 「該開」以請款項目的實際請款日落在本期為準 —— 發票開立時點跟著請款走，
+ * 這也是決定它落在哪一期申報的依據。TWD 以外的幣別不進這張表：營業稅只管台幣。
+ */
+export async function summarizeTaxPeriod(
+  orgId: string,
+  board: BillingRow[],
+  start: string,
+  end: string,
+): Promise<TaxPeriodSummary> {
+  const invoiceRows = await getDb()
+    .select({
+      amountGross: invoices.amountGross,
+      externalStatus: invoices.externalStatus,
+    })
+    .from(invoices)
+    .where(
+      and(
+        eq(invoices.organizationId, orgId),
+        eq(invoices.direction, "issued"),
+        eq(invoices.status, "valid"),
+        isNull(invoices.deletedAt),
+        sql`${invoices.invoiceDate} between ${start} and ${end}`,
+        eq(invoices.currency, "TWD"),
+      ),
+    );
+
+  const inPeriod = board.filter(
+    (r) =>
+      r.currency === "TWD" &&
+      r.billedOn != null &&
+      r.billedOn >= start &&
+      r.billedOn <= end,
+  );
+  const shouldIssueRows = inPeriod.filter((r) => r.invoicedOn != null || r.needsInvoice);
+  const missingRows = inPeriod.filter((r) => r.needsInvoice);
+
+  const sum = (rows: { expected: number }[]) => rows.reduce((s, r) => s + r.expected, 0);
+  const pendingRows = invoiceRows.filter((i) => i.externalStatus === "pending");
+  const gross = (rows: { amountGross: string | null }[]) =>
+    rows.reduce((s, r) => s + (r.amountGross == null ? 0 : Number(r.amountGross)), 0);
+
+  return {
+    shouldIssue: { count: shouldIssueRows.length, amount: sum(shouldIssueRows) },
+    issued: { count: invoiceRows.length, amount: gross(invoiceRows) },
+    pending: { count: pendingRows.length, amount: gross(pendingRows) },
+    missing: { count: missingRows.length, amount: sum(missingRows) },
+  };
+}
+
+export type ContractCoverageRow = {
+  id: number;
+  title: string;
+  customerName: string | null;
+  currency: string;
+  amount: number | null;
+  scheduled: number;
+  billed: number;
+  paid: number;
+  /** 合約金額 − 已排程；> 0 表示有錢沒排進來 */
+  unscheduled: number | null;
+};
+
+/**
+ * 合約完整性：合約談了多少、排了多少、請了多少、收了多少。
+ *
+ * 這是最容易漏錢的一道對帳 —— 合約談 100 萬只排了 80 萬的請款，沒有人會提醒你。
+ * 沒填合約金額的合約 unscheduled 為 null（無從比較），不會假裝算得出差額。
+ */
+export async function listContractCoverage(
+  orgId: string,
+  board: BillingRow[],
+): Promise<ContractCoverageRow[]> {
+  const contractRows = await listContracts(orgId);
+
+  const byContract = new Map<number, BillingRow[]>();
+  for (const r of board) {
+    if (r.source !== "billing_item" || r.contractId == null) continue;
+    const list = byContract.get(r.contractId) ?? [];
+    list.push(r);
+    byContract.set(r.contractId, list);
+  }
+
+  return contractRows
+    .filter((c) => c.status !== "cancelled")
+    .map((c) => {
+      const items = byContract.get(c.id) ?? [];
+      const scheduled = items.reduce((s, r) => s + r.expected, 0);
+      const billed = items.filter((r) => r.billedOn != null).reduce((s, r) => s + r.expected, 0);
+      const amount = c.amount == null ? null : Number(c.amount);
+      return {
+        id: c.id,
+        title: c.title,
+        customerName: c.customerName,
+        currency: c.currency,
+        amount,
+        scheduled,
+        billed,
+        // 已收金額沿用合約頁的口徑（綁定此合約、同幣別的收入交易），
+        // 這樣「合約收了多少」在兩個畫面上是同一個數字。
+        paid: c.received,
+        unscheduled: amount == null ? null : Math.round((amount - scheduled) * 100) / 100,
+      };
+    })
+    .sort((a, b) => (b.unscheduled ?? -1) - (a.unscheduled ?? -1));
 }
 
 /** 單一合約底下的分期請款項目（合約編輯 dialog 用）。 */

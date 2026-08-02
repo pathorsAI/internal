@@ -18,9 +18,16 @@ export function CurrencySelect({
   name = "currency",
   defaultValue = DEFAULT_CURRENCY,
   id,
-}: Readonly<{ name?: string; defaultValue?: string; id?: string }>) {
+  onValueChange,
+}: Readonly<{
+  name?: string;
+  defaultValue?: string;
+  id?: string;
+  /** 選到幣別時通知外層（連動預覽用） */
+  onValueChange?: (code: string) => void;
+}>) {
   return (
-    <Select name={name} defaultValue={defaultValue}>
+    <Select name={name} defaultValue={defaultValue} onValueChange={onValueChange}>
       <SelectTrigger id={id} className="w-full">
         <SelectValue />
       </SelectTrigger>

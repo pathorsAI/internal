@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { toast } from "sonner";
 import { updateContract, type ActionState } from "@/db/mutations";
 import { formatCurrency } from "@/lib/format";
@@ -20,6 +20,10 @@ import {
 } from "@/components/ui/select";
 import { CurrencySelect } from "@/components/currency-select";
 import { submitAction } from "@/lib/form-action";
+import {
+  ContractBillingPlanFields,
+  type BillingPlanDefaults,
+} from "./contract-billing-plan";
 
 const initial: ActionState = { ok: false };
 
@@ -37,13 +41,15 @@ type Contract = {
   status: string;
   note: string | null;
   fileUrl: string | null;
-};
+} & BillingPlanDefaults;
 
 export function EditContractForm({
   contract,
   parties,
   projects,
   summary,
+  scheduleCount = 0,
+  lockedScheduleCount = 0,
   extra,
   footer,
 }: Readonly<{
@@ -51,11 +57,19 @@ export function EditContractForm({
   parties: { id: number; name: string }[];
   projects: { id: number; name: string }[];
   summary?: { received: number; cost: number; remaining: number | null };
+  /** 這張合約已有幾筆請款項目，以及其中已動過（不可重排）的筆數 */
+  scheduleCount?: number;
+  lockedScheduleCount?: number;
   /** 額外區塊（分期請款清單），由 Server Component 傳進來 */
   extra?: React.ReactNode;
   footer?: React.ReactNode;
 }>) {
   const close = useRowDialogClose();
+  // 受控欄位：請款方式區塊要靠它們即時算出排程預覽。
+  const [amount, setAmount] = useState(contract.amount ?? "");
+  const [currency, setCurrency] = useState(contract.currency);
+  const [signedDate, setSignedDate] = useState(contract.signedDate ?? "");
+  const [startDate, setStartDate] = useState(contract.startDate ?? "");
 
   // 成功/失敗處理放在 action 內（跑在 transition 裡），不用 useEffect ——
   // 既避免 effect 內 setState 的串聯 render，也讓每次送出都必定各吐一次 toast
@@ -143,11 +157,18 @@ export function EditContractForm({
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="amount">合約金額</Label>
-        <Input id="amount" name="amount" type="number" step="0.01" defaultValue={contract.amount ?? ""} />
+        <Input
+          id="amount"
+          name="amount"
+          type="number"
+          step="0.01"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+        />
       </div>
       <div className="space-y-1.5">
         <Label>幣別</Label>
-        <CurrencySelect defaultValue={contract.currency} />
+        <CurrencySelect defaultValue={contract.currency} onValueChange={setCurrency} />
       </div>
       <div className="space-y-1.5">
         <Label>狀態</Label>
@@ -168,7 +189,13 @@ export function EditContractForm({
       </div>
       <div className="space-y-1.5">
         <Label>簽約日</Label>
-        <DatePicker name="signedDate" allowEmpty placeholder="— 無 —" defaultValue={contract.signedDate ?? undefined} />
+        <DatePicker
+          name="signedDate"
+          allowEmpty
+          placeholder="— 無 —"
+          defaultValue={contract.signedDate ?? undefined}
+          onValueChange={setSignedDate}
+        />
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="paymentTermsDays">付款條件（天）</Label>
@@ -183,7 +210,13 @@ export function EditContractForm({
       </div>
       <div className="space-y-1.5">
         <Label>開始日期</Label>
-        <DatePicker name="startDate" allowEmpty placeholder="— 無 —" defaultValue={contract.startDate ?? undefined} />
+        <DatePicker
+          name="startDate"
+          allowEmpty
+          placeholder="— 無 —"
+          defaultValue={contract.startDate ?? undefined}
+          onValueChange={setStartDate}
+        />
       </div>
       <div className="space-y-1.5">
         <Label>結束日期</Label>
@@ -203,6 +236,16 @@ export function EditContractForm({
           placeholder="https://drive.google.com/…"
         />
       </div>
+
+      <ContractBillingPlanFields
+        amount={amount}
+        currency={currency}
+        signedDate={signedDate}
+        startDate={startDate}
+        defaults={contract}
+        existingCount={scheduleCount}
+        lockedCount={lockedScheduleCount}
+      />
 
       {extra}
 

@@ -41,8 +41,14 @@ import { OrgSwitcher } from "@/components/org-switcher";
 import { UserMenu } from "@/components/user-menu";
 import { Logo } from "@/components/logo";
 
-const nav = [
+// 每天都會開的兩頁放最上面。請款看板是收入循環的日常操作面 —— 請款、開票、
+// 收款都在那一頁就地推進，不該埋在「客戶 / 營運」底下跟不常動的資源頁並列。
+const daily = [
   { title: "總覽", href: "/", icon: LayoutDashboard },
+  { title: "請款看板", href: "/billing", icon: CalendarClock },
+];
+
+const nav = [
   { title: "內外帳", href: "/transactions", icon: ArrowLeftRight },
   { title: "交易對象", href: "/parties", icon: Truck },
   { title: "分類", href: "/categories", icon: Tags },
@@ -53,7 +59,6 @@ const nav = [
 ];
 
 const clients = [
-  { title: "請款看板", href: "/billing", icon: CalendarClock },
   { title: "專案", href: "/projects", icon: FolderKanban },
   { title: "訂閱 / 月費", href: "/subscriptions", icon: Repeat },
   { title: "合約", href: "/contracts", icon: FileSignature },
@@ -92,6 +97,24 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupLabel>日常</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {daily.map((item) => (
+                <SidebarMenuItem key={item.href}>
+                  <SidebarMenuButton asChild isActive={isActive(item.href)}>
+                    <Link href={item.href}>
+                      <item.icon />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
         <SidebarGroup>
           <SidebarGroupLabel>會計</SidebarGroupLabel>
           <SidebarGroupContent>
