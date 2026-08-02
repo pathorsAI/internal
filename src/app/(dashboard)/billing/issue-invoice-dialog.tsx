@@ -47,7 +47,6 @@ function todayISO() {
 export function IssueInvoiceDialog({
   billingItemId,
   contractId,
-  customerPartyId,
   customerName,
   customerTaxId,
   title,
@@ -56,7 +55,6 @@ export function IssueInvoiceDialog({
 }: Readonly<{
   billingItemId: number;
   contractId: number | null;
-  customerPartyId: number | null;
   customerName: string | null;
   customerTaxId: string | null;
   title: string;
@@ -113,9 +111,9 @@ export function IssueInvoiceDialog({
           <input type="hidden" name="currency" value={currency} />
           <input type="hidden" name="billingItemId" value={billingItemId} />
           {contractId != null && <input type="hidden" name="contractId" value={contractId} />}
-          {customerPartyId != null && (
-            <input type="hidden" name="partyId" value={customerPartyId} />
-          )}
+          {/* 對象一律以名稱送出（與其他表單一致）；這一期已經有客戶了，所以查得到既有那筆，
+              不會多建一個。 */}
+          <input type="hidden" name="partyName" value={customerName ?? ""} />
           <input type="hidden" name="counterpartyName" value={customerName ?? ""} />
           <input type="hidden" name="amountNet" value={net} />
           <input type="hidden" name="tax" value={tax} />

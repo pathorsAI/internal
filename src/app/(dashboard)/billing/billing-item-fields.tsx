@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Req } from "@/components/req";
 import { DatePicker } from "@/components/date-picker";
 import { CurrencySelect } from "@/components/currency-select";
+import { PartyField } from "@/components/party-combobox";
 import {
   Select,
   SelectContent,
@@ -17,6 +18,8 @@ export type Option = { id: number; name: string };
 
 export type BillingItemFormValues = {
   customerPartyId: number | null;
+  /** 目前綁定的客戶名稱，給 PartyCombobox 預填 */
+  customerName: string | null;
   contractId: number | null;
   projectId: number | null;
   title: string;
@@ -51,24 +54,12 @@ export function BillingItemFields({
 }>) {
   return (
     <>
-      <div className="space-y-1.5">
-        <Label>客戶<Req /></Label>
-        <Select
-          name="customerPartyId"
-          defaultValue={values?.customerPartyId == null ? undefined : String(values.customerPartyId)}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="選擇客戶" />
-          </SelectTrigger>
-          <SelectContent>
-            {parties.map((p) => (
-              <SelectItem key={p.id} value={String(p.id)}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      <PartyField
+        parties={parties}
+        name="customerPartyName"
+        required
+        defaultName={values?.customerName ?? ""}
+      />
 
       <div className="space-y-1.5">
         <Label htmlFor="bi-title">項目名稱<Req /></Label>

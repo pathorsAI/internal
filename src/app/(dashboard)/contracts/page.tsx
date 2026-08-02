@@ -188,6 +188,7 @@ export default async function ContractsPage() {
                     contract={{
                       id: c.id,
                       customerPartyId: c.customerPartyId,
+                      customerName: c.customerName,
                       projectId: c.projectId,
                       title: c.title,
                       amount: c.amount,

@@ -10,6 +10,7 @@ import { Req } from "@/components/req";
 import { DialogFooter } from "@/components/ui/dialog";
 import { submitAction } from "@/lib/form-action";
 import { useRowDialogClose } from "@/components/row-dialog";
+import { PartyField } from "@/components/party-combobox";
 import {
   Select,
   SelectContent,
@@ -24,6 +25,8 @@ type Project = {
   id: number;
   name: string;
   clientPartyId: number | null;
+  /** 目前綁定的客戶名稱，給 PartyCombobox 預填 */
+  clientName: string | null;
   status: string;
   description: string | null;
 };
@@ -64,24 +67,11 @@ export function EditProjectForm({
         <Label htmlFor="name">專案名稱<Req /></Label>
         <Input id="name" name="name" required defaultValue={project.name} />
       </div>
-      <div className="space-y-1.5">
-        <Label>客戶</Label>
-        <Select
-          name="clientPartyId"
-          defaultValue={project.clientPartyId == null ? undefined : String(project.clientPartyId)}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="— 未指定 —" />
-          </SelectTrigger>
-          <SelectContent>
-            {parties.map((p) => (
-              <SelectItem key={p.id} value={String(p.id)}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      <PartyField
+        parties={parties}
+        name="clientPartyName"
+        defaultName={project.clientName ?? ""}
+      />
       <div className="space-y-1.5">
         <Label>狀態</Label>
         <Select name="status" defaultValue={project.status}>

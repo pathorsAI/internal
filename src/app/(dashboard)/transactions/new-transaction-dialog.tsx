@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/sheet";
 import { DatePicker } from "@/components/date-picker";
 import { submitAction } from "@/lib/form-action";
-import { PartyCombobox } from "./party-combobox";
+import { PartyCombobox } from "@/components/party-combobox";
 import { CategoryCombobox } from "./category-combobox";
 import { ContractCombobox, type ContractOption } from "./contract-combobox";
 

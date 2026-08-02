@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Req } from "@/components/req";
 import { DatePicker } from "@/components/date-picker";
 import { CurrencySelect } from "@/components/currency-select";
+import { PartyField } from "@/components/party-combobox";
 import {
   Select,
   SelectContent,
@@ -20,6 +21,8 @@ export type InvoiceFormValues = {
   invoiceNumber: string | null;
   invoiceDate: string | null;
   partyId: number | null;
+  /** 目前綁定的對象名稱，給 PartyCombobox 預填 */
+  partyName: string | null;
   counterpartyName: string | null;
   counterpartyTaxId: string | null;
   amountNet: string | null;
@@ -72,24 +75,12 @@ export function InvoiceFields({
         <DatePicker name="invoiceDate" defaultValue={values?.invoiceDate ?? undefined} />
       </div>
 
-      <div className="space-y-1.5">
-        <Label>對象</Label>
-        <Select
-          name="partyId"
-          defaultValue={values?.partyId == null ? undefined : String(values.partyId)}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="— 未指定 —" />
-          </SelectTrigger>
-          <SelectContent>
-            {parties.map((p) => (
-              <SelectItem key={p.id} value={String(p.id)}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      <PartyField
+        parties={parties}
+        name="partyName"
+        label="對象"
+        defaultName={values?.partyName ?? ""}
+      />
       <div className="space-y-1.5">
         <Label htmlFor="inv-number">發票號碼（Simpany 單號）</Label>
         <Input
