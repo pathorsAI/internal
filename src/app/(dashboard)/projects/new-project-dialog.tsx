@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { submitAction } from "@/lib/form-action";
 import { Req } from "@/components/req";
+import { PartyCombobox } from "@/components/party-combobox";
 import {
   Select,
   SelectContent,
@@ -72,18 +73,11 @@ export function NewProjectDialog({
             </div>
             <div className="space-y-1.5">
               <Label>客戶</Label>
-              <Select name="clientPartyId">
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="— 未指定 —" />
-                </SelectTrigger>
-                <SelectContent>
-                  {parties.map((p) => (
-                    <SelectItem key={p.id} value={String(p.id)}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <PartyCombobox
+                parties={parties}
+                name="clientPartyName"
+                placeholder="輸入或選擇客戶（選填）…"
+              />
             </div>
             <div className="space-y-1.5">
               <Label>狀態</Label>

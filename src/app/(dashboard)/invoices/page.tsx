@@ -173,6 +173,7 @@ export default async function InvoicesPage({
                       invoiceNumber: inv.invoiceNumber,
                       invoiceDate: inv.invoiceDate,
                       partyId: inv.partyId,
+                      partyName: inv.partyName ?? inv.counterpartyName,
                       counterpartyName: inv.counterpartyName,
                       counterpartyTaxId: inv.counterpartyTaxId,
                       amountNet: inv.amountNet,

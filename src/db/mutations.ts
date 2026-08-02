@@ -183,6 +183,28 @@ async function getOrCreateParty(
   return created.id;
 }
 
+/**
+ * 表單上的「客戶」欄一律收名稱而不是 id：使用者可以直接打一個新客戶，存檔時才
+ * 建立，不必先跳去「交易對象」頁建好再回來。名稱已存在就連到既有那筆。
+ *
+ * 回傳 `created` 讓呼叫端決定要不要 revalidate /parties —— 沒新建就不用。
+ */
+async function resolvePartyName(
+  db: ReturnType<typeof getDb>,
+  orgId: string,
+  name: string | null,
+  label = "customer",
+): Promise<{ id: number | null; created: boolean }> {
+  if (!name) return { id: null, created: false };
+  const [found] = await db
+    .select({ id: parties.id })
+    .from(parties)
+    .where(and(eq(parties.organizationId, orgId), eq(parties.name, name)))
+    .limit(1);
+  if (found) return { id: found.id, created: false };
+  return { id: await getOrCreateParty(db, orgId, name, label), created: true };
+}
+
 async function getOrCreateEmployee(
   db: ReturnType<typeof getDb>,
   orgId: string,
@@ -954,10 +976,23 @@ function invoiceValues(formData: FormData) {
     status: str(formData.get("status")) ?? "valid",
     note: str(formData.get("note")),
     // 對象／來源綁定（migrations/0017）：讓「這張發票是哪個客戶、對應哪一筆請款」有答案。
-    partyId: num(formData.get("partyId")),
+    // 對象收名稱（查無就在存檔時新建），與合約／訂閱／請款項目一致。
+    partyName: str(formData.get("partyName")),
     contractId: num(formData.get("contractId")),
     billingItemId: num(formData.get("billingItemId")),
   };
+}
+
+/** 把表單值裡的 partyName 換成 partyId（查無就新建）。銷項對象是客戶、進項是廠商。 */
+async function invoiceColumns(orgId: string, formData: FormData) {
+  const { partyName, ...columns } = invoiceValues(formData);
+  const party = await resolvePartyName(
+    getDb(),
+    orgId,
+    partyName,
+    columns.direction === "received" ? "vendor" : "customer",
+  );
+  return { columns: { ...columns, partyId: party.id }, created: party.created };
 }
 
 export async function createInvoice(
@@ -966,12 +1001,13 @@ export async function createInvoice(
 ): Promise<ActionState> {
   try {
     const { orgId } = await requireOrg();
-    const v = invoiceValues(formData);
+    const { columns: v, created } = await invoiceColumns(orgId, formData);
     const [inserted] = await getDb()
       .insert(invoices)
       .values({ organizationId: orgId, ...v })
       .returning({ id: invoices.id });
     await logWeb(orgId, "create", "invoice", inserted.id);
+    if (created) revalidatePath("/parties");
     // 綁到請款項目時順手回填開發票日，看板的「待開發票」才會自己消掉，
     // 不必再手動標記一次。已經有日期就不覆蓋。
     if (v.billingItemId && v.invoiceDate) {
@@ -1002,11 +1038,13 @@ export async function updateInvoice(
   if (!id) return { ok: false, error: "缺少 ID" };
   try {
     const { orgId } = await requireOrg();
+    const { columns, created } = await invoiceColumns(orgId, formData);
     await getDb()
       .update(invoices)
-      .set(invoiceValues(formData))
+      .set(columns)
       .where(and(eq(invoices.organizationId, orgId), eq(invoices.id, id)));
     await logWeb(orgId, "update", "invoice", id);
+    if (created) revalidatePath("/parties");
     revalidatePath("/invoices");
     revalidatePath(`/invoices/${id}`);
     return { ok: true };
@@ -1348,18 +1386,21 @@ export async function createProject(
   if (!PROJECT_STATUS.has(status)) return { ok: false, error: "狀態不正確" };
   try {
     const { orgId } = await requireOrg();
-    const [inserted] = await getDb()
+    const db = getDb();
+    const client = await resolvePartyName(db, orgId, str(formData.get("clientPartyName")));
+    const [inserted] = await db
       .insert(projects)
       .values({
         organizationId: orgId,
         name,
-        clientPartyId: num(formData.get("clientPartyId")),
+        clientPartyId: client.id,
         status,
         description: str(formData.get("description")),
       })
       .returning({ id: projects.id });
     await logWeb(orgId, "create", "project", inserted.id, name);
     revalidatePath("/projects");
+    if (client.created) revalidatePath("/parties");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "新增失敗" };
@@ -1378,17 +1419,20 @@ export async function updateProject(
   if (!PROJECT_STATUS.has(status)) return { ok: false, error: "狀態不正確" };
   try {
     const { orgId } = await requireOrg();
-    await getDb()
+    const db = getDb();
+    const client = await resolvePartyName(db, orgId, str(formData.get("clientPartyName")));
+    await db
       .update(projects)
       .set({
         name,
-        clientPartyId: num(formData.get("clientPartyId")),
+        clientPartyId: client.id,
         status,
         description: str(formData.get("description")),
       })
       .where(and(eq(projects.organizationId, orgId), eq(projects.id, id)));
     await logWeb(orgId, "update", "project", id, name);
     revalidatePath("/projects");
+    if (client.created) revalidatePath("/parties");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
@@ -1415,7 +1459,7 @@ const SUBSCRIPTION_STATUS = new Set(["active", "paused", "ended"]);
 
 function subscriptionValues(formData: FormData) {
   return {
-    customerPartyId: num(formData.get("customerPartyId")),
+    customerPartyName: str(formData.get("customerPartyName")),
     projectId: num(formData.get("projectId")),
     name: str(formData.get("name")),
     amount: str(formData.get("amount")),
@@ -1433,18 +1477,21 @@ export async function createSubscription(
   formData: FormData,
 ): Promise<ActionState> {
   const v = subscriptionValues(formData);
-  if (!v.customerPartyId) return { ok: false, error: "請選擇客戶" };
+  if (!v.customerPartyName) return { ok: false, error: "請輸入客戶" };
   if (!v.name) return { ok: false, error: "請輸入方案名稱" };
   if (v.amount === null) return { ok: false, error: "請輸入金額" };
   if (!v.startDate) return { ok: false, error: "請選擇開始日期" };
   if (!SUBSCRIPTION_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
   try {
     const { orgId } = await requireOrg();
-    const [inserted] = await getDb()
+    const db = getDb();
+    const customer = await resolvePartyName(db, orgId, v.customerPartyName);
+    if (!customer.id) return { ok: false, error: "請輸入客戶" };
+    const [inserted] = await db
       .insert(subscriptions)
       .values({
         organizationId: orgId,
-        customerPartyId: v.customerPartyId,
+        customerPartyId: customer.id,
         projectId: v.projectId,
         name: v.name,
         amount: v.amount,
@@ -1458,6 +1505,7 @@ export async function createSubscription(
       .returning({ id: subscriptions.id });
     await logWeb(orgId, "create", "subscription", inserted.id, v.name ?? undefined);
     revalidatePath("/subscriptions");
+    if (customer.created) revalidatePath("/parties");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "新增失敗" };
@@ -1471,17 +1519,20 @@ export async function updateSubscription(
   const id = num(formData.get("id"));
   if (!id) return { ok: false, error: "缺少 ID" };
   const v = subscriptionValues(formData);
-  if (!v.customerPartyId) return { ok: false, error: "請選擇客戶" };
+  if (!v.customerPartyName) return { ok: false, error: "請輸入客戶" };
   if (!v.name) return { ok: false, error: "請輸入方案名稱" };
   if (v.amount === null) return { ok: false, error: "請輸入金額" };
   if (!v.startDate) return { ok: false, error: "請選擇開始日期" };
   if (!SUBSCRIPTION_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
   try {
     const { orgId } = await requireOrg();
-    await getDb()
+    const db = getDb();
+    const customer = await resolvePartyName(db, orgId, v.customerPartyName);
+    if (!customer.id) return { ok: false, error: "請輸入客戶" };
+    await db
       .update(subscriptions)
       .set({
-        customerPartyId: v.customerPartyId,
+        customerPartyId: customer.id,
         projectId: v.projectId,
         name: v.name,
         amount: v.amount,
@@ -1495,6 +1546,7 @@ export async function updateSubscription(
       .where(and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, id)));
     await logWeb(orgId, "update", "subscription", id, v.name ?? undefined);
     revalidatePath("/subscriptions");
+    if (customer.created) revalidatePath("/parties");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
@@ -1531,7 +1583,7 @@ function contractValues(formData: FormData) {
   const billingPlan = str(formData.get("billingPlan"));
   const dueRule = str(formData.get("dueRule"));
   return {
-    customerPartyId: num(formData.get("customerPartyId")),
+    customerPartyName: str(formData.get("customerPartyName")),
     projectId: num(formData.get("projectId")),
     title: str(formData.get("title")),
     amount: str(formData.get("amount")),
@@ -1658,16 +1710,19 @@ export async function createContract(
   formData: FormData,
 ): Promise<ActionState> {
   const v = contractValues(formData);
-  if (!v.customerPartyId) return { ok: false, error: "請選擇客戶" };
+  if (!v.customerPartyName) return { ok: false, error: "請輸入客戶" };
   if (!v.title) return { ok: false, error: "請輸入合約名稱" };
   if (!CONTRACT_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
   try {
     const { orgId } = await requireOrg();
-    const [inserted] = await getDb()
+    const db = getDb();
+    const customer = await resolvePartyName(db, orgId, v.customerPartyName);
+    if (!customer.id) return { ok: false, error: "請輸入客戶" };
+    const [inserted] = await db
       .insert(contracts)
       .values({
         organizationId: orgId,
-        customerPartyId: v.customerPartyId,
+        customerPartyId: customer.id,
         projectId: v.projectId,
         title: v.title,
         amount: v.amount,
@@ -1689,15 +1744,9 @@ export async function createContract(
       .returning({ id: contracts.id });
     await logWeb(orgId, "create", "contract", inserted.id, v.title ?? undefined);
     // 新合約一定沒有既有排程，直接展開（展不出來就是 0 期，不是錯誤）。
-    const created = await expandContractSchedule(
-      getDb(),
-      orgId,
-      inserted.id,
-      v.customerPartyId,
-      v,
-      false,
-    );
+    const created = await expandContractSchedule(db, orgId, inserted.id, customer.id, v, false);
     revalidatePath("/contracts");
+    if (customer.created) revalidatePath("/parties");
     if (created > 0) {
       revalidatePath("/billing");
       await syncCalendarBestEffort(orgId);
@@ -1715,15 +1764,18 @@ export async function updateContract(
   const id = num(formData.get("id"));
   if (!id) return { ok: false, error: "缺少 ID" };
   const v = contractValues(formData);
-  if (!v.customerPartyId) return { ok: false, error: "請選擇客戶" };
+  if (!v.customerPartyName) return { ok: false, error: "請輸入客戶" };
   if (!v.title) return { ok: false, error: "請輸入合約名稱" };
   if (!CONTRACT_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
   try {
     const { orgId } = await requireOrg();
-    await getDb()
+    const db = getDb();
+    const customer = await resolvePartyName(db, orgId, v.customerPartyName);
+    if (!customer.id) return { ok: false, error: "請輸入客戶" };
+    await db
       .update(contracts)
       .set({
-        customerPartyId: v.customerPartyId,
+        customerPartyId: customer.id,
         projectId: v.projectId,
         title: v.title,
         amount: v.amount,
@@ -1746,14 +1798,15 @@ export async function updateContract(
     await logWeb(orgId, "update", "contract", id, v.title ?? undefined);
     // 沒有排程時第一次設計畫 → 直接展開；已有排程 → 只有勾了「重新產生」才重排。
     const changed = await expandContractSchedule(
-      getDb(),
+      db,
       orgId,
       id,
-      v.customerPartyId,
+      customer.id,
       v,
       v.regenerateSchedule,
     );
     revalidatePath("/contracts");
+    if (customer.created) revalidatePath("/parties");
     if (changed > 0) {
       revalidatePath("/billing");
       await syncCalendarBestEffort(orgId);
@@ -1785,7 +1838,7 @@ const BILLING_ITEM_STATUS = new Set(["scheduled", "billed", "paid", "cancelled"]
 
 function billingItemValues(formData: FormData) {
   return {
-    customerPartyId: num(formData.get("customerPartyId")),
+    customerPartyName: str(formData.get("customerPartyName")),
     contractId: num(formData.get("contractId")),
     projectId: num(formData.get("projectId")),
     title: str(formData.get("title")),
@@ -1804,17 +1857,18 @@ function billingItemValues(formData: FormData) {
 /** 建立請款項目時，客戶沒指定就沿用合約的客戶（看板一定要有客戶才有意義）。 */
 async function resolveBillingCustomer(
   orgId: string,
-  customerPartyId: number | null,
+  customerPartyName: string | null,
   contractId: number | null,
-): Promise<number | null> {
-  if (customerPartyId) return customerPartyId;
-  if (!contractId) return null;
-  const [c] = await getDb()
+): Promise<{ id: number | null; created: boolean }> {
+  const db = getDb();
+  if (customerPartyName) return resolvePartyName(db, orgId, customerPartyName);
+  if (!contractId) return { id: null, created: false };
+  const [c] = await db
     .select({ customerPartyId: contracts.customerPartyId })
     .from(contracts)
     .where(and(eq(contracts.organizationId, orgId), eq(contracts.id, contractId)))
     .limit(1);
-  return c?.customerPartyId ?? null;
+  return { id: c?.customerPartyId ?? null, created: false };
 }
 
 function revalidateBilling() {
@@ -1850,13 +1904,13 @@ export async function createBillingItem(
   if (!BILLING_ITEM_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
   try {
     const { orgId } = await requireOrg();
-    const customerPartyId = await resolveBillingCustomer(orgId, v.customerPartyId, v.contractId);
-    if (!customerPartyId) return { ok: false, error: "請選擇客戶" };
+    const customer = await resolveBillingCustomer(orgId, v.customerPartyName, v.contractId);
+    if (!customer.id) return { ok: false, error: "請輸入客戶" };
     const [inserted] = await getDb()
       .insert(billingItems)
       .values({
         organizationId: orgId,
-        customerPartyId,
+        customerPartyId: customer.id,
         contractId: v.contractId,
         projectId: v.projectId,
         title: v.title,
@@ -1873,6 +1927,7 @@ export async function createBillingItem(
       .returning({ id: billingItems.id });
     await logWeb(orgId, "create", "billing_item", inserted.id, v.title ?? undefined);
     revalidateBilling();
+    if (customer.created) revalidatePath("/parties");
     await syncCalendarBestEffort(orgId);
     return { ok: true };
   } catch (e) {
@@ -1892,12 +1947,12 @@ export async function updateBillingItem(
   if (!BILLING_ITEM_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
   try {
     const { orgId } = await requireOrg();
-    const customerPartyId = await resolveBillingCustomer(orgId, v.customerPartyId, v.contractId);
-    if (!customerPartyId) return { ok: false, error: "請選擇客戶" };
+    const customer = await resolveBillingCustomer(orgId, v.customerPartyName, v.contractId);
+    if (!customer.id) return { ok: false, error: "請輸入客戶" };
     await getDb()
       .update(billingItems)
       .set({
-        customerPartyId,
+        customerPartyId: customer.id,
         contractId: v.contractId,
         projectId: v.projectId,
         title: v.title,
@@ -1914,6 +1969,7 @@ export async function updateBillingItem(
       .where(and(eq(billingItems.organizationId, orgId), eq(billingItems.id, id)));
     await logWeb(orgId, "update", "billing_item", id, v.title ?? undefined);
     revalidateBilling();
+    if (customer.created) revalidatePath("/parties");
     await syncCalendarBestEffort(orgId);
     return { ok: true };
   } catch (e) {

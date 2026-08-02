@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CurrencySelect } from "@/components/currency-select";
+import { PartyCombobox } from "@/components/party-combobox";
 import { submitAction } from "@/lib/form-action";
 import { DEFAULT_CURRENCY } from "@/lib/currency";
 import { ContractBillingPlanFields } from "./contract-billing-plan";
@@ -79,18 +80,11 @@ export function NewContractDialog({
           <div className="grid gap-4 py-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label>客戶<Req /></Label>
-              <Select name="customerPartyId">
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="選擇客戶" />
-                </SelectTrigger>
-                <SelectContent>
-                  {parties.map((p) => (
-                    <SelectItem key={p.id} value={String(p.id)}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <PartyCombobox
+                parties={parties}
+                name="customerPartyName"
+                placeholder="輸入或選擇客戶…"
+              />
             </div>
             <div className="space-y-1.5">
               <Label>專案</Label>

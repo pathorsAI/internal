@@ -132,7 +132,6 @@ function RowActions({ row }: Readonly<{ row: BillingRow }>) {
           <IssueInvoiceDialog
             billingItemId={itemId}
             contractId={row.contractId}
-            customerPartyId={row.customerPartyId}
             customerName={row.customerName}
             customerTaxId={row.customerTaxId}
             title={row.title}
@@ -287,6 +286,7 @@ export default async function BillingPage({
                       id={itemId}
                       values={{
                         customerPartyId: row.customerPartyId,
+                        customerName: row.customerName,
                         contractId: row.contractId,
                         projectId: row.projectId,
                         title: row.title,

@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CurrencySelect } from "@/components/currency-select";
+import { PartyCombobox } from "@/components/party-combobox";
 import { submitAction } from "@/lib/form-action";
 
 const initial: ActionState = { ok: false };
@@ -25,6 +26,8 @@ const initial: ActionState = { ok: false };
 type Subscription = {
   id: number;
   customerPartyId: number;
+  /** 目前綁定的客戶名稱，給 PartyCombobox 預填 */
+  customerName: string | null;
   projectId: number | null;
   name: string;
   amount: string;
@@ -72,18 +75,12 @@ export function EditSubscriptionForm({
 
       <div className="space-y-1.5">
         <Label>客戶<Req /></Label>
-        <Select name="customerPartyId" defaultValue={String(subscription.customerPartyId)}>
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="選擇客戶" />
-          </SelectTrigger>
-          <SelectContent>
-            {parties.map((p) => (
-              <SelectItem key={p.id} value={String(p.id)}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <PartyCombobox
+          parties={parties}
+          name="customerPartyName"
+          defaultName={subscription.customerName ?? ""}
+          placeholder="輸入或選擇客戶…"
+        />
       </div>
       <div className="space-y-1.5">
         <Label>專案</Label>
