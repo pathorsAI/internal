@@ -205,6 +205,22 @@ async function resolvePartyName(
   return { id: await getOrCreateParty(db, orgId, name, label), created: true };
 }
 
+/**
+ * 必填的客戶欄：名稱轉 id，查無就新建；名稱空白時回錯誤而不是 id。
+ *
+ * 合約與訂閱的新增／編輯都要做這件事，之前每個 mutation 各抄一遍「先檢查名稱、
+ * 解析、再檢查 id」—— 後面那道檢查其實永遠跟前面同時成立，是抄出來的贅肉。
+ */
+async function requireCustomer(
+  db: ReturnType<typeof getDb>,
+  orgId: string,
+  name: string | null,
+): Promise<{ id: number; created: boolean } | { error: string }> {
+  const party = await resolvePartyName(db, orgId, name);
+  if (party.id == null) return { error: "請輸入客戶" };
+  return { id: party.id, created: party.created };
+}
+
 async function getOrCreateEmployee(
   db: ReturnType<typeof getDb>,
   orgId: string,
@@ -1477,7 +1493,6 @@ export async function createSubscription(
   formData: FormData,
 ): Promise<ActionState> {
   const v = subscriptionValues(formData);
-  if (!v.customerPartyName) return { ok: false, error: "請輸入客戶" };
   if (!v.name) return { ok: false, error: "請輸入方案名稱" };
   if (v.amount === null) return { ok: false, error: "請輸入金額" };
   if (!v.startDate) return { ok: false, error: "請選擇開始日期" };
@@ -1485,8 +1500,8 @@ export async function createSubscription(
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
-    const customer = await resolvePartyName(db, orgId, v.customerPartyName);
-    if (!customer.id) return { ok: false, error: "請輸入客戶" };
+    const customer = await requireCustomer(db, orgId, v.customerPartyName);
+    if ("error" in customer) return { ok: false, error: customer.error };
     const [inserted] = await db
       .insert(subscriptions)
       .values({
@@ -1519,7 +1534,6 @@ export async function updateSubscription(
   const id = num(formData.get("id"));
   if (!id) return { ok: false, error: "缺少 ID" };
   const v = subscriptionValues(formData);
-  if (!v.customerPartyName) return { ok: false, error: "請輸入客戶" };
   if (!v.name) return { ok: false, error: "請輸入方案名稱" };
   if (v.amount === null) return { ok: false, error: "請輸入金額" };
   if (!v.startDate) return { ok: false, error: "請選擇開始日期" };
@@ -1527,8 +1541,8 @@ export async function updateSubscription(
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
-    const customer = await resolvePartyName(db, orgId, v.customerPartyName);
-    if (!customer.id) return { ok: false, error: "請輸入客戶" };
+    const customer = await requireCustomer(db, orgId, v.customerPartyName);
+    if ("error" in customer) return { ok: false, error: customer.error };
     await db
       .update(subscriptions)
       .set({
@@ -1710,14 +1724,13 @@ export async function createContract(
   formData: FormData,
 ): Promise<ActionState> {
   const v = contractValues(formData);
-  if (!v.customerPartyName) return { ok: false, error: "請輸入客戶" };
   if (!v.title) return { ok: false, error: "請輸入合約名稱" };
   if (!CONTRACT_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
-    const customer = await resolvePartyName(db, orgId, v.customerPartyName);
-    if (!customer.id) return { ok: false, error: "請輸入客戶" };
+    const customer = await requireCustomer(db, orgId, v.customerPartyName);
+    if ("error" in customer) return { ok: false, error: customer.error };
     const [inserted] = await db
       .insert(contracts)
       .values({
@@ -1764,14 +1777,13 @@ export async function updateContract(
   const id = num(formData.get("id"));
   if (!id) return { ok: false, error: "缺少 ID" };
   const v = contractValues(formData);
-  if (!v.customerPartyName) return { ok: false, error: "請輸入客戶" };
   if (!v.title) return { ok: false, error: "請輸入合約名稱" };
   if (!CONTRACT_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
-    const customer = await resolvePartyName(db, orgId, v.customerPartyName);
-    if (!customer.id) return { ok: false, error: "請輸入客戶" };
+    const customer = await requireCustomer(db, orgId, v.customerPartyName);
+    if ("error" in customer) return { ok: false, error: customer.error };
     await db
       .update(contracts)
       .set({
