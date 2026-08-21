@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Pathors Internal",
-  description: "派斯科技內部管理後台",
+  description: "內部管理後台",
 };
 
 export default function RootLayout({
