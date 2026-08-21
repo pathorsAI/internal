@@ -84,6 +84,48 @@ function categoryTag(a: ToolAnnotations): string {
   return "[write]";
 }
 
+async function handleToolCall(
+  id: JsonRpcId,
+  params: Record<string, unknown> | undefined,
+  ctx: ToolContext,
+): Promise<object> {
+  const name = params?.name as string | undefined;
+  const args = (params?.arguments as Record<string, unknown>) ?? {};
+  const tool = name ? tools[name] : undefined;
+  if (!tool) {
+    return ok(id, {
+      content: [{ type: "text", text: `Unknown tool: ${name}` }],
+      isError: true,
+    });
+  }
+  try {
+    const out = await tool.execute(args, ctx);
+    // Best-effort audit log for MCP writes (never affects the response).
+    const audit = name ? deriveMcpAudit(name, out) : null;
+    if (audit) {
+      try {
+        const orgId = await resolveOrg(args, ctx);
+        await logMcp(orgId, ctx.userId, audit.action, audit.entityType, audit.entityId, name);
+      } catch {
+        // ignore audit failures
+      }
+    }
+    return ok(id, {
+      content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
+    });
+  } catch (err) {
+    return ok(id, {
+      content: [
+        {
+          type: "text",
+          text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+        },
+      ],
+      isError: true,
+    });
+  }
+}
+
 async function handleMessage(
   msg: JsonRpcMessage,
   ctx: ToolContext,
@@ -121,43 +163,8 @@ async function handleMessage(
         }),
       });
 
-    case "tools/call": {
-      const name = msg.params?.name as string | undefined;
-      const args = (msg.params?.arguments as Record<string, unknown>) ?? {};
-      const tool = name ? tools[name] : undefined;
-      if (!tool) {
-        return ok(id, {
-          content: [{ type: "text", text: `Unknown tool: ${name}` }],
-          isError: true,
-        });
-      }
-      try {
-        const out = await tool.execute(args, ctx);
-        // Best-effort audit log for MCP writes (never affects the response).
-        const audit = name ? deriveMcpAudit(name, out) : null;
-        if (audit) {
-          try {
-            const orgId = await resolveOrg(args, ctx);
-            await logMcp(orgId, ctx.userId, audit.action, audit.entityType, audit.entityId, name);
-          } catch {
-            // ignore audit failures
-          }
-        }
-        return ok(id, {
-          content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
-        });
-      } catch (err) {
-        return ok(id, {
-          content: [
-            {
-              type: "text",
-              text: `Error: ${err instanceof Error ? err.message : String(err)}`,
-            },
-          ],
-          isError: true,
-        });
-      }
-    }
+    case "tools/call":
+      return handleToolCall(id, msg.params, ctx);
 
     default:
       if (isNotification) return null;

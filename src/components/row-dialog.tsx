@@ -18,6 +18,11 @@ import {
 } from "@/components/ui/sheet";
 
 const CloseCtx = React.createContext<() => void>(() => {});
+
+// 點到列裡的按鈕 / 連結 / 輸入等互動元素 → 交給它們自己處理，不開啟編輯
+function hitInteractive(target: EventTarget | null) {
+  return Boolean((target as HTMLElement | null)?.closest("button, a, input, label"));
+}
 /** 在 RowDialog 內的表單可呼叫此 hook，存檔成功後關閉對話框 */
 export function useRowDialogClose() {
   return React.useContext(CloseCtx);
@@ -41,11 +46,6 @@ export function RowDialog({
 }>) {
   const [open, setOpen] = React.useState(false);
   const close = React.useCallback(() => setOpen(false), []);
-
-  // 點到列裡的按鈕 / 連結 / 輸入等互動元素 → 交給它們自己處理，不開啟編輯
-  function hitInteractive(target: EventTarget | null) {
-    return Boolean((target as HTMLElement | null)?.closest("button, a, input, label"));
-  }
 
   function shouldOpen(target: EventTarget | null) {
     // 有對話框正開著 / 正在關閉時（例如點灰色背景關閉發放薪資 dialog，

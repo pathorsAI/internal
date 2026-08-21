@@ -48,7 +48,7 @@ const periodStatusVariant: Record<string, "default" | "secondary" | "destructive
   upcoming: "outline",
 };
 
-function PeriodScheduleTable({ schedule }: { schedule: SubscriptionSchedule | null }) {
+function PeriodScheduleTable({ schedule }: Readonly<{ schedule: SubscriptionSchedule | null }>) {
   if (!schedule || schedule.periods.length === 0) {
     return <p className="mt-6 text-sm text-muted-foreground">尚無收款期別</p>;
   }
@@ -91,8 +91,7 @@ function PeriodScheduleTable({ schedule }: { schedule: SubscriptionSchedule | nu
         </Table>
       </div>
       <p className="mt-2 text-right text-sm text-muted-foreground">
-        未收合計：
-        <span className="font-medium text-foreground tabular-nums">
+        未收合計：<span className="font-medium text-foreground tabular-nums">
           {formatCurrency(schedule.totalOutstanding, schedule.currency)}
         </span>
       </p>

@@ -31,9 +31,9 @@ const initial: ActionState = { ok: false };
 
 export function NewReconciliationDialog({
   accounts,
-}: {
+}: Readonly<{
   accounts: { id: number; name: string; currency: string }[];
-}) {
+}>) {
   const [open, setOpen] = useState(false);
   const today = new Date().toISOString().slice(0, 10);
 

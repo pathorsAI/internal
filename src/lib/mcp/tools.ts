@@ -19,7 +19,6 @@ import {
   requireNumber,
   resolveOrg,
   todayStr,
-  type ToolContext,
   type ToolDef,
 } from "./shared";
 import { accountingTools } from "./tools-accounting";
@@ -28,7 +27,7 @@ import { clientTools } from "./tools-client";
 import { hrTools } from "./tools-hr";
 import { billingItemTools } from "./tools-billing";
 
-export type { ToolContext, ToolDef };
+export type { ToolContext, ToolDef } from "./shared";
 
 // Discovery + the recurring-billing tools. Domain CRUD lives in the tools-*.ts
 // modules and is merged into `tools` at the bottom.

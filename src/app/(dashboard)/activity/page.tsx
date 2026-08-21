@@ -93,7 +93,7 @@ export default async function ActivityPage() {
                   </TableCell>
                   <TableCell className="whitespace-nowrap">
                     {entityLabel[r.entityType] ?? r.entityType}
-                    {r.entityId != null ? ` #${r.entityId}` : ""}
+                    {r.entityId == null ? "" : ` #${r.entityId}`}
                   </TableCell>
                   <TableCell className="max-w-[28ch] truncate text-muted-foreground" title={r.summary ?? ""}>
                     {r.summary ?? "—"}
