@@ -64,7 +64,7 @@ export default async function DashboardPage() {
 
   return (
     <>
-      <PageHeader title="總覽" description="派斯科技內外帳與財務概況" />
+      <PageHeader title="總覽" description="內外帳與財務概況" />
 
       {/* 資產總覽：每種幣別一張卡，顯示總資產（含期初餘額）與各帳戶餘額 */}
       <section className="space-y-2">

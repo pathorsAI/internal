@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-label="Demo flow GIF placeholder">
-  <rect width="1280" height="720" fill="#0f172a"/>
-  <rect x="1" y="1" width="1278" height="718" fill="none" stroke="#334155" stroke-width="2" stroke-dasharray="10 8"/>
-  <circle cx="640" cy="300" r="64" fill="none" stroke="#475569" stroke-width="4"/>
-  <path d="M620 270 L676 300 L620 330 Z" fill="#e2e8f0"/>
-  <text x="640" y="430" fill="#e2e8f0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="44" font-weight="700" text-anchor="middle">操作示範 Demo</text>
-  <text x="640" y="482" fill="#64748b" font-family="ui-sans-serif, system-ui, sans-serif" font-size="24" text-anchor="middle">GIF placeholder — replace with docs/images/demo.gif</text>
-</svg>
