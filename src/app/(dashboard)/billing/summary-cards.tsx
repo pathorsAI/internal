@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getTranslations } from "next-intl/server";
 import { AlertTriangle, Clock, HandCoins, Receipt } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/format";
@@ -7,43 +8,6 @@ import type { BillingBucket, BillingSummary } from "@/db/queries";
 
 export type BoardFilter = "due" | "awaiting" | "overdue" | "invoice";
 
-const cards: {
-  key: BoardFilter;
-  label: string;
-  hint: string;
-  icon: React.ComponentType<{ className?: string }>;
-  accent: string;
-}[] = [
-  {
-    key: "due",
-    label: "該請款",
-    hint: "已到應請款日、還沒請款",
-    icon: HandCoins,
-    accent: "text-primary",
-  },
-  {
-    key: "awaiting",
-    label: "待收款",
-    hint: "已請款、還沒收齊",
-    icon: Clock,
-    accent: "text-muted-foreground",
-  },
-  {
-    key: "overdue",
-    label: "逾期未收",
-    hint: "超過付款期限仍未收齊",
-    icon: AlertTriangle,
-    accent: "text-expense",
-  },
-  {
-    key: "invoice",
-    label: "待開發票",
-    hint: "已請款或已收款、發票還沒開",
-    icon: Receipt,
-    accent: "text-muted-foreground",
-  },
-];
-
 /** 金額依幣別分開顯示 —— 本系統一律不做匯率換算。 */
 function bucketAmount(bucket: BillingBucket) {
   const entries = Object.entries(bucket.amounts);
@@ -51,10 +15,49 @@ function bucketAmount(bucket: BillingBucket) {
   return entries.map(([currency, amount]) => formatCurrency(amount, currency)).join(" · ");
 }
 
-export function SummaryCards({
+export async function SummaryCards({
   summary,
   active,
 }: Readonly<{ summary: BillingSummary; active: BoardFilter | null }>) {
+  const t = await getTranslations("billing");
+
+  const cards: {
+    key: BoardFilter;
+    label: string;
+    hint: string;
+    icon: React.ComponentType<{ className?: string }>;
+    accent: string;
+  }[] = [
+    {
+      key: "due",
+      label: t("status.due"),
+      hint: t("summary.due.hint"),
+      icon: HandCoins,
+      accent: "text-primary",
+    },
+    {
+      key: "awaiting",
+      label: t("summary.awaiting.label"),
+      hint: t("summary.awaiting.hint"),
+      icon: Clock,
+      accent: "text-muted-foreground",
+    },
+    {
+      key: "overdue",
+      label: t("status.overdue"),
+      hint: t("summary.overdue.hint"),
+      icon: AlertTriangle,
+      accent: "text-expense",
+    },
+    {
+      key: "invoice",
+      label: t("summary.invoice.label"),
+      hint: t("summary.invoice.hint"),
+      icon: Receipt,
+      accent: "text-muted-foreground",
+    },
+  ];
+
   const buckets: Record<BoardFilter, BillingBucket> = {
     due: summary.due,
     awaiting: summary.awaiting,

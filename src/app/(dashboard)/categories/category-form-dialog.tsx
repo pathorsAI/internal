@@ -2,14 +2,14 @@
 
 import { useActionState, useState } from "react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { Plus, Pencil } from "lucide-react";
 import { createCategory, updateCategory, deleteCategory, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { DeleteButton } from "@/components/delete-button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field } from "@/components/form-field";
 import { submitAction } from "@/lib/form-action";
-import { Req } from "@/components/req";
 import {
   Dialog,
   DialogContent,
@@ -30,6 +30,7 @@ export function CategoryFormDialog({
   category?: { id: number; name: string };
   addLabel?: string;
 }>) {
+  const t = useTranslations("categories");
   const editing = !!category;
   const [open, setOpen] = useState(false);
   // 成功/失敗處理放在 action 內（跑在 transition 裡），不用 useEffect ——
@@ -40,7 +41,7 @@ export function CategoryFormDialog({
       const res = await (editing ? updateCategory : createCategory)(prev, formData);
       if (res.ok) {
         setOpen(false);
-        toast.success(editing ? "已更新分類" : "已新增分類");
+        toast.success(editing ? t("toast.updated") : t("toast.added"));
       } else if (res.error) {
         toast.error(res.error);
       }
@@ -53,12 +54,12 @@ export function CategoryFormDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         {editing ? (
-          <Button variant="ghost" size="icon" aria-label="編輯">
+          <Button variant="ghost" size="icon" aria-label={t("editAria")}>
             <Pencil className="size-4 text-muted-foreground" />
           </Button>
         ) : (
           <Button variant="ghost" size="sm" className="text-primary">
-            <Plus className="size-4" /> {addLabel ?? "新增"}
+            <Plus className="size-4" /> {addLabel ?? t("add")}
           </Button>
         )}
       </DialogTrigger>
@@ -67,19 +68,18 @@ export function CategoryFormDialog({
           {editing ? <input type="hidden" name="id" value={category.id} /> : null}
           <input type="hidden" name="kind" value={kind} />
           <DialogHeader>
-            <DialogTitle>{editing ? "編輯分類" : "新增分類"}</DialogTitle>
+            <DialogTitle>{editing ? t("dialog.editTitle") : t("dialog.addTitle")}</DialogTitle>
           </DialogHeader>
           <div className="py-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="cat-name">名稱<Req /></Label>
+            <Field label={t("dialog.name")} htmlFor="cat-name" required>
               <Input
                 id="cat-name"
                 name="name"
                 required
                 defaultValue={category?.name ?? ""}
-                placeholder="例：租金費用"
+                placeholder={t("dialog.namePlaceholder")}
               />
-            </div>
+            </Field>
           </div>
           <DialogFooter>
             {editing ? (
@@ -88,10 +88,10 @@ export function CategoryFormDialog({
               </div>
             ) : null}
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-              取消
+              {t("dialog.cancel")}
             </Button>
             <Button type="submit" disabled={pending}>
-              {pending ? "儲存中…" : "儲存"}
+              {pending ? t("dialog.saving") : t("dialog.save")}
             </Button>
           </DialogFooter>
         </form>

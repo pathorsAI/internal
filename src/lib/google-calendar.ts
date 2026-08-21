@@ -1,3 +1,4 @@
+import { getTranslations } from "next-intl/server";
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { calendarEventLinks, calendarSettings } from "@/db/schema";
@@ -18,6 +19,16 @@ import { formatCurrency } from "@/lib/currency";
 
 const CAL_API = "https://www.googleapis.com/calendar/v3";
 
+/**
+ * next-intl 的 translator 型別是整棵訊息樹展開出來的聯集，當成參數傳遞時 TS 會
+ * 因為型別太深而放棄（TS2589），而且它的 key 參數比 `string` 窄，逆變也過不了。
+ * 這裡只需要「給 key 回字串」，所以縮成最小介面，傳入時明確轉型。
+ */
+type CalendarText = (
+  key: string,
+  values?: Record<string, string | number>,
+) => string;
+
 export type CalendarSyncResult = {
   created: number;
   updated: number;
@@ -26,7 +37,7 @@ export type CalendarSyncResult = {
 };
 
 export class CalendarNotConnectedError extends Error {
-  constructor(message = "尚未連結 Google 日曆") {
+  constructor(message = "Google Calendar is not connected") {
     super(message);
     this.name = "CalendarNotConnectedError";
   }
@@ -37,21 +48,20 @@ export class CalendarNotConnectedError extends Error {
  * 所以這裡不必自己處理 refresh。
  */
 async function getAccessToken(userId: string): Promise<string> {
+  const t = await getTranslations("lib");
   try {
     // 這個 endpoint 不吃 session（只看 body 的 userId），所以不必傳 headers ——
     // server action、MCP route、未來的排程都能共用同一條路徑。
     const res = await auth.api.getAccessToken({
       body: { providerId: GOOGLE_CALENDAR_PROVIDER_ID, userId },
     });
-    if (!res?.accessToken) throw new CalendarNotConnectedError();
+    if (!res?.accessToken) throw new CalendarNotConnectedError(t("calendar.notConnected"));
     return res.accessToken;
   } catch (e) {
     if (e instanceof CalendarNotConnectedError) throw e;
     // better-auth 在「找不到帳號」與「refresh 失敗」都丟 APIError，對使用者來說
     // 兩者的處置一樣：重新連結一次。
-    throw new CalendarNotConnectedError(
-      "Google 日曆授權已失效，請到組織設定重新連結",
-    );
+    throw new CalendarNotConnectedError(t("calendar.grantExpired"));
   }
 }
 
@@ -97,6 +107,7 @@ async function ensureCalendar(
   token: string,
   existing: CalendarSettingsRow | null,
 ): Promise<string> {
+  const t = await getTranslations("lib");
   if (existing?.googleCalendarId) {
     // 確認那本日曆還在（可能被使用者從 Google 端刪掉）。
     const check = await calendarFetch(
@@ -105,7 +116,7 @@ async function ensureCalendar(
     );
     if (check.ok) return existing.googleCalendarId;
     if (check.status !== 404 && check.status !== 403) {
-      throw new Error(`確認日曆失敗（${check.status}）`);
+      throw new Error(t("calendar.checkFailed", { status: check.status }));
     }
     // 被刪掉了 → 連同事件對應一起清掉，下面重建一本新的。
     await getDb()
@@ -115,9 +126,12 @@ async function ensureCalendar(
 
   const res = await calendarFetch(token, "/calendars", {
     method: "POST",
-    body: { summary: `請款提醒 · ${orgName}`, timeZone: "Asia/Taipei" },
+    body: { summary: t("calendar.title", { org: orgName }), timeZone: "Asia/Taipei" },
   });
-  if (!res.ok) throw new Error(`建立日曆失敗（${res.status}）：${await res.text()}`);
+  if (!res.ok)
+    throw new Error(
+      t("calendar.createFailed", { status: res.status, body: await res.text() }),
+    );
   const created = (await res.json()) as { id: string };
 
   await getDb()
@@ -143,12 +157,17 @@ type PlannedEvent = {
   description: string;
 };
 
-/** 一列請款要在日曆上長出哪幾顆事件。已完成的動作就不再提醒。 */
-function planEvents(row: BillingRow): PlannedEvent[] {
+/**
+ * 一列請款要在日曆上長出哪幾顆事件。已完成的動作就不再提醒。
+ *
+ * 事件文案會跟著同步發動者的語系走 —— `hashEvent` 把 summary 算進 hash，所以換語
+ * 系後的第一次同步會把既有事件的標題改寫成新語言。內容等價，只是語言不同。
+ */
+function planEvents(row: BillingRow, t: CalendarText): PlannedEvent[] {
   const out: PlannedEvent[] = [];
-  const who = row.customerName ?? "客戶";
+  const who = row.customerName ?? t("calendar.client");
   const money = formatCurrency(row.expected, row.currency);
-  const link = "請款看板：/billing";
+  const link = t("calendar.link");
 
   // 還沒請款 → 提醒去請款
   if (row.dueDate && !row.billedOn && row.status !== "paid") {
@@ -156,8 +175,8 @@ function planEvents(row: BillingRow): PlannedEvent[] {
       itemKey: row.key,
       kind: "due",
       date: row.dueDate,
-      summary: `請款：${who} · ${row.title}（${money}）`,
-      description: `應向 ${who} 請款 ${money}。\n${link}`,
+      summary: t("calendar.due.summary", { who, title: row.title, money }),
+      description: `${t("calendar.due.description", { who, money })}\n${link}`,
     });
   }
   // 已請款但還沒收齊 → 提醒去追款
@@ -167,8 +186,8 @@ function planEvents(row: BillingRow): PlannedEvent[] {
       itemKey: row.key,
       kind: "payment",
       date: row.dueDate ?? row.billedOn,
-      summary: `收款追蹤：${who} · ${row.title}（未收 ${outstanding}）`,
-      description: `已於 ${row.billedOn} 請款，尚未收齊 ${outstanding}。\n${link}`,
+      summary: t("calendar.payment.summary", { who, title: row.title, outstanding }),
+      description: `${t("calendar.payment.description", { billedOn: row.billedOn, outstanding })}\n${link}`,
     });
   }
   // 該開發票還沒開
@@ -177,8 +196,8 @@ function planEvents(row: BillingRow): PlannedEvent[] {
       itemKey: row.key,
       kind: "invoice",
       date: row.billedOn ?? row.dueDate ?? "",
-      summary: `開發票：${who} · ${row.title}（${money}）`,
-      description: `需開立發票給 ${who}，金額 ${money}。\n${link}`,
+      summary: t("calendar.invoice.summary", { who, title: row.title, money }),
+      description: `${t("calendar.invoice.description", { who, money })}\n${link}`,
     });
   }
   return out.filter((e) => e.date !== "");
@@ -216,7 +235,9 @@ export async function syncBillingCalendar(
 ): Promise<CalendarSyncResult> {
   const db = getDb();
   const settings = await getCalendarSettings(orgId);
-  if (!settings?.ownerUserId) throw new CalendarNotConnectedError();
+  const t = await getTranslations("lib");
+  if (!settings?.ownerUserId)
+    throw new CalendarNotConnectedError(t("calendar.notConnected"));
   if (!settings.enabled) return { created: 0, updated: 0, deleted: 0, skipped: 0 };
 
   const token = await getAccessToken(settings.ownerUserId);
@@ -225,7 +246,7 @@ export async function syncBillingCalendar(
   const reminderDays = settings.reminderDays;
 
   const rows = await listBillingBoard(orgId, { includeAllHistory: true });
-  const planned = rows.flatMap(planEvents);
+  const planned = rows.flatMap((row) => planEvents(row, t as CalendarText));
   const links = await db
     .select()
     .from(calendarEventLinks)
@@ -261,7 +282,9 @@ export async function syncBillingCalendar(
         continue;
       }
       if (res.status !== 404 && res.status !== 410) {
-        throw new Error(`更新事件失敗（${res.status}）：${await res.text()}`);
+        throw new Error(
+          t("calendar.updateEventFailed", { status: res.status, body: await res.text() }),
+        );
       }
       // Google 端已被刪掉 → 移除對應後往下重建。
       await db.delete(calendarEventLinks).where(eq(calendarEventLinks.id, existing.id));
@@ -271,7 +294,10 @@ export async function syncBillingCalendar(
       method: "POST",
       body: eventBody(e, reminderDays),
     });
-    if (!res.ok) throw new Error(`建立事件失敗（${res.status}）：${await res.text()}`);
+    if (!res.ok)
+      throw new Error(
+        t("calendar.createEventFailed", { status: res.status, body: await res.text() }),
+      );
     const created = (await res.json()) as { id: string };
     await db
       .insert(calendarEventLinks)
@@ -303,7 +329,7 @@ export async function syncBillingCalendar(
     );
     // 404/410 = 早就不在了，一樣視為已刪除。
     if (!res.ok && res.status !== 404 && res.status !== 410) {
-      throw new Error(`刪除事件失敗（${res.status}）`);
+      throw new Error(t("calendar.deleteEventFailed", { status: res.status }));
     }
     result.deleted += 1;
   }

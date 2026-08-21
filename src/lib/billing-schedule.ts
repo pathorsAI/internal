@@ -10,17 +10,17 @@ import { addMonths, format, getDaysInMonth, parseISO, setDate } from "date-fns";
 export type BillingPlan = "single" | "installments" | "milestones" | "subscription";
 export type DueRule = "signed_date" | "day_of_month" | "business_day_of_month";
 
-export const BILLING_PLAN_LABELS: Record<BillingPlan, string> = {
-  single: "一次付清",
-  installments: "分 N 期",
-  milestones: "里程碑",
-  subscription: "月費 / 訂閱",
-};
-
-export const DUE_RULE_LABELS: Record<DueRule, string> = {
-  signed_date: "簽約日起算，每期間隔固定月數",
-  day_of_month: "每月第 N 個日曆日",
-  business_day_of_month: "每月第 N 個工作日",
+/**
+ * 期別名稱由呼叫端提供 —— 這些字會寫進 billing_items.title 存起來，所以要用
+ * 「產生當下」使用者的語系，而這支是不碰 i18n 的純函式。
+ */
+export type InstallmentTitles = {
+  full: string;
+  first: string;
+  final: string;
+  signing: string;
+  interim: string;
+  nth: (n: number) => string;
 };
 
 /** 分期預設比例：三期用業界常見的 30/40/30，其餘平均分攤。 */
@@ -126,11 +126,15 @@ export function computeDueDate(input: DueDateInput, index: number): string {
 }
 
 /** 期別名稱：常見期數給看得懂的名字，其餘退回「第 N 期」。 */
-export function installmentTitle(index: number, count: number): string {
-  if (count === 1) return "全額";
-  if (count === 2) return ["頭款", "尾款"][index];
-  if (count === 3) return ["簽約金", "期中款", "尾款"][index];
-  return `第 ${index + 1} 期`;
+export function installmentTitle(
+  index: number,
+  count: number,
+  titles: InstallmentTitles,
+): string {
+  if (count === 1) return titles.full;
+  if (count === 2) return [titles.first, titles.final][index];
+  if (count === 3) return [titles.signing, titles.interim, titles.final][index];
+  return titles.nth(index + 1);
 }
 
 export type ScheduleInput = {
@@ -155,7 +159,10 @@ export type ScheduleRow = { title: string; amount: number; dueDate: string };
  * 展不出來就回空陣列（不是錯誤）：里程碑要人自己逐筆加、月費走訂閱、沒設定計畫的
  * 舊合約維持現狀、沒有金額或沒有基準日的合約也不硬猜。
  */
-export function generateSchedule(input: ScheduleInput): ScheduleRow[] {
+export function generateSchedule(
+  input: ScheduleInput,
+  titles: InstallmentTitles,
+): ScheduleRow[] {
   const { billingPlan, amount } = input;
   if (billingPlan !== "single" && billingPlan !== "installments") return [];
   if (amount == null || !Number.isFinite(amount) || amount <= 0) return [];
@@ -175,7 +182,7 @@ export function generateSchedule(input: ScheduleInput): ScheduleRow[] {
   };
 
   return amounts.map((amt, i) => ({
-    title: installmentTitle(i, count),
+    title: installmentTitle(i, count, titles),
     amount: amt,
     dueDate: computeDueDate(dueInput, i),
   }));

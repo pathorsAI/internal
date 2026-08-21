@@ -1,18 +1,12 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Req } from "@/components/req";
+import { Field, SelectField } from "@/components/form-field";
 import { DatePicker } from "@/components/date-picker";
 import { CurrencySelect } from "@/components/currency-select";
 import { PartyField } from "@/components/party-combobox";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SelectItem } from "@/components/ui/select";
 
 export type Option = { id: number; name: string };
 
@@ -52,6 +46,8 @@ export function BillingItemFields({
   /** 從合約頁開啟時合約已固定，改用 hidden input 帶值，這裡就不再渲染下拉。 */
   hideContract?: boolean;
 }>) {
+  const t = useTranslations("billing");
+
   return (
     <>
       <PartyField
@@ -61,59 +57,45 @@ export function BillingItemFields({
         defaultName={values?.customerName ?? ""}
       />
 
-      <div className="space-y-1.5">
-        <Label htmlFor="bi-title">項目名稱<Req /></Label>
+      <Field label={t("form.fields.title")} htmlFor="bi-title" required>
         <Input
           id="bi-title"
           name="title"
           required
-          placeholder="例：簽約金 / 期中款 / 尾款"
+          placeholder={t("form.fields.titlePlaceholder")}
           defaultValue={values?.title}
         />
-      </div>
+      </Field>
 
       {!hideContract && (
-        <div className="space-y-1.5">
-          <Label>合約</Label>
-          <Select
-            name="contractId"
-            defaultValue={values?.contractId == null ? undefined : String(values.contractId)}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="— 未指定 —" />
-            </SelectTrigger>
-            <SelectContent>
-              {contracts.map((c) => (
-                <SelectItem key={c.id} value={String(c.id)}>
-                  {c.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <SelectField
+          name="contractId"
+          label={t("form.fields.contract")}
+          placeholder={t("common.unspecified")}
+          defaultValue={values?.contractId == null ? undefined : String(values.contractId)}
+        >
+          {contracts.map((c) => (
+            <SelectItem key={c.id} value={String(c.id)}>
+              {c.name}
+            </SelectItem>
+          ))}
+        </SelectField>
       )}
 
-      <div className="space-y-1.5">
-        <Label>專案</Label>
-        <Select
-          name="projectId"
-          defaultValue={values?.projectId == null ? undefined : String(values.projectId)}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="— 未指定 —" />
-          </SelectTrigger>
-          <SelectContent>
-            {projects.map((p) => (
-              <SelectItem key={p.id} value={String(p.id)}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      <SelectField
+        name="projectId"
+        label={t("form.fields.project")}
+        placeholder={t("common.unspecified")}
+        defaultValue={values?.projectId == null ? undefined : String(values.projectId)}
+      >
+        {projects.map((p) => (
+          <SelectItem key={p.id} value={String(p.id)}>
+            {p.name}
+          </SelectItem>
+        ))}
+      </SelectField>
 
-      <div className="space-y-1.5">
-        <Label htmlFor="bi-amount">應收金額<Req /></Label>
+      <Field label={t("form.fields.amount")} htmlFor="bi-amount" required>
         <Input
           id="bi-amount"
           name="amount"
@@ -122,63 +104,50 @@ export function BillingItemFields({
           required
           defaultValue={values?.amount}
         />
-      </div>
-      <div className="space-y-1.5">
-        <Label>幣別</Label>
+      </Field>
+      <Field label={t("form.fields.currency")}>
         <CurrencySelect defaultValue={values?.currency} />
-      </div>
+      </Field>
 
-      <div className="space-y-1.5">
-        <Label>應請款日</Label>
+      <Field label={t("form.fields.dueDate")}>
         <DatePicker
           name="dueDate"
           allowEmpty
-          placeholder="— 無 —"
+          placeholder={t("form.fields.dueDatePlaceholder")}
           defaultValue={values?.dueDate ?? undefined}
         />
-      </div>
-      <div className="space-y-1.5">
-        <Label>狀態</Label>
-        <Select name="status" defaultValue={values?.status ?? "scheduled"}>
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="scheduled">排程中</SelectItem>
-            <SelectItem value="billed">已請款</SelectItem>
-            <SelectItem value="paid">已收款</SelectItem>
-            <SelectItem value="cancelled">已取消</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+      </Field>
+      <SelectField name="status" label={t("form.fields.status")} defaultValue={values?.status ?? "scheduled"}>
+        <SelectItem value="scheduled">{t("form.rawStatus.scheduled")}</SelectItem>
+        <SelectItem value="billed">{t("form.rawStatus.billed")}</SelectItem>
+        <SelectItem value="paid">{t("form.rawStatus.paid")}</SelectItem>
+        <SelectItem value="cancelled">{t("form.rawStatus.cancelled")}</SelectItem>
+      </SelectField>
 
-      <div className="space-y-1.5">
-        <Label>實際請款日</Label>
+      <Field label={t("form.fields.billedOn")}>
         <DatePicker
           name="billedOn"
           allowEmpty
-          placeholder="— 尚未請款 —"
+          placeholder={t("form.fields.billedOnPlaceholder")}
           defaultValue={values?.billedOn ?? undefined}
         />
-      </div>
-      <div className="space-y-1.5">
-        <Label>收款日</Label>
+      </Field>
+      <Field label={t("form.fields.paidOn")}>
         <DatePicker
           name="paidOn"
           allowEmpty
-          placeholder="— 尚未收款 —"
+          placeholder={t("form.fields.paidOnPlaceholder")}
           defaultValue={values?.paidOn ?? undefined}
         />
-      </div>
-      <div className="space-y-1.5">
-        <Label>開發票日</Label>
+      </Field>
+      <Field label={t("form.fields.invoicedOn")}>
         <DatePicker
           name="invoicedOn"
           allowEmpty
-          placeholder="— 尚未開立 —"
+          placeholder={t("form.fields.invoicedOnPlaceholder")}
           defaultValue={values?.invoicedOn ?? undefined}
         />
-      </div>
+      </Field>
       <div className="flex items-end pb-2">
         <label className="flex items-center gap-2 text-sm">
           <input
@@ -187,18 +156,20 @@ export function BillingItemFields({
             defaultChecked={values?.needsInvoice ?? true}
             className="size-4 accent-primary"
           />
-          這筆需要開發票
+          {t("form.fields.needsInvoice")}
         </label>
       </div>
 
-      <div className="space-y-1.5 sm:col-span-2">
-        <Label htmlFor="bi-note">備註</Label>
-        <Input id="bi-note" name="note" placeholder="選填" defaultValue={values?.note ?? ""} />
-      </div>
+      <Field label={t("form.fields.note")} htmlFor="bi-note" wide>
+        <Input
+          id="bi-note"
+          name="note"
+          placeholder={t("common.optional")}
+          defaultValue={values?.note ?? ""}
+        />
+      </Field>
 
-      <p className="text-xs text-muted-foreground sm:col-span-2">
-        收款金額以「綁定這筆請款項目的收入交易」為準；這裡的收款日只是人工註記。
-      </p>
+      <p className="text-xs text-muted-foreground sm:col-span-2">{t("form.paidOnHint")}</p>
     </>
   );
 }

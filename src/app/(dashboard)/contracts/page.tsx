@@ -1,3 +1,4 @@
+import { getTranslations } from "next-intl/server";
 import { RowDialog } from "@/components/row-dialog";
 import { DeleteButton } from "@/components/delete-button";
 import { deleteContract } from "@/db/mutations";
@@ -30,12 +31,6 @@ import { ContractBillingItems } from "./contract-billing-items";
 
 export const dynamic = "force-dynamic";
 
-const statusMap: Record<string, string> = {
-  draft: "草稿",
-  active: "進行中",
-  completed: "已完成",
-  cancelled: "已取消",
-};
 const statusVariant: Record<string, "default" | "secondary" | "outline"> = {
   draft: "outline",
   active: "default",
@@ -49,11 +44,13 @@ function CollectionCell({
   currency,
   received,
   cost,
+  t,
 }: Readonly<{
   amount: string | null;
   currency: string;
   received: number;
   cost: number;
+  t: Awaited<ReturnType<typeof getTranslations<"contracts">>>;
 }>) {
   const total = amount == null ? null : Number(amount);
   const pct = total && total > 0 ? Math.min(100, Math.round((received / total) * 100)) : null;
@@ -66,15 +63,21 @@ function CollectionCell({
   else if (fullyCollected) barColor = "bg-income";
   let remainingLabel: string;
   if (remaining == null) remainingLabel = "—";
-  else if (remaining > 0) remainingLabel = `未收 ${formatCurrency(remaining, currency)}`;
-  else if (remaining < 0) remainingLabel = `溢收 ${formatCurrency(-remaining, currency)}`;
-  else remainingLabel = "已收齊";
+  else if (remaining > 0)
+    remainingLabel = t("list.collection.unpaid", {
+      amount: formatCurrency(remaining, currency),
+    });
+  else if (remaining < 0)
+    remainingLabel = t("list.collection.overCollected", {
+      amount: formatCurrency(-remaining, currency),
+    });
+  else remainingLabel = t("list.collection.fullyPaid");
   return (
     <div className="min-w-[170px] space-y-1">
       <div className="flex items-baseline justify-between gap-2 text-sm tabular-nums">
         <span className="font-medium">{formatCurrency(received, currency)}</span>
         <span className="text-xs text-muted-foreground">
-          {total == null ? "未設金額" : `/ ${formatCurrency(total, currency)}`}
+          {total == null ? t("list.collection.unsetAmount") : `/ ${formatCurrency(total, currency)}`}
         </span>
       </div>
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
@@ -87,7 +90,9 @@ function CollectionCell({
       </div>
       <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground tabular-nums">
         <span>{remainingLabel}</span>
-        {cost > 0 && <span>成本 {formatCurrency(cost, currency)}</span>}
+        {cost > 0 && (
+          <span>{t("list.collection.cost", { amount: formatCurrency(cost, currency) })}</span>
+        )}
       </div>
     </div>
   );
@@ -95,6 +100,7 @@ function CollectionCell({
 
 export default async function ContractsPage() {
   const { orgId } = await requireOrg();
+  const t = await getTranslations("contracts");
   const [rows, parties, projects, board] = await Promise.all([
     listContracts(orgId),
     listParties(orgId),
@@ -103,6 +109,12 @@ export default async function ContractsPage() {
   ]);
   const partyOptions = parties.map((p) => ({ id: p.id, name: p.name }));
   const projectOptions = projects.map((p) => ({ id: p.id, name: p.name }));
+  const statusLabels: Record<string, string> = {
+    draft: t("status.draft"),
+    active: t("status.active"),
+    completed: t("status.completed"),
+    cancelled: t("status.cancelled"),
+  };
 
   // 一次抓完整個看板再依合約分組，避免每張合約各查一次（N+1）。
   const billingByContract = new Map<number, typeof board>();
@@ -115,7 +127,7 @@ export default async function ContractsPage() {
 
   return (
     <>
-      <PageHeader title="合約" description="客戶合約，點列可編輯">
+      <PageHeader title={t("list.title")} description={t("list.description")}>
         <NewContractDialog parties={partyOptions} projects={projectOptions} />
       </PageHeader>
 
@@ -123,26 +135,26 @@ export default async function ContractsPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>合約</TableHead>
-              <TableHead>客戶</TableHead>
-              <TableHead>專案</TableHead>
-              <TableHead>收款進度</TableHead>
-              <TableHead>期間</TableHead>
-              <TableHead>狀態</TableHead>
-              <TableHead>檔案</TableHead>
+              <TableHead>{t("list.columns.title")}</TableHead>
+              <TableHead>{t("list.columns.customer")}</TableHead>
+              <TableHead>{t("list.columns.project")}</TableHead>
+              <TableHead>{t("list.columns.collectionProgress")}</TableHead>
+              <TableHead>{t("list.columns.period")}</TableHead>
+              <TableHead>{t("list.columns.status")}</TableHead>
+              <TableHead>{t("list.columns.file")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <EmptyRow colSpan={7} message="尚無合約">
-                點右上角新增
+              <EmptyRow colSpan={7} message={t("list.empty.message")}>
+                {t("list.empty.cta")}
               </EmptyRow>
             ) : (
               rows.map((c) => (
                 <RowDialog
                   key={c.id}
                   title={c.title}
-                  description="合約"
+                  description={t("list.rowDescription")}
                   cells={
                     <>
                       <TableCell className="max-w-[26ch] truncate font-medium" title={c.title}>
@@ -156,6 +168,7 @@ export default async function ContractsPage() {
                           currency={c.currency}
                           received={c.received}
                           cost={c.cost}
+                          t={t}
                         />
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
@@ -164,7 +177,7 @@ export default async function ContractsPage() {
                       </TableCell>
                       <TableCell>
                         <Badge variant={statusVariant[c.status] ?? "outline"}>
-                          {statusMap[c.status] ?? c.status}
+                          {statusLabels[c.status] ?? c.status}
                         </Badge>
                       </TableCell>
                       <TableCell>

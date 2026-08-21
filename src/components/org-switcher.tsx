@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Building2 } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import {
   authClient,
   useActiveOrganization,
@@ -20,6 +21,7 @@ import {
 } from "@/components/ui/select";
 
 export function OrgSwitcher() {
+  const t = useTranslations("common");
   const router = useRouter();
   const { data: organizations } = useListOrganizations();
   const { data: activeOrg } = useActiveOrganization();
@@ -46,7 +48,7 @@ export function OrgSwitcher() {
     const { error } = await authClient.organization.setActive({ organizationId });
     setSwitching(false);
     if (error) {
-      toast.error(error.message || "切換組織失敗");
+      toast.error(error.message || t("orgSwitcher.toast.switchFailed"));
       return;
     }
     localStorage.setItem(LAST_ORG_KEY, organizationId);
@@ -61,7 +63,7 @@ export function OrgSwitcher() {
     >
       <SelectTrigger className="w-full" size="default">
         <Building2 className="size-4 text-muted-foreground" />
-        <SelectValue placeholder="選擇組織" />
+        <SelectValue placeholder={t("orgSwitcher.placeholder")} />
       </SelectTrigger>
       <SelectContent>
         {(organizations ?? []).map((o) => (

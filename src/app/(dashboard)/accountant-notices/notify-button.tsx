@@ -3,11 +3,13 @@
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { Check, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { markAccountantNotified, unmarkAccountantNotified } from "@/db/mutations";
 
 export function NotifyButton({ id, notified }: Readonly<{ id: number; notified: boolean }>) {
+  const t = useTranslations("accountantNotices");
   const [pending, start] = useTransition();
   const router = useRouter();
 
@@ -18,7 +20,7 @@ export function NotifyButton({ id, notified }: Readonly<{ id: number; notified: 
         toast.success(msg);
         router.refresh();
       } else {
-        toast.error(res.error ?? "操作失敗");
+        toast.error(res.error ?? t("toast.failed"));
       }
     });
   }
@@ -30,9 +32,9 @@ export function NotifyButton({ id, notified }: Readonly<{ id: number; notified: 
         size="sm"
         variant="ghost"
         disabled={pending}
-        onClick={() => run(unmarkAccountantNotified, "已改回待通知")}
+        onClick={() => run(unmarkAccountantNotified, t("toast.markedUndone"))}
       >
-        <Undo2 className="size-4" /> 取消
+        <Undo2 className="size-4" /> {t("button.undo")}
       </Button>
     );
   }
@@ -42,9 +44,9 @@ export function NotifyButton({ id, notified }: Readonly<{ id: number; notified: 
       type="button"
       size="sm"
       disabled={pending}
-      onClick={() => run(markAccountantNotified, "已標記為已通知")}
+      onClick={() => run(markAccountantNotified, t("toast.markedDone"))}
     >
-      <Check className="size-4" /> 標記已通知
+      <Check className="size-4" /> {t("button.markDone")}
     </Button>
   );
 }

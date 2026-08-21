@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { createBillingItem, type ActionState } from "@/db/mutations";
@@ -24,7 +25,7 @@ export function NewBillingItemDialog({
   contracts,
   projects,
   contractId,
-  triggerLabel = "新增請款項目",
+  triggerLabel,
   triggerVariant = "default",
 }: Readonly<{
   parties: Option[];
@@ -35,6 +36,7 @@ export function NewBillingItemDialog({
   triggerLabel?: string;
   triggerVariant?: "default" | "outline";
 }>) {
+  const t = useTranslations("billing");
   const [open, setOpen] = useState(false);
   // 成功/失敗處理放在 action 內（跑在 transition 裡），不用 useEffect ——
   // 既避免 effect 內 setState 的串聯 render，也讓每次送出都必定各吐一次 toast
@@ -44,7 +46,7 @@ export function NewBillingItemDialog({
       const res = await createBillingItem(prev, formData);
       if (res.ok) {
         setOpen(false);
-        toast.success("已新增請款項目");
+        toast.success(t("newItem.toast.created"));
       } else if (res.error) {
         toast.error(res.error);
       }
@@ -57,16 +59,14 @@ export function NewBillingItemDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button size="sm" variant={triggerVariant}>
-          <Plus className="size-4" /> {triggerLabel}
+          <Plus className="size-4" /> {triggerLabel ?? t("newItem.trigger")}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
         <form onSubmit={submitAction(action)}>
           <DialogHeader>
-            <DialogTitle>新增請款項目</DialogTitle>
-            <DialogDescription>
-              一次性合約分期、專案里程碑或臨時請款。週期性月費請用「訂閱 / 月費」。
-            </DialogDescription>
+            <DialogTitle>{t("newItem.dialog.title")}</DialogTitle>
+            <DialogDescription>{t("newItem.dialog.description")}</DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4 py-4 sm:grid-cols-2">
@@ -81,7 +81,7 @@ export function NewBillingItemDialog({
 
           <DialogFooter>
             <Button type="submit" disabled={pending}>
-              {pending ? "儲存中…" : "儲存"}
+              {pending ? t("common.saving") : t("newItem.dialog.save")}
             </Button>
           </DialogFooter>
         </form>

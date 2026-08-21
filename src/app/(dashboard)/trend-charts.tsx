@@ -7,6 +7,7 @@
  */
 
 import { useMemo, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { ChartLine } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,27 +30,41 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/empty-state";
 import { CurrencyFlag } from "@/components/currency-flag";
 import type { MonthlyTrends } from "@/db/queries";
-import { formatCurrency, currencyMeta, CURRENCIES, DEFAULT_CURRENCY } from "@/lib/currency";
+import { formatCurrency, CURRENCIES, DEFAULT_CURRENCY } from "@/lib/currency";
 
 type AccountOption = { id: number; name: string; currency: string };
-
-const chartConfig = {
-  income: { label: "收入", color: "var(--income)" },
-  expense: { label: "支出", color: "var(--expense)" },
-  balance: { label: "餘額", color: "var(--chart-1)" },
-} satisfies ChartConfig;
 
 /** "2025-08" → "25/08"（X 軸刻度）；tooltip 用完整 "2025/08"。 */
 const tickLabel = (ym: string) => ym.slice(2).replace("-", "/");
 const fullLabel = (ym: React.ReactNode) => String(ym).replace("-", "/");
 
-/** Y 軸刻度：壓縮表示（1.5萬、300 之類），跨語系交給 Intl。 */
-const compact = new Intl.NumberFormat("zh-TW", { notation: "compact" });
+/**
+ * Y 軸刻度：壓縮表示（zh-TW 的 1.5萬、en 的 15K），跨語系交給 Intl —— 所以格式化
+ * 器要跟著當下語系建，不能寫死。
+ */
+function useCompactNumber() {
+  const locale = useLocale();
+  return useMemo(
+    () => new Intl.NumberFormat(locale, { notation: "compact" }),
+    [locale],
+  );
+}
 
 export function TrendCharts({
   accounts,
   trends,
 }: Readonly<{ accounts: AccountOption[]; trends: MonthlyTrends }>) {
+  const t = useTranslations("dashboard");
+  const tc = useTranslations("common.currency");
+  const compact = useCompactNumber();
+  // CURRENCIES.code is typed as a plain string; the catalogue is keyed by the
+  // same codes, so narrow it at the boundary rather than widening the messages.
+  const currencyName = (code: string) => tc(code as Parameters<typeof tc>[0]);
+  const chartConfig = {
+    income: { label: t("trend.tooltip.income"), color: "var(--income)" },
+    expense: { label: t("trend.tooltip.expense"), color: "var(--expense)" },
+    balance: { label: t("trend.tooltip.balance"), color: "var(--chart-1)" },
+  } satisfies ChartConfig;
   const [range, setRange] = useState<"6" | "12">("6");
   const [scope, setScope] = useState<string>("all"); // "all" 或帳戶 id
   // 幣別清單依 CURRENCIES 註冊順序排序（TWD 最前），未登記的幣別排在最後。
@@ -158,7 +173,7 @@ export function TrendCharts({
     <section className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
-          <ChartLine className="size-4" /> 收支趨勢
+          <ChartLine className="size-4" /> {t("trend.title")}
         </h2>
         <div className="flex flex-wrap items-center gap-2">
           {scope === "all" && currencies.length > 1 && (
@@ -167,7 +182,7 @@ export function TrendCharts({
                 {currencies.map((c) => (
                   <TabsTrigger key={c} value={c} className="gap-1.5 px-2.5 text-xs">
                     <CurrencyFlag currency={c} className="h-3" />
-                    {currencyMeta(c).name}
+                    {currencyName(c)}
                   </TabsTrigger>
                 ))}
               </TabsList>
@@ -178,13 +193,13 @@ export function TrendCharts({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">全部帳戶</SelectItem>
+              <SelectItem value="all">{t("trend.allAccounts")}</SelectItem>
               {currencies.map((c) => {
                 const group = accounts.filter((a) => a.currency === c);
                 if (group.length === 0) return null;
                 return (
                   <SelectGroup key={c}>
-                    <SelectLabel>{currencyMeta(c).name}</SelectLabel>
+                    <SelectLabel>{currencyName(c)}</SelectLabel>
                     {group.map((a) => (
                       <SelectItem key={a.id} value={String(a.id)}>
                         {a.name}
@@ -197,8 +212,8 @@ export function TrendCharts({
           </Select>
           <Tabs value={range} onValueChange={(v) => setRange(v as "6" | "12")}>
             <TabsList className="h-8">
-              <TabsTrigger value="6" className="px-2.5 text-xs">6 個月</TabsTrigger>
-              <TabsTrigger value="12" className="px-2.5 text-xs">12 個月</TabsTrigger>
+              <TabsTrigger value="6" className="px-2.5 text-xs">{t("trend.months6")}</TabsTrigger>
+              <TabsTrigger value="12" className="px-2.5 text-xs">{t("trend.months12")}</TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
@@ -208,7 +223,9 @@ export function TrendCharts({
         <Card className="gap-3">
           <CardHeader>
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              每月收支{selectedAccount ? `（${selectedAccount.name}）` : ""}
+              {selectedAccount
+                ? t("trend.flowTitleWithAccount", { account: selectedAccount.name })
+                : t("trend.flowTitle")}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -239,7 +256,7 @@ export function TrendCharts({
                 </BarChart>
               </ChartContainer>
             ) : (
-              <EmptyState icon={ChartLine} message="此範圍尚無收支資料" />
+              <EmptyState icon={ChartLine} message={t("trend.flowEmpty")} />
             )}
           </CardContent>
         </Card>
@@ -247,7 +264,9 @@ export function TrendCharts({
         <Card className="gap-3">
           <CardHeader>
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              帳戶餘額走勢{selectedAccount ? `（${selectedAccount.name}）` : ""}
+              {selectedAccount
+                ? t("trend.balanceTitleWithAccount", { account: selectedAccount.name })
+                : t("trend.balanceTitle")}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -290,7 +309,7 @@ export function TrendCharts({
                 </AreaChart>
               </ChartContainer>
             ) : (
-              <EmptyState icon={ChartLine} message="此範圍尚無餘額資料" />
+              <EmptyState icon={ChartLine} message={t("trend.balanceEmpty")} />
             )}
           </CardContent>
         </Card>

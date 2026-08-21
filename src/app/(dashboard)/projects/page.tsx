@@ -1,3 +1,4 @@
+import { getTranslations } from "next-intl/server";
 import { RowDialog } from "@/components/row-dialog";
 import { DeleteButton } from "@/components/delete-button";
 import { deleteProject } from "@/db/mutations";
@@ -23,7 +24,6 @@ import { requireOrg } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
-const statusMap: Record<string, string> = { active: "進行中", archived: "封存" };
 const statusVariant: Record<string, "default" | "secondary" | "outline"> = {
   active: "default",
   archived: "secondary",
@@ -31,12 +31,17 @@ const statusVariant: Record<string, "default" | "secondary" | "outline"> = {
 
 export default async function ProjectsPage() {
   const { orgId } = await requireOrg();
+  const t = await getTranslations("projects");
   const [rows, parties] = await Promise.all([listProjects(orgId), listParties(orgId)]);
   const partyOptions = parties.map((p) => ({ id: p.id, name: p.name }));
+  const statusLabels: Record<string, string> = {
+    active: t("status.active"),
+    archived: t("status.archived"),
+  };
 
   return (
     <>
-      <PageHeader title="專案" description="每個專案的收支由交易上的「專案」欄位彙總（P&L）">
+      <PageHeader title={t("list.title")} description={t("list.description")}>
         <NewProjectDialog parties={partyOptions} />
       </PageHeader>
 
@@ -44,30 +49,30 @@ export default async function ProjectsPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>專案</TableHead>
-              <TableHead>客戶</TableHead>
-              <TableHead>狀態</TableHead>
-              <TableHead className="text-right">收入</TableHead>
-              <TableHead className="text-right">支出</TableHead>
-              <TableHead className="text-right">淨額</TableHead>
+              <TableHead>{t("list.columns.project")}</TableHead>
+              <TableHead>{t("list.columns.customer")}</TableHead>
+              <TableHead>{t("list.columns.status")}</TableHead>
+              <TableHead className="text-right">{t("list.columns.income")}</TableHead>
+              <TableHead className="text-right">{t("list.columns.expense")}</TableHead>
+              <TableHead className="text-right">{t("list.columns.net")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <EmptyRow colSpan={6} message="尚無專案，點右上角新增" />
+              <EmptyRow colSpan={6} message={t("list.empty")} />
             ) : (
               rows.map((p) => (
                 <RowDialog
                   key={p.id}
                   title={p.name}
-                  description="專案"
+                  description={t("list.rowDescription")}
                   cells={
                     <>
                       <TableCell className="font-medium">{p.name}</TableCell>
                       <TableCell className="text-muted-foreground">{p.clientName ?? "—"}</TableCell>
                       <TableCell>
                         <Badge variant={statusVariant[p.status] ?? "outline"}>
-                          {statusMap[p.status] ?? p.status}
+                          {statusLabels[p.status] ?? p.status}
                         </Badge>
                       </TableCell>
                       <TableCell className={cn("text-right tabular-nums", signColor(p.income))}>

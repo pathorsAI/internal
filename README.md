@@ -20,7 +20,8 @@ It keeps two sets of books — *internal* and *external* (內外帳) — in one 
 the money owed to you on the other side: projects, contracts, subscriptions, invoices and
 who still hasn't paid. It's the in-house tool we run ourselves, not a general-purpose ERP.
 
-The UI is in Traditional Chinese (zh-TW); the codebase, docs and configuration are English.
+The UI ships in English and Traditional Chinese (zh-TW), switchable per user from the
+sidebar. The codebase, docs and configuration are English.
 
 ---
 
@@ -28,41 +29,38 @@ The UI is in Traditional Chinese (zh-TW); the codebase, docs and configuration a
 
 > Screenshots are from a demo organization — the company, clients and figures are all made up.
 
-### 請款看板 — one page for the whole billing cycle
-
-Who should be billed, who has been billed, who still owes you, and which invoices are
-outstanding. One-off contract instalments and project milestones are merged with recurring
-subscription periods into a single list, and each row carries its next action.
-
-![Billing board](docs/images/billing.png)
-
-### 內外帳 — the dual-book ledger
-
-Every transaction carries a `book` tag — 內帳 / 外帳 / 內外 — so the internal and external
-views come from the same records instead of two spreadsheets that drift apart. Filter by
-month, book, category or account.
-
-![Transactions](docs/images/transactions.png)
-
-### 總覽 — where the money actually is
-
-Balances per account and per currency (no implicit FX conversion), monthly income vs.
-expense, and the balance trend.
-
-![Dashboard](docs/images/dashboard.png)
-
-### 報表 — receivables ageing, VAT periods, contract coverage
-
-Ageing buckets per client, what each VAT period still needs invoiced, and a check that
-every contract's value has actually been scheduled into billable items.
-
-![Reports](docs/images/reports.png)
-
-### 合約 — collection progress per contract
-
-![Contracts](docs/images/contracts.png)
-
----
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/billing.png" alt="Billing board" width="100%" />
+      <p><b>Billing board</b> — one page for the whole billing cycle.<br/>
+      <sub>Who should be billed, who has been billed, who still owes you. One-off
+      contract instalments and recurring subscription periods merge into a single
+      list, and every row carries its next action.</sub></p>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/transactions.png" alt="Dual-book ledger" width="100%" />
+      <p><b>Dual books</b> — the internal / external ledger.<br/>
+      <sub>Every transaction carries a <code>book</code> tag, so both views come from
+      the same records instead of two spreadsheets that drift apart. Filter by month,
+      book, category or account.</sub></p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/dashboard.png" alt="Overview" width="100%" />
+      <p><b>Overview</b> — where the money actually is.<br/>
+      <sub>Balances per account and per currency with no implicit FX conversion,
+      monthly income against expense, and the balance trend.</sub></p>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/reports.png" alt="Reports" width="100%" />
+      <p><b>Reports</b> — receivables, tax periods, contract coverage.<br/>
+      <sub>Ageing buckets per client, what each VAT period still needs invoiced, and a
+      check that every contract's value has actually been scheduled into billable items.</sub></p>
+    </td>
+  </tr>
+</table>
 
 ## Features
 
@@ -84,6 +82,8 @@ every contract's value has actually been scheduled into billable items.
 - **Documents** — file uploads to object storage (e.g. receipts attached to transactions).
 - **MCP** — the ledger is also exposed as an MCP server, so an AI agent can query and record
   against it. See [`docs/mcp.md`](docs/mcp.md).
+- **Bilingual UI** — English and Traditional Chinese, switched per user without
+  reloading or changing URLs. See [Internationalization](#internationalization).
 - **Auth** — Google OAuth via better-auth, invite-based member management, org settings.
 
 ## Tech stack
@@ -91,6 +91,7 @@ every contract's value has actually been scheduled into billable items.
 | Layer | Choice |
 | --- | --- |
 | Frontend | Next.js 16 (App Router), React 19, Tailwind CSS v4, shadcn/ui + Base UI |
+| i18n | next-intl (cookie-based locale, no URL segment) |
 | Backend | Next.js Route Handlers / Server Actions, better-auth |
 | Database | Postgres + Drizzle ORM (introspect-only schema, plain-SQL migrations) |
 | Tooling | Bun |
@@ -137,6 +138,46 @@ See [`.env.example`](.env.example) for the full template.
 
 ---
 
+## Internationalization
+
+The UI ships in **English** and **Traditional Chinese (zh-TW)**. Readers switch locale from
+the sidebar; the choice is stored in a `locale` cookie.
+
+There is deliberately **no locale segment in the URL** — `/billing` is `/billing` in every
+language. That keeps the auth callbacks, the MCP endpoints and every bookmark stable.
+
+```
+src/i18n/
+  config.ts            # locale list, default, cookie name
+  request.ts           # next-intl request config
+  messages/
+    dictionary.ts      # Leaf / Dictionary types + locale projection
+    <area>.ts          # one file per area, all locales side by side
+```
+
+Every string carries its translations together, rather than living in parallel per-locale
+trees:
+
+```ts
+const dashboard = {
+  title: { "zh-TW": "總覽", en: "Overview" },
+} satisfies Dictionary;
+```
+
+A key missing a locale — or carrying a misspelled one — is a **build error**, not a string
+that silently falls back. Keeping both languages on the same key also makes a gap visible
+where you are already reading, and means adding a locale is a compiler-guided edit rather
+than a diff between two files. Translations are read with
+[next-intl](https://next-intl.dev) — `useTranslations()` in Client Components,
+`await getTranslations()` in Server Components and Server Actions. Server Actions translate
+their own validation errors, so a message that surfaces in a toast is in the same language as
+the page that triggered it.
+
+To add a locale: add it to `locales` in `src/i18n/config.ts` and let TypeScript walk you
+through every key that now needs a translation.
+
+---
+
 ## Database
 
 Postgres through **Drizzle ORM**. `src/db/schema.ts` is introspected from the database
@@ -173,6 +214,7 @@ src/
   app/            # Next.js App Router (dashboard pages, auth routes, onboarding)
   components/     # UI components (shadcn/ui + Base UI) and shared widgets
   db/             # Drizzle client, introspected schema, queries & mutations
+  i18n/           # locale config and bilingual message catalogue
   lib/            # auth (better-auth), session helpers, object storage, utils
 migrations/       # plain forward-only SQL migrations
 scripts/          # one-off operational SQL (e.g. bootstrap-owner)
@@ -184,8 +226,8 @@ docker-compose.yml
 ## Contributing
 
 Issues and pull requests are welcome — please use [GitHub Issues](../../issues) for bugs and
-feature requests. User-facing strings are Traditional Chinese (zh-TW); please keep new UI
-copy consistent.
+feature requests. User-facing strings must go through i18n rather than being hardcoded —
+see [Internationalization](#internationalization) for where the message files live.
 
 ## License
 

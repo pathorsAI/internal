@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { getTranslations } from "next-intl/server";
 import { headers } from "next/headers";
 import { eq, and, isNull, inArray, desc, sql } from "drizzle-orm";
 import { getDb } from "./index";
@@ -99,8 +100,9 @@ export async function createParty(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
   const name = str(formData.get("name"));
-  if (!name) return { ok: false, error: "請輸入交易對象名稱" };
+  if (!name) return { ok: false, error: t("required.counterpartyName") };
 
   try {
     const { orgId } = await requireOrg();
@@ -122,7 +124,7 @@ export async function createParty(
     revalidatePath("/parties");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "新增失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
   }
 }
 
@@ -130,13 +132,14 @@ export async function createReconciliation(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
   const accountId = num(formData.get("accountId"));
   const asOfDate = str(formData.get("asOfDate"));
   const statementBalance = str(formData.get("statementBalance"));
 
-  if (!accountId) return { ok: false, error: "請選擇帳戶" };
-  if (!asOfDate) return { ok: false, error: "請選擇截止日期" };
-  if (statementBalance === null) return { ok: false, error: "請輸入對帳單餘額" };
+  if (!accountId) return { ok: false, error: t("required.account") };
+  if (!asOfDate) return { ok: false, error: t("required.endDate") };
+  if (statementBalance === null) return { ok: false, error: t("required.statementBalance") };
 
   try {
     const { orgId } = await requireOrg();
@@ -154,11 +157,11 @@ export async function createReconciliation(
     revalidatePath("/reconciliation");
     return { ok: true };
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "新增失敗";
+    const msg = e instanceof Error ? e.message : t("failed.create");
     return {
       ok: false,
       error: msg.includes("uq_recon_account_date")
-        ? "此帳戶在該日期已有對帳紀錄"
+        ? t("conflict.reconciliationExists")
         : msg,
     };
   }
@@ -216,8 +219,9 @@ async function requireCustomer(
   orgId: string,
   name: string | null,
 ): Promise<{ id: number; created: boolean } | { error: string }> {
+  const t = await getTranslations("errors");
   const party = await resolvePartyName(db, orgId, name);
-  if (party.id == null) return { error: "請輸入客戶" };
+  if (party.id == null) return { error: t("required.client") };
   return { id: party.id, created: party.created };
 }
 
@@ -262,10 +266,11 @@ async function resolveExpenseIncome(
   isIncome: boolean,
   formData: FormData,
 ): Promise<TxnResult> {
+  const t = await getTranslations("errors");
   const accountId = num(formData.get("accountId"));
-  if (!accountId) return { error: isIncome ? "請選擇收款帳戶" : "請選擇付款帳戶" };
+  if (!accountId) return { error: isIncome ? t("required.receivingAccount") : t("required.payingAccount") };
   const partyName = str(formData.get("partyName"));
-  if (!partyName) return { error: isIncome ? "請輸入客戶" : "請輸入交易對象" };
+  if (!partyName) return { error: isIncome ? t("required.client") : t("required.counterparty") };
   // 分類可留空 → categoryId 為 null＝未分類（不再強制選分類，避免用另一個帳戶暫存）
   const categoryId = num(formData.get("categoryId"));
   const partyId = await getOrCreateParty(db, orgId, partyName, isIncome ? "customer" : "vendor");
@@ -285,11 +290,12 @@ async function resolveAdvance(
   orgId: string,
   formData: FormData,
 ): Promise<TxnResult> {
+  const t = await getTranslations("errors");
   const partyName = str(formData.get("partyName"));
-  if (!partyName) return { error: "請輸入廠商" };
+  if (!partyName) return { error: t("required.vendor") };
   const categoryId = num(formData.get("categoryId")); // 可留空＝未分類
   const settleName = str(formData.get("settleEmployeeName"));
-  if (!settleName) return { error: "請輸入代墊人" };
+  if (!settleName) return { error: t("required.payer") };
   return {
     fields: {
       ...blankFields,
@@ -300,40 +306,58 @@ async function resolveAdvance(
   };
 }
 
-function resolveTransfer(formData: FormData): TxnResult {
+async function resolveTransfer(formData: FormData): Promise<TxnResult> {
   const fromAccountId = num(formData.get("fromAccountId"));
   const toAccountId = num(formData.get("toAccountId"));
-  if (!fromAccountId || !toAccountId) return { error: "請選擇轉出與轉入帳戶" };
+  if (!fromAccountId || !toAccountId) {
+    const t = await getTranslations("errors");
+    return { error: t("required.transferAccounts") };
+  }
   return { fields: { ...blankFields, fromAccountId, toAccountId } };
 }
 
 // 依情境（type）解析交易要寫的欄位，順便驗證；回傳欄位或錯誤訊息。
-function resolveTxnFields(
+async function resolveTxnFields(
   db: ReturnType<typeof getDb>,
   orgId: string,
   type: string,
   formData: FormData,
-): Promise<TxnResult> | TxnResult {
+): Promise<TxnResult> {
   if (type === "expense" || type === "income")
     return resolveExpenseIncome(db, orgId, type === "income", formData);
   if (type === "advance") return resolveAdvance(db, orgId, formData);
   if (type === "transfer") return resolveTransfer(formData);
-  return { error: "不支援的交易類型" };
+  const t = await getTranslations("errors");
+  return { error: t("unsupported.transactionType") };
 }
 
-// 情境優先：type 決定行為，各情境只讀自己需要的欄位。所有金額目前以 TWD 計。
-export async function createTransaction(
-  _prev: ActionState,
+type TxnHeader = {
+  type: string;
+  txnDate: string;
+  amount: string;
+  currency: string;
+  book: "both" | "internal";
+  billed: boolean;
+};
+
+/**
+ * 新增與編輯交易共用的表頭解析與驗證。
+ *
+ * 兩支 action 的差別只在「有沒有 id」與最後是 insert 還是 update；日期、金額、幣別、
+ * 報稅與統編這幾條規則必須一模一樣，分開寫遲早會走鐘。
+ */
+async function readTransactionHeader(
   formData: FormData,
-): Promise<ActionState> {
+): Promise<{ error: string } | { header: TxnHeader }> {
+  const t = await getTranslations("errors");
   const type = str(formData.get("type"));
   const txnDate = str(formData.get("txnDate"));
   const amount = str(formData.get("amount"));
   const currency = str(formData.get("currency")) ?? "TWD";
 
-  if (!type) return { ok: false, error: "缺少交易類型" };
-  if (!txnDate) return { ok: false, error: "請選擇日期" };
-  if (amount === null) return { ok: false, error: "請輸入金額" };
+  if (!type) return { error: t("required.transactionType") };
+  if (!txnDate) return { error: t("required.date") };
+  if (amount === null) return { error: t("required.amount") };
 
   // 報稅與否：transfer 固定 both；其餘看「上外帳」勾選（勾→both，不勾→internal）
   const reported = type === "transfer" || formData.get("reported") === "on";
@@ -345,14 +369,49 @@ export async function createTransaction(
   if (billed) {
     const kind = str(formData.get("docKind"));
     if (kind !== "e_invoice" && kind !== "paper_invoice") {
-      return { ok: false, error: "有報公司統編時，憑證類型必須是電子發票或其他發票" };
+      return { error: t("validation.billedDocKind") };
     }
   }
+
+  return { header: { type, txnDate, amount, currency, book, billed } };
+}
+
+/** insert 與 update 共用的欄位（type 只在新增時寫入，所以不在這裡）。 */
+function transactionColumns(formData: FormData, header: TxnHeader, f: TxnFields) {
+  return {
+    txnDate: header.txnDate,
+    amount: header.amount,
+    currency: header.currency,
+    amountTwd: header.currency === "TWD" ? header.amount : null,
+    description: str(formData.get("description")),
+    categoryId: f.categoryId,
+    partyId: f.partyId,
+    settleEmployeeId: f.settleEmployeeId,
+    projectId: num(formData.get("projectId")),
+    contractId: num(formData.get("contractId")),
+    subscriptionId: num(formData.get("subscriptionId")),
+    subscriptionPeriod: str(formData.get("subscriptionPeriod")),
+    fromAccountId: f.fromAccountId,
+    toAccountId: f.toAccountId,
+    book: header.book,
+    billedToCompanyTaxId: header.billed,
+  };
+}
+
+// 情境優先：type 決定行為，各情境只讀自己需要的欄位。所有金額目前以 TWD 計。
+export async function createTransaction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const t = await getTranslations("errors");
+  const parsed = await readTransactionHeader(formData);
+  if ("error" in parsed) return { ok: false, error: parsed.error };
+  const { header } = parsed;
 
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
-    const resolved = await resolveTxnFields(db, orgId, type, formData);
+    const resolved = await resolveTxnFields(db, orgId, header.type, formData);
     if ("error" in resolved) return { ok: false, error: resolved.error };
     const f = resolved.fields;
 
@@ -360,36 +419,21 @@ export async function createTransaction(
       .insert(transactions)
       .values({
         organizationId: orgId,
-        type,
-        txnDate,
-        description: str(formData.get("description")),
-        categoryId: f.categoryId,
-        partyId: f.partyId,
-        settleEmployeeId: f.settleEmployeeId,
-        projectId: num(formData.get("projectId")),
-        contractId: num(formData.get("contractId")),
-        subscriptionId: num(formData.get("subscriptionId")),
-        subscriptionPeriod: str(formData.get("subscriptionPeriod")),
-        amount,
-        currency,
-        amountTwd: currency === "TWD" ? amount : null,
-        fromAccountId: f.fromAccountId,
-        toAccountId: f.toAccountId,
-        book,
-        billedToCompanyTaxId: billed,
+        type: header.type,
+        ...transactionColumns(formData, header, f),
       })
       .returning({ id: transactions.id });
 
-    await storeTransactionDocument(db, orgId, inserted.id, formData, billed);
+    await storeTransactionDocument(db, orgId, inserted.id, formData, header.billed);
 
-    await logWeb(orgId, "create", "transaction", inserted.id, str(formData.get("description")) ?? type);
+    await logWeb(orgId, "create", "transaction", inserted.id, str(formData.get("description")) ?? header.type);
 
     revalidatePath("/transactions");
     revalidatePath("/accountant-notices");
     revalidatePath("/");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "新增失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
   }
 }
 
@@ -397,10 +441,11 @@ export async function updateParty(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
   const id = num(formData.get("id"));
   const name = str(formData.get("name"));
-  if (!id) return { ok: false, error: "缺少 ID" };
-  if (!name) return { ok: false, error: "請輸入名稱" };
+  if (!id) return { ok: false, error: t("required.id") };
+  if (!name) return { ok: false, error: t("required.name") };
 
   try {
     const { orgId } = await requireOrg();
@@ -423,10 +468,10 @@ export async function updateParty(
     revalidatePath(`/parties/${id}`);
     return { ok: true };
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "更新失敗";
+    const msg = e instanceof Error ? e.message : t("failed.update");
     return {
       ok: false,
-      error: msg.includes("parties_name_key") ? "已有相同名稱的交易對象" : msg,
+      error: msg.includes("parties_name_key") ? t("conflict.partyNameExists") : msg,
     };
   }
 }
@@ -436,15 +481,17 @@ export async function createReimbursement(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
+  const tRec = await getTranslations("lib");
   const advanceId = num(formData.get("advanceId"));
   const fromAccountId = num(formData.get("fromAccountId"));
   const payDate = str(formData.get("payDate"));
   const amount = str(formData.get("amount"));
 
-  if (!advanceId) return { ok: false, error: "缺少代墊紀錄" };
-  if (!fromAccountId) return { ok: false, error: "請選擇付款帳戶" };
-  if (!payDate) return { ok: false, error: "請選擇撥款日期" };
-  if (amount === null) return { ok: false, error: "請輸入金額" };
+  if (!advanceId) return { ok: false, error: t("required.advanceRecord") };
+  if (!fromAccountId) return { ok: false, error: t("required.payingAccount") };
+  if (!payDate) return { ok: false, error: t("required.reimbursementDate") };
+  if (amount === null) return { ok: false, error: t("required.amount") };
 
   try {
     const { orgId } = await requireOrg();
@@ -458,7 +505,7 @@ export async function createReimbursement(
       .from(transactions)
       .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, advanceId)))
       .limit(1);
-    if (!adv) return { ok: false, error: "找不到該代墊紀錄" };
+    if (!adv) return { ok: false, error: t("notFound.advanceRecord") };
     const advCurrency = adv.currency ?? "TWD";
 
     const [inserted] = await db
@@ -474,18 +521,18 @@ export async function createReimbursement(
         fromAccountId,
         book: "internal",
         relatedToId: advanceId,
-        description: "撥款還代墊",
+        description: tRec("records.advanceSettled"),
       })
       .returning({ id: transactions.id });
 
-    await logWeb(orgId, "create", "transaction", inserted.id, "員工代墊撥款");
+    await logWeb(orgId, "create", "transaction", inserted.id, tRec("activity.advanceReimbursed"));
 
     revalidatePath("/advances");
     revalidatePath("/transactions");
     revalidatePath("/");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "撥款失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.reimburse") };
   }
 }
 
@@ -496,10 +543,11 @@ export async function createCategory(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
   const name = str(formData.get("name"));
   const kind = str(formData.get("kind")) ?? "expense";
-  if (!name) return { ok: false, error: "請輸入分類名稱" };
-  if (!CATEGORY_KINDS.has(kind)) return { ok: false, error: "分類別不正確" };
+  if (!name) return { ok: false, error: t("required.categoryName") };
+  if (!CATEGORY_KINDS.has(kind)) return { ok: false, error: t("validation.categoryKindInvalid") };
   try {
     const { orgId } = await requireOrg();
     const [inserted] = await getDb()
@@ -511,7 +559,7 @@ export async function createCategory(
     revalidatePath("/transactions");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "新增失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
   }
 }
 
@@ -519,10 +567,11 @@ export async function updateCategory(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
   const id = num(formData.get("id"));
   const name = str(formData.get("name"));
-  if (!id) return { ok: false, error: "缺少 ID" };
-  if (!name) return { ok: false, error: "請輸入分類名稱" };
+  if (!id) return { ok: false, error: t("required.id") };
+  if (!name) return { ok: false, error: t("required.categoryName") };
   try {
     const { orgId } = await requireOrg();
     await getDb()
@@ -534,11 +583,12 @@ export async function updateCategory(
     revalidatePath("/transactions");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
   }
 }
 
 export async function deleteCategory(id: number): Promise<ActionState> {
+  const t = await getTranslations("errors");
   try {
     const { orgId } = await requireOrg();
     await getDb()
@@ -550,7 +600,7 @@ export async function deleteCategory(id: number): Promise<ActionState> {
     revalidatePath("/transactions");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
   }
 }
 
@@ -559,8 +609,9 @@ export async function createBankAccount(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
   const name = str(formData.get("name"));
-  if (!name) return { ok: false, error: "請輸入名稱" };
+  if (!name) return { ok: false, error: t("required.name") };
   try {
     const { orgId } = await requireOrg();
     const [inserted] = await getDb()
@@ -578,7 +629,7 @@ export async function createBankAccount(
     revalidatePath("/bank-accounts");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "新增失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
   }
 }
 
@@ -586,10 +637,11 @@ export async function updateBankAccount(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
   const id = num(formData.get("id"));
   const name = str(formData.get("name"));
-  if (!id) return { ok: false, error: "缺少 ID" };
-  if (!name) return { ok: false, error: "請輸入名稱" };
+  if (!id) return { ok: false, error: t("required.id") };
+  if (!name) return { ok: false, error: t("required.name") };
   try {
     const { orgId } = await requireOrg();
     await getDb()
@@ -607,11 +659,12 @@ export async function updateBankAccount(
     revalidatePath(`/bank-accounts/${id}`);
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
   }
 }
 
 export async function deleteBankAccount(id: number): Promise<ActionState> {
+  const t = await getTranslations("errors");
   try {
     const { orgId } = await requireOrg();
     await getDb()
@@ -622,7 +675,7 @@ export async function deleteBankAccount(id: number): Promise<ActionState> {
     revalidatePath("/bank-accounts");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
   }
 }
 
@@ -637,6 +690,7 @@ async function resolveEmployeeUserId(
   raw: string | null,
   excludeEmployeeId?: number,
 ): Promise<string | null> {
+  const t = await getTranslations("errors");
   if (!raw || raw === "none") return null;
   const db = getDb();
   const [m] = await db
@@ -644,37 +698,68 @@ async function resolveEmployeeUserId(
     .from(member)
     .where(and(eq(member.organizationId, orgId), eq(member.userId, raw)))
     .limit(1);
-  if (!m) throw new Error("該使用者不是此組織成員");
+  if (!m) throw new Error(t("validation.notOrgMember"));
   const [taken] = await db
     .select({ id: employees.id })
     .from(employees)
     .where(and(eq(employees.organizationId, orgId), eq(employees.userId, raw), isNull(employees.deletedAt)))
     .limit(1);
   if (taken && taken.id !== excludeEmployeeId) {
-    throw new Error("此使用者已綁定其他員工");
+    throw new Error(t("validation.userAlreadyBoundToEmployee"));
   }
   return raw;
 }
 
 /** 員工表單的 email 欄位檢查：空值放行，有填就要是合法格式。 */
-function employeeEmailError(formData: FormData): string | null {
+async function employeeEmailError(formData: FormData): Promise<string | null> {
   const work = str(formData.get("workEmail"));
   const personal = str(formData.get("personalEmail"));
-  if (work && !isValidEmail(work)) return "工作 Email 格式不正確";
-  if (personal && !isValidEmail(personal)) return "聯絡 Email 格式不正確";
+  const t = await getTranslations("errors");
+  if (work && !isValidEmail(work)) return t("validation.workEmailFormat");
+  if (personal && !isValidEmail(personal)) return t("validation.personalEmailFormat");
   return null;
+}
+
+/**
+ * 新增與編輯員工共用的欄位。差別只有 isActive：新增一律 true，編輯看勾選。
+ */
+function employeeColumns(
+  formData: FormData,
+  name: string,
+  userId: string | null,
+) {
+  const laborInsured = str(formData.get("laborInsuredSalary"));
+  const healthInsured = str(formData.get("healthInsuredSalary"));
+  return {
+    name,
+    nationalId: str(formData.get("nationalId")),
+    employmentType: str(formData.get("employmentType")) ?? "full_time",
+    hasLaborInsurance: laborInsured !== null,
+    hasHealthInsurance: healthInsured !== null,
+    hasPension: formData.get("hasPension") === "on",
+    baseSalary: str(formData.get("baseSalary")),
+    laborInsuredSalary: laborInsured,
+    healthInsuredSalary: healthInsured,
+    salaryAccount: str(formData.get("salaryAccount")),
+    startDate: str(formData.get("startDate")),
+    endDate: str(formData.get("endDate")),
+    workEmail: str(formData.get("workEmail")),
+    personalEmail: str(formData.get("personalEmail")),
+    phone: str(formData.get("phone")),
+    note: str(formData.get("note")),
+    userId,
+  };
 }
 
 export async function createEmployee(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
   const name = str(formData.get("name"));
-  if (!name) return { ok: false, error: "請輸入姓名" };
-  const emailErr = employeeEmailError(formData);
+  if (!name) return { ok: false, error: t("required.employeeName") };
+  const emailErr = await employeeEmailError(formData);
   if (emailErr) return { ok: false, error: emailErr };
-  const laborInsured = str(formData.get("laborInsuredSalary"));
-  const healthInsured = str(formData.get("healthInsuredSalary"));
   try {
     const { orgId } = await requireOrg();
     const userId = await resolveEmployeeUserId(orgId, str(formData.get("userId")));
@@ -682,23 +767,7 @@ export async function createEmployee(
       .insert(employees)
       .values({
         organizationId: orgId,
-        name,
-        nationalId: str(formData.get("nationalId")),
-        employmentType: str(formData.get("employmentType")) ?? "full_time",
-        hasLaborInsurance: laborInsured !== null,
-        hasHealthInsurance: healthInsured !== null,
-        hasPension: formData.get("hasPension") === "on",
-        baseSalary: str(formData.get("baseSalary")),
-        laborInsuredSalary: laborInsured,
-        healthInsuredSalary: healthInsured,
-        salaryAccount: str(formData.get("salaryAccount")),
-        startDate: str(formData.get("startDate")),
-        endDate: str(formData.get("endDate")),
-        workEmail: str(formData.get("workEmail")),
-        personalEmail: str(formData.get("personalEmail")),
-        phone: str(formData.get("phone")),
-        note: str(formData.get("note")),
-        userId,
+        ...employeeColumns(formData, name, userId),
         isActive: true,
       })
       .returning({ id: employees.id });
@@ -706,7 +775,7 @@ export async function createEmployee(
     revalidatePath("/employees");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "新增失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
   }
 }
 
@@ -714,37 +783,20 @@ export async function updateEmployee(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
   const id = num(formData.get("id"));
   const name = str(formData.get("name"));
-  if (!id) return { ok: false, error: "缺少 ID" };
-  if (!name) return { ok: false, error: "請輸入姓名" };
-  const emailErr = employeeEmailError(formData);
+  if (!id) return { ok: false, error: t("required.id") };
+  if (!name) return { ok: false, error: t("required.employeeName") };
+  const emailErr = await employeeEmailError(formData);
   if (emailErr) return { ok: false, error: emailErr };
-  const laborInsured = str(formData.get("laborInsuredSalary"));
-  const healthInsured = str(formData.get("healthInsuredSalary"));
   try {
     const { orgId } = await requireOrg();
     const userId = await resolveEmployeeUserId(orgId, str(formData.get("userId")), id);
     await getDb()
       .update(employees)
       .set({
-        name,
-        nationalId: str(formData.get("nationalId")),
-        employmentType: str(formData.get("employmentType")) ?? "full_time",
-        hasLaborInsurance: laborInsured !== null,
-        hasHealthInsurance: healthInsured !== null,
-        hasPension: formData.get("hasPension") === "on",
-        baseSalary: str(formData.get("baseSalary")),
-        laborInsuredSalary: laborInsured,
-        healthInsuredSalary: healthInsured,
-        salaryAccount: str(formData.get("salaryAccount")),
-        startDate: str(formData.get("startDate")),
-        endDate: str(formData.get("endDate")),
-        workEmail: str(formData.get("workEmail")),
-        personalEmail: str(formData.get("personalEmail")),
-        phone: str(formData.get("phone")),
-        note: str(formData.get("note")),
-        userId,
+        ...employeeColumns(formData, name, userId),
         isActive: formData.get("isActive") === "on",
       })
       .where(and(eq(employees.organizationId, orgId), eq(employees.id, id)));
@@ -753,11 +805,12 @@ export async function updateEmployee(
     revalidatePath(`/employees/${id}`);
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
   }
 }
 
 export async function deleteEmployee(id: number): Promise<ActionState> {
+  const t = await getTranslations("errors");
   try {
     const { orgId } = await requireOrg();
     await getDb()
@@ -768,12 +821,13 @@ export async function deleteEmployee(id: number): Promise<ActionState> {
     revalidatePath("/employees");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
   }
 }
 
 // ---- 交易對象 / 交易 刪除 ----
 export async function deleteParty(id: number): Promise<ActionState> {
+  const t = await getTranslations("errors");
   try {
     const { orgId } = await requireOrg();
     await getDb()
@@ -784,11 +838,12 @@ export async function deleteParty(id: number): Promise<ActionState> {
     revalidatePath("/parties");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
   }
 }
 
 export async function deleteTransaction(id: number): Promise<ActionState> {
+  const t = await getTranslations("errors");
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
@@ -798,7 +853,7 @@ export async function deleteTransaction(id: number): Promise<ActionState> {
       .from(transactions)
       .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)))
       .limit(1);
-    if (!owned) return { ok: false, error: "找不到該交易" };
+    if (!owned) return { ok: false, error: t("notFound.transaction") };
     // 薪資發放產生的交易：要刪請到「薪資」頁撤銷該筆發放（會連這筆交易一起刪）
     const [slip] = await db
       .select({ id: payslips.id })
@@ -808,7 +863,7 @@ export async function deleteTransaction(id: number): Promise<ActionState> {
     if (slip) {
       return {
         ok: false,
-        error: "這筆是發薪產生的交易，不能直接刪；請到「薪資」頁撤銷該筆發放。",
+        error: t("validation.cannotDeletePayrollTransaction"),
       };
     }
     // 軟刪除這筆交易的憑證（保留 R2 檔，不移除 storage）
@@ -827,12 +882,13 @@ export async function deleteTransaction(id: number): Promise<ActionState> {
     revalidatePath("/");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
   }
 }
 
 // 軟刪除交易的某筆憑證（保留 R2 檔，不移除 storage）
 export async function deleteTransactionDocument(id: number): Promise<ActionState> {
+  const t = await getTranslations("errors");
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
@@ -841,7 +897,7 @@ export async function deleteTransactionDocument(id: number): Promise<ActionState
       .from(documents)
       .where(and(eq(documents.organizationId, orgId), eq(documents.id, id)))
       .limit(1);
-    if (!doc) return { ok: false, error: "找不到該憑證" };
+    if (!doc) return { ok: false, error: t("notFound.document") };
     await db
       .update(documents)
       .set({ deletedAt: new Date().toISOString() })
@@ -850,12 +906,13 @@ export async function deleteTransactionDocument(id: number): Promise<ActionState
     revalidatePath("/transactions");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
   }
 }
 
 // 標記 / 取消標記「已通知會計師」（針對其他發票憑證）
 export async function markAccountantNotified(id: number): Promise<ActionState> {
+  const t = await getTranslations("errors");
   try {
     const { orgId } = await requireOrg();
     await getDb()
@@ -865,11 +922,12 @@ export async function markAccountantNotified(id: number): Promise<ActionState> {
     revalidatePath("/accountant-notices");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
   }
 }
 
 export async function unmarkAccountantNotified(id: number): Promise<ActionState> {
+  const t = await getTranslations("errors");
   try {
     const { orgId } = await requireOrg();
     await getDb()
@@ -879,7 +937,7 @@ export async function unmarkAccountantNotified(id: number): Promise<ActionState>
     revalidatePath("/accountant-notices");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
   }
 }
 
@@ -888,64 +946,36 @@ export async function updateTransaction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
   const id = num(formData.get("id"));
-  const type = str(formData.get("type"));
-  const txnDate = str(formData.get("txnDate"));
-  const amount = str(formData.get("amount"));
-  const currency = str(formData.get("currency")) ?? "TWD";
-  if (!id) return { ok: false, error: "缺少 ID" };
-  if (!type) return { ok: false, error: "缺少交易類型" };
-  if (!txnDate) return { ok: false, error: "請選擇日期" };
-  if (amount === null) return { ok: false, error: "請輸入金額" };
-
-  const reported = type === "transfer" || formData.get("reported") === "on";
-  const book = reported ? "both" : "internal";
-  const billed = formData.get("billedToCompanyTaxId") === "on";
-  if (billed) {
-    const kind = str(formData.get("docKind"));
-    if (kind !== "e_invoice" && kind !== "paper_invoice") {
-      return { ok: false, error: "有報公司統編時，憑證類型必須是電子發票或其他發票" };
-    }
-  }
+  if (!id) return { ok: false, error: t("required.id") };
+  const parsed = await readTransactionHeader(formData);
+  if ("error" in parsed) return { ok: false, error: parsed.error };
+  const { header } = parsed;
 
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
-    const resolved = await resolveTxnFields(db, orgId, type, formData);
+    const resolved = await resolveTxnFields(db, orgId, header.type, formData);
     if ("error" in resolved) return { ok: false, error: resolved.error };
     const f = resolved.fields;
 
     await db
       .update(transactions)
       .set({
-        txnDate,
-        amount,
-        currency,
-        amountTwd: currency === "TWD" ? amount : null,
-        description: str(formData.get("description")),
-        categoryId: f.categoryId,
-        partyId: f.partyId,
-        settleEmployeeId: f.settleEmployeeId,
-        projectId: num(formData.get("projectId")),
-        contractId: num(formData.get("contractId")),
-        subscriptionId: num(formData.get("subscriptionId")),
-        subscriptionPeriod: str(formData.get("subscriptionPeriod")),
-        fromAccountId: f.fromAccountId,
-        toAccountId: f.toAccountId,
-        book,
-        billedToCompanyTaxId: billed,
+        ...transactionColumns(formData, header, f),
         updatedAt: new Date().toISOString(),
       })
       .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)));
     // 編輯時若有補上憑證，新增一筆 documents
-    await storeTransactionDocument(db, orgId, id, formData, billed);
+    await storeTransactionDocument(db, orgId, id, formData, header.billed);
     await logWeb(orgId, "update", "transaction", id);
     revalidatePath("/transactions");
     revalidatePath("/accountant-notices");
     revalidatePath("/");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
   }
 }
 
@@ -1015,6 +1045,7 @@ export async function createInvoice(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
   try {
     const { orgId } = await requireOrg();
     const { columns: v, created } = await invoiceColumns(orgId, formData);
@@ -1042,7 +1073,7 @@ export async function createInvoice(
     revalidatePath("/invoices");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "新增失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
   }
 }
 
@@ -1050,8 +1081,9 @@ export async function updateInvoice(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
   const id = num(formData.get("id"));
-  if (!id) return { ok: false, error: "缺少 ID" };
+  if (!id) return { ok: false, error: t("required.id") };
   try {
     const { orgId } = await requireOrg();
     const { columns, created } = await invoiceColumns(orgId, formData);
@@ -1065,11 +1097,12 @@ export async function updateInvoice(
     revalidatePath(`/invoices/${id}`);
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
   }
 }
 
 export async function deleteInvoice(id: number): Promise<ActionState> {
+  const t = await getTranslations("errors");
   try {
     const { orgId } = await requireOrg();
     await getDb()
@@ -1080,7 +1113,7 @@ export async function deleteInvoice(id: number): Promise<ActionState> {
     revalidatePath("/invoices");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
   }
 }
 
@@ -1095,8 +1128,9 @@ export async function markInvoiceExternal(
   externalStatus: string,
   externalRef: string | null,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
   if (!INVOICE_EXTERNAL_STATUS.has(externalStatus)) {
-    return { ok: false, error: "狀態不正確" };
+    return { ok: false, error: t("validation.statusInvalid") };
   }
   try {
     const { orgId } = await requireOrg();
@@ -1115,7 +1149,7 @@ export async function markInvoiceExternal(
     revalidatePath("/invoices/reconcile");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
   }
 }
 
@@ -1124,14 +1158,15 @@ export async function updateReconciliation(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
   const id = num(formData.get("id"));
   const accountId = num(formData.get("accountId"));
   const asOfDate = str(formData.get("asOfDate"));
   const statementBalance = str(formData.get("statementBalance"));
-  if (!id) return { ok: false, error: "缺少 ID" };
-  if (!accountId) return { ok: false, error: "請選擇帳戶" };
-  if (!asOfDate) return { ok: false, error: "請選擇截止日期" };
-  if (statementBalance === null) return { ok: false, error: "請輸入對帳單餘額" };
+  if (!id) return { ok: false, error: t("required.id") };
+  if (!accountId) return { ok: false, error: t("required.account") };
+  if (!asOfDate) return { ok: false, error: t("required.endDate") };
+  if (statementBalance === null) return { ok: false, error: t("required.statementBalance") };
   try {
     const { orgId } = await requireOrg();
     await getDb()
@@ -1143,15 +1178,16 @@ export async function updateReconciliation(
     revalidatePath(`/reconciliation/${id}`);
     return { ok: true };
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "更新失敗";
+    const msg = e instanceof Error ? e.message : t("failed.update");
     return {
       ok: false,
-      error: msg.includes("uq_recon_account_date") ? "此帳戶在該日期已有對帳紀錄" : msg,
+      error: msg.includes("uq_recon_account_date") ? t("conflict.reconciliationExists") : msg,
     };
   }
 }
 
 export async function deleteReconciliation(id: number): Promise<ActionState> {
+  const t = await getTranslations("errors");
   try {
     const { orgId } = await requireOrg();
     await getDb()
@@ -1162,12 +1198,13 @@ export async function deleteReconciliation(id: number): Promise<ActionState> {
     revalidatePath("/reconciliation");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
   }
 }
 
 // ---- 薪資（軟刪除整期；payslips 隨之軟刪除）----
 export async function deletePayrollRun(id: number): Promise<ActionState> {
+  const t = await getTranslations("errors");
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
@@ -1184,7 +1221,7 @@ export async function deletePayrollRun(id: number): Promise<ActionState> {
     revalidatePath("/payroll");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
   }
 }
 
@@ -1242,15 +1279,17 @@ export async function payEmployeeSalary(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
+  const tRec = await getTranslations("lib");
   const employeeId = num(formData.get("employeeId"));
   const year = num(formData.get("periodYear"));
   const month = num(formData.get("periodMonth"));
   const payDate = str(formData.get("payDate"));
   const fromAccountId = num(formData.get("fromAccountId"));
-  if (!employeeId) return { ok: false, error: "缺少員工" };
-  if (!year || !month) return { ok: false, error: "請選擇發薪月份" };
-  if (!payDate) return { ok: false, error: "請選擇發薪日" };
-  if (!fromAccountId) return { ok: false, error: "請選擇付款帳戶" };
+  if (!employeeId) return { ok: false, error: t("required.employee") };
+  if (!year || !month) return { ok: false, error: t("required.payPeriod") };
+  if (!payDate) return { ok: false, error: t("required.payDate") };
+  if (!fromAccountId) return { ok: false, error: t("required.payingAccount") };
   // 帳別：沒投保沒合約的可只記內帳、不報稅
   const bookRaw = str(formData.get("book")) ?? "both";
   const book = ["internal", "external", "both"].includes(bookRaw) ? bookRaw : "both";
@@ -1260,12 +1299,12 @@ export async function payEmployeeSalary(
   try {
     items = JSON.parse(str(formData.get("items")) ?? "[]") as PayItem[];
   } catch {
-    return { ok: false, error: "明細格式錯誤" };
+    return { ok: false, error: t("validation.payItemFormat") };
   }
   items = items.filter((r) => r?.name && Number.isFinite(r.amount) && r.amount !== 0);
 
   const { taxable, nontaxable, otherDeduction } = sumPayItems(items);
-  if (taxable + nontaxable <= 0) return { ok: false, error: "請至少填一項薪資（如底薪）" };
+  if (taxable + nontaxable <= 0) return { ok: false, error: t("required.atLeastOnePayItem") };
 
   const deductionTotal = otherDeduction;
   const net = taxable + nontaxable - deductionTotal;
@@ -1282,7 +1321,7 @@ export async function payEmployeeSalary(
       .where(and(eq(payslips.payrollRunId, runId), eq(payslips.employeeId, employeeId)))
       .limit(1);
     if (existing?.paidTransactionId)
-      return { ok: false, error: "這位員工本月已發放過了" };
+      return { ok: false, error: t("conflict.payslipAlreadyPaid") };
 
     // 薪資支出交易（每人一筆）
     const [cat] = await db
@@ -1302,7 +1341,7 @@ export async function payEmployeeSalary(
         organizationId: orgId,
         type: "expense",
         txnDate: payDate,
-        description: `${period} 薪資 - ${emp?.name ?? ""}`.trim(),
+        description: tRec("records.salary", { period, name: emp?.name ?? "" }).trim(),
         categoryId: cat?.id ?? null,
         settleEmployeeId: employeeId,
         amount: String(net),
@@ -1347,7 +1386,7 @@ export async function payEmployeeSalary(
     }));
     if (allItems.length > 0) await db.insert(payslipItems).values(allItems);
 
-    await logWeb(orgId, "create", "transaction", txn.id, "發放薪資");
+    await logWeb(orgId, "create", "transaction", txn.id, tRec("activity.salaryPaid"));
 
     revalidatePath("/payroll");
     revalidatePath("/employees");
@@ -1355,12 +1394,13 @@ export async function payEmployeeSalary(
     revalidatePath("/");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "發放失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.pay") };
   }
 }
 
 // 刪除（撤銷）一張薪資單，連同它產生的薪資支出交易
 export async function deletePayslip(id: number): Promise<ActionState> {
+  const t = await getTranslations("errors");
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
@@ -1370,7 +1410,7 @@ export async function deletePayslip(id: number): Promise<ActionState> {
       .innerJoin(payrollRuns, eq(payslips.payrollRunId, payrollRuns.id))
       .where(and(eq(payrollRuns.organizationId, orgId), eq(payslips.id, id)))
       .limit(1);
-    if (!slip) return { ok: false, error: "找不到該薪資單" };
+    if (!slip) return { ok: false, error: t("notFound.payslip") };
     const deletedAt = new Date().toISOString();
     await db.update(payslips).set({ deletedAt }).where(eq(payslips.id, id));
     if (slip?.paidTransactionId) {
@@ -1385,7 +1425,7 @@ export async function deletePayslip(id: number): Promise<ActionState> {
     revalidatePath("/");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
   }
 }
 
@@ -1396,10 +1436,11 @@ export async function createProject(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
   const name = str(formData.get("name"));
-  if (!name) return { ok: false, error: "請輸入專案名稱" };
+  if (!name) return { ok: false, error: t("required.projectName") };
   const status = str(formData.get("status")) ?? "active";
-  if (!PROJECT_STATUS.has(status)) return { ok: false, error: "狀態不正確" };
+  if (!PROJECT_STATUS.has(status)) return { ok: false, error: t("validation.statusInvalid") };
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
@@ -1419,7 +1460,7 @@ export async function createProject(
     if (client.created) revalidatePath("/parties");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "新增失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
   }
 }
 
@@ -1427,12 +1468,13 @@ export async function updateProject(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
   const id = num(formData.get("id"));
   const name = str(formData.get("name"));
-  if (!id) return { ok: false, error: "缺少 ID" };
-  if (!name) return { ok: false, error: "請輸入專案名稱" };
+  if (!id) return { ok: false, error: t("required.id") };
+  if (!name) return { ok: false, error: t("required.projectName") };
   const status = str(formData.get("status")) ?? "active";
-  if (!PROJECT_STATUS.has(status)) return { ok: false, error: "狀態不正確" };
+  if (!PROJECT_STATUS.has(status)) return { ok: false, error: t("validation.statusInvalid") };
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
@@ -1451,11 +1493,12 @@ export async function updateProject(
     if (client.created) revalidatePath("/parties");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
   }
 }
 
 export async function deleteProject(id: number): Promise<ActionState> {
+  const t = await getTranslations("errors");
   try {
     const { orgId } = await requireOrg();
     await getDb()
@@ -1466,7 +1509,7 @@ export async function deleteProject(id: number): Promise<ActionState> {
     revalidatePath("/projects");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
   }
 }
 
@@ -1494,13 +1537,14 @@ type SubscriptionValues = ReturnType<typeof subscriptionValues>;
  * 必填欄位驗證：過了就回傳收窄成 non-null 的值，讓 subscriptionColumns 直接可用。
  * 散著寫 if-return 的話，型別收窄只在該函式內成立，抽出共用 helper 就會失效。
  */
-function requiredSubscriptionFields(
+async function requiredSubscriptionFields(
   v: SubscriptionValues,
-): { name: string; amount: string; startDate: string } | { error: string } {
-  if (!v.name) return { error: "請輸入方案名稱" };
-  if (v.amount === null) return { error: "請輸入金額" };
-  if (!v.startDate) return { error: "請選擇開始日期" };
-  if (!SUBSCRIPTION_STATUS.has(v.status)) return { error: "狀態不正確" };
+): Promise<{ name: string; amount: string; startDate: string } | { error: string }> {
+  const t = await getTranslations("errors");
+  if (!v.name) return { error: t("required.planName") };
+  if (v.amount === null) return { error: t("required.amount") };
+  if (!v.startDate) return { error: t("required.startDate") };
+  if (!SUBSCRIPTION_STATUS.has(v.status)) return { error: t("validation.statusInvalid") };
   return { name: v.name, amount: v.amount, startDate: v.startDate };
 }
 
@@ -1526,8 +1570,9 @@ export async function createSubscription(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
   const v = subscriptionValues(formData);
-  const required = requiredSubscriptionFields(v);
+  const required = await requiredSubscriptionFields(v);
   if ("error" in required) return { ok: false, error: required.error };
   try {
     const { orgId } = await requireOrg();
@@ -1543,7 +1588,7 @@ export async function createSubscription(
     if (customer.created) revalidatePath("/parties");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "新增失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
   }
 }
 
@@ -1551,10 +1596,11 @@ export async function updateSubscription(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
   const id = num(formData.get("id"));
-  if (!id) return { ok: false, error: "缺少 ID" };
+  if (!id) return { ok: false, error: t("required.id") };
   const v = subscriptionValues(formData);
-  const required = requiredSubscriptionFields(v);
+  const required = await requiredSubscriptionFields(v);
   if ("error" in required) return { ok: false, error: required.error };
   try {
     const { orgId } = await requireOrg();
@@ -1570,11 +1616,12 @@ export async function updateSubscription(
     if (customer.created) revalidatePath("/parties");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
   }
 }
 
 export async function deleteSubscription(id: number): Promise<ActionState> {
+  const t = await getTranslations("errors");
   try {
     const { orgId } = await requireOrg();
     await getDb()
@@ -1585,7 +1632,7 @@ export async function deleteSubscription(id: number): Promise<ActionState> {
     revalidatePath("/subscriptions");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
   }
 }
 
@@ -1669,6 +1716,7 @@ async function expandContractSchedule(
   v: ContractValues,
   regenerate: boolean,
 ): Promise<number> {
+  const tRec = await getTranslations("lib");
   const existing = await db
     .select({
       id: billingItems.id,
@@ -1701,7 +1749,14 @@ async function expandContractSchedule(
   // 鎖定的期別已經佔掉一部分合約金額，剩下的才拿去重排。
   const lockedTotal = locked.reduce((sum, r) => sum + Number(r.amount), 0);
   const total = v.amount == null ? null : Number(v.amount) - lockedTotal;
-  const rows = generateSchedule(scheduleInputOf(v, total));
+  const rows = generateSchedule(scheduleInputOf(v, total), {
+    full: tRec("installment.full"),
+    first: tRec("installment.first"),
+    final: tRec("installment.final"),
+    signing: tRec("installment.signing"),
+    interim: tRec("installment.interim"),
+    nth: (n: number) => tRec("installment.nth", { n }),
+  });
   if (rows.length === 0) return 0;
 
   if (removable.length > 0) {
@@ -1735,9 +1790,12 @@ async function expandContractSchedule(
 }
 
 /** 必填欄位驗證，過了就回傳收窄成 non-null 的值（同 requiredSubscriptionFields 的理由）。 */
-function requiredContractFields(v: ContractValues): { title: string } | { error: string } {
-  if (!v.title) return { error: "請輸入合約名稱" };
-  if (!CONTRACT_STATUS.has(v.status)) return { error: "狀態不正確" };
+async function requiredContractFields(
+  v: ContractValues,
+): Promise<{ title: string } | { error: string }> {
+  const t = await getTranslations("errors");
+  if (!v.title) return { error: t("required.contractTitle") };
+  if (!CONTRACT_STATUS.has(v.status)) return { error: t("validation.statusInvalid") };
   return { title: v.title };
 }
 
@@ -1769,8 +1827,9 @@ export async function createContract(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
   const v = contractValues(formData);
-  const required = requiredContractFields(v);
+  const required = await requiredContractFields(v);
   if ("error" in required) return { ok: false, error: required.error };
   try {
     const { orgId } = await requireOrg();
@@ -1792,7 +1851,7 @@ export async function createContract(
     }
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "新增失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
   }
 }
 
@@ -1800,10 +1859,11 @@ export async function updateContract(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
   const id = num(formData.get("id"));
-  if (!id) return { ok: false, error: "缺少 ID" };
+  if (!id) return { ok: false, error: t("required.id") };
   const v = contractValues(formData);
-  const required = requiredContractFields(v);
+  const required = await requiredContractFields(v);
   if ("error" in required) return { ok: false, error: required.error };
   try {
     const { orgId } = await requireOrg();
@@ -1832,11 +1892,12 @@ export async function updateContract(
     }
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
   }
 }
 
 export async function deleteContract(id: number): Promise<ActionState> {
+  const t = await getTranslations("errors");
   try {
     const { orgId } = await requireOrg();
     await getDb()
@@ -1847,7 +1908,7 @@ export async function deleteContract(id: number): Promise<ActionState> {
     revalidatePath("/contracts");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
   }
 }
 
@@ -1904,9 +1965,10 @@ function revalidateBilling() {
  */
 async function syncCalendarBestEffort(orgId: string) {
   try {
+    const tRec = await getTranslations("lib");
     const { syncBillingCalendar } = await import("@/lib/google-calendar");
     const orgs = await auth.api.listOrganizations({ headers: await headers() });
-    const name = orgs?.find((o) => o.id === orgId)?.name ?? "組織";
+    const name = orgs?.find((o) => o.id === orgId)?.name ?? tRec("records.orgFallback");
     await syncBillingCalendar(orgId, name);
   } catch {
     // 沒連結日曆 / 授權失效 / Google 暫時不可用 —— 都不影響這筆資料已經存好了。
@@ -1917,14 +1979,15 @@ export async function createBillingItem(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
   const v = billingItemValues(formData);
-  if (!v.title) return { ok: false, error: "請輸入項目名稱" };
-  if (!v.amount) return { ok: false, error: "請輸入金額" };
-  if (!BILLING_ITEM_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
+  if (!v.title) return { ok: false, error: t("required.itemTitle") };
+  if (!v.amount) return { ok: false, error: t("required.amount") };
+  if (!BILLING_ITEM_STATUS.has(v.status)) return { ok: false, error: t("validation.statusInvalid") };
   try {
     const { orgId } = await requireOrg();
     const customer = await resolveBillingCustomer(orgId, v.customerPartyName, v.contractId);
-    if (!customer.id) return { ok: false, error: "請輸入客戶" };
+    if (!customer.id) return { ok: false, error: t("required.client") };
     const [inserted] = await getDb()
       .insert(billingItems)
       .values({
@@ -1950,7 +2013,7 @@ export async function createBillingItem(
     await syncCalendarBestEffort(orgId);
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "新增失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
   }
 }
 
@@ -1958,16 +2021,17 @@ export async function updateBillingItem(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
   const id = num(formData.get("id"));
-  if (!id) return { ok: false, error: "缺少 ID" };
+  if (!id) return { ok: false, error: t("required.id") };
   const v = billingItemValues(formData);
-  if (!v.title) return { ok: false, error: "請輸入項目名稱" };
-  if (!v.amount) return { ok: false, error: "請輸入金額" };
-  if (!BILLING_ITEM_STATUS.has(v.status)) return { ok: false, error: "狀態不正確" };
+  if (!v.title) return { ok: false, error: t("required.itemTitle") };
+  if (!v.amount) return { ok: false, error: t("required.amount") };
+  if (!BILLING_ITEM_STATUS.has(v.status)) return { ok: false, error: t("validation.statusInvalid") };
   try {
     const { orgId } = await requireOrg();
     const customer = await resolveBillingCustomer(orgId, v.customerPartyName, v.contractId);
-    if (!customer.id) return { ok: false, error: "請輸入客戶" };
+    if (!customer.id) return { ok: false, error: t("required.client") };
     await getDb()
       .update(billingItems)
       .set({
@@ -1992,11 +2056,12 @@ export async function updateBillingItem(
     await syncCalendarBestEffort(orgId);
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
   }
 }
 
 export async function deleteBillingItem(id: number): Promise<ActionState> {
+  const t = await getTranslations("errors");
   try {
     const { orgId } = await requireOrg();
     await getDb()
@@ -2008,7 +2073,7 @@ export async function deleteBillingItem(id: number): Promise<ActionState> {
     await syncCalendarBestEffort(orgId);
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "刪除失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
   }
 }
 
@@ -2024,13 +2089,14 @@ export async function markBillingRow(
   field: "billedOn" | "paidOn" | "invoicedOn",
   date: string | null,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
 
     if (key.startsWith("bi:")) {
       const id = Number(key.slice(3));
-      if (!Number.isFinite(id)) return { ok: false, error: "項目代號不正確" };
+      if (!Number.isFinite(id)) return { ok: false, error: t("validation.invalidItemCode") };
       await db
         .update(billingItems)
         .set({ [field]: date })
@@ -2043,11 +2109,11 @@ export async function markBillingRow(
 
     if (key.startsWith("sub:")) {
       // paid_on 在訂閱端沒有對應欄位（實收一律看綁定的交易），忽略。
-      if (field === "paidOn") return { ok: false, error: "訂閱的收款請用交易綁定期別紀錄" };
+      if (field === "paidOn") return { ok: false, error: t("validation.subscriptionPaymentViaTransaction") };
       const [, rawId, periodStart] = key.split(":");
       const subscriptionId = Number(rawId);
       if (!Number.isFinite(subscriptionId) || !periodStart) {
-        return { ok: false, error: "期別代號不正確" };
+        return { ok: false, error: t("validation.invalidPeriodCode") };
       }
       const [existing] = await db
         .select({ id: subscriptionPeriods.id })
@@ -2081,9 +2147,9 @@ export async function markBillingRow(
       return { ok: true };
     }
 
-    return { ok: false, error: "無法辨識的項目" };
+    return { ok: false, error: t("validation.unrecognizedItem") };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "更新失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
   }
 }
 
@@ -2174,6 +2240,8 @@ export async function linkPaymentToBillingRow(
   rowKey: string,
   transactionId: number,
 ): Promise<ActionState> {
+  const t = await getTranslations("errors");
+  const tRec = await getTranslations("lib");
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
@@ -2188,11 +2256,11 @@ export async function linkPaymentToBillingRow(
         ),
       )
       .limit(1);
-    if (!txn) return { ok: false, error: "找不到這筆交易" };
+    if (!txn) return { ok: false, error: t("notFound.transaction") };
 
     if (rowKey.startsWith("bi:")) {
       const itemId = Number(rowKey.slice(3));
-      if (!Number.isFinite(itemId)) return { ok: false, error: "項目代號不正確" };
+      if (!Number.isFinite(itemId)) return { ok: false, error: t("validation.invalidItemCode") };
       const [item] = await db
         .select({
           id: billingItems.id,
@@ -2209,7 +2277,7 @@ export async function linkPaymentToBillingRow(
           ),
         )
         .limit(1);
-      if (!item) return { ok: false, error: "找不到這筆請款項目" };
+      if (!item) return { ok: false, error: t("notFound.billingItem") };
 
       // 交易上還沒填的關聯順手補上（已經有值的不覆蓋，人填的優先）。
       await db
@@ -2231,12 +2299,12 @@ export async function linkPaymentToBillingRow(
             isNull(billingItems.paidOn),
           ),
         );
-      await logWeb(orgId, "update", "billing_item", itemId, `收款配對 #${transactionId}`);
+      await logWeb(orgId, "update", "billing_item", itemId, tRec("activity.paymentMatched", { id: transactionId }));
     } else if (rowKey.startsWith("sub:")) {
       const [, rawId, periodStart] = rowKey.split(":");
       const subscriptionId = Number(rawId);
       if (!Number.isFinite(subscriptionId) || !periodStart) {
-        return { ok: false, error: "期別代號不正確" };
+        return { ok: false, error: t("validation.invalidPeriodCode") };
       }
       const [sub] = await db
         .select({
@@ -2248,7 +2316,7 @@ export async function linkPaymentToBillingRow(
           and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, subscriptionId)),
         )
         .limit(1);
-      if (!sub) return { ok: false, error: "找不到這張訂閱" };
+      if (!sub) return { ok: false, error: t("notFound.subscription") };
       await db
         .update(transactions)
         .set({
@@ -2263,11 +2331,11 @@ export async function linkPaymentToBillingRow(
         "update",
         "subscription",
         subscriptionId,
-        `${periodStart} 收款配對 #${transactionId}`,
+        tRec("activity.paymentMatchedPeriod", { period: periodStart, id: transactionId }),
       );
       revalidatePath("/subscriptions");
     } else {
-      return { ok: false, error: "無法辨識的項目" };
+      return { ok: false, error: t("validation.unrecognizedItem") };
     }
 
     revalidateBilling();
@@ -2275,7 +2343,7 @@ export async function linkPaymentToBillingRow(
     await syncCalendarBestEffort(orgId);
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "配對失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.match") };
   }
 }
 
@@ -2285,6 +2353,7 @@ export async function linkPaymentToBillingRow(
 // tokens and consents (FK on delete cascade), so the client must re-authorize.
 // Deployment-wide action — gated to org owners/admins.
 export async function revokeMcpClient(clientId: string): Promise<ActionState> {
+  const t = await getTranslations("errors");
   try {
     const { orgId, userId } = await requireOrg();
     const db = getDb();
@@ -2296,7 +2365,7 @@ export async function revokeMcpClient(clientId: string): Promise<ActionState> {
         .limit(1)
     )[0]?.role;
     if (role !== "owner" && role !== "admin") {
-      return { ok: false, error: "只有擁有者或管理員可以撤銷 MCP 用戶端" };
+      return { ok: false, error: t("validation.onlyOwnerOrAdminCanRevoke") };
     }
     await db
       .delete(oauthApplication)
@@ -2304,6 +2373,6 @@ export async function revokeMcpClient(clientId: string): Promise<ActionState> {
     revalidatePath("/settings/mcp");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "撤銷失敗" };
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.revoke") };
   }
 }

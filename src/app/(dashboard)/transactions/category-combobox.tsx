@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 
 import { Combobox } from "@/components/combobox";
 
@@ -11,6 +12,7 @@ export function CategoryCombobox({
   categories: { id: number; name: string }[];
   defaultName?: string;
 }>) {
+  const t = useTranslations("transactions");
   const [value, setValue] = React.useState(defaultName);
   const names = React.useMemo(() => categories.map((c) => c.name), [categories]);
   const matched = categories.find((c) => c.name === value.trim());
@@ -23,8 +25,8 @@ export function CategoryCombobox({
         items={names}
         value={value}
         onValueChange={setValue}
-        placeholder="搜尋或選擇分類（選填）…"
-        emptyText="查無分類"
+        placeholder={t("combobox.category.placeholder")}
+        emptyText={t("combobox.category.empty")}
       />
     </>
   );

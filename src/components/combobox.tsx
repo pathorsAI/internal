@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Popover as PopoverPrimitive } from "radix-ui";
+import { useTranslations } from "next-intl";
 
 import { cn } from "@/lib/utils";
 
@@ -22,7 +23,7 @@ export function Combobox({
   value,
   onValueChange,
   placeholder,
-  emptyText = "查無項目",
+  emptyText,
   inputName,
   className,
   id,
@@ -36,6 +37,8 @@ export function Combobox({
   className?: string;
   id?: string;
 }>) {
+  const t = useTranslations("common");
+  const resolvedEmptyText = emptyText ?? t("combobox.emptyText");
   const [open, setOpen] = React.useState(false);
   const [activeIndex, setActiveIndex] = React.useState(-1);
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -116,7 +119,7 @@ export function Combobox({
           className="z-50 max-h-64 w-[var(--radix-popover-trigger-width)] overflow-y-auto rounded-md border bg-popover p-1 text-sm text-popover-foreground shadow-md outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0"
         >
           {filtered.length === 0 ? (
-            <div className="px-2 py-1.5 text-muted-foreground">{emptyText}</div>
+            <div className="px-2 py-1.5 text-muted-foreground">{resolvedEmptyText}</div>
           ) : (
             filtered.map((item, idx) => (
               <div

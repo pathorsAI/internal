@@ -1,3 +1,4 @@
+import { getTranslations } from "next-intl/server";
 import { RowDialog } from "@/components/row-dialog";
 import { DeleteButton } from "@/components/delete-button";
 import { deleteBankAccount } from "@/db/mutations";
@@ -23,41 +24,42 @@ import { requireOrg } from "@/lib/session";
 export const dynamic = "force-dynamic";
 
 export default async function BankAccountsPage() {
+  const t = await getTranslations("bankAccounts");
   const { orgId } = await requireOrg();
   const rows = await listAccountBalances(orgId, { includeInactive: true });
 
   return (
     <>
-      <PageHeader title="銀行帳戶" description="現金與銀行帳戶">
+      <PageHeader title={t("title")} description={t("description")}>
         <NewBankAccountDialog />
       </PageHeader>
       <TableCard>
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>名稱</TableHead>
-              <TableHead>類型</TableHead>
-              <TableHead>幣別</TableHead>
-              <TableHead>狀態</TableHead>
-              <TableHead className="text-right">期初餘額</TableHead>
-              <TableHead className="text-right">目前餘額</TableHead>
+              <TableHead>{t("columns.name")}</TableHead>
+              <TableHead>{t("columns.type")}</TableHead>
+              <TableHead>{t("columns.currency")}</TableHead>
+              <TableHead>{t("columns.status")}</TableHead>
+              <TableHead className="text-right">{t("columns.openingBalance")}</TableHead>
+              <TableHead className="text-right">{t("columns.currentBalance")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <EmptyRow colSpan={6} message="尚無帳戶" />
+              <EmptyRow colSpan={6} message={t("empty")} />
             ) : (
               rows.map((a) => (
                 <RowDialog
                   key={a.id}
                   title={a.name}
-                  description="銀行帳戶"
+                  description={t("rowDialogDescription")}
                   cells={
                     <>
                       <TableCell className="font-medium">{a.name}</TableCell>
                       <TableCell>
                         <Badge variant={a.kind === "bank" ? "outline" : "secondary"}>
-                          {a.kind === "bank" ? "實體" : "虛擬"}
+                          {a.kind === "bank" ? t("physical") : t("virtual")}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -68,7 +70,7 @@ export default async function BankAccountsPage() {
                       </TableCell>
                       <TableCell>
                         <Badge variant={a.isActive ? "outline" : "secondary"}>
-                          {a.isActive ? "啟用" : "停用"}
+                          {a.isActive ? t("active") : t("inactive")}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right tabular-nums text-muted-foreground">

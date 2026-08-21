@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { UserPlus, X, AlertTriangle, Users } from "lucide-react";
 import {
   authClient,
@@ -15,7 +16,7 @@ import {
 const LAST_ORG_KEY = "lastOrgId";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field } from "@/components/form-field";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -56,14 +57,15 @@ type Invitation = {
   status: string;
 };
 
-const roleLabel: Record<string, string> = {
-  owner: "擁有者",
-  admin: "管理員",
-  member: "成員",
-};
-const roleItems = { member: "成員", admin: "管理員" };
+const inviteRoles = ["member", "admin"] as const;
 
 export function MembersClient() {
+  const t = useTranslations("members");
+  const roleLabel: Record<string, string> = {
+    owner: t("role.owner"),
+    admin: t("role.admin"),
+    member: t("role.member"),
+  };
   const router = useRouter();
   const { data: session } = useSession();
   const { data: activeMember } = useActiveMember();
@@ -100,10 +102,10 @@ export function MembersClient() {
     });
     setInviting(false);
     if (error) {
-      toast.error(error.message || "邀請失敗");
+      toast.error(error.message || t("invite.toast.failed"));
       return;
     }
-    toast.success(`已邀請 ${value}`);
+    toast.success(t("invite.toast.success", { email: value }));
     setEmail("");
     setRole("member");
   }
@@ -115,10 +117,10 @@ export function MembersClient() {
     });
     setCancelingId(null);
     if (error) {
-      toast.error(error.message || "取消失敗");
+      toast.error(error.message || t("invitations.toast.failed"));
       return;
     }
-    toast.success("已取消邀請");
+    toast.success(t("invitations.toast.success"));
   }
 
   async function onDeleteOrg() {
@@ -129,7 +131,7 @@ export function MembersClient() {
     });
     if (error) {
       setDeleting(false);
-      toast.error(error.message || "刪除組織失敗");
+      toast.error(error.message || t("danger.toast.failed"));
       return;
     }
     setDeleteDialogOpen(false);
@@ -138,7 +140,7 @@ export function MembersClient() {
     if (localStorage.getItem(LAST_ORG_KEY) === activeOrg.id) {
       localStorage.removeItem(LAST_ORG_KEY);
     }
-    toast.success(`已刪除 ${activeOrg.name}`);
+    toast.success(t("danger.toast.success", { name: activeOrg.name }));
     // Move to another org if one remains, otherwise send the user back through
     // onboarding to create or join one.
     const next = (organizations ?? []).find((o) => o.id !== activeOrg.id);
@@ -155,7 +157,7 @@ export function MembersClient() {
   if (orgPending) {
     return (
       <Card>
-        <div className="p-8 text-center text-sm text-muted-foreground">載入中…</div>
+        <div className="p-8 text-center text-sm text-muted-foreground">{t("loading")}</div>
       </Card>
     );
   }
@@ -167,42 +169,44 @@ export function MembersClient() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <UserPlus className="size-5 text-muted-foreground" />
-              邀請成員
+              {t("invite.title")}
             </CardTitle>
             <CardDescription>
-              用對方的 Google 帳號 email 邀請。對方用同一個 email 登入後即可在進入畫面接受邀請，不需要任何邀請碼。
+              {t("invite.description")}
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={onInvite} className="flex flex-wrap items-end gap-3">
-              <div className="min-w-[16rem] flex-1 space-y-1.5">
-                <Label htmlFor="invite-email">Email</Label>
+              <Field
+                label={t("invite.emailLabel")}
+                htmlFor="invite-email"
+                className="min-w-[16rem] flex-1"
+              >
                 <Input
                   id="invite-email"
                   type="email"
                   required
-                  placeholder="teammate@example.com"
+                  placeholder={t("invite.emailPlaceholder")}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                 />
-              </div>
-              <div className="w-36 space-y-1.5">
-                <Label>身分</Label>
+              </Field>
+              <Field label={t("invite.roleLabel")} className="w-36">
                 <Select value={role} onValueChange={(v) => v && setRole(v)}>
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {Object.entries(roleItems).map(([v, l]) => (
+                    {inviteRoles.map((v) => (
                       <SelectItem key={v} value={v}>
-                        {l}
+                        {t(`role.${v}`)}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
+              </Field>
               <Button type="submit" disabled={inviting}>
-                {inviting ? "邀請中…" : "送出邀請"}
+                {inviting ? t("invite.submitting") : t("invite.submit")}
               </Button>
             </form>
           </CardContent>
@@ -211,11 +215,11 @@ export function MembersClient() {
 
       <Card>
         <CardHeader>
-          <CardTitle>成員（{members.length}）</CardTitle>
+          <CardTitle>{t("list.title", { count: members.length })}</CardTitle>
         </CardHeader>
         <CardContent>
           {members.length === 0 ? (
-            <EmptyState icon={Users} message="尚無成員" />
+            <EmptyState icon={Users} message={t("list.empty")} />
           ) : (
             <ul className="divide-y rounded-md border">
               {members.map((m) => (
@@ -224,7 +228,7 @@ export function MembersClient() {
                     <div className="truncate font-medium">
                       {m.user.name || m.user.email}
                       {m.user.id === session?.user.id ? (
-                        <span className="ml-2 text-xs text-muted-foreground">（你）</span>
+                        <span className="ml-2 text-xs text-muted-foreground">{t("list.you")}</span>
                       ) : null}
                     </div>
                     <div className="truncate text-xs text-muted-foreground">
@@ -244,8 +248,8 @@ export function MembersClient() {
       {invitations.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>待接受的邀請（{invitations.length}）</CardTitle>
-            <CardDescription>對方用該 email 登入後即可接受</CardDescription>
+            <CardTitle>{t("invitations.title", { count: invitations.length })}</CardTitle>
+            <CardDescription>{t("invitations.description")}</CardDescription>
           </CardHeader>
           <CardContent>
             <ul className="divide-y rounded-md border">
@@ -257,7 +261,7 @@ export function MembersClient() {
                       {roleLabel[inv.role ?? "member"] ?? inv.role}
                     </div>
                   </div>
-                  <Badge variant="outline">待接受</Badge>
+                  <Badge variant="outline">{t("invitations.pending")}</Badge>
                   {canManage && (
                     <Button
                       type="button"
@@ -265,7 +269,7 @@ export function MembersClient() {
                       size="icon"
                       onClick={() => onCancel(inv.id)}
                       disabled={cancelingId !== null}
-                      aria-label="取消邀請"
+                      aria-label={t("invitations.cancel")}
                     >
                       <X className="size-4" />
                     </Button>
@@ -282,30 +286,32 @@ export function MembersClient() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-destructive">
               <AlertTriangle className="size-5" />
-              危險區域
+              {t("danger.title")}
             </CardTitle>
             <CardDescription>
-              刪除組織會永久移除組織內所有資料，且無法復原。
+              {t("danger.description")}
             </CardDescription>
           </CardHeader>
           <CardContent>
             <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
               <AlertDialogTrigger asChild>
                 <Button type="button" variant="destructive" disabled={deleting}>
-                  {deleting ? "刪除中…" : `刪除「${activeOrg?.name ?? "組織"}」`}
+                  {deleting
+                    ? t("danger.deleting")
+                    : t("danger.deleteTrigger", { name: activeOrg?.name ?? t("danger.defaultOrgName") })}
                 </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
                   <AlertDialogTitle>
-                    確定要刪除組織「{activeOrg?.name ?? "組織"}」嗎？
+                    {t("danger.confirmTitle", { name: activeOrg?.name ?? t("danger.defaultOrgName") })}
                   </AlertDialogTitle>
                   <AlertDialogDescription>
-                    此動作無法復原，組織內所有資料將一併刪除。
+                    {t("danger.confirmDescription")}
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
-                  <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
+                  <AlertDialogCancel disabled={deleting}>{t("danger.cancel")}</AlertDialogCancel>
                   <AlertDialogAction
                     variant="destructive"
                     disabled={deleting}
@@ -314,7 +320,7 @@ export function MembersClient() {
                       onDeleteOrg();
                     }}
                   >
-                    {deleting ? "刪除中…" : "刪除"}
+                    {deleting ? t("danger.deleting") : t("danger.confirm")}
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>

@@ -1,4 +1,5 @@
 import { CheckCircle2, AlertTriangle } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { RowDialog } from "@/components/row-dialog";
 import { DeleteButton } from "@/components/delete-button";
 import { deleteReconciliation } from "@/db/mutations";
@@ -38,6 +39,7 @@ export const dynamic = "force-dynamic";
 const EPS = 0.01;
 
 export default async function ReconciliationPage() {
+  const t = await getTranslations("reconciliation");
   const { orgId } = await requireOrg();
   const [balances, recons, accounts] = await Promise.all([
     listAccountBalances(orgId),
@@ -47,7 +49,7 @@ export default async function ReconciliationPage() {
 
   return (
     <>
-      <PageHeader title="對帳" description="比對帳面餘額與帳戶實際餘額，確保記帳對得上">
+      <PageHeader title={t("title")} description={t("description")}>
         <NewReconciliationDialog
           accounts={accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }))}
         />
@@ -60,15 +62,15 @@ export default async function ReconciliationPage() {
               <CardTitle className="text-base">{b.name}</CardTitle>
               <CardDescription>
                 {b.lastReconciledAt
-                  ? `上次對帳：${formatDate(b.lastReconciledAt)}`
-                  : "尚未對帳"}
+                  ? t("card.lastReconciled", { date: formatDate(b.lastReconciledAt) })
+                  : t("card.never")}
               </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-semibold tabular-nums">
                 {formatCurrency(b.bookBalance, b.currency)}
               </div>
-              <p className="text-xs text-muted-foreground">目前帳面餘額</p>
+              <p className="text-xs text-muted-foreground">{t("card.currentBookBalance")}</p>
             </CardContent>
           </Card>
         ))}
@@ -78,18 +80,18 @@ export default async function ReconciliationPage() {
         <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>截止日</TableHead>
-                <TableHead>帳戶</TableHead>
-                <TableHead className="text-right">帳面餘額</TableHead>
-                <TableHead className="text-right">實際餘額</TableHead>
-                <TableHead className="text-right">差額</TableHead>
-                <TableHead>狀態</TableHead>
-                <TableHead>備註</TableHead>
+                <TableHead>{t("columns.asOfDate")}</TableHead>
+                <TableHead>{t("columns.account")}</TableHead>
+                <TableHead className="text-right">{t("columns.bookBalance")}</TableHead>
+                <TableHead className="text-right">{t("columns.statementBalance")}</TableHead>
+                <TableHead className="text-right">{t("columns.diff")}</TableHead>
+                <TableHead>{t("columns.status")}</TableHead>
+                <TableHead>{t("columns.note")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {recons.length === 0 ? (
-                <EmptyRow colSpan={7} message="尚無對帳紀錄" />
+                <EmptyRow colSpan={7} message={t("empty")} />
               ) : (
                 recons.map((r) => {
                   const diff = Number(r.statementBalance) - Number(r.bookBalance);
@@ -97,7 +99,7 @@ export default async function ReconciliationPage() {
                   return (
                     <RowDialog
                       key={r.id}
-                      title="編輯對帳紀錄"
+                      title={t("editTitle")}
                       cells={
                         <>
                           <TableCell className="whitespace-nowrap text-muted-foreground">
@@ -121,11 +123,11 @@ export default async function ReconciliationPage() {
                           <TableCell>
                             {matched ? (
                               <Badge variant="outline" className="gap-1">
-                                <CheckCircle2 className="size-3" /> 已對平
+                                <CheckCircle2 className="size-3" /> {t("status.matched")}
                               </Badge>
                             ) : (
                               <Badge variant="destructive" className="gap-1">
-                                <AlertTriangle className="size-3" /> 有差額
+                                <AlertTriangle className="size-3" /> {t("status.mismatched")}
                               </Badge>
                             )}
                           </TableCell>

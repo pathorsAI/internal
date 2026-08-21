@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getTranslations } from "next-intl/server";
 import { CalendarClock } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { TableCard } from "@/components/table-card";
@@ -39,6 +40,8 @@ import { SyncCalendarButton } from "./sync-calendar-button";
 
 export const dynamic = "force-dynamic";
 
+type T = Awaited<ReturnType<typeof getTranslations<"billing">>>;
+
 const FILTERS = new Set<BoardFilter>(["due", "awaiting", "overdue", "invoice"]);
 
 function matchesFilter(row: BillingRow, filter: BoardFilter) {
@@ -55,15 +58,15 @@ function matchesFilter(row: BillingRow, filter: BoardFilter) {
 }
 
 /** 未收 / 溢收 / 已收齊 的說明文字。 */
-function outstandingLabel(expected: number, paid: number, currency: string) {
+function outstandingLabel(t: T, expected: number, paid: number, currency: string) {
   const outstanding = expected - paid;
-  if (outstanding > 0) return `未收 ${formatCurrency(outstanding, currency)}`;
-  if (outstanding < 0) return `溢收 ${formatCurrency(-outstanding, currency)}`;
-  return "已收齊";
+  if (outstanding > 0) return t("amount.outstanding", { amount: formatCurrency(outstanding, currency) });
+  if (outstanding < 0) return t("amount.overpaid", { amount: formatCurrency(-outstanding, currency) });
+  return t("amount.settled");
 }
 
 /** 已收 / 應收 + 未收差額，沿用合約頁「收款進度」的資訊密度。 */
-function AmountCell({ row }: Readonly<{ row: BillingRow }>) {
+function AmountCell({ row, t }: Readonly<{ row: BillingRow; t: T }>) {
   return (
     <div className="min-w-[150px] space-y-0.5 text-sm tabular-nums">
       <div className="flex items-baseline justify-between gap-2">
@@ -73,14 +76,14 @@ function AmountCell({ row }: Readonly<{ row: BillingRow }>) {
         </span>
       </div>
       <div className="text-xs text-muted-foreground">
-        {outstandingLabel(row.expected, row.paid, row.currency)}
+        {outstandingLabel(t, row.expected, row.paid, row.currency)}
       </div>
     </div>
   );
 }
 
 /** 發票欄：已開就顯示日期，該開沒開就標紅，不需要開就留白。 */
-function InvoiceCell({ row }: Readonly<{ row: BillingRow }>) {
+function InvoiceCell({ row, t }: Readonly<{ row: BillingRow; t: T }>) {
   if (row.invoicedOn) {
     return (
       <span className="text-xs tabular-nums text-muted-foreground">
@@ -91,7 +94,7 @@ function InvoiceCell({ row }: Readonly<{ row: BillingRow }>) {
   if (row.needsInvoice) {
     return (
       <Badge variant="outline" className="border-expense/40 text-expense">
-        待開立
+        {t("table.pendingInvoice")}
       </Badge>
     );
   }
@@ -150,6 +153,7 @@ export default async function BillingPage({
   searchParams,
 }: Readonly<{ searchParams: Promise<{ filter?: string }> }>) {
   const { orgId } = await requireOrg();
+  const t = await getTranslations("billing");
   const { filter: rawFilter } = await searchParams;
   const filter =
     rawFilter && FILTERS.has(rawFilter as BoardFilter) ? (rawFilter as BoardFilter) : null;
@@ -173,8 +177,8 @@ export default async function BillingPage({
   return (
     <>
       <PageHeader
-        title="請款看板"
-        description="所有客戶的請款、收款與發票狀態，一頁看完"
+        title={t("page.title")}
+        description={t("page.description")}
       >
         <SyncCalendarButton
           connected={Boolean(calendar?.ownerUserId && calendar?.googleCalendarId)}
@@ -189,13 +193,13 @@ export default async function BillingPage({
       <SummaryCards summary={summary} active={filter} />
 
       <TableCard
-        title={filter ? "已篩選" : "全部請款項目"}
+        title={filter ? t("table.filtered") : t("table.all")}
         action={
           <span className="flex items-center gap-2">
-            {visible.length} 筆
+            {t("table.count", { count: visible.length })}
             {filter && (
               <Button asChild size="sm" variant="ghost">
-                <Link href="/billing">清除篩選</Link>
+                <Link href="/billing">{t("table.clearFilter")}</Link>
               </Button>
             )}
           </span>
@@ -204,19 +208,19 @@ export default async function BillingPage({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>客戶</TableHead>
-              <TableHead>項目</TableHead>
-              <TableHead>應請款日</TableHead>
-              <TableHead>已收 / 應收</TableHead>
-              <TableHead>狀態</TableHead>
-              <TableHead>發票</TableHead>
-              <TableHead>下一步</TableHead>
+              <TableHead>{t("table.columns.customer")}</TableHead>
+              <TableHead>{t("table.columns.item")}</TableHead>
+              <TableHead>{t("table.columns.dueDate")}</TableHead>
+              <TableHead>{t("table.columns.amount")}</TableHead>
+              <TableHead>{t("table.columns.status")}</TableHead>
+              <TableHead>{t("table.columns.invoice")}</TableHead>
+              <TableHead>{t("table.columns.nextAction")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {visible.length === 0 ? (
-              <EmptyRow colSpan={7} message={filter ? "這個篩選沒有項目" : "尚無請款項目"}>
-                {filter ? "換一張卡片或清除篩選" : "點右上角新增，或到「訂閱 / 月費」建立週期性收費"}
+              <EmptyRow colSpan={7} message={filter ? t("table.emptyFiltered") : t("table.emptyAll")}>
+                {filter ? t("table.emptyFilteredHint") : t("table.emptyAllHint")}
               </EmptyRow>
             ) : (
               visible.map((row) => {
@@ -230,10 +234,10 @@ export default async function BillingPage({
                       <div className="truncate" title={row.title}>
                         {row.title}
                       </div>
-                      <div className="text-xs text-muted-foreground">
+                      <div className="truncate text-xs text-muted-foreground">
                         {row.source === "subscription"
-                          ? "訂閱"
-                          : (row.contractTitle ?? row.projectName ?? "單筆")}
+                          ? t("table.subscriptionSource")
+                          : (row.contractTitle ?? row.projectName ?? t("table.oneTimeSource"))}
                       </div>
                     </TableCell>
                     <TableCell
@@ -245,22 +249,22 @@ export default async function BillingPage({
                       {row.dueDate ? formatDate(row.dueDate) : "—"}
                       {row.billedOn && (
                         <div className="text-xs text-muted-foreground">
-                          已請款 {formatDate(row.billedOn)}
+                          {t("table.billedPrefix", { date: formatDate(row.billedOn) })}
                           {/* 有月結條件時期限會晚於應請款日，直接寫出來免得自己推算 */}
                           {row.deadline && row.deadline !== row.dueDate && (
-                            <> · 期限 {formatDate(row.deadline)}</>
+                            <> · {t("table.deadline", { date: formatDate(row.deadline) })}</>
                           )}
                         </div>
                       )}
                     </TableCell>
                     <TableCell>
-                      <AmountCell row={row} />
+                      <AmountCell row={row} t={t} />
                     </TableCell>
                     <TableCell>
                       <BillingStatusBadge status={row.status} />
                     </TableCell>
                     <TableCell>
-                      <InvoiceCell row={row} />
+                      <InvoiceCell row={row} t={t} />
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
@@ -279,7 +283,7 @@ export default async function BillingPage({
                   <RowDialog
                     key={row.key}
                     title={row.title}
-                    description="請款項目"
+                    description={t("table.rowDialogDescription")}
                     cells={cells}
                   >
                     <EditBillingItemForm
@@ -317,7 +321,7 @@ export default async function BillingPage({
 
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <CalendarClock className="size-3.5" />
-        週期性月費的期別由「訂閱 / 月費」自動推算，會直接出現在這裡，不需要另外建立。
+        {t("page.footerHint")}
       </p>
     </>
   );

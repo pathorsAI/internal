@@ -3,13 +3,13 @@
 import { useActionState, useState } from "react";
 import { toast } from "sonner";
 import { Paperclip } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { updateTransaction, deleteTransactionDocument, type ActionState } from "@/db/mutations";
 import type { TxnDocument, AuditMeta as AuditMetaData } from "@/db/queries";
 import { AuditMeta } from "@/components/audit-meta";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Req } from "@/components/req";
+import { Field, SelectField, TextField } from "@/components/form-field";
 import { Badge } from "@/components/ui/badge";
 import { DeleteButton } from "@/components/delete-button";
 import { useRowDialogClose } from "@/components/row-dialog";
@@ -28,24 +28,14 @@ import { PartyCombobox } from "@/components/party-combobox";
 import { ContractCombobox, type ContractOption } from "./contract-combobox";
 
 const initial: ActionState = { ok: false };
-const DOC_KINDS: Record<string, string> = {
-  e_invoice: "電子發票",
-  paper_invoice: "其他發票（三聯式等）",
-  receipt: "收據",
-  other: "其他",
-};
-const typeLabel: Record<string, string> = {
-  expense: "一般支出",
-  income: "收入",
-  advance: "員工代墊",
-  reimbursement: "撥款",
-  transfer: "轉帳",
-};
-function docLabel(docType: string, invoiceKind: string | null) {
-  if (docType === "invoice") return invoiceKind === "paper" ? "其他發票" : "電子發票";
-  if (docType === "receipt") return "收據";
-  if (docType === "contract") return "合約";
-  return "其他";
+const DOC_KIND_KEYS = ["e_invoice", "paper_invoice", "receipt", "other"] as const;
+const TYPE_KEYS = ["expense", "income", "advance", "reimbursement", "transfer"] as const;
+
+function docLabelKey(docType: string, invoiceKind: string | null) {
+  if (docType === "invoice") return invoiceKind === "paper" ? "invoicePaper" : "invoiceElectronic";
+  if (docType === "receipt") return "receipt";
+  if (docType === "contract") return "contract";
+  return "other";
 }
 
 type Account = { id: number; name: string; currency: string };
@@ -92,6 +82,7 @@ export function EditTransactionForm({
   audit?: AuditMetaData;
   footer?: React.ReactNode;
 }>) {
+  const t = useTranslations("transactions");
   const [billed, setBilled] = useState(txn.billedToCompanyTaxId);
   const close = useRowDialogClose();
 
@@ -102,7 +93,7 @@ export function EditTransactionForm({
     async (prev: ActionState, formData: FormData) => {
       const res = await updateTransaction(prev, formData);
       if (res.ok) {
-        toast.success("已更新");
+        toast.success(t("toast.updated"));
         close();
       } else if (res.error) {
         toast.error(res.error);
@@ -116,22 +107,25 @@ export function EditTransactionForm({
   const isIncome = txn.type === "income";
   const isAdvance = txn.type === "advance";
   const defaultCategoryName = categories.find((c) => c.id === txn.categoryId)?.name ?? "";
+  const typeLabel: Record<string, string> = Object.fromEntries(
+    TYPE_KEYS.map((k) => [k, t(`type.${k}`)]),
+  );
 
   return (
     <>
       {docs.length > 0 && (
         <div className="mb-4 space-y-2">
-          <div className="text-sm font-medium">已附憑證</div>
+          <div className="text-sm font-medium">{t("form.attachedDocs")}</div>
           <ul className="divide-y rounded-md border">
             {docs.map((d) => (
               <li key={d.id} className="flex items-center gap-2 px-3 py-2 text-sm">
                 <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
                 <span className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                  {docLabel(d.docType, d.invoiceKind)}
+                  {t(`form.docLabel.${docLabelKey(d.docType, d.invoiceKind)}`)}
                 </span>
                 {d.invoiceKind === "paper" ? (
                   <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-700">
-                    需通知會計師
+                    {t("form.needsNotifyAccountant")}
                   </span>
                 ) : null}
                 <a
@@ -140,7 +134,7 @@ export function EditTransactionForm({
                   rel="noreferrer"
                   className="truncate text-primary hover:underline"
                 >
-                  {d.fileName ?? "檢視檔案"}
+                  {d.fileName ?? t("form.viewFile")}
                 </a>
                 <span className="ml-auto">
                   <DeleteButton action={deleteTransactionDocument} id={d.id} />
@@ -156,105 +150,101 @@ export function EditTransactionForm({
         <input type="hidden" name="type" value={txn.type} />
 
         <div className="flex items-center gap-2 text-sm text-muted-foreground sm:col-span-2">
-          類型
+          {t("form.typeLabel")}
           <Badge variant="secondary">{typeLabel[txn.type] ?? txn.type}</Badge>
-          <span className="text-xs">（類型不可改）</span>
+          <span className="text-xs">{t("form.typeLocked")}</span>
         </div>
 
-        <div className="space-y-1.5">
-          <Label>日期<Req /></Label>
+        <Field label={t("form.date")} required>
           <DatePicker name="txnDate" defaultValue={txn.txnDate} />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="amount">金額<Req /></Label>
-          <Input id="amount" name="amount" type="number" step="0.01" required defaultValue={txn.amount} />
-        </div>
-        <div className="space-y-1.5">
-          <Label>幣別</Label>
+        </Field>
+        <TextField
+          name="amount"
+          label={t("form.amount")}
+          required
+          type="number"
+          step="0.01"
+          defaultValue={txn.amount}
+        />
+        <Field label={t("form.currency")}>
           <CurrencySelect defaultValue={txn.currency} />
-        </div>
+        </Field>
 
         {isTransfer ? (
           <>
             <AccountField
               name="fromAccountId"
-              label="轉出帳戶"
+              label={t("form.fromAccount")}
               accounts={accounts}
               defaultValue={txn.fromAccountId}
             />
             <AccountField
               name="toAccountId"
-              label="轉入帳戶"
+              label={t("form.toAccount")}
               accounts={accounts}
               defaultValue={txn.toAccountId}
             />
           </>
         ) : (
           <>
-            <div className="space-y-1.5 sm:col-span-2">
-              <Label>
-                {isIncome ? "客戶" : "廠商 / 對象"}
-                <Req />
-              </Label>
+            <Field
+              label={isIncome ? t("form.client") : t("form.vendor")}
+              required
+              wide
+            >
               <PartyCombobox
                 parties={parties}
                 name="partyName"
                 defaultName={txn.partyName ?? ""}
-                placeholder={isIncome ? "輸入或選擇客戶…" : "輸入或選擇廠商…"}
+                placeholder={isIncome ? t("form.clientPlaceholder") : t("form.vendorPlaceholder")}
               />
-            </div>
+            </Field>
             {isAdvance && (
-              <div className="space-y-1.5 sm:col-span-2">
-                <Label>代墊人（員工）<Req /></Label>
+              <Field label={t("form.payer")} required wide>
                 <PartyCombobox
                   parties={employees}
                   name="settleEmployeeName"
                   defaultName={txn.settleName ?? ""}
-                  placeholder="輸入代墊的員工…"
+                  placeholder={t("form.payerPlaceholder")}
                 />
-              </div>
+              </Field>
             )}
-            <div className="space-y-1.5">
-              <Label>分類<Req /></Label>
+            <Field label={t("form.category")} required>
               <CategoryCombobox categories={categories} defaultName={defaultCategoryName} />
-            </div>
+            </Field>
             {!isAdvance && (
               <AccountField
                 name="accountId"
-                label={isIncome ? "收款帳戶" : "付款帳戶"}
+                label={isIncome ? t("form.receivingAccount") : t("form.payingAccount")}
                 accounts={accounts}
                 defaultValue={isIncome ? txn.toAccountId : txn.fromAccountId}
               />
             )}
-            <div className="space-y-1.5 sm:col-span-2">
-              <Label>專案</Label>
-              <Select
-                name="projectId"
-                defaultValue={txn.projectId == null ? undefined : String(txn.projectId)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="— 未指定 —" />
-                </SelectTrigger>
-                <SelectContent>
-                  {projects.map((p) => (
-                    <SelectItem key={p.id} value={String(p.id)}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5 sm:col-span-2">
-              <Label>合約</Label>
+            <SelectField
+              name="projectId"
+              label={t("form.project")}
+              wide
+              placeholder={t("form.projectPlaceholder")}
+              defaultValue={txn.projectId == null ? undefined : String(txn.projectId)}
+            >
+              {projects.map((p) => (
+                <SelectItem key={p.id} value={String(p.id)}>
+                  {p.name}
+                </SelectItem>
+              ))}
+            </SelectField>
+            <Field label={t("form.contract")} wide>
               <ContractCombobox contracts={contracts} defaultId={txn.contractId} />
-            </div>
+            </Field>
           </>
         )}
 
-        <div className="space-y-1.5 sm:col-span-2">
-          <Label htmlFor="description">摘要</Label>
-          <Input id="description" name="description" defaultValue={txn.description ?? ""} />
-        </div>
+        <TextField
+          name="description"
+          label={t("form.description")}
+          wide
+          defaultValue={txn.description ?? ""}
+        />
 
         {!isTransfer && (
           <div className="space-y-3 sm:col-span-2">
@@ -265,7 +255,7 @@ export function EditTransactionForm({
                 defaultChecked={txn.book !== "internal"}
                 className="size-4"
               />
-              <span>上外帳（要報稅）</span>
+              <span>{t("form.reported")}</span>
             </label>
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -275,7 +265,7 @@ export function EditTransactionForm({
                 onChange={(e) => setBilled(e.target.checked)}
                 className="size-4 accent-primary"
               />
-              <span>這筆有報公司統編</span>
+              <span>{t("form.billedToCompanyTaxId")}</span>
             </label>
             <VoucherFields billed={billed} />
           </div>
@@ -292,10 +282,10 @@ export function EditTransactionForm({
         <div className="sticky bottom-0 z-10 -mx-4 mt-2 flex flex-col-reverse gap-2 border-t bg-background px-4 py-3 sm:col-span-2 sm:flex-row sm:items-center sm:justify-end">
           {footer ? <div className="sm:mr-auto">{footer}</div> : null}
           <Button type="button" variant="outline" onClick={close}>
-            取消
+            {t("form.cancel")}
           </Button>
           <Button type="submit" disabled={pending}>
-            {pending ? "儲存中…" : "儲存變更"}
+            {pending ? t("form.saving") : t("form.saveChanges")}
           </Button>
         </div>
       </form>
@@ -314,60 +304,51 @@ function AccountField({
   accounts: Account[];
   defaultValue: number | null;
 }>) {
+  const t = useTranslations("transactions");
   return (
-    <div className="space-y-1.5">
-      <Label>
-        {label}
-        <Req />
-      </Label>
-      <Select
-        name={name}
-        defaultValue={defaultValue == null ? undefined : String(defaultValue)}
-        required
-      >
-        <SelectTrigger className="w-full">
-          <SelectValue placeholder="— 選擇帳戶 —" />
-        </SelectTrigger>
-        <SelectContent>
-          {accounts.map((a) => (
-            <SelectItem key={a.id} value={String(a.id)}>
-              {a.name}（{a.currency}）
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
+    <SelectField
+      name={name}
+      label={label}
+      required
+      placeholder={t("form.accountPlaceholder")}
+      defaultValue={defaultValue == null ? undefined : String(defaultValue)}
+    >
+      {accounts.map((a) => (
+        <SelectItem key={a.id} value={String(a.id)}>
+          {a.name} ({a.currency})
+        </SelectItem>
+      ))}
+    </SelectField>
   );
 }
 
 function VoucherFields({ billed }: Readonly<{ billed: boolean }>) {
-  const kindOptions = billed
-    ? { e_invoice: DOC_KINDS.e_invoice, paper_invoice: DOC_KINDS.paper_invoice }
-    : DOC_KINDS;
+  const t = useTranslations("transactions");
+  const kindKeys = billed ? (["e_invoice", "paper_invoice"] as const) : DOC_KIND_KEYS;
   return (
     <div className="space-y-3 rounded-lg border p-3">
       <div className="flex items-center gap-2 text-sm font-medium">
         <Paperclip className="size-4 text-muted-foreground" />
-        補上憑證 / 相關證明{billed ? "" : "（選填）"}
+        {t("form.editVoucher.title")}
+        {billed ? "" : t("form.voucher.optional")}
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <Label>類型{billed ? <Req /> : null}</Label>
+        {/* 標籤的必填星號跟著 billed 走，但 Select 本身一直沒有 required，維持原樣。 */}
+        <Field label={t("form.voucher.kind")} required={billed}>
           <Select key={billed ? "billed" : "free"} name="docKind" defaultValue="e_invoice">
             <SelectTrigger className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {Object.entries(kindOptions).map(([v, l]) => (
+              {kindKeys.map((v) => (
                 <SelectItem key={v} value={v}>
-                  {l}
+                  {t(`form.docKind.${v}`)}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="edit-attachment">附檔</Label>
+        </Field>
+        <Field label={t("form.voucher.attachment")} htmlFor="edit-attachment">
           <Input
             id="edit-attachment"
             name="attachment"
@@ -375,7 +356,7 @@ function VoucherFields({ billed }: Readonly<{ billed: boolean }>) {
             accept="image/*,application/pdf"
             className="cursor-pointer file:mr-2 file:cursor-pointer file:rounded file:border-0 file:bg-muted file:px-2 file:py-0.5 file:text-xs"
           />
-        </div>
+        </Field>
       </div>
     </div>
   );

@@ -3,6 +3,7 @@
 import { useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { CalendarPlus, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ import { syncCalendar } from "../settings/calendar-actions";
  * 就看得出來。
  */
 export function SyncCalendarButton({ connected }: Readonly<{ connected: boolean }>) {
+  const t = useTranslations("billing.syncCalendar");
   const [pending, start] = useTransition();
   const router = useRouter();
 
@@ -20,7 +22,7 @@ export function SyncCalendarButton({ connected }: Readonly<{ connected: boolean 
     return (
       <Button asChild size="sm" variant="outline">
         <Link href="/settings">
-          <CalendarPlus className="size-4" /> 連結 Google 日曆
+          <CalendarPlus className="size-4" /> {t("connect")}
         </Link>
       </Button>
     );
@@ -30,12 +32,14 @@ export function SyncCalendarButton({ connected }: Readonly<{ connected: boolean 
     start(async () => {
       const res = await syncCalendar();
       if (!res.ok) {
-        toast.error(res.error ?? "同步失敗");
+        toast.error(res.error ?? t("toast.syncFailed"));
         return;
       }
       const r = res.result;
       toast.success(
-        r ? `已同步（新增 ${r.created}、更新 ${r.updated}、移除 ${r.deleted}）` : "已同步",
+        r
+          ? t("toast.syncedDetail", { created: r.created, updated: r.updated, deleted: r.deleted })
+          : t("toast.synced"),
       );
       router.refresh();
     });
@@ -43,7 +47,7 @@ export function SyncCalendarButton({ connected }: Readonly<{ connected: boolean 
 
   return (
     <Button type="button" size="sm" variant="outline" onClick={sync} disabled={pending}>
-      <RefreshCw className="size-4" /> {pending ? "同步中…" : "同步到 Google 日曆"}
+      <RefreshCw className="size-4" /> {pending ? t("syncing") : t("sync")}
     </Button>
   );
 }

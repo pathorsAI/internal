@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Trash2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { useRowDialogClose } from "@/components/row-dialog";
 import {
@@ -24,9 +25,9 @@ export function DeleteButton({
   action,
   id,
   redirectTo,
-  label = "刪除",
-  title = "確定要刪除嗎？",
-  description = "此動作無法復原。",
+  label,
+  title,
+  description,
 }: Readonly<{
   action: (id: number) => Promise<Result>;
   id: number;
@@ -35,6 +36,10 @@ export function DeleteButton({
   title?: string;
   description?: string;
 }>) {
+  const t = useTranslations("common");
+  const resolvedLabel = label ?? t("deleteButton.label");
+  const resolvedTitle = title ?? t("deleteButton.title");
+  const resolvedDescription = description ?? t("deleteButton.description");
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const router = useRouter();
@@ -47,12 +52,12 @@ export function DeleteButton({
       const res = await action(id);
       if (res.ok) {
         setOpen(false);
-        toast.success("已刪除");
+        toast.success(t("deleteButton.toast.success"));
         closeRowDialog();
         if (redirectTo) router.push(redirectTo);
         else router.refresh();
       } else {
-        toast.error(res.error ?? "刪除失敗");
+        toast.error(res.error ?? t("deleteButton.toast.failure"));
       }
     });
   }
@@ -66,18 +71,18 @@ export function DeleteButton({
           size="sm"
           onClick={(e) => e.stopPropagation()}
         >
-          <Trash2 className="size-4" /> {label}
+          <Trash2 className="size-4" /> {resolvedLabel}
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription>{description}</AlertDialogDescription>
+          <AlertDialogTitle>{resolvedTitle}</AlertDialogTitle>
+          <AlertDialogDescription>{resolvedDescription}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>取消</AlertDialogCancel>
+          <AlertDialogCancel>{t("deleteButton.cancel")}</AlertDialogCancel>
           <AlertDialogAction variant="destructive" disabled={pending} onClick={onConfirm}>
-            {pending ? "刪除中…" : "刪除"}
+            {pending ? t("deleteButton.deleting") : t("deleteButton.label")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

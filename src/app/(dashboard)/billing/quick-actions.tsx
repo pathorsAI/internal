@@ -2,18 +2,13 @@
 
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Check, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { markBillingRow } from "@/db/mutations";
 
 type Field = "billedOn" | "paidOn" | "invoicedOn";
-
-const label: Record<Field, string> = {
-  billedOn: "已請款",
-  paidOn: "已收款",
-  invoicedOn: "已開發票",
-};
 
 function todayISO() {
   const d = new Date();
@@ -39,18 +34,24 @@ export function QuickMark({
   disabled?: boolean;
   disabledHint?: string;
 }>) {
+  const t = useTranslations("billing.quickMark");
   const [pending, start] = useTransition();
   const router = useRouter();
   const marked = value != null;
+  const fieldLabel = t(`field.${field}`);
 
   function run() {
     start(async () => {
       const res = await markBillingRow(rowKey, field, marked ? null : todayISO());
       if (res.ok) {
-        toast.success(marked ? `已取消「${label[field]}」` : `已標記${label[field]}`);
+        toast.success(
+          marked
+            ? t("toast.unmarked", { label: fieldLabel })
+            : t("toast.marked", { label: fieldLabel }),
+        );
         router.refresh();
       } else {
-        toast.error(res.error ?? "更新失敗");
+        toast.error(res.error ?? t("toast.updateFailed"));
       }
     });
   }
@@ -58,7 +59,7 @@ export function QuickMark({
   if (disabled) {
     return (
       <Button type="button" size="sm" variant="outline" disabled title={disabledHint}>
-        {label[field]}
+        {fieldLabel}
       </Button>
     );
   }
@@ -72,7 +73,7 @@ export function QuickMark({
       onClick={run}
     >
       {marked ? <Undo2 className="size-4" /> : <Check className="size-4" />}
-      {marked ? `取消${label[field]}` : `標記${label[field]}`}
+      {marked ? t("button.unmark", { label: fieldLabel }) : t("button.mark", { label: fieldLabel })}
     </Button>
   );
 }

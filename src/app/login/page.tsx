@@ -2,6 +2,7 @@
 
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { signIn } from "@/lib/auth-client";
 import { LogoMark } from "@/components/logo";
@@ -48,6 +49,7 @@ function mcpAuthorizeCallback(params: URLSearchParams): string | null {
 }
 
 function LoginButton() {
+  const t = useTranslations("auth.login");
   const params = useSearchParams();
   const redirectTo = mcpAuthorizeCallback(params) || params.get("redirect") || "/";
   const [pending, setPending] = useState(false);
@@ -60,7 +62,7 @@ function LoginButton() {
     });
     if (error) {
       setPending(false);
-      toast.error(error.message || "登入失敗");
+      toast.error(error.message || t("toast.failed"));
     }
     // On success the browser is redirected to Google, so no need to reset.
   }
@@ -74,19 +76,20 @@ function LoginButton() {
       disabled={pending}
     >
       <GoogleIcon />
-      {pending ? "前往 Google…" : "使用 Google 登入"}
+      {pending ? t("redirecting") : t("signInWithGoogle")}
     </Button>
   );
 }
 
 export default function LoginPage() {
+  const t = useTranslations("auth.login");
   return (
     <div className="flex min-h-full flex-1 items-center justify-center p-6">
       <Card className="w-full max-w-sm">
         <CardHeader>
           <LogoMark className="size-10 mb-2" />
-          <CardTitle>登入內部管理系統</CardTitle>
-          <CardDescription>用 Google 帳號進入後台</CardDescription>
+          <CardTitle>{t("title")}</CardTitle>
+          <CardDescription>{t("description")}</CardDescription>
         </CardHeader>
         <CardContent>
           <Suspense fallback={null}>

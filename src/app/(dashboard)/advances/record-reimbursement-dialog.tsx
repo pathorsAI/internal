@@ -2,18 +2,12 @@
 
 import { useActionState, useState } from "react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { createReimbursement, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/format";
-import { Label } from "@/components/ui/label";
-import { Req } from "@/components/req";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Field, SelectField } from "@/components/form-field";
+import { SelectItem } from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -35,6 +29,7 @@ export function RecordReimbursementDialog({
   advance: { id: number; settleName: string; amount: string; currency: string; vendorName: string };
   accounts: { id: number; name: string; currency: string }[];
 }>) {
+  const t = useTranslations("advances");
   const [open, setOpen] = useState(false);
   const today = new Date().toISOString().slice(0, 10);
 
@@ -46,7 +41,7 @@ export function RecordReimbursementDialog({
       const res = await createReimbursement(prev, formData);
       if (res.ok) {
         setOpen(false);
-        toast.success("已記錄撥款");
+        toast.success(t("toast.recorded"));
       } else if (res.error) {
         toast.error(res.error);
       }
@@ -59,51 +54,49 @@ export function RecordReimbursementDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button size="sm" variant="outline">
-          記錄撥款
+          {t("recordButton")}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <form onSubmit={submitAction(action)}>
           <input type="hidden" name="advanceId" value={advance.id} />
           <DialogHeader>
-            <DialogTitle>記錄撥款</DialogTitle>
+            <DialogTitle>{t("dialog.title")}</DialogTitle>
             <DialogDescription>
-              還給 {advance.settleName || "代墊人"}（原費用：{advance.vendorName || "—"}）
+              {t("dialog.description", {
+                settleName: advance.settleName || t("defaultPayer"),
+                vendorName: advance.vendorName || "—",
+              })}
             </DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4 py-4">
-            <div className="space-y-1.5">
-              <Label>撥款日期<Req /></Label>
+            <Field label={t("dialog.payDate")} required>
               <DatePicker name="payDate" defaultValue={today} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>付款帳戶<Req /></Label>
-              <Select name="fromAccountId" required>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="— 選擇帳戶 —" />
-                </SelectTrigger>
-                <SelectContent>
-                  {accounts.map((a) => (
-                    <SelectItem key={a.id} value={String(a.id)}>
-                      {a.name}（{a.currency}）
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>金額（依代墊，不可改）</Label>
+            </Field>
+            <SelectField
+              name="fromAccountId"
+              label={t("dialog.fromAccount")}
+              required
+              placeholder={t("dialog.fromAccountPlaceholder")}
+            >
+              {accounts.map((a) => (
+                <SelectItem key={a.id} value={String(a.id)}>
+                  {t("accountOption", { name: a.name, currency: a.currency })}
+                </SelectItem>
+              ))}
+            </SelectField>
+            <Field label={t("dialog.amountLabel")}>
               <div className="flex h-9 items-center rounded-md border bg-muted px-3 text-sm text-muted-foreground">
                 {formatCurrency(advance.amount, advance.currency)}
               </div>
               <input type="hidden" name="amount" value={advance.amount} />
-            </div>
+            </Field>
           </div>
 
           <DialogFooter>
             <Button type="submit" disabled={pending}>
-              {pending ? "儲存中…" : "確認撥款"}
+              {pending ? t("dialog.saving") : t("dialog.confirm")}
             </Button>
           </DialogFooter>
         </form>

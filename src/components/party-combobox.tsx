@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Check, Plus } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Combobox } from "@/components/combobox";
 import { Label } from "@/components/ui/label";
@@ -10,7 +11,7 @@ import { Req } from "@/components/req";
 export function PartyCombobox({
   parties,
   name = "partyName",
-  placeholder = "輸入或選擇…",
+  placeholder,
   defaultName = "",
 }: Readonly<{
   parties: { id: number; name: string }[];
@@ -18,6 +19,8 @@ export function PartyCombobox({
   placeholder?: string;
   defaultName?: string;
 }>) {
+  const t = useTranslations("common");
+  const resolvedPlaceholder = placeholder ?? t("partyCombobox.placeholder");
   const [value, setValue] = React.useState(defaultName);
   const names = React.useMemo(() => parties.map((p) => p.name), [parties]);
   const trimmed = value.trim();
@@ -31,18 +34,18 @@ export function PartyCombobox({
         value={value}
         onValueChange={setValue}
         inputName={name}
-        placeholder={placeholder}
-        emptyText="查無此對象，儲存後會自動新增"
+        placeholder={resolvedPlaceholder}
+        emptyText={t("partyCombobox.emptyText")}
       />
 
       {trimmed &&
         (exists ? (
           <p className="flex items-center gap-1 text-xs text-muted-foreground">
-            <Check className="size-3" /> 已存在，將連結到既有的「{trimmed}」
+            <Check className="size-3" /> {t("partyCombobox.exists", { name: trimmed })}
           </p>
         ) : (
           <p className="flex items-center gap-1 text-xs text-amber-600">
-            <Plus className="size-3" /> 系統中沒有，儲存時會新增「{trimmed}」
+            <Plus className="size-3" /> {t("partyCombobox.willCreate", { name: trimmed })}
           </p>
         ))}
     </div>
@@ -58,7 +61,7 @@ export function PartyCombobox({
 export function PartyField({
   parties,
   name,
-  label = "客戶",
+  label,
   required = false,
   defaultName = "",
   placeholder,
@@ -71,17 +74,24 @@ export function PartyField({
   /** 不給就依 label 與是否必填自動組出來 */
   placeholder?: string;
 }>) {
+  const t = useTranslations("common");
+  const resolvedLabel = label ?? t("partyField.label");
+  const resolvedPlaceholder =
+    placeholder ??
+    (required
+      ? t("partyField.placeholderRequired", { label: resolvedLabel })
+      : t("partyField.placeholderOptional", { label: resolvedLabel }));
   return (
     <div className="space-y-1.5">
       <Label>
-        {label}
+        {resolvedLabel}
         {required && <Req />}
       </Label>
       <PartyCombobox
         parties={parties}
         name={name}
         defaultName={defaultName}
-        placeholder={placeholder ?? `輸入或選擇${label}${required ? "" : "（選填）"}…`}
+        placeholder={resolvedPlaceholder}
       />
     </div>
   );

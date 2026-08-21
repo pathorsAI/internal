@@ -3,11 +3,11 @@
 import { useActionState, useState } from "react";
 import { toast } from "sonner";
 import { Plus, ArrowLeft, Receipt, Banknote, HandCoins, ArrowLeftRight, Paperclip } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { createTransaction, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Req } from "@/components/req";
+import { Field, SelectField, TextField } from "@/components/form-field";
 import {
   Select,
   SelectContent,
@@ -33,27 +33,20 @@ import { ContractCombobox, type ContractOption } from "./contract-combobox";
 
 const initial: ActionState = { ok: false };
 
-// 憑證類型；電子發票會計師會自動看到，其他發票（三聯式等）要主動通知
-const DOC_KINDS: Record<string, string> = {
-  e_invoice: "電子發票",
-  paper_invoice: "其他發票（三聯式等）",
-  receipt: "收據",
-  other: "其他",
-};
-
 type Account = { id: number; name: string; currency: string };
 type Scenario = "expense" | "income" | "advance" | "transfer";
+
+// 憑證類型 / 交易情境的圖示與 key；顯示文字在 component 內用 t() 取得
+const DOC_KIND_KEYS = ["e_invoice", "paper_invoice", "receipt", "other"] as const;
 
 const SCENARIOS: {
   key: Scenario;
   icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  desc: string;
 }[] = [
-  { key: "expense", icon: Receipt, label: "一般支出", desc: "公司直接付錢" },
-  { key: "income", icon: Banknote, label: "收入", desc: "收到客戶的錢" },
-  { key: "advance", icon: HandCoins, label: "員工代墊", desc: "員工先付，之後再還" },
-  { key: "transfer", icon: ArrowLeftRight, label: "帳戶互轉", desc: "自己帳戶間搬錢" },
+  { key: "expense", icon: Receipt },
+  { key: "income", icon: Banknote },
+  { key: "advance", icon: HandCoins },
+  { key: "transfer", icon: ArrowLeftRight },
 ];
 
 export function NewTransactionDialog({
@@ -71,6 +64,7 @@ export function NewTransactionDialog({
   projects: { id: number; name: string }[];
   contracts: ContractOption[];
 }>) {
+  const t = useTranslations("transactions");
   const [open, setOpen] = useState(false);
   const [scenario, setScenario] = useState<Scenario | null>(null);
   const [billed, setBilled] = useState(true);
@@ -82,7 +76,7 @@ export function NewTransactionDialog({
       const res = await createTransaction(prev, formData);
       if (res.ok) {
         setOpen(false);
-        toast.success("已新增交易");
+        toast.success(t("toast.added"));
       } else if (res.error) {
         toast.error(res.error);
       }
@@ -102,7 +96,7 @@ export function NewTransactionDialog({
     <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetTrigger asChild>
         <Button size="sm">
-          <Plus className="size-4" /> 新增交易
+          <Plus className="size-4" /> {t("form.addTransaction")}
         </Button>
       </SheetTrigger>
       <SheetContent className="data-[side=right]:sm:max-w-xl">
@@ -117,153 +111,139 @@ export function NewTransactionDialog({
                   type="button"
                   onClick={() => setScenario(null)}
                   className="text-muted-foreground hover:text-foreground"
-                  aria-label="重選"
+                  aria-label={t("form.reselect")}
                 >
                   <ArrowLeft className="size-4" />
                 </button>
                 {current ? <current.icon className="size-4" /> : null}
-                {current?.label}
+                {current ? t(`form.scenario.${current.key}.label`) : null}
               </SheetTitle>
             </SheetHeader>
 
             <div className="grid flex-1 gap-4 overflow-y-auto px-4 py-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label>日期<Req /></Label>
+              <Field label={t("form.date")} required>
                 <DatePicker name="txnDate" />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="amount">金額<Req /></Label>
-                <Input id="amount" name="amount" type="number" step="0.01" required placeholder="正數" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>幣別</Label>
+              </Field>
+              <TextField
+                name="amount"
+                label={t("form.amount")}
+                required
+                type="number"
+                step="0.01"
+                placeholder={t("form.amountPlaceholder")}
+              />
+              <Field label={t("form.currency")}>
                 <CurrencySelect />
-              </div>
+              </Field>
 
               {/* 帳戶互轉 */}
               {scenario === "transfer" && (
                 <>
-                  <div className="space-y-1.5">
-                    <Label>轉出帳戶<Req /></Label>
-                    <Select name="fromAccountId" required>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="— 選擇帳戶 —" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {accounts.map((a) => (
-                          <SelectItem key={a.id} value={String(a.id)}>
-                            {a.name}（{a.currency}）
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>轉入帳戶<Req /></Label>
-                    <Select name="toAccountId" required>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="— 選擇帳戶 —" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {accounts.map((a) => (
-                          <SelectItem key={a.id} value={String(a.id)}>
-                            {a.name}（{a.currency}）
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  <SelectField
+                    name="fromAccountId"
+                    label={t("form.fromAccount")}
+                    required
+                    placeholder={t("form.accountPlaceholder")}
+                  >
+                    {accounts.map((a) => (
+                      <SelectItem key={a.id} value={String(a.id)}>
+                        {a.name} ({a.currency})
+                      </SelectItem>
+                    ))}
+                  </SelectField>
+                  <SelectField
+                    name="toAccountId"
+                    label={t("form.toAccount")}
+                    required
+                    placeholder={t("form.accountPlaceholder")}
+                  >
+                    {accounts.map((a) => (
+                      <SelectItem key={a.id} value={String(a.id)}>
+                        {a.name} ({a.currency})
+                      </SelectItem>
+                    ))}
+                  </SelectField>
                 </>
               )}
 
               {/* 支出 / 收入 / 代墊 共用：對象 + 分類 */}
               {scenario !== "transfer" && (
                 <>
-                  <div className="space-y-1.5 sm:col-span-2">
-                    <Label>
-                      {scenario === "income" ? "客戶" : "廠商 / 對象"}
-                      <Req />
-                    </Label>
+                  <Field
+                    label={scenario === "income" ? t("form.client") : t("form.vendor")}
+                    required
+                    wide
+                  >
                     <PartyCombobox
                       parties={parties}
                       name="partyName"
-                      placeholder={scenario === "income" ? "輸入或選擇客戶…" : "輸入或選擇廠商…"}
+                      placeholder={scenario === "income" ? t("form.clientPlaceholder") : t("form.vendorPlaceholder")}
                     />
-                  </div>
+                  </Field>
 
                   {scenario === "advance" && (
-                    <div className="space-y-1.5 sm:col-span-2">
-                      <Label>代墊人（員工）<Req /></Label>
-                      <PartyCombobox parties={employees} name="settleEmployeeName" placeholder="輸入代墊的員工…" />
-                    </div>
+                    <Field label={t("form.payer")} required wide>
+                      <PartyCombobox parties={employees} name="settleEmployeeName" placeholder={t("form.payerPlaceholder")} />
+                    </Field>
                   )}
 
-                  <div className="space-y-1.5">
-                    <Label>分類<Req /></Label>
+                  <Field label={t("form.category")} required>
                     <CategoryCombobox categories={categories} />
-                  </div>
+                  </Field>
 
                   {/* 支出 / 收入 才有帳戶 */}
                   {scenario !== "advance" && (
-                    <div className="space-y-1.5">
-                      <Label>
-                        {scenario === "income" ? "收款帳戶" : "付款帳戶"}
-                        <Req />
-                      </Label>
-                      <Select name="accountId" required>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="— 選擇帳戶 —" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {accounts.map((a) => (
-                            <SelectItem key={a.id} value={String(a.id)}>
-                              {a.name}（{a.currency}）
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+                    <SelectField
+                      name="accountId"
+                      label={scenario === "income" ? t("form.receivingAccount") : t("form.payingAccount")}
+                      required
+                      placeholder={t("form.accountPlaceholder")}
+                    >
+                      {accounts.map((a) => (
+                        <SelectItem key={a.id} value={String(a.id)}>
+                          {a.name} ({a.currency})
+                        </SelectItem>
+                      ))}
+                    </SelectField>
                   )}
 
-                  <div className="space-y-1.5 sm:col-span-2">
-                    <Label>專案</Label>
-                    <Select name="projectId">
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="— 未指定 —" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {projects.map((p) => (
-                          <SelectItem key={p.id} value={String(p.id)}>
-                            {p.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  <SelectField
+                    name="projectId"
+                    label={t("form.project")}
+                    wide
+                    placeholder={t("form.projectPlaceholder")}
+                  >
+                    {projects.map((p) => (
+                      <SelectItem key={p.id} value={String(p.id)}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectField>
 
-                  <div className="space-y-1.5 sm:col-span-2">
-                    <Label>合約</Label>
+                  <Field label={t("form.contract")} wide>
                     <ContractCombobox contracts={contracts} />
                     <p className="text-xs text-muted-foreground">
                       {scenario === "income"
-                        ? "綁合約後可在合約頁看到已收 / 未收。"
-                        : "可綁合約來追蹤這單花了多少（成本不會從合約金額扣除）。"}
+                        ? t("form.contractHintIncome")
+                        : t("form.contractHintOther")}
                     </p>
-                  </div>
+                  </Field>
                 </>
               )}
 
-              <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="description">摘要</Label>
-                <Input id="description" name="description" placeholder="選填" />
-              </div>
+              <TextField
+                name="description"
+                label={t("form.description")}
+                wide
+                placeholder={t("form.descriptionPlaceholder")}
+              />
 
               {/* 報稅 + 統編 + 憑證（轉帳沒有） */}
               {scenario !== "transfer" && (
                 <div className="space-y-3 sm:col-span-2">
                   <label className="flex items-center gap-2 text-sm">
                     <input type="checkbox" name="reported" defaultChecked className="size-4" />
-                    <span>上外帳（要報稅）</span>
+                    <span>{t("form.reported")}</span>
                   </label>
                   <label className="flex items-center gap-2 text-sm">
                     <input
@@ -273,7 +253,7 @@ export function NewTransactionDialog({
                       onChange={(e) => setBilled(e.target.checked)}
                       className="size-4"
                     />
-                    <span>這筆有報公司統編</span>
+                    <span>{t("form.billedToCompanyTaxId")}</span>
                   </label>
 
                   <VoucherBox billed={billed} />
@@ -283,7 +263,7 @@ export function NewTransactionDialog({
 
             <SheetFooter>
               <Button type="submit" disabled={pending}>
-                {pending ? "儲存中…" : "儲存"}
+                {pending ? t("form.saving") : t("form.save")}
               </Button>
             </SheetFooter>
           </form>
@@ -294,11 +274,12 @@ export function NewTransactionDialog({
 }
 
 function ScenarioPicker({ onPick }: Readonly<{ onPick: (s: Scenario) => void }>) {
+  const t = useTranslations("transactions");
   return (
     <>
       <SheetHeader>
-        <SheetTitle>新增交易</SheetTitle>
-        <SheetDescription>先選這是哪一種交易</SheetDescription>
+        <SheetTitle>{t("form.addTransaction")}</SheetTitle>
+        <SheetDescription>{t("form.pickScenario")}</SheetDescription>
       </SheetHeader>
       <div className="grid grid-cols-2 gap-3 p-4">
         {SCENARIOS.map((s) => (
@@ -309,8 +290,8 @@ function ScenarioPicker({ onPick }: Readonly<{ onPick: (s: Scenario) => void }>)
             className="flex flex-col items-start gap-1 rounded-lg border p-4 text-left transition-colors hover:bg-accent hover:text-accent-foreground"
           >
             <s.icon className="size-5 text-muted-foreground" />
-            <span className="text-sm font-medium">{s.label}</span>
-            <span className="text-xs text-muted-foreground">{s.desc}</span>
+            <span className="text-sm font-medium">{t(`form.scenario.${s.key}.label`)}</span>
+            <span className="text-xs text-muted-foreground">{t(`form.scenario.${s.key}.desc`)}</span>
           </button>
         ))}
       </div>
@@ -319,19 +300,19 @@ function ScenarioPicker({ onPick }: Readonly<{ onPick: (s: Scenario) => void }>)
 }
 
 function VoucherBox({ billed }: Readonly<{ billed: boolean }>) {
+  const t = useTranslations("transactions");
   // 有報公司統編時，憑證類型只能是電子發票 / 其他發票
-  const kindOptions = billed
-    ? { e_invoice: DOC_KINDS.e_invoice, paper_invoice: DOC_KINDS.paper_invoice }
-    : DOC_KINDS;
+  const kindKeys = billed ? (["e_invoice", "paper_invoice"] as const) : DOC_KIND_KEYS;
   return (
     <div className="space-y-3 rounded-lg border p-3">
       <div className="flex items-center gap-2 text-sm font-medium">
         <Paperclip className="size-4 text-muted-foreground" />
-        憑證 / 相關證明{billed ? "" : "（選填）"}
+        {t("form.voucher.title")}
+        {billed ? "" : t("form.voucher.optional")}
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <Label>類型{billed ? <Req /> : null}</Label>
+        {/* 標籤的必填星號跟著 billed 走，但 Select 本身一直沒有 required，維持原樣。 */}
+        <Field label={t("form.voucher.kind")} required={billed}>
           <Select
             key={billed ? "billed" : "free"}
             name="docKind"
@@ -341,16 +322,18 @@ function VoucherBox({ billed }: Readonly<{ billed: boolean }>) {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {Object.entries(kindOptions).map(([v, l]) => (
+              {kindKeys.map((v) => (
                 <SelectItem key={v} value={v}>
-                  {l}
+                  {t(`form.docKind.${v}`)}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="attachment">附檔{billed ? "（選填）" : ""}</Label>
+        </Field>
+        <Field
+          label={<>{t("form.voucher.attachment")}{billed ? t("form.voucher.optional") : ""}</>}
+          htmlFor="attachment"
+        >
           <Input
             id="attachment"
             name="attachment"
@@ -358,12 +341,10 @@ function VoucherBox({ billed }: Readonly<{ billed: boolean }>) {
             accept="image/*,application/pdf"
             className="cursor-pointer file:mr-2 file:cursor-pointer file:rounded file:border-0 file:bg-muted file:px-2 file:py-0.5 file:text-xs"
           />
-        </div>
+        </Field>
       </div>
       <p className="text-xs text-muted-foreground">
-        {billed
-          ? "有報公司統編，請選擇電子發票或其他發票。電子發票會計師自動看到;其他發票（三聯式等）會列入待通知清單。"
-          : "電子發票會計師會自動看到;其他發票（三聯式等）系統會標記、要主動通知會計師。"}
+        {billed ? t("form.voucher.hintBilled") : t("form.voucher.hintFree")}
       </p>
     </div>
   );

@@ -1,3 +1,6 @@
+"use client";
+
+import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 
 /** Pathors brand mark — a minimal blue waypoint route. */
@@ -24,10 +27,11 @@ export function LogoMark({ className }: Readonly<{ className?: string }>) {
 
 /** Brand mark + app name, used in the sidebar header. */
 export function Logo({ className }: Readonly<{ className?: string }>) {
+  const t = useTranslations("common");
   return (
     <div className={cn("flex items-center gap-2", className)}>
       <LogoMark className="size-6" />
-      <span className="text-sm font-semibold tracking-tight">內部管理系統</span>
+      <span className="text-sm font-semibold tracking-tight">{t("brand.name")}</span>
     </div>
   );
 }

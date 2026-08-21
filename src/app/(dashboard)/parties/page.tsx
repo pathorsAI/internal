@@ -1,3 +1,4 @@
+import { getTranslations } from "next-intl/server";
 import { RowDialog } from "@/components/row-dialog";
 import { DeleteButton } from "@/components/delete-button";
 import { deleteParty } from "@/db/mutations";
@@ -23,13 +24,6 @@ import { requireOrg } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
-const labelMap: Record<string, string> = {
-  vendor: "廠商",
-  customer: "客戶",
-  gov: "政府機關",
-  other: "其他",
-};
-
 /** 依幣別逐行顯示某方向（收款/付款）的累計；不同幣別分開，不換算。 */
 function MoneyLines({
   totals,
@@ -51,15 +45,20 @@ function MoneyLines({
 }
 
 export default async function PartiesPage() {
+  const t = await getTranslations("parties");
   const { orgId } = await requireOrg();
   const [rows, accounts] = await Promise.all([listParties(orgId), listBankAccounts(orgId)]);
 
+  const labelMap: Record<string, string> = {
+    vendor: t("label.vendor"),
+    customer: t("label.customer"),
+    gov: t("label.gov"),
+    other: t("label.other"),
+  };
+
   return (
     <>
-      <PageHeader
-        title="交易對象"
-        description="往來的廠商、客戶、機關；收款＝對方付我們、付款＝我們付對方，依幣別分開加總"
-      >
+      <PageHeader title={t("title")} description={t("description")}>
         <NewPartyDialog
           accounts={accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }))}
         />
@@ -69,23 +68,23 @@ export default async function PartiesPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>名稱</TableHead>
-              <TableHead>類型</TableHead>
-              <TableHead>統編</TableHead>
-              <TableHead className="text-right">交易數</TableHead>
-              <TableHead className="text-right">收款</TableHead>
-              <TableHead className="text-right">付款</TableHead>
+              <TableHead>{t("columns.name")}</TableHead>
+              <TableHead>{t("columns.type")}</TableHead>
+              <TableHead>{t("columns.taxId")}</TableHead>
+              <TableHead className="text-right">{t("columns.txnCount")}</TableHead>
+              <TableHead className="text-right">{t("columns.received")}</TableHead>
+              <TableHead className="text-right">{t("columns.paid")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <EmptyRow colSpan={6} message="尚無交易對象">點右上角新增</EmptyRow>
+              <EmptyRow colSpan={6} message={t("empty")}>{t("emptyHint")}</EmptyRow>
             ) : (
               rows.map((s) => (
                 <RowDialog
                   key={s.id}
                   title={s.name}
-                  description="交易對象"
+                  description={t("rowDialogDescription")}
                   cells={
                     <>
                       <TableCell className="font-medium">{s.name}</TableCell>

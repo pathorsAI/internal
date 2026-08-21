@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useTranslations } from "next-intl";
 import {
   LayoutDashboard,
   ArrowLeftRight,
@@ -39,46 +40,81 @@ import {
 } from "@/components/ui/sidebar";
 import { OrgSwitcher } from "@/components/org-switcher";
 import { UserMenu } from "@/components/user-menu";
+import { LocaleSwitcher } from "@/components/locale-switcher";
 import { Logo } from "@/components/logo";
 
 // 每天都會開的兩頁放最上面。請款看板是收入循環的日常操作面 —— 請款、開票、
 // 收款都在那一頁就地推進，不該埋在「客戶 / 營運」底下跟不常動的資源頁並列。
+// title 改用 nav.items.<key> 在 component 內用 t() 查表，key/href/icon 留在 code。
+/** 對應 common.nav.items 的鍵；header-breadcrumb 用同一組鍵維持頁名一致。 */
+export type NavItemKey =
+  | "dashboard"
+  | "billing"
+  | "transactions"
+  | "parties"
+  | "categories"
+  | "advances"
+  | "accountantNotices"
+  | "bankAccounts"
+  | "reconciliation"
+  | "projects"
+  | "subscriptions"
+  | "contracts"
+  | "invoices"
+  | "reports"
+  | "employees"
+  | "payroll"
+  | "members"
+  | "activity"
+  | "mcp"
+  | "settings";
+
 const daily = [
-  { title: "總覽", href: "/", icon: LayoutDashboard },
-  { title: "請款看板", href: "/billing", icon: CalendarClock },
-];
+  { key: "dashboard", href: "/", icon: LayoutDashboard },
+  { key: "billing", href: "/billing", icon: CalendarClock },
+] as const satisfies { key: NavItemKey; href: string; icon: typeof LayoutDashboard }[];
 
 const nav = [
-  { title: "內外帳", href: "/transactions", icon: ArrowLeftRight },
-  { title: "交易對象", href: "/parties", icon: Truck },
-  { title: "分類", href: "/categories", icon: Tags },
-  { title: "代墊", href: "/advances", icon: ReceiptText },
-  { title: "待通知會計師", href: "/accountant-notices", icon: BellRing },
-  { title: "銀行帳戶", href: "/bank-accounts", icon: Landmark },
-  { title: "對帳", href: "/reconciliation", icon: Scale },
-];
+  { key: "transactions", href: "/transactions", icon: ArrowLeftRight },
+  { key: "parties", href: "/parties", icon: Truck },
+  { key: "categories", href: "/categories", icon: Tags },
+  { key: "advances", href: "/advances", icon: ReceiptText },
+  { key: "accountantNotices", href: "/accountant-notices", icon: BellRing },
+  { key: "bankAccounts", href: "/bank-accounts", icon: Landmark },
+  { key: "reconciliation", href: "/reconciliation", icon: Scale },
+] as const satisfies { key: NavItemKey; href: string; icon: typeof LayoutDashboard }[];
 
 const clients = [
-  { title: "專案", href: "/projects", icon: FolderKanban },
-  { title: "訂閱 / 月費", href: "/subscriptions", icon: Repeat },
-  { title: "合約", href: "/contracts", icon: FileSignature },
-  { title: "發票", href: "/invoices", icon: Receipt },
-  { title: "報表", href: "/reports", icon: BarChart3 },
-];
+  { key: "projects", href: "/projects", icon: FolderKanban },
+  { key: "subscriptions", href: "/subscriptions", icon: Repeat },
+  { key: "contracts", href: "/contracts", icon: FileSignature },
+  { key: "invoices", href: "/invoices", icon: Receipt },
+  { key: "reports", href: "/reports", icon: BarChart3 },
+] as const satisfies { key: NavItemKey; href: string; icon: typeof LayoutDashboard }[];
 
 const hr = [
-  { title: "員工", href: "/employees", icon: Users },
-  { title: "薪資", href: "/payroll", icon: ReceiptText },
-];
+  { key: "employees", href: "/employees", icon: Users },
+  { key: "payroll", href: "/payroll", icon: ReceiptText },
+] as const satisfies { key: NavItemKey; href: string; icon: typeof LayoutDashboard }[];
 
 const org = [
-  { title: "成員", href: "/members", icon: UserCog },
-  { title: "操作紀錄", href: "/activity", icon: History },
-  { title: "MCP", href: "/settings/mcp", icon: Plug },
-  { title: "組織設定", href: "/settings", icon: Settings },
-];
+  { key: "members", href: "/members", icon: UserCog },
+  { key: "activity", href: "/activity", icon: History },
+  { key: "mcp", href: "/settings/mcp", icon: Plug },
+  { key: "settings", href: "/settings", icon: Settings },
+] as const satisfies { key: NavItemKey; href: string; icon: typeof LayoutDashboard }[];
+
+/** 側邊欄的分組順序。五個區塊的結構完全一樣，所以用資料驅動而不是抄五遍。 */
+const groups = [
+  { label: "daily", items: daily },
+  { label: "accounting", items: nav },
+  { label: "clients", items: clients },
+  { label: "hr", items: hr },
+  { label: "org", items: org },
+] as const;
 
 export function AppSidebar() {
+  const t = useTranslations("common");
   const pathname = usePathname();
 
   const isActive = (href: string) => {
@@ -97,98 +133,29 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>日常</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {daily.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton asChild isActive={isActive(item.href)}>
-                    <Link href={item.href}>
-                      <item.icon />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarGroup>
-          <SidebarGroupLabel>會計</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {nav.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton asChild isActive={isActive(item.href)}>
-                    <Link href={item.href}>
-                      <item.icon />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarGroup>
-          <SidebarGroupLabel>客戶 / 營運</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {clients.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton asChild isActive={isActive(item.href)}>
-                    <Link href={item.href}>
-                      <item.icon />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarGroup>
-          <SidebarGroupLabel>人事</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {hr.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton asChild isActive={isActive(item.href)}>
-                    <Link href={item.href}>
-                      <item.icon />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarGroup>
-          <SidebarGroupLabel>組織</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {org.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton asChild isActive={isActive(item.href)}>
-                    <Link href={item.href}>
-                      <item.icon />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {groups.map((group) => (
+          <SidebarGroup key={group.label}>
+            <SidebarGroupLabel>{t(`nav.groups.${group.label}`)}</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {group.items.map((item) => (
+                  <SidebarMenuItem key={item.href}>
+                    <SidebarMenuButton asChild isActive={isActive(item.href)}>
+                      <Link href={item.href}>
+                        <item.icon />
+                        <span>{t(`nav.items.${item.key}`)}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
       </SidebarContent>
 
       <SidebarFooter>
+        <LocaleSwitcher />
         <UserMenu />
       </SidebarFooter>
       <SidebarRail />

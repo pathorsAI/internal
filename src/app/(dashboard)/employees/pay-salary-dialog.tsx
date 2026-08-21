@@ -2,12 +2,12 @@
 
 import { useActionState, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { Banknote, Plus, Trash2 } from "lucide-react";
 import { payEmployeeSalary, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Req } from "@/components/req";
+import { Field, SelectField, TextField } from "@/components/form-field";
 import {
   Select,
   SelectContent,
@@ -31,21 +31,18 @@ import { submitAction } from "@/lib/form-action";
 import { cn } from "@/lib/utils";
 
 const initial: ActionState = { ok: false };
-const monthItems = Object.fromEntries(
-  Array.from({ length: 12 }, (_, i) => [String(i + 1), `${i + 1} 月`]),
-);
-const bookItems: Record<string, string> = {
-  both: "內外帳（both）",
-  internal: "僅內帳（不報稅）",
-  external: "僅外帳",
-};
+const months = Array.from({ length: 12 }, (_, i) => i + 1);
+const bookKinds = ["both", "internal", "external"] as const;
 
 type ItemType = { id: number; name: string; direction: string; isTaxable: boolean; isStatutory: boolean };
 
-function itemTypeSuffix(t: ItemType) {
-  if (t.direction === "deduction") return "（扣除）";
-  return t.isTaxable ? "（應稅）" : "（免稅）";
+/** 薪資項目後綴：扣項 / 應稅 / 免稅。抽出來避免巢狀三元。 */
+function itemSuffixKey(it: ItemType): "deduction" | "taxable" | "nontaxable" {
+  if (it.direction === "deduction") return "deduction";
+  return it.isTaxable ? "taxable" : "nontaxable";
 }
+
+
 type Employee = { id: number; name: string; baseSalary: string | null };
 type Row = {
   key: number;
@@ -66,6 +63,7 @@ export function PaySalaryDialog({
   itemTypes: ItemType[];
   accounts: Account[];
 }>) {
+  const t = useTranslations("employees");
   const [open, setOpen] = useState(false);
   // 成功/失敗處理放在 action 內（跑在 transition 裡），不用 useEffect ——
   // 既避免 effect 內 setState 的串聯 render，也讓每次送出都必定各吐一次 toast
@@ -75,7 +73,7 @@ export function PaySalaryDialog({
       const res = await payEmployeeSalary(prev, formData);
       if (res.ok) {
         setOpen(false);
-        toast.success("已發放薪資，並在交易產生薪資支出");
+        toast.success(t("paySalary.toast.success"));
       } else if (res.error) {
         toast.error(res.error);
       }
@@ -89,10 +87,10 @@ export function PaySalaryDialog({
   const [rows, setRows] = useState<Row[]>([]);
 
   // 非法定的項目（底薪/加班費/獎金/請假扣…）
-  const optionTypes = useMemo(() => itemTypes.filter((t) => !t.isStatutory), [itemTypes]);
+  const optionTypes = useMemo(() => itemTypes.filter((it) => !it.isStatutory), [itemTypes]);
 
   function reset() {
-    const base = itemTypes.find((t) => t.name === "底薪");
+    const base = itemTypes.find((it) => it.name === "底薪");
     setRows([
       {
         key: next(),
@@ -162,7 +160,7 @@ export function PaySalaryDialog({
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogTrigger asChild>
           <Button size="sm" variant="outline" onClick={(e) => e.stopPropagation()}>
-            <Banknote className="size-3.5" /> 發放薪資
+            <Banknote className="size-3.5" /> {t("paySalary.trigger")}
           </Button>
         </DialogTrigger>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
@@ -171,68 +169,60 @@ export function PaySalaryDialog({
             <input type="hidden" name="items" value={itemsJson} />
 
             <DialogHeader>
-              <DialogTitle>發放薪資 — {employee.name}</DialogTitle>
-              <DialogDescription>填實際發放的金額；確認後產生一筆薪資支出交易</DialogDescription>
+              <DialogTitle>{t("paySalary.title", { name: employee.name })}</DialogTitle>
+              <DialogDescription>{t("paySalary.description")}</DialogDescription>
             </DialogHeader>
 
             <div className="grid gap-4 py-4 sm:grid-cols-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="periodYear">發薪年<Req /></Label>
-                <Input id="periodYear" name="periodYear" type="number" required defaultValue={now.getFullYear()} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>發薪月<Req /></Label>
+              <TextField
+                name="periodYear"
+                label={t("paySalary.periodYearLabel")}
+                required
+                type="number"
+                defaultValue={now.getFullYear()}
+              />
+              {/* 標籤有必填星號但 Select 本身沒有 required，維持原樣不動。 */}
+              <Field label={t("paySalary.periodMonthLabel")} required>
                 <Select name="periodMonth" defaultValue={String(now.getMonth() + 1)}>
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {Object.entries(monthItems).map(([v, l]) => (
-                      <SelectItem key={v} value={v}>
-                        {l}
+                    {months.map((m) => (
+                      <SelectItem key={m} value={String(m)}>
+                        {t("paySalary.monthLabel", { month: m })}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>發薪日<Req /></Label>
+              </Field>
+              <Field label={t("paySalary.payDateLabel")} required>
                 <DatePicker name="payDate" />
-              </div>
-              <div className="space-y-1.5 sm:col-span-2">
-                <Label>付款帳戶<Req /></Label>
-                <Select name="fromAccountId" required>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="— 選擇帳戶 —" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {accounts.map((a) => (
-                      <SelectItem key={a.id} value={String(a.id)}>
-                        {a.name}（{a.currency}）
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>帳別</Label>
-                <Select name="book" defaultValue="both">
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(bookItems).map(([v, l]) => (
-                      <SelectItem key={v} value={v}>
-                        {l}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              </Field>
+              <SelectField
+                name="fromAccountId"
+                label={t("paySalary.fromAccountLabel")}
+                required
+                wide
+                placeholder={t("paySalary.selectAccountPlaceholder")}
+              >
+                {accounts.map((a) => (
+                  <SelectItem key={a.id} value={String(a.id)}>
+                    {t("paySalary.accountOption", { name: a.name, currency: a.currency })}
+                  </SelectItem>
+                ))}
+              </SelectField>
+              <SelectField name="book" label={t("paySalary.bookLabel")} defaultValue="both">
+                {bookKinds.map((k) => (
+                  <SelectItem key={k} value={k}>
+                    {t(`paySalary.bookOptions.${k}`)}
+                  </SelectItem>
+                ))}
+              </SelectField>
             </div>
 
             <div className="space-y-2 border-t pt-4">
-              <div className="text-sm font-medium">薪資項目（底薪、加班費、獎金、請假扣…）</div>
+              <div className="text-sm font-medium">{t("paySalary.itemsSection")}</div>
               {rows.map((r) => (
                 <div key={r.key} className="flex items-center gap-2">
                   <div className="flex-1">
@@ -241,13 +231,13 @@ export function PaySalaryDialog({
                       onValueChange={(v) => pickType(r.key, v as string)}
                     >
                       <SelectTrigger className="w-full">
-                        <SelectValue placeholder="選擇項目" />
+                        <SelectValue placeholder={t("paySalary.selectItemPlaceholder")} />
                       </SelectTrigger>
                       <SelectContent>
                         {optionTypes.map((it) => (
                           <SelectItem key={it.id} value={String(it.id)}>
                             {it.name}
-                            {itemTypeSuffix(it)}
+                            {t(`paySalary.itemSuffix.${itemSuffixKey(it)}`)}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -256,23 +246,23 @@ export function PaySalaryDialog({
                   <Input
                     type="number"
                     step="0.01"
-                    placeholder="金額"
+                    placeholder={t("paySalary.amountPlaceholder")}
                     value={r.amount}
                     onChange={(e) => setAmount(r.key, e.target.value)}
                     className="w-32"
                   />
-                  <Button type="button" variant="ghost" size="icon" onClick={() => removeRow(r.key)} aria-label="移除">
+                  <Button type="button" variant="ghost" size="icon" onClick={() => removeRow(r.key)} aria-label={t("paySalary.removeItem")}>
                     <Trash2 className="size-4 text-muted-foreground" />
                   </Button>
                 </div>
               ))}
               <Button type="button" variant="outline" size="sm" onClick={addRow}>
-                <Plus className="size-4" /> 新增項目
+                <Plus className="size-4" /> {t("paySalary.addItem")}
               </Button>
             </div>
 
             <div className="mt-4 flex items-center justify-between rounded-lg border p-3">
-              <span className="text-sm text-muted-foreground">實發合計</span>
+              <span className="text-sm text-muted-foreground">{t("paySalary.net")}</span>
               <span className={cn("text-lg font-semibold tabular-nums", signColor(net))}>
                 {formatCurrency(net)}
               </span>
@@ -280,10 +270,10 @@ export function PaySalaryDialog({
 
             <DialogFooter className="mt-4">
               <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-                取消
+                {t("paySalary.cancel")}
               </Button>
               <Button type="submit" disabled={pending}>
-                {pending ? "發放中…" : "確認發放"}
+                {pending ? t("paySalary.submitting") : t("paySalary.submit")}
               </Button>
             </DialogFooter>
           </form>
