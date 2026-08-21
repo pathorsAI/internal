@@ -167,6 +167,7 @@ export default async function SubscriptionsPage() {
                     subscription={{
                       id: s.id,
                       customerPartyId: s.customerPartyId,
+                      customerName: s.customerName,
                       projectId: s.projectId,
                       name: s.name,
                       amount: s.amount,

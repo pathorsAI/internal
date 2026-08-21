@@ -89,6 +89,7 @@ export default async function ProjectsPage() {
                       id: p.id,
                       name: p.name,
                       clientPartyId: p.clientPartyId,
+                      clientName: p.clientName,
                       status: p.status,
                       description: p.description,
                     }}

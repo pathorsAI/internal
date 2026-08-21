@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
+import { useActionState, useState } from "react";
 import { toast } from "sonner";
 import { updateContract, type ActionState } from "@/db/mutations";
 import { formatCurrency } from "@/lib/format";
@@ -19,51 +19,80 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CurrencySelect } from "@/components/currency-select";
+import { PartyField } from "@/components/party-combobox";
+import { submitAction } from "@/lib/form-action";
+import {
+  ContractBillingPlanFields,
+  type BillingPlanDefaults,
+} from "./contract-billing-plan";
 
 const initial: ActionState = { ok: false };
 
 type Contract = {
   id: number;
   customerPartyId: number;
+  /** 目前綁定的客戶名稱，給 PartyCombobox 預填 */
+  customerName: string | null;
   projectId: number | null;
   title: string;
   amount: string | null;
   currency: string;
   startDate: string | null;
   endDate: string | null;
+  signedDate: string | null;
+  paymentTermsDays: number | null;
   status: string;
   note: string | null;
   fileUrl: string | null;
-};
+} & BillingPlanDefaults;
 
 export function EditContractForm({
   contract,
   parties,
   projects,
   summary,
+  scheduleCount = 0,
+  lockedScheduleCount = 0,
+  extra,
   footer,
 }: Readonly<{
   contract: Contract;
   parties: { id: number; name: string }[];
   projects: { id: number; name: string }[];
   summary?: { received: number; cost: number; remaining: number | null };
+  /** 這張合約已有幾筆請款項目，以及其中已動過（不可重排）的筆數 */
+  scheduleCount?: number;
+  lockedScheduleCount?: number;
+  /** 額外區塊（分期請款清單），由 Server Component 傳進來 */
+  extra?: React.ReactNode;
   footer?: React.ReactNode;
 }>) {
-  const [state, action, pending] = useActionState(updateContract, initial);
-
   const close = useRowDialogClose();
-  useEffect(() => {
-    if (state.ok) {
-      toast.success("已更新");
-      close();
-    }
-  }, [state]);
-  useEffect(() => {
-    if (state.error) toast.error(state.error);
-  }, [state]);
+  // 受控欄位：請款方式區塊要靠它們即時算出排程預覽。
+  const [amount, setAmount] = useState(contract.amount ?? "");
+  const [currency, setCurrency] = useState(contract.currency);
+  const [signedDate, setSignedDate] = useState(contract.signedDate ?? "");
+  const [startDate, setStartDate] = useState(contract.startDate ?? "");
+
+  // 成功/失敗處理放在 action 內（跑在 transition 裡），不用 useEffect ——
+  // 既避免 effect 內 setState 的串聯 render，也讓每次送出都必定各吐一次 toast
+  // （舊寫法依賴 [state] 變化，連續兩次同樣的錯誤不會再跳）。
+  const [, action, pending] = useActionState(
+    async (prev: ActionState, formData: FormData) => {
+      const res = await updateContract(prev, formData);
+      if (res.ok) {
+        toast.success("已更新");
+        close();
+      } else if (res.error) {
+        toast.error(res.error);
+      }
+      return res;
+    },
+    initial,
+  );
 
   return (
-    <form action={action} className="grid gap-4 sm:grid-cols-2">
+    <form onSubmit={submitAction(action)} className="grid gap-4 sm:grid-cols-2">
       <input type="hidden" name="id" value={contract.id} />
 
       {summary && (
@@ -92,21 +121,12 @@ export function EditContractForm({
         </div>
       )}
 
-      <div className="space-y-1.5">
-        <Label>客戶<Req /></Label>
-        <Select name="customerPartyId" defaultValue={String(contract.customerPartyId)}>
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="選擇客戶" />
-          </SelectTrigger>
-          <SelectContent>
-            {parties.map((p) => (
-              <SelectItem key={p.id} value={String(p.id)}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      <PartyField
+        parties={parties}
+        name="customerPartyName"
+        required
+        defaultName={contract.customerName ?? ""}
+      />
       <div className="space-y-1.5">
         <Label>專案</Label>
         <Select
@@ -131,11 +151,18 @@ export function EditContractForm({
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="amount">合約金額</Label>
-        <Input id="amount" name="amount" type="number" step="0.01" defaultValue={contract.amount ?? ""} />
+        <Input
+          id="amount"
+          name="amount"
+          type="number"
+          step="0.01"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+        />
       </div>
       <div className="space-y-1.5">
         <Label>幣別</Label>
-        <CurrencySelect defaultValue={contract.currency} />
+        <CurrencySelect defaultValue={contract.currency} onValueChange={setCurrency} />
       </div>
       <div className="space-y-1.5">
         <Label>狀態</Label>
@@ -155,8 +182,35 @@ export function EditContractForm({
         </Select>
       </div>
       <div className="space-y-1.5">
+        <Label>簽約日</Label>
+        <DatePicker
+          name="signedDate"
+          allowEmpty
+          placeholder="— 無 —"
+          defaultValue={contract.signedDate ?? undefined}
+          onValueChange={setSignedDate}
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="paymentTermsDays">付款條件（天）</Label>
+        <Input
+          id="paymentTermsDays"
+          name="paymentTermsDays"
+          type="number"
+          min="0"
+          placeholder="月結 30 天 → 30"
+          defaultValue={contract.paymentTermsDays ?? ""}
+        />
+      </div>
+      <div className="space-y-1.5">
         <Label>開始日期</Label>
-        <DatePicker name="startDate" allowEmpty placeholder="— 無 —" defaultValue={contract.startDate ?? undefined} />
+        <DatePicker
+          name="startDate"
+          allowEmpty
+          placeholder="— 無 —"
+          defaultValue={contract.startDate ?? undefined}
+          onValueChange={setStartDate}
+        />
       </div>
       <div className="space-y-1.5">
         <Label>結束日期</Label>
@@ -176,6 +230,18 @@ export function EditContractForm({
           placeholder="https://drive.google.com/…"
         />
       </div>
+
+      <ContractBillingPlanFields
+        amount={amount}
+        currency={currency}
+        signedDate={signedDate}
+        startDate={startDate}
+        defaults={contract}
+        existingCount={scheduleCount}
+        lockedCount={lockedScheduleCount}
+      />
+
+      {extra}
 
       <DialogFooter className="mt-2 border-t pt-4 sm:col-span-2">
         {footer ? <div className="mr-auto">{footer}</div> : null}

@@ -11,10 +11,12 @@ import {
   payslips,
   transactions,
 } from "@/db/schema";
+import { member } from "@/db/auth-schema";
 import {
   getEmployee,
   listAccountantNotices,
   listEmployees,
+  listOrgMembers,
   listPayrollRuns,
   listPayslipRecords,
   listReconciliations,
@@ -35,6 +37,7 @@ import {
   todayStr,
   type ToolDef,
 } from "./shared";
+import { isValidEmail, maskBankAccount, maskNationalId } from "@/lib/pii";
 
 const EMPLOYMENT_TYPES = ["full_time", "part_time", "freelancer", "contractor"] as const;
 
@@ -81,30 +84,82 @@ function parseSalaryItems(raw: unknown): SalaryItem[] {
     .filter((r) => r.amount !== 0);
 }
 
+function checkEmailArg(args: Record<string, unknown>, key: string) {
+  const v = optString(args, key);
+  if (v && !isValidEmail(v)) throw new Error(`"${key}" is not a valid email address.`);
+}
+
+// 員工資料離開 MCP 前遮罩身分證字號與薪轉帳戶 — MCP 的用途（payroll、
+// 聯絡資訊查詢）不需要完整值；完整值只在網頁端看得到。
+function redactEmployee<T extends { nationalId: string | null; salaryAccount: string | null }>(
+  e: T,
+): T {
+  return {
+    ...e,
+    nationalId: maskNationalId(e.nationalId),
+    salaryAccount: maskBankAccount(e.salaryAccount),
+  };
+}
+
+/**
+ * Validate an employee → login-user binding: the user must be a member of the
+ * org and not already bound to another (non-deleted) employee. Binding is
+ * optional — roster-only employees keep userId NULL.
+ */
+async function checkEmployeeUserBinding(orgId: string, userId: string, excludeEmployeeId?: number) {
+  const db = getDb();
+  const [m] = await db
+    .select({ userId: member.userId })
+    .from(member)
+    .where(and(eq(member.organizationId, orgId), eq(member.userId, userId)))
+    .limit(1);
+  if (!m) throw new Error('"userId" is not a member of this organization — see list_org_members.');
+  const [taken] = await db
+    .select({ id: employees.id })
+    .from(employees)
+    .where(and(eq(employees.organizationId, orgId), eq(employees.userId, userId), isNull(employees.deletedAt)))
+    .limit(1);
+  if (taken && taken.id !== excludeEmployeeId) {
+    throw new Error(`This user is already bound to employee ${taken.id}.`);
+  }
+}
+
 export const hrTools: Record<string, ToolDef> = {
   // ---- employees ----
   list_employees: {
-    description: "List employees (for payroll, advances, reimbursements).",
+    description:
+      "List employees (for payroll, advances, reimbursements). National ID and salary account are masked; use the web app when the full values are needed.",
     inputSchema: {
       type: "object",
       properties: { limit: { type: "number", description: "Default 200." }, ...ORG_ARG },
       additionalProperties: false,
     },
-    execute: async (args, ctx) => listEmployees(await resolveOrg(args, ctx), optNumber(args, "limit") ?? 200),
+    execute: async (args, ctx) =>
+      (await listEmployees(await resolveOrg(args, ctx), optNumber(args, "limit") ?? 200)).map(
+        redactEmployee,
+      ),
   },
 
   get_employee: {
-    description: "Get one employee by id.",
+    description:
+      "Get one employee by id. National ID and salary account are masked; use the web app when the full values are needed.",
     inputSchema: {
       type: "object",
       properties: { id: { type: "number" }, ...ORG_ARG },
       required: ["id"],
       additionalProperties: false,
     },
-    execute: async (args, ctx) =>
-      (await getEmployee(await resolveOrg(args, ctx), requireNumber(args, "id"))) ?? {
-        error: "Not found.",
-      },
+    execute: async (args, ctx) => {
+      const row = await getEmployee(await resolveOrg(args, ctx), requireNumber(args, "id"));
+      return row ? redactEmployee(row) : { error: "Not found." };
+    },
+  },
+
+  list_org_members: {
+    description:
+      "List login users (members) of the organization — for binding an employee to a user via create_employee / update_employee userId. Not every employee has a login; binding is optional.",
+    inputSchema: { type: "object", properties: { ...ORG_ARG }, additionalProperties: false },
+    execute: async (args, ctx) => listOrgMembers(await resolveOrg(args, ctx)),
   },
 
   create_employee: {
@@ -121,6 +176,15 @@ export const hrTools: Record<string, ToolDef> = {
         salaryAccount: { type: "string" },
         startDate: { type: "string", description: "YYYY-MM-DD." },
         endDate: { type: "string", description: "YYYY-MM-DD." },
+        workEmail: { type: "string" },
+        personalEmail: { type: "string" },
+        phone: { type: "string" },
+        note: { type: "string" },
+        userId: {
+          type: "string",
+          description:
+            "Optional: bind this employee to a login user (see list_org_members). Most roster-only employees have no binding.",
+        },
         hasLaborInsurance: { type: "boolean" },
         hasHealthInsurance: { type: "boolean" },
         hasPension: { type: "boolean" },
@@ -132,8 +196,12 @@ export const hrTools: Record<string, ToolDef> = {
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       checkEmploymentType(optString(args, "employmentType"));
+      checkEmailArg(args, "workEmail");
+      checkEmailArg(args, "personalEmail");
       const laborInsuredSalary = optDecimal(args, "laborInsuredSalary") ?? null;
       const healthInsuredSalary = optDecimal(args, "healthInsuredSalary") ?? null;
+      const userId = optString(args, "userId") ?? null;
+      if (userId) await checkEmployeeUserBinding(orgId, userId);
       const [row] = await getDb()
         .insert(employees)
         .values({
@@ -147,6 +215,11 @@ export const hrTools: Record<string, ToolDef> = {
           salaryAccount: optString(args, "salaryAccount") ?? null,
           startDate: optString(args, "startDate") ?? null,
           endDate: optString(args, "endDate") ?? null,
+          workEmail: optString(args, "workEmail") ?? null,
+          personalEmail: optString(args, "personalEmail") ?? null,
+          phone: optString(args, "phone") ?? null,
+          note: optString(args, "note") ?? null,
+          userId,
           // NOT NULL columns: always pass explicit booleans. Mirror the app —
           // derive from whether insured salary was given; default false.
           hasLaborInsurance: optBoolean(args, "hasLaborInsurance") ?? laborInsuredSalary !== null,
@@ -155,7 +228,7 @@ export const hrTools: Record<string, ToolDef> = {
           hasPension: optBoolean(args, "hasPension") ?? false,
         })
         .returning();
-      return row;
+      return redactEmployee(row);
     },
   },
 
@@ -174,6 +247,15 @@ export const hrTools: Record<string, ToolDef> = {
         salaryAccount: { type: "string" },
         startDate: { type: "string", description: "YYYY-MM-DD." },
         endDate: { type: "string", description: "YYYY-MM-DD." },
+        workEmail: { type: "string" },
+        personalEmail: { type: "string" },
+        phone: { type: "string" },
+        note: { type: "string" },
+        userId: {
+          type: ["string", "null"],
+          description:
+            "Bind to a login user (see list_org_members). Pass null to unbind — binding is optional, not 1:1.",
+        },
         hasLaborInsurance: { type: "boolean" },
         hasHealthInsurance: { type: "boolean" },
         hasPension: { type: "boolean" },
@@ -187,6 +269,8 @@ export const hrTools: Record<string, ToolDef> = {
       const id = requireNumber(args, "id");
       const orgId = await resolveOrg(args, ctx);
       checkEmploymentType(optString(args, "employmentType"));
+      checkEmailArg(args, "workEmail");
+      checkEmailArg(args, "personalEmail");
       const patch: Record<string, unknown> = {};
       if (optString(args, "name") !== undefined) patch.name = requireString(args, "name");
       if (optString(args, "nationalId") !== undefined) patch.nationalId = optString(args, "nationalId");
@@ -201,6 +285,22 @@ export const hrTools: Record<string, ToolDef> = {
         patch.salaryAccount = optString(args, "salaryAccount");
       if (optString(args, "startDate") !== undefined) patch.startDate = optString(args, "startDate");
       if (optString(args, "endDate") !== undefined) patch.endDate = optString(args, "endDate");
+      if (optString(args, "workEmail") !== undefined) patch.workEmail = optString(args, "workEmail");
+      if (optString(args, "personalEmail") !== undefined)
+        patch.personalEmail = optString(args, "personalEmail");
+      if (optString(args, "phone") !== undefined) patch.phone = optString(args, "phone");
+      if (optString(args, "note") !== undefined) patch.note = optString(args, "note");
+      if ("userId" in args) {
+        // null / empty string = unbind; otherwise validate the binding.
+        const raw = args.userId;
+        if (raw === null || raw === "") {
+          patch.userId = null;
+        } else {
+          const uid = requireString(args, "userId");
+          await checkEmployeeUserBinding(orgId, uid, id);
+          patch.userId = uid;
+        }
+      }
       if (optBoolean(args, "hasLaborInsurance") !== undefined)
         patch.hasLaborInsurance = optBoolean(args, "hasLaborInsurance");
       if (optBoolean(args, "hasHealthInsurance") !== undefined)
@@ -214,7 +314,7 @@ export const hrTools: Record<string, ToolDef> = {
         .where(and(eq(employees.organizationId, orgId), eq(employees.id, id)))
         .returning();
       if (!row) throw new Error(`Employee ${id} not found in your organization.`);
-      return row;
+      return redactEmployee(row);
     },
   },
 

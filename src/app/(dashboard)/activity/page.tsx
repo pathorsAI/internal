@@ -20,11 +20,13 @@ const actionLabel: Record<string, string> = {
   create: "新增",
   update: "修改",
   delete: "刪除",
+  read: "讀取",
 };
 const actionVariant: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   create: "secondary",
   update: "outline",
   delete: "destructive",
+  read: "outline",
 };
 const entityLabel: Record<string, string> = {
   transaction: "交易",
@@ -37,6 +39,7 @@ const entityLabel: Record<string, string> = {
   project: "專案",
   subscription: "訂閱",
   contract: "合約",
+  billing_item: "請款項目",
   document: "憑證",
   payroll_run: "薪資批次",
   payslip: "薪資單",

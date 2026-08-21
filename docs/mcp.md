@@ -61,9 +61,21 @@ destructive calls.
 **Discovery** — `list_organizations` (call first), `create_organization` (spin up a
 new org, makes you its owner), `get_financial_overview`.
 
-**Billing** — `list_upcoming_billing` (who to bill & when, projected from active
-subscriptions). One-off collection is tracked on contracts (已收/未收, see
-`list_contracts`).
+**Billing** — `list_billing_status` is the main one: the whole billing board in a
+single call, merging one-off charges (contract instalments / project milestones)
+with projected subscription periods. It answers 誰該請款 / 誰已繳款 / 誰還沒繳 /
+發票該開給誰 — filter by `status` (`due`, `billed`, `partial`, `overdue`, `paid`,
+`upcoming`), by `customerPartyId`, or with `needsInvoiceOnly`. Nothing unpaid is
+ever hidden, however old it is. `list_upcoming_billing` is the narrower "what's
+coming up in the next N days" view over the same data. Scheduled charges are
+managed with `create_billing_item` / `update_billing_item` / `delete_billing_item`
+(record 已請款 / 已收款 / 已開發票 by setting `billedOn` / `paidOn` / `invoicedOn`);
+recurring fees belong in subscriptions instead, and their periods appear on the
+board automatically. `sync_billing_calendar` pushes the board to Google Calendar.
+
+> Money actually received is always computed from ledger transactions bound to the
+> charge (`billingItemId`) or to a subscription period — never from `paidOn`, which
+> is only a human annotation.
 
 **Ledger (內外帳)** — `list_transactions`, `get_transaction`,
 `list_outstanding_advances`, `create_transaction` (expense/income/advance/transfer),
@@ -75,22 +87,38 @@ subscriptions). One-off collection is tracked on contracts (已收/未收, see
 `update_category`/`delete_category`; bank accounts: `list_bank_accounts`/
 `get_bank_account`/`create_bank_account`/`update_bank_account`/`delete_bank_account`;
 invoices: `list_invoices`/`get_invoice`/`create_invoice`/`delete_invoice`.
+`create_invoice` takes `partyId` / `contractId` / `billingItemId`; binding an
+invoice to a scheduled charge fills that charge's 開發票日, which clears it from
+the 待開發票 list.
 
 **Client ops** — projects/subscriptions/contracts each have `list_*` +
 `create_*`/`update_*`/`delete_*` (`list_customers` is a convenience filter of
 `list_parties`). A contract carries a `fileUrl` — the link to the signed contract
-file (e.g. a Google Drive link).
+file (e.g. a Google Drive link). Contract status is stored, not derived: linking
+an income transaction that fills the contract does **not** move it to
+`completed` on its own. So `create_transaction` / `bulk_create_transactions` /
+`update_transaction` return `contractProgress` (amount / received / remaining /
+`fullyCollected`) for every contract they touched — when a contract comes back
+fully collected while still draft/active, the client is told to surface it and
+ask the user before calling `update_contract` with `status='completed'`. Status
+is never flipped automatically.
 
 **HR / payroll / recon** — employees: `list_employees`/`get_employee`/
-`create_employee`/`update_employee`/`delete_employee`; payroll:
+`create_employee`/`update_employee`/`delete_employee`. Employee PII is
+handled conservatively over MCP: national ID and salary account come back
+**masked** (full values are web-app only), and every employee read is written
+to the activity log as a `read` entry — so who pulled contact data, and when,
+is always answerable. Payroll:
 `list_payroll_runs`, `list_payslips`, `list_salary_status` (who's paid for a month
 + when), `pay_employee_salary` (records the payslip **and** posts the salary
 expense to the ledger); reconciliations: `list_reconciliations` +
 `create`/`update`/`delete`; accountant notices: `list_accountant_notices`,
 `mark_accountant_notified`, `unmark_accountant_notified`.
 
-**Not exposed (do in the app):** uploading invoice/receipt **files** (R2) and
-multi-currency FX entry — these need file handling or extra UI. Deletes that would
+**Not exposed (do in the app):** uploading invoice/receipt **files** (R2),
+multi-currency FX entry, and *connecting* Google Calendar (the OAuth consent needs
+a browser — do it once in 組織設定, after which `sync_billing_calendar` works over
+MCP). These need file handling or extra UI. Deletes that would
 break references return a clear error suggesting deactivation/archiving instead.
 
 ## Setup

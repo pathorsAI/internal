@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
+import { useActionState } from "react";
 import { toast } from "sonner";
 import { updateSubscription, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
@@ -18,12 +18,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CurrencySelect } from "@/components/currency-select";
+import { PartyField } from "@/components/party-combobox";
+import { submitAction } from "@/lib/form-action";
 
 const initial: ActionState = { ok: false };
 
 type Subscription = {
   id: number;
   customerPartyId: number;
+  /** 目前綁定的客戶名稱，給 PartyCombobox 預填 */
+  customerName: string | null;
   projectId: number | null;
   name: string;
   amount: string;
@@ -46,38 +50,35 @@ export function EditSubscriptionForm({
   projects: { id: number; name: string }[];
   footer?: React.ReactNode;
 }>) {
-  const [state, action, pending] = useActionState(updateSubscription, initial);
-
   const close = useRowDialogClose();
-  useEffect(() => {
-    if (state.ok) {
-      toast.success("已更新");
-      close();
-    }
-  }, [state]);
-  useEffect(() => {
-    if (state.error) toast.error(state.error);
-  }, [state]);
+
+  // 成功/失敗處理放在 action 內（跑在 transition 裡），不用 useEffect ——
+  // 既避免 effect 內 setState 的串聯 render，也讓每次送出都必定各吐一次 toast
+  // （舊寫法依賴 [state] 變化，連續兩次同樣的錯誤不會再跳）。
+  const [, action, pending] = useActionState(
+    async (prev: ActionState, formData: FormData) => {
+      const res = await updateSubscription(prev, formData);
+      if (res.ok) {
+        toast.success("已更新");
+        close();
+      } else if (res.error) {
+        toast.error(res.error);
+      }
+      return res;
+    },
+    initial,
+  );
 
   return (
-    <form action={action} className="grid gap-4 sm:grid-cols-2">
+    <form onSubmit={submitAction(action)} className="grid gap-4 sm:grid-cols-2">
       <input type="hidden" name="id" value={subscription.id} />
 
-      <div className="space-y-1.5">
-        <Label>客戶<Req /></Label>
-        <Select name="customerPartyId" defaultValue={String(subscription.customerPartyId)}>
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="選擇客戶" />
-          </SelectTrigger>
-          <SelectContent>
-            {parties.map((p) => (
-              <SelectItem key={p.id} value={String(p.id)}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      <PartyField
+        parties={parties}
+        name="customerPartyName"
+        required
+        defaultName={subscription.customerName ?? ""}
+      />
       <div className="space-y-1.5">
         <Label>專案</Label>
         <Select

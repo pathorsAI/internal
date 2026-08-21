@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useState } from "react";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { createEmployee, type ActionState } from "@/db/mutations";
@@ -25,6 +25,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { DatePicker } from "@/components/date-picker";
+import { submitAction } from "@/lib/form-action";
+import type { MemberOption } from "./edit-employee-form";
 
 const initial: ActionState = { ok: false };
 const typeItems: Record<string, string> = {
@@ -34,19 +36,24 @@ const typeItems: Record<string, string> = {
   contractor: "承攬",
 };
 
-export function NewEmployeeDialog() {
+export function NewEmployeeDialog({ members }: Readonly<{ members: MemberOption[] }>) {
   const [open, setOpen] = useState(false);
-  const [state, action, pending] = useActionState(createEmployee, initial);
-
-  useEffect(() => {
-    if (state.ok) {
-      setOpen(false);
-      toast.success("已新增員工");
-    }
-  }, [state]);
-  useEffect(() => {
-    if (state.error) toast.error(state.error);
-  }, [state]);
+  // 成功/失敗處理放在 action 內（跑在 transition 裡），不用 useEffect ——
+  // 既避免 effect 內 setState 的串聯 render，也讓每次送出都必定各吐一次 toast
+  // （舊寫法依賴 [state] 變化，連續兩次同樣的錯誤不會再跳）。
+  const [, action, pending] = useActionState(
+    async (prev: ActionState, formData: FormData) => {
+      const res = await createEmployee(prev, formData);
+      if (res.ok) {
+        setOpen(false);
+        toast.success("已新增員工");
+      } else if (res.error) {
+        toast.error(res.error);
+      }
+      return res;
+    },
+    initial,
+  );
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -56,7 +63,7 @@ export function NewEmployeeDialog() {
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
-        <form action={action} className="grid gap-4 sm:grid-cols-2">
+        <form onSubmit={submitAction(action)} className="grid gap-4 sm:grid-cols-2">
           <DialogHeader className="sm:col-span-2">
             <DialogTitle>新增員工</DialogTitle>
             <DialogDescription>正職、兼職、自由工作者或承攬皆可</DialogDescription>
@@ -96,6 +103,51 @@ export function NewEmployeeDialog() {
               name="salaryAccount"
               placeholder="例：永豐銀行 帳號末四碼 1234"
             />
+          </div>
+          <div className="space-y-3 rounded-lg border p-3 sm:col-span-2">
+            <div className="text-sm font-medium">聯絡資訊</div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="workEmail" className="text-xs text-muted-foreground">
+                  工作 Email
+                </Label>
+                <Input id="workEmail" name="workEmail" type="email" placeholder="選填" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="personalEmail" className="text-xs text-muted-foreground">
+                  聯絡 Email
+                </Label>
+                <Input id="personalEmail" name="personalEmail" type="email" placeholder="選填" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="phone" className="text-xs text-muted-foreground">
+                  電話
+                </Label>
+                <Input id="phone" name="phone" placeholder="選填" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">綁定登入使用者（選填）</Label>
+                <Select name="userId" defaultValue="none">
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">不綁定（僅名冊紀錄）</SelectItem>
+                    {members.map((m) => (
+                      <SelectItem key={m.userId} value={m.userId}>
+                        {m.name}（{m.email}）
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="note" className="text-xs text-muted-foreground">
+                備註
+              </Label>
+              <Input id="note" name="note" placeholder="選填" />
+            </div>
           </div>
           <div className="space-y-3 rounded-lg border p-3 sm:col-span-2">
             <div className="text-sm font-medium">勞健保投保（記錄保多少；之後再依此試算保費）</div>

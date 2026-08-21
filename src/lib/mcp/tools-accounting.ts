@@ -1,6 +1,6 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { getDb } from "@/db";
-import { bankAccounts, categories, invoices, parties } from "@/db/schema";
+import { bankAccounts, billingItems, categories, contracts, invoices, parties } from "@/db/schema";
 import {
   getBankAccount,
   getInvoice,
@@ -421,7 +421,8 @@ export const accountingTools: Record<string, ToolDef> = {
   },
 
   create_invoice: {
-    description: "Create an invoice record (AR/AP tracking).",
+    description:
+      "Create an invoice record (AR/AP tracking). Bind it to a client with partyId, and to a scheduled charge with billingItemId — doing so fills that charge's 開發票日 automatically, which clears it from the 「待開發票」 list (see list_billing_status).",
     inputSchema: {
       type: "object",
       properties: {
@@ -436,6 +437,12 @@ export const accountingTools: Record<string, ToolDef> = {
         currency: { type: "string", description: "3-letter; default TWD." },
         status: { type: "string", enum: [...INVOICE_STATUSES], description: "Default valid." },
         note: { type: "string" },
+        partyId: { type: "number", description: "Counterparty; see list_parties." },
+        contractId: { type: "number" },
+        billingItemId: {
+          type: "number",
+          description: "Scheduled charge this invoice covers; see list_billing_status.",
+        },
         ...ORG_ARG,
       },
       additionalProperties: false,
@@ -450,7 +457,15 @@ export const accountingTools: Record<string, ToolDef> = {
       if (!INVOICE_STATUSES.includes(status as (typeof INVOICE_STATUSES)[number])) {
         throw new Error(`"status" must be one of: ${INVOICE_STATUSES.join(", ")}.`);
       }
-      const [row] = await getDb()
+      const db = getDb();
+      const partyId = optNumber(args, "partyId");
+      if (partyId !== undefined) await assertInOrg(db, parties, partyId, orgId, "Party");
+      const contractId = optNumber(args, "contractId");
+      if (contractId !== undefined) await assertInOrg(db, contracts, contractId, orgId, "Contract");
+      const billingItemId = optNumber(args, "billingItemId");
+      if (billingItemId !== undefined)
+        await assertInOrg(db, billingItems, billingItemId, orgId, "Billing item");
+      const [row] = await db
         .insert(invoices)
         .values({
           organizationId: orgId,
@@ -465,8 +480,24 @@ export const accountingTools: Record<string, ToolDef> = {
           amountGross: optDecimal(args, "amountGross") ?? null,
           currency: normalizeCurrency(args, "currency"),
           note: optString(args, "note") ?? null,
+          partyId: partyId ?? null,
+          contractId: contractId ?? null,
+          billingItemId: billingItemId ?? null,
         })
         .returning();
+      // 綁到請款項目時順手回填開發票日，「待開發票」才會自己消掉（與 web 端一致）。
+      if (billingItemId !== undefined && optString(args, "invoiceDate")) {
+        await db
+          .update(billingItems)
+          .set({ invoicedOn: optString(args, "invoiceDate") })
+          .where(
+            and(
+              eq(billingItems.organizationId, orgId),
+              eq(billingItems.id, billingItemId),
+              isNull(billingItems.invoicedOn),
+            ),
+          );
+      }
       return row;
     },
   },

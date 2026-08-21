@@ -11,10 +11,22 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { listVendorCosts, listProjects } from "@/db/queries";
+import {
+  computeReceivableAging,
+  listBillingBoard,
+  listContractCoverage,
+  listVendorCosts,
+  listProjects,
+  summarizeTaxPeriod,
+} from "@/db/queries";
 import { formatCurrency } from "@/lib/format";
 import { requireOrg } from "@/lib/session";
 import { cn } from "@/lib/utils";
+import { shiftTaxPeriod, taxPeriodOf } from "@/lib/vat";
+import { todayStr } from "@/lib/mcp/shared";
+import { ReceivableAging } from "./receivable-aging";
+import { TaxPeriodCard } from "./tax-period-card";
+import { ContractCoverage } from "./contract-coverage";
 
 export const dynamic = "force-dynamic";
 
@@ -27,14 +39,38 @@ const labelMap: Record<string, string> = {
 
 export default async function ReportsPage() {
   const { orgId } = await requireOrg();
-  const [vendorCosts, projects] = await Promise.all([listVendorCosts(orgId), listProjects(orgId)]);
+  // 稅期預設看當期；上一期常常還在申報中，一起帶出來比較有用。
+  const current = taxPeriodOf(todayStr());
+  const previous = shiftTaxPeriod(current, -1);
+
+  // 三張新報表都建立在同一份看板資料上 —— 抓一次就好，數字也保證一致。
+  const board = await listBillingBoard(orgId, { includeAllHistory: true });
+  const [vendorCosts, projects, coverage, currentTax, previousTax] = await Promise.all([
+    listVendorCosts(orgId),
+    listProjects(orgId),
+    listContractCoverage(orgId, board),
+    summarizeTaxPeriod(orgId, board, current.start, current.end),
+    summarizeTaxPeriod(orgId, board, previous.start, previous.end),
+  ]);
+  const aging = computeReceivableAging(board, todayStr());
   const totalVendorCost = vendorCosts.reduce((s, v) => s + v.total, 0);
 
   return (
     <>
-      <PageHeader title="報表" description="廠商 / infra 成本與各專案損益" />
+      <PageHeader
+        title="報表"
+        description="應收帳齡、營業稅期、合約完整性，以及成本與專案損益"
+      />
 
       <div className="grid gap-6">
+        <ReceivableAging rows={aging} />
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          <TaxPeriodCard period={current} summary={currentTax} highlight />
+          <TaxPeriodCard period={previous} summary={previousTax} />
+        </div>
+
+        <ContractCoverage rows={coverage} />
         <TableCard
           title="廠商 / infra 成本"
           action={`依交易對象彙總的支出（含代墊，TWD）— 合計 ${formatCurrency(totalVendorCost)}`}

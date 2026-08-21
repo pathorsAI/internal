@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
+import { useActionState } from "react";
 import { toast } from "sonner";
 import { updateProject, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Req } from "@/components/req";
 import { DialogFooter } from "@/components/ui/dialog";
+import { submitAction } from "@/lib/form-action";
 import { useRowDialogClose } from "@/components/row-dialog";
+import { PartyField } from "@/components/party-combobox";
 import {
   Select,
   SelectContent,
@@ -23,6 +25,8 @@ type Project = {
   id: number;
   name: string;
   clientPartyId: number | null;
+  /** 目前綁定的客戶名稱，給 PartyCombobox 預填 */
+  clientName: string | null;
   status: string;
   description: string | null;
 };
@@ -36,45 +40,38 @@ export function EditProjectForm({
   parties: { id: number; name: string }[];
   footer?: React.ReactNode;
 }>) {
-  const [state, action, pending] = useActionState(updateProject, initial);
-
   const close = useRowDialogClose();
-  useEffect(() => {
-    if (state.ok) {
-      toast.success("已更新");
-      close();
-    }
-  }, [state]);
-  useEffect(() => {
-    if (state.error) toast.error(state.error);
-  }, [state]);
+
+  // 成功/失敗處理放在 action 內（跑在 transition 裡），不用 useEffect ——
+  // 既避免 effect 內 setState 的串聯 render，也讓每次送出都必定各吐一次 toast
+  // （舊寫法依賴 [state] 變化，連續兩次同樣的錯誤不會再跳）。
+  const [, action, pending] = useActionState(
+    async (prev: ActionState, formData: FormData) => {
+      const res = await updateProject(prev, formData);
+      if (res.ok) {
+        toast.success("已更新");
+        close();
+      } else if (res.error) {
+        toast.error(res.error);
+      }
+      return res;
+    },
+    initial,
+  );
 
   return (
-    <form action={action} className="grid gap-4 sm:grid-cols-2">
+    <form onSubmit={submitAction(action)} className="grid gap-4 sm:grid-cols-2">
       <input type="hidden" name="id" value={project.id} />
 
       <div className="space-y-1.5 sm:col-span-2">
         <Label htmlFor="name">專案名稱<Req /></Label>
         <Input id="name" name="name" required defaultValue={project.name} />
       </div>
-      <div className="space-y-1.5">
-        <Label>客戶</Label>
-        <Select
-          name="clientPartyId"
-          defaultValue={project.clientPartyId == null ? undefined : String(project.clientPartyId)}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="— 未指定 —" />
-          </SelectTrigger>
-          <SelectContent>
-            {parties.map((p) => (
-              <SelectItem key={p.id} value={String(p.id)}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      <PartyField
+        parties={parties}
+        name="clientPartyName"
+        defaultName={project.clientName ?? ""}
+      />
       <div className="space-y-1.5">
         <Label>狀態</Label>
         <Select name="status" defaultValue={project.status}>

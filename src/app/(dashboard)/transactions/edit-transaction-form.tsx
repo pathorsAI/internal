@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useState } from "react";
 import { toast } from "sonner";
 import { Paperclip } from "lucide-react";
 import { updateTransaction, deleteTransactionDocument, type ActionState } from "@/db/mutations";
@@ -21,9 +21,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CurrencySelect } from "@/components/currency-select";
+import { submitAction } from "@/lib/form-action";
 import { DatePicker } from "@/components/date-picker";
 import { CategoryCombobox } from "./category-combobox";
-import { PartyCombobox } from "./party-combobox";
+import { PartyCombobox } from "@/components/party-combobox";
 import { ContractCombobox, type ContractOption } from "./contract-combobox";
 
 const initial: ActionState = { ok: false };
@@ -91,18 +92,25 @@ export function EditTransactionForm({
   audit?: AuditMetaData;
   footer?: React.ReactNode;
 }>) {
-  const [state, action, pending] = useActionState(updateTransaction, initial);
   const [billed, setBilled] = useState(txn.billedToCompanyTaxId);
   const close = useRowDialogClose();
-  useEffect(() => {
-    if (state.ok) {
-      toast.success("已更新");
-      close();
-    }
-  }, [state]);
-  useEffect(() => {
-    if (state.error) toast.error(state.error);
-  }, [state]);
+
+  // 成功/失敗處理放在 action 內（跑在 transition 裡），不用 useEffect ——
+  // 既避免 effect 內 setState 的串聯 render，也讓每次送出都必定各吐一次 toast
+  // （舊寫法依賴 [state] 變化，連續兩次同樣的錯誤不會再跳）。
+  const [, action, pending] = useActionState(
+    async (prev: ActionState, formData: FormData) => {
+      const res = await updateTransaction(prev, formData);
+      if (res.ok) {
+        toast.success("已更新");
+        close();
+      } else if (res.error) {
+        toast.error(res.error);
+      }
+      return res;
+    },
+    initial,
+  );
 
   const isTransfer = txn.type === "transfer";
   const isIncome = txn.type === "income";
@@ -143,7 +151,7 @@ export function EditTransactionForm({
         </div>
       )}
 
-      <form action={action} className="grid gap-4 sm:grid-cols-2">
+      <form onSubmit={submitAction(action)} className="grid gap-4 sm:grid-cols-2">
         <input type="hidden" name="id" value={txn.id} />
         <input type="hidden" name="type" value={txn.type} />
 

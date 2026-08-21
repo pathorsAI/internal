@@ -22,6 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { EmptyRow } from "@/components/empty-state";
+import { tableEdgePadding } from "@/components/table-card";
 import { listOutstandingAdvances, listBankAccounts } from "@/db/queries";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { RecordReimbursementDialog } from "./record-reimbursement-dialog";
@@ -68,7 +69,7 @@ export default async function AdvancesPage() {
           <CardDescription>目前未還總額</CardDescription>
           <CardTitle className="text-2xl tabular-nums">{formatCurrency(total, "TWD")}</CardTitle>
         </CardHeader>
-        <CardContent className="p-0">
+        <CardContent className={`p-0 ${tableEdgePadding}`}>
           <Table>
             <TableHeader>
               <TableRow>

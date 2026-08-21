@@ -1,13 +1,15 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useState } from "react";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { createProject, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { submitAction } from "@/lib/form-action";
 import { Req } from "@/components/req";
+import { PartyField } from "@/components/party-combobox";
 import {
   Select,
   SelectContent,
@@ -33,17 +35,22 @@ export function NewProjectDialog({
   parties: { id: number; name: string }[];
 }>) {
   const [open, setOpen] = useState(false);
-  const [state, action, pending] = useActionState(createProject, initial);
-
-  useEffect(() => {
-    if (state.ok) {
-      setOpen(false);
-      toast.success("已新增專案");
-    }
-  }, [state]);
-  useEffect(() => {
-    if (state.error) toast.error(state.error);
-  }, [state]);
+  // 成功/失敗處理放在 action 內（跑在 transition 裡），不用 useEffect ——
+  // 既避免 effect 內 setState 的串聯 render，也讓每次送出都必定各吐一次 toast
+  // （舊寫法依賴 [state] 變化，連續兩次同樣的錯誤不會再跳）。
+  const [, action, pending] = useActionState(
+    async (prev: ActionState, formData: FormData) => {
+      const res = await createProject(prev, formData);
+      if (res.ok) {
+        setOpen(false);
+        toast.success("已新增專案");
+      } else if (res.error) {
+        toast.error(res.error);
+      }
+      return res;
+    },
+    initial,
+  );
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -53,7 +60,7 @@ export function NewProjectDialog({
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
-        <form action={action}>
+        <form onSubmit={submitAction(action)}>
           <DialogHeader>
             <DialogTitle>新增專案</DialogTitle>
             <DialogDescription>專案的收支由交易上的「專案」欄位彙總</DialogDescription>
@@ -64,21 +71,7 @@ export function NewProjectDialog({
               <Label htmlFor="name">專案名稱<Req /></Label>
               <Input id="name" name="name" required placeholder="例：官網改版、A 客戶系統" />
             </div>
-            <div className="space-y-1.5">
-              <Label>客戶</Label>
-              <Select name="clientPartyId">
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="— 未指定 —" />
-                </SelectTrigger>
-                <SelectContent>
-                  {parties.map((p) => (
-                    <SelectItem key={p.id} value={String(p.id)}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <PartyField parties={parties} name="clientPartyName" />
             <div className="space-y-1.5">
               <Label>狀態</Label>
               <Select name="status" defaultValue="active">

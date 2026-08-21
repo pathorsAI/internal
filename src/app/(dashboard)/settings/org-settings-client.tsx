@@ -1,14 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Building2 } from "lucide-react";
-import {
-  authClient,
-  useActiveMember,
-  useActiveOrganization,
-} from "@/lib/auth-client";
+import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,33 +16,46 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-export function OrgSettingsClient() {
+/**
+ * 組織名稱與角色一律由 server 傳進來，這裡不再用 useActiveOrganization() /
+ * useActiveMember() 取。
+ *
+ * 原本用 client hook 有三個連帶問題，都源自同一件事 —— SSR 時 better-auth 的
+ * client store 是空的，hydration 時卻可能已經被 sidebar 的組織切換器填好了：
+ *
+ * 1. hydration mismatch（React #418）：伺服器渲染「載入中」，客戶端第一次渲染
+ *    卻是完整卡片。
+ * 2. 載入那幾秒 `activeMember` 還是 null，擁有者會看到「只有擁有者或管理員可以
+ *    修改組織資料」、欄位變灰 —— 看起來像權限壞掉。
+ * 3. 卡片高度在載入前後差 80px 左右，資料一到整頁往下跳，把下面那張卡的按鈕擠走。
+ *
+ * 這一頁本來就是 server component，orgId / 名稱 / 角色都拿得到，沒有理由繞一圈
+ * 從客戶端再要一次。
+ */
+export function OrgSettingsClient({
+  orgId,
+  orgName,
+  canEdit,
+}: Readonly<{ orgId: string; orgName: string; canEdit: boolean }>) {
   const router = useRouter();
-  const { data: activeOrg } = useActiveOrganization();
-  const { data: activeMember } = useActiveMember();
-  const canEdit = activeMember?.role === "owner" || activeMember?.role === "admin";
 
-  const [name, setName] = useState("");
+  // `draft` 在使用者真的打字前都是 null，欄位只是「顯示」server 傳來的名稱。
+  // 存檔後清掉 draft，就會自動同步成伺服器回來的值。
+  const [draft, setDraft] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-
-  // Prefill once the active org loads, and keep in sync if it changes
-  // (e.g. switching orgs without a full reload).
-  useEffect(() => {
-    if (activeOrg) setName(activeOrg.name);
-  }, [activeOrg]);
+  const name = draft ?? orgName;
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!activeOrg) return;
     const value = name.trim();
     if (!value) {
       toast.error("組織名稱不可空白");
       return;
     }
-    if (value === activeOrg.name) return;
+    if (value === orgName) return;
     setSaving(true);
     const { error } = await authClient.organization.update({
-      organizationId: activeOrg.id,
+      organizationId: orgId,
       data: { name: value },
     });
     setSaving(false);
@@ -55,15 +64,8 @@ export function OrgSettingsClient() {
       return;
     }
     toast.success("已更新組織名稱");
+    setDraft(null);
     router.refresh();
-  }
-
-  if (!activeOrg) {
-    return (
-      <Card>
-        <div className="p-8 text-center text-sm text-muted-foreground">載入中…</div>
-      </Card>
-    );
   }
 
   return (
@@ -84,13 +86,13 @@ export function OrgSettingsClient() {
             <Input
               id="org-name"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => setDraft(e.target.value)}
               disabled={!canEdit || saving}
               required
             />
           </div>
           {canEdit && (
-            <Button type="submit" disabled={saving || name.trim() === activeOrg.name}>
+            <Button type="submit" disabled={saving || name.trim() === orgName}>
               {saving ? "儲存中…" : "儲存"}
             </Button>
           )}

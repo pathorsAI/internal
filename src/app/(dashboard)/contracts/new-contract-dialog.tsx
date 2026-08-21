@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useState } from "react";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { createContract, type ActionState } from "@/db/mutations";
@@ -17,6 +17,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CurrencySelect } from "@/components/currency-select";
+import { PartyField } from "@/components/party-combobox";
+import { submitAction } from "@/lib/form-action";
+import { DEFAULT_CURRENCY } from "@/lib/currency";
+import { ContractBillingPlanFields } from "./contract-billing-plan";
 import {
   Dialog,
   DialogContent,
@@ -37,17 +41,27 @@ export function NewContractDialog({
   projects: { id: number; name: string }[];
 }>) {
   const [open, setOpen] = useState(false);
-  const [state, action, pending] = useActionState(createContract, initial);
-
-  useEffect(() => {
-    if (state.ok) {
-      setOpen(false);
-      toast.success("已新增合約");
-    }
-  }, [state]);
-  useEffect(() => {
-    if (state.error) toast.error(state.error);
-  }, [state]);
+  // 這四格改成受控：請款方式區塊要靠它們即時算出「存檔後會產生哪幾期」。
+  const [amount, setAmount] = useState("");
+  const [currency, setCurrency] = useState(DEFAULT_CURRENCY);
+  const [signedDate, setSignedDate] = useState("");
+  const [startDate, setStartDate] = useState("");
+  // 成功/失敗處理放在 action 內（跑在 transition 裡），不用 useEffect ——
+  // 既避免 effect 內 setState 的串聯 render，也讓每次送出都必定各吐一次 toast
+  // （舊寫法依賴 [state] 變化，連續兩次同樣的錯誤不會再跳）。
+  const [, action, pending] = useActionState(
+    async (prev: ActionState, formData: FormData) => {
+      const res = await createContract(prev, formData);
+      if (res.ok) {
+        setOpen(false);
+        toast.success("已新增合約");
+      } else if (res.error) {
+        toast.error(res.error);
+      }
+      return res;
+    },
+    initial,
+  );
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -57,28 +71,14 @@ export function NewContractDialog({
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
-        <form action={action}>
+        <form onSubmit={submitAction(action)}>
           <DialogHeader>
             <DialogTitle>新增合約</DialogTitle>
             <DialogDescription>客戶合約，可連結到專案</DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4 py-4 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label>客戶<Req /></Label>
-              <Select name="customerPartyId">
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="選擇客戶" />
-                </SelectTrigger>
-                <SelectContent>
-                  {parties.map((p) => (
-                    <SelectItem key={p.id} value={String(p.id)}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <PartyField parties={parties} name="customerPartyName" required />
             <div className="space-y-1.5">
               <Label>專案</Label>
               <Select name="projectId">
@@ -100,11 +100,19 @@ export function NewContractDialog({
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="amount">合約金額</Label>
-              <Input id="amount" name="amount" type="number" step="0.01" placeholder="選填" />
+              <Input
+                id="amount"
+                name="amount"
+                type="number"
+                step="0.01"
+                placeholder="選填"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+              />
             </div>
             <div className="space-y-1.5">
               <Label>幣別</Label>
-              <CurrencySelect />
+              <CurrencySelect onValueChange={setCurrency} />
             </div>
             <div className="space-y-1.5">
               <Label>狀態</Label>
@@ -124,8 +132,32 @@ export function NewContractDialog({
               </Select>
             </div>
             <div className="space-y-1.5">
+              <Label>簽約日</Label>
+              <DatePicker
+                name="signedDate"
+                allowEmpty
+                placeholder="— 無 —"
+                onValueChange={setSignedDate}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="paymentTermsDays">付款條件（天）</Label>
+              <Input
+                id="paymentTermsDays"
+                name="paymentTermsDays"
+                type="number"
+                min="0"
+                placeholder="月結 30 天 → 30"
+              />
+            </div>
+            <div className="space-y-1.5">
               <Label>開始日期</Label>
-              <DatePicker name="startDate" allowEmpty placeholder="— 無 —" />
+              <DatePicker
+                name="startDate"
+                allowEmpty
+                placeholder="— 無 —"
+                onValueChange={setStartDate}
+              />
             </div>
             <div className="space-y-1.5">
               <Label>結束日期</Label>
@@ -144,6 +176,13 @@ export function NewContractDialog({
                 placeholder="https://drive.google.com/… （選填）"
               />
             </div>
+
+            <ContractBillingPlanFields
+              amount={amount}
+              currency={currency}
+              signedDate={signedDate}
+              startDate={startDate}
+            />
           </div>
 
           <DialogFooter>

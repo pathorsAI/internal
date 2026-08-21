@@ -3,8 +3,9 @@ import { type ToolAnnotations, resolveOrg } from "./shared";
 import { logMcp, type ActivityAction } from "@/db/activity";
 
 // Derive an audit-log entry from a tool name + its result. Returns null for
-// read-only tools (list_/get_/...) so only writes get logged. Entity types match
-// the web side (transaction, party, bank_account, contract, ...).
+// most read-only tools (list_/get_/...) so only writes get logged — except
+// employee reads, which carry PII (email/phone + masked national id/account)
+// and are logged as "read". Entity types match the web side.
 function deriveMcpAudit(
   name: string,
   out: unknown,
@@ -22,6 +23,8 @@ function deriveMcpAudit(
   if (name === "pay_employee_salary") return { action: "create", entityType: "payslip", entityId };
   if (name === "mark_accountant_notified" || name === "unmark_accountant_notified")
     return { action: "update", entityType: "transaction", entityId };
+  if (name === "list_employees" || name === "get_employee")
+    return { action: "read", entityType: "employee", entityId };
   return null;
 }
 

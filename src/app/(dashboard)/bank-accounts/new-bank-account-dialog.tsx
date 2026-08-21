@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useState } from "react";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { createBankAccount, type ActionState } from "@/db/mutations";
@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CurrencySelect } from "@/components/currency-select";
+import { submitAction } from "@/lib/form-action";
 import {
   Dialog,
   DialogContent,
@@ -31,17 +32,22 @@ const kindItems: Record<string, string> = { bank: "銀行", wise: "Wise / 虛擬
 
 export function NewBankAccountDialog() {
   const [open, setOpen] = useState(false);
-  const [state, action, pending] = useActionState(createBankAccount, initial);
-
-  useEffect(() => {
-    if (state.ok) {
-      setOpen(false);
-      toast.success("已新增帳戶");
-    }
-  }, [state]);
-  useEffect(() => {
-    if (state.error) toast.error(state.error);
-  }, [state]);
+  // 成功/失敗處理放在 action 內（跑在 transition 裡），不用 useEffect ——
+  // 既避免 effect 內 setState 的串聯 render，也讓每次送出都必定各吐一次 toast
+  // （舊寫法依賴 [state] 變化，連續兩次同樣的錯誤不會再跳）。
+  const [, action, pending] = useActionState(
+    async (prev: ActionState, formData: FormData) => {
+      const res = await createBankAccount(prev, formData);
+      if (res.ok) {
+        setOpen(false);
+        toast.success("已新增帳戶");
+      } else if (res.error) {
+        toast.error(res.error);
+      }
+      return res;
+    },
+    initial,
+  );
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -51,7 +57,7 @@ export function NewBankAccountDialog() {
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
-        <form action={action}>
+        <form onSubmit={submitAction(action)}>
           <DialogHeader>
             <DialogTitle>新增銀行帳戶</DialogTitle>
             <DialogDescription>銀行、Wise / 虛擬帳戶或現金</DialogDescription>
