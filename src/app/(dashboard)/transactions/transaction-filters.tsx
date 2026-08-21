@@ -2,6 +2,7 @@
 
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { Filter } from "lucide-react";
+import { useTranslations } from "next-intl";
 import {
   Select,
   SelectContent,
@@ -9,18 +10,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-
-const BOOK_ITEMS: Record<string, string> = {
-  all: "全部帳別",
-  internal: "內帳",
-  external: "外帳",
-  both: "內外帳",
-};
-
-function monthLabel(ym: string) {
-  const [y, m] = ym.split("-");
-  return `${y} 年 ${Number(m)} 月`;
-}
 
 export function TransactionFilters({
   categories,
@@ -39,6 +28,7 @@ export function TransactionFilters({
   account?: string;
   period?: string;
 }>) {
+  const t = useTranslations("transactions");
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -51,22 +41,33 @@ export function TransactionFilters({
     router.push(qs ? `${pathname}?${qs}` : pathname);
   }
 
+  const bookItems: Record<string, string> = {
+    all: t("filters.book.all"),
+    internal: t("filters.book.internal"),
+    external: t("filters.book.external"),
+    both: t("filters.book.both"),
+  };
   const categoryItems: Record<string, string> = {
-    all: "全部分類",
+    all: t("filters.category.all"),
     ...Object.fromEntries(categories.map((c) => [String(c.id), c.name])),
   };
   const accountItems: Record<string, string> = {
-    all: "全部帳戶",
+    all: t("filters.account.all"),
     ...Object.fromEntries(accounts.map((a) => [String(a.id), a.name])),
   };
   const monthItems: Record<string, string> = {
-    all: "全部月份",
-    ...Object.fromEntries(months.map((m) => [m, monthLabel(m)])),
+    all: t("filters.month.all"),
+    ...Object.fromEntries(
+      months.map((m) => {
+        const [y, mo] = m.split("-");
+        return [m, t("filters.month.label", { year: y, month: Number(mo) })];
+      }),
+    ),
   };
 
   const filters: { key: string; value: string; items: Record<string, string>; w: string }[] = [
     { key: "period", value: period ?? "all", items: monthItems, w: "w-36" },
-    { key: "book", value: book ?? "all", items: BOOK_ITEMS, w: "w-32" },
+    { key: "book", value: book ?? "all", items: bookItems, w: "w-32" },
     { key: "category", value: category ?? "all", items: categoryItems, w: "w-44" },
     { key: "account", value: account ?? "all", items: accountItems, w: "w-44" },
   ];

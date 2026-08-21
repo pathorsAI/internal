@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 
 import { Combobox } from "@/components/combobox";
 
@@ -15,6 +16,7 @@ export function ContractCombobox({
   contracts: ContractOption[];
   defaultId?: number | null;
 }>) {
+  const t = useTranslations("transactions");
   const defaultLabel = contracts.find((c) => c.id === defaultId)?.label ?? "";
   const [value, setValue] = React.useState(defaultLabel);
   const labels = React.useMemo(() => contracts.map((c) => c.label), [contracts]);
@@ -28,8 +30,8 @@ export function ContractCombobox({
         items={labels}
         value={value}
         onValueChange={setValue}
-        placeholder="搜尋或選擇合約（選填）…"
-        emptyText="查無合約"
+        placeholder={t("combobox.contract.placeholder")}
+        emptyText={t("combobox.contract.empty")}
       />
     </>
   );

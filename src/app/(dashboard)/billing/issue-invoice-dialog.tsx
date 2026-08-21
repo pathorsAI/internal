@@ -2,12 +2,13 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Receipt } from "lucide-react";
 import { createInvoice, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field } from "@/components/form-field";
 import { DatePicker } from "@/components/date-picker";
 import {
   Dialog,
@@ -61,6 +62,8 @@ export function IssueInvoiceDialog({
   expected: number;
   currency: string;
 }>) {
+  const t = useTranslations("billing.issueInvoice");
+  const tCommon = useTranslations("billing.common");
   const [open, setOpen] = React.useState(false);
   const [basis, setBasis] = React.useState<"gross" | "net">("gross");
   const [amount, setAmount] = React.useState(String(expected));
@@ -79,7 +82,7 @@ export function IssueInvoiceDialog({
       const res = await createInvoice(prev, formData);
       if (res.ok) {
         setOpen(false);
-        toast.success("已建立發票，記得到 Simpany 實際開立");
+        toast.success(t("toast.created"));
         router.refresh();
       } else if (res.error) {
         toast.error(res.error);
@@ -93,16 +96,14 @@ export function IssueInvoiceDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button type="button" size="sm" variant="outline">
-          <Receipt className="size-4" /> 開發票
+          <Receipt className="size-4" /> {t("trigger")}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <form onSubmit={submitAction(action)}>
           <DialogHeader>
-            <DialogTitle>開發票</DialogTitle>
-            <DialogDescription>
-              已用這一期的資料預填。存檔後這一期的「待開立」會消掉，並列進 Simpany 對帳。
-            </DialogDescription>
+            <DialogTitle>{t("dialog.title")}</DialogTitle>
+            <DialogDescription>{t("dialog.description")}</DialogDescription>
           </DialogHeader>
 
           {/* 綁定關係與品名沿用這一期的資料，不讓人重打。 */}
@@ -122,45 +123,42 @@ export function IssueInvoiceDialog({
           <div className="grid gap-4 py-4 sm:grid-cols-2">
             <div className="space-y-1.5 sm:col-span-2 rounded-lg border bg-muted/30 p-3 text-sm">
               <div className="flex justify-between gap-2">
-                <span className="text-muted-foreground">客戶</span>
+                <span className="text-muted-foreground">{t("fields.customer")}</span>
                 <span className="font-medium">{customerName ?? "—"}</span>
               </div>
               <div className="flex justify-between gap-2">
-                <span className="text-muted-foreground">品名</span>
+                <span className="text-muted-foreground">{t("fields.title")}</span>
                 <span className="truncate font-medium">{title}</span>
               </div>
             </div>
 
-            <div className="space-y-1.5">
-              <Label>發票日期</Label>
+            <Field label={t("fields.invoiceDate")}>
               <DatePicker name="invoiceDate" defaultValue={todayISO()} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="inv-taxid">對象統編</Label>
+            </Field>
+            <Field label={t("fields.counterpartyTaxId")} htmlFor="inv-taxid">
               <Input
                 id="inv-taxid"
                 name="counterpartyTaxId"
                 defaultValue={customerTaxId ?? ""}
-                placeholder="選填"
+                placeholder={tCommon("optional")}
               />
-            </div>
+            </Field>
 
-            <div className="space-y-1.5">
-              <Label>金額基準</Label>
+            <Field label={t("fields.basisLabel")}>
               <Select value={basis} onValueChange={(v) => setBasis(v as "gross" | "net")}>
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="gross">請款金額為含稅</SelectItem>
-                  <SelectItem value="net">請款金額為未稅</SelectItem>
+                  <SelectItem value="gross">{t("basis.gross")}</SelectItem>
+                  <SelectItem value="net">{t("basis.net")}</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="inv-basis-amount">
-                {basis === "gross" ? "含稅金額" : "未稅金額"}
-              </Label>
+            </Field>
+            <Field
+              label={basis === "gross" ? t("fields.grossAmount") : t("fields.netAmount")}
+              htmlFor="inv-basis-amount"
+            >
               <Input
                 id="inv-basis-amount"
                 type="number"
@@ -168,45 +166,42 @@ export function IssueInvoiceDialog({
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
               />
-            </div>
+            </Field>
 
             <div className="grid grid-cols-3 gap-2 rounded-lg border p-3 text-center sm:col-span-2">
               <div>
-                <div className="text-xs text-muted-foreground">未稅</div>
+                <div className="text-xs text-muted-foreground">{t("summary.net")}</div>
                 <div className="text-sm font-medium tabular-nums">
                   {formatCurrency(net, currency)}
                 </div>
               </div>
               <div>
-                <div className="text-xs text-muted-foreground">稅額 5%</div>
+                <div className="text-xs text-muted-foreground">{t("summary.taxRate")}</div>
                 <div className="text-sm font-medium tabular-nums">
                   {formatCurrency(tax, currency)}
                 </div>
               </div>
               <div>
-                <div className="text-xs text-muted-foreground">含稅</div>
+                <div className="text-xs text-muted-foreground">{t("summary.gross")}</div>
                 <div className="text-sm font-medium tabular-nums">
                   {formatCurrency(gross, currency)}
                 </div>
               </div>
             </div>
 
-            <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="inv-external-ref">Simpany 發票號碼</Label>
+            <Field label={t("fields.externalRef")} htmlFor="inv-external-ref" wide>
               <Input
                 id="inv-external-ref"
                 name="externalRef"
-                placeholder="還沒開就留空，之後在發票頁或對帳時補"
+                placeholder={t("fields.externalRefPlaceholder")}
               />
-              <p className="text-xs text-muted-foreground">
-                填了就視為 Simpany 已開立；留空則列進「該開未開」，開完再回來補號碼。
-              </p>
-            </div>
+              <p className="text-xs text-muted-foreground">{t("fields.externalRefHint")}</p>
+            </Field>
           </div>
 
           <DialogFooter>
             <Button type="submit" disabled={pending}>
-              {pending ? "建立中…" : "建立發票"}
+              {pending ? t("dialog.creating") : t("dialog.create")}
             </Button>
           </DialogFooter>
         </form>

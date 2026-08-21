@@ -1,3 +1,4 @@
+import { getTranslations } from "next-intl/server";
 import { RowDialog } from "@/components/row-dialog";
 import { DeleteButton } from "@/components/delete-button";
 import { deleteSubscription } from "@/db/mutations";
@@ -27,20 +28,12 @@ import { requireOrg } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
-const statusMap: Record<string, string> = { active: "進行中", paused: "暫停", ended: "結束" };
 const statusVariant: Record<string, "default" | "secondary" | "outline"> = {
   active: "default",
   paused: "secondary",
   ended: "outline",
 };
 
-// 各期收款狀態 → 繁中標籤 + badge 樣式
-const periodStatusMap: Record<string, string> = {
-  paid: "已收",
-  partial: "部分",
-  overdue: "逾期",
-  upcoming: "未到期",
-};
 const periodStatusVariant: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   paid: "default",
   partial: "secondary",
@@ -48,21 +41,35 @@ const periodStatusVariant: Record<string, "default" | "secondary" | "destructive
   upcoming: "outline",
 };
 
-function PeriodScheduleTable({ schedule }: Readonly<{ schedule: SubscriptionSchedule | null }>) {
+/**
+ * next-intl 的 translator key 型別比 `string` 窄，當成參數傳遞時逆變過不了，而且
+ * 整棵訊息樹展開會讓 TS 直接放棄（TS2589）。這裡縮成最小介面，傳入時明確轉型。
+ */
+type Translator = (key: string, values?: Record<string, string | number>) => string;
+
+function PeriodScheduleTable({
+  schedule,
+  t,
+  periodStatusLabels,
+}: Readonly<{
+  schedule: SubscriptionSchedule | null;
+  t: Translator;
+  periodStatusLabels: Record<string, string>;
+}>) {
   if (!schedule || schedule.periods.length === 0) {
-    return <p className="mt-6 text-sm text-muted-foreground">尚無收款期別</p>;
+    return <p className="mt-6 text-sm text-muted-foreground">{t("schedule.empty")}</p>;
   }
   return (
     <div className="mt-6">
-      <div className="mb-2 text-sm font-medium">各期收款</div>
+      <div className="mb-2 text-sm font-medium">{t("schedule.heading")}</div>
       <div className="rounded-md border">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>期別</TableHead>
-              <TableHead className="text-right">應收</TableHead>
-              <TableHead className="text-right">已收</TableHead>
-              <TableHead>狀態</TableHead>
+              <TableHead>{t("schedule.columns.period")}</TableHead>
+              <TableHead className="text-right">{t("schedule.columns.expected")}</TableHead>
+              <TableHead className="text-right">{t("schedule.columns.paid")}</TableHead>
+              <TableHead>{t("schedule.columns.status")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -82,7 +89,7 @@ function PeriodScheduleTable({ schedule }: Readonly<{ schedule: SubscriptionSche
                 </TableCell>
                 <TableCell>
                   <Badge variant={periodStatusVariant[p.status] ?? "outline"}>
-                    {periodStatusMap[p.status] ?? p.status}
+                    {periodStatusLabels[p.status] ?? p.status}
                   </Badge>
                 </TableCell>
               </TableRow>
@@ -91,7 +98,8 @@ function PeriodScheduleTable({ schedule }: Readonly<{ schedule: SubscriptionSche
         </Table>
       </div>
       <p className="mt-2 text-right text-sm text-muted-foreground">
-        未收合計：<span className="font-medium text-foreground tabular-nums">
+        {t("schedule.outstandingTotal")}
+        <span className="font-medium text-foreground tabular-nums">
           {formatCurrency(schedule.totalOutstanding, schedule.currency)}
         </span>
       </p>
@@ -99,15 +107,16 @@ function PeriodScheduleTable({ schedule }: Readonly<{ schedule: SubscriptionSche
   );
 }
 
-function intervalLabel(months: number) {
-  if (months === 1) return "每月";
-  if (months === 12) return "每年";
-  if (months === 3) return "每季";
-  return `每 ${months} 個月`;
+function intervalLabel(t: Translator, months: number) {
+  if (months === 1) return t("interval.monthly");
+  if (months === 12) return t("interval.yearly");
+  if (months === 3) return t("interval.quarterly");
+  return t("interval.everyNMonths", { months });
 }
 
 export default async function SubscriptionsPage() {
   const { orgId } = await requireOrg();
+  const t = await getTranslations("subscriptions");
   const [rows, parties, projects] = await Promise.all([
     listSubscriptions(orgId),
     listParties(orgId),
@@ -118,10 +127,21 @@ export default async function SubscriptionsPage() {
   // 訂閱不多，逐筆抓各期收款狀態即可（一次平行抓完）。
   const schedules = await Promise.all(rows.map((s) => getSubscriptionSchedule(orgId, s.id)));
   const scheduleById = new Map(schedules.filter((s) => s != null).map((s) => [s.id, s]));
+  const statusLabels: Record<string, string> = {
+    active: t("status.active"),
+    paused: t("status.paused"),
+    ended: t("status.ended"),
+  };
+  const periodStatusLabels: Record<string, string> = {
+    paid: t("periodStatus.paid"),
+    partial: t("periodStatus.partial"),
+    overdue: t("periodStatus.overdue"),
+    upcoming: t("periodStatus.upcoming"),
+  };
 
   return (
     <>
-      <PageHeader title="訂閱 / 月費" description="客戶定期收費的方案，點列可編輯">
+      <PageHeader title={t("list.title")} description={t("list.description")}>
         <NewSubscriptionDialog parties={partyOptions} projects={projectOptions} />
       </PageHeader>
 
@@ -129,23 +149,23 @@ export default async function SubscriptionsPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>方案</TableHead>
-              <TableHead>客戶</TableHead>
-              <TableHead>專案</TableHead>
-              <TableHead className="text-right">金額</TableHead>
-              <TableHead>頻率</TableHead>
-              <TableHead>狀態</TableHead>
+              <TableHead>{t("list.columns.plan")}</TableHead>
+              <TableHead>{t("list.columns.customer")}</TableHead>
+              <TableHead>{t("list.columns.project")}</TableHead>
+              <TableHead className="text-right">{t("list.columns.amount")}</TableHead>
+              <TableHead>{t("list.columns.frequency")}</TableHead>
+              <TableHead>{t("list.columns.status")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <EmptyRow colSpan={6} message="尚無訂閱，點右上角新增" />
+              <EmptyRow colSpan={6} message={t("list.empty")} />
             ) : (
               rows.map((s) => (
                 <RowDialog
                   key={s.id}
                   title={s.name}
-                  description="訂閱 / 月費"
+                  description={t("list.rowDescription")}
                   cells={
                     <>
                       <TableCell className="font-medium">{s.name}</TableCell>
@@ -154,10 +174,12 @@ export default async function SubscriptionsPage() {
                       <TableCell className="text-right font-medium tabular-nums">
                         {formatCurrency(s.amount, s.currency)}
                       </TableCell>
-                      <TableCell className="text-muted-foreground">{intervalLabel(s.intervalMonths)}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {intervalLabel(t as Translator, s.intervalMonths)}
+                      </TableCell>
                       <TableCell>
                         <Badge variant={statusVariant[s.status] ?? "outline"}>
-                          {statusMap[s.status] ?? s.status}
+                          {statusLabels[s.status] ?? s.status}
                         </Badge>
                       </TableCell>
                     </>
@@ -182,7 +204,11 @@ export default async function SubscriptionsPage() {
                     projects={projectOptions}
                     footer={<DeleteButton action={deleteSubscription} id={s.id} />}
                   />
-                  <PeriodScheduleTable schedule={scheduleById.get(s.id) ?? null} />
+                  <PeriodScheduleTable
+                    schedule={scheduleById.get(s.id) ?? null}
+                    t={t as Translator}
+                    periodStatusLabels={periodStatusLabels}
+                  />
                 </RowDialog>
               ))
             )}

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getTranslations } from "next-intl/server";
 import { Users } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -21,38 +22,39 @@ import { requireOrg } from "@/lib/session";
 export const dynamic = "force-dynamic";
 
 export default async function PayrollPage() {
+  const t = await getTranslations("payroll");
   const { orgId } = await requireOrg();
   const rows = await listPayslipRecords(orgId);
 
   return (
     <>
       <PageHeader
-        title="薪資"
-        description="到「員工」頁對每位員工發放薪資；這裡是發放紀錄"
+        title={t("title")}
+        description={t("description")}
       >
         <Button size="sm" asChild>
           <Link href="/employees">
-            <Users className="size-4" /> 去員工頁發薪
+            <Users className="size-4" /> {t("goToEmployees")}
           </Link>
         </Button>
       </PageHeader>
 
-      <TableCard title="發放紀錄">
+      <TableCard title={t("table.title")}>
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>月份</TableHead>
-              <TableHead>員工</TableHead>
-              <TableHead className="text-right">應稅</TableHead>
-              <TableHead className="text-right">免稅</TableHead>
-              <TableHead className="text-right">實發</TableHead>
-              <TableHead>交易</TableHead>
-              <TableHead className="text-right">動作</TableHead>
+              <TableHead>{t("table.columns.period")}</TableHead>
+              <TableHead>{t("table.columns.employee")}</TableHead>
+              <TableHead className="text-right">{t("table.columns.taxable")}</TableHead>
+              <TableHead className="text-right">{t("table.columns.nontaxable")}</TableHead>
+              <TableHead className="text-right">{t("table.columns.netPay")}</TableHead>
+              <TableHead>{t("table.columns.transaction")}</TableHead>
+              <TableHead className="text-right">{t("table.columns.actions")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <EmptyRow colSpan={7} message="尚無發放紀錄" />
+              <EmptyRow colSpan={7} message={t("table.empty")} />
             ) : (
               rows.map((r) => (
                 <TableRow key={r.id}>
@@ -72,7 +74,7 @@ export default async function PayrollPage() {
                   <TableCell>
                     {r.paidTransactionId ? (
                       <Link href="/transactions" className="text-xs text-primary hover:underline">
-                        已入帳
+                        {t("table.posted")}
                       </Link>
                     ) : (
                       <span className="text-xs text-muted-foreground">—</span>
@@ -82,8 +84,8 @@ export default async function PayrollPage() {
                     <DeleteButton
                       action={deletePayslip}
                       id={r.id}
-                      title="撤銷這筆發放？"
-                      description="會一併刪除它產生的薪資支出交易。"
+                      title={t("delete.title")}
+                      description={t("delete.description")}
                     />
                   </TableCell>
                 </TableRow>

@@ -1,3 +1,6 @@
+"use client";
+
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { formatDateTime } from "@/lib/format";
 import type { AuditMeta as AuditMetaData } from "@/db/queries";
@@ -14,6 +17,7 @@ export function AuditMeta({
   fallbackCreatedAt?: string | null;
   fallbackUpdatedAt?: string | null;
 }>) {
+  const t = useTranslations("common");
   const createdAt = meta?.createdAt ?? fallbackCreatedAt ?? null;
   const updatedAt = meta?.updatedAt ?? fallbackUpdatedAt ?? null;
   // 修改時間與建立時間相同視為「未曾修改」，不重複顯示
@@ -24,13 +28,15 @@ export function AuditMeta({
     <div className="flex flex-col gap-1 text-xs text-muted-foreground">
       {createdAt ? (
         <span className="inline-flex items-center gap-1.5">
-          建立{meta?.createdBy ? ` · ${meta.createdBy}` : ""} · {formatDateTime(createdAt)}
+          {t("auditMeta.created")}
+          {meta?.createdBy ? ` · ${meta.createdBy}` : ""} · {formatDateTime(createdAt)}
           {meta?.createdChannel === "mcp" ? <McpTag /> : null}
         </span>
       ) : null}
       {showUpdate ? (
         <span className="inline-flex items-center gap-1.5">
-          最後修改{meta?.updatedBy ? ` · ${meta.updatedBy}` : ""} · {formatDateTime(updatedAt!)}
+          {t("auditMeta.updated")}
+          {meta?.updatedBy ? ` · ${meta.updatedBy}` : ""} · {formatDateTime(updatedAt!)}
           {meta?.updatedChannel === "mcp" ? <McpTag /> : null}
         </span>
       ) : null}

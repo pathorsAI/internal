@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
 import { cn } from "@/lib/utils";
@@ -8,45 +9,47 @@ import { CategoryFormDialog } from "./category-form-dialog";
 
 type Cat = { id: number; name: string; kind: string };
 
-const TABS = [
-  { kind: "income", label: "收入分類", add: "新增收入" },
-  { kind: "cogs", label: "成本分類", add: "新增成本" },
-  { kind: "expense", label: "費用分類", add: "新增費用" },
-];
+const KINDS = ["income", "cogs", "expense"] as const;
 
 export function CategoryBoard({ categories }: Readonly<{ categories: Cat[] }>) {
-  const [kind, setKind] = useState("income");
-  const tab = TABS.find((t) => t.kind === kind) ?? TABS[0];
+  const t = useTranslations("categories");
+  const [kind, setKind] = useState<(typeof KINDS)[number]>("income");
+  const TABS = KINDS.map((k) => ({
+    kind: k,
+    label: t(`tabs.${k}.label`),
+    add: t(`tabs.${k}.add`),
+  }));
+  const tab = TABS.find((tb) => tb.kind === kind) ?? TABS[0];
   const list = categories.filter((c) => c.kind === kind);
 
   return (
     <div className="space-y-4">
       <div className="flex gap-1">
-        {TABS.map((t) => (
+        {TABS.map((tb) => (
           <button
-            key={t.kind}
+            key={tb.kind}
             type="button"
-            onClick={() => setKind(t.kind)}
+            onClick={() => setKind(tb.kind)}
             className={cn(
               "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-              t.kind === kind
+              tb.kind === kind
                 ? "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:bg-muted",
             )}
           >
-            {t.label}
+            {tb.label}
           </button>
         ))}
       </div>
 
       <Card>
         <div className="flex items-center justify-between border-b px-4 py-2.5">
-          <span className="text-sm text-muted-foreground">{list.length} 個分類</span>
+          <span className="text-sm text-muted-foreground">{t("count", { count: list.length })}</span>
           <CategoryFormDialog kind={kind} addLabel={tab.add} />
         </div>
         {list.length === 0 ? (
-          <EmptyState message="尚無分類">
-            <p className="text-sm text-muted-foreground">點右上角新增</p>
+          <EmptyState message={t("empty")}>
+            <p className="text-sm text-muted-foreground">{t("emptyHint")}</p>
           </EmptyState>
         ) : (
           <ul className="divide-y">

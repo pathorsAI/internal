@@ -23,14 +23,16 @@ export function grossFromNet(net: number): { tax: number; gross: number } {
 
 /**
  * 營業稅申報期別：雙月一期，1-2 月為第 1 期、3-4 月為第 2 期，依此類推。
- * 回傳 { year, period, label, start, end }，start/end 為 YYYY-MM-DD。
+ * 回傳 { year, period, startMonth, endMonth, start, end }，start/end 為 YYYY-MM-DD。
+ * 期別的顯示字串由畫面端組（要跟著語系走），這裡只給組字串需要的數字。
  */
 export type TaxPeriod = {
   year: number;
   /** 1 ~ 6 */
   period: number;
-  /** 例：2026 年 5-6 月（第 3 期） */
-  label: string;
+  /** 期別涵蓋的頭尾月份，例：第 3 期為 5 與 6 */
+  startMonth: number;
+  endMonth: number;
   start: string;
   end: string;
 };
@@ -51,7 +53,8 @@ export function taxPeriod(year: number, period: number): TaxPeriod {
   return {
     year,
     period,
-    label: `${year} 年 ${startMonth}-${endMonth} 月（第 ${period} 期）`,
+    startMonth,
+    endMonth,
     start: `${year}-${pad(startMonth)}-01`,
     end: `${year}-${pad(endMonth)}-${pad(endDay)}`,
   };

@@ -40,16 +40,9 @@ import { EditTransactionForm } from "./edit-transaction-form";
 import { TransactionFilters } from "./transaction-filters";
 import { txnTypeColor } from "@/components/amount";
 import { requireOrg } from "@/lib/session";
+import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
-
-const typeLabel: Record<string, string> = {
-  expense: "一般支出",
-  income: "收入",
-  advance: "員工代墊",
-  reimbursement: "撥款",
-  transfer: "轉帳",
-};
 
 type TxnRow = Awaited<ReturnType<typeof listTransactions>>[number];
 type Opt = { id: number; name: string };
@@ -66,24 +59,16 @@ function groupByMonth(rows: TxnRow[]) {
   }
   return [...map.entries()].map(([ym, items]) => {
     const [y, m] = ym.split("-");
-    return { ym, label: `${y} 年 ${m} 月`, rows: items };
+    return { ym, year: y, month: m, rows: items };
   });
 }
 
-// table-fixed 下，欄寬由表頭決定，各月份共用同一組欄寬 → 金額欄永遠對齊
-const COLUMNS: { label: string; width: string; align?: "right" }[] = [
-  { label: "日期", width: "w-24" },
-  { label: "對象", width: "w-44" },
-  { label: "說明", width: "" },
-  { label: "分類", width: "w-28" },
-  { label: "帳別", width: "w-20" },
-  { label: "帳戶", width: "w-40" },
-  { label: "最後更新", width: "w-36" },
-  { label: "金額", width: "w-32", align: "right" },
-];
-
 function TransactionRow({
   t,
+  typeLabel,
+  editDialogTitle,
+  editDialogDescription,
+  uncategorizedLabel,
   categories,
   parties,
   employees,
@@ -94,6 +79,10 @@ function TransactionRow({
   audit,
 }: Readonly<{
   t: TxnRow;
+  typeLabel: Record<string, string>;
+  editDialogTitle: string;
+  editDialogDescription: string;
+  uncategorizedLabel: string;
   categories: Opt[];
   parties: Opt[];
   employees: Opt[];
@@ -108,8 +97,8 @@ function TransactionRow({
   return (
     <RowDialog
       variant="sheet"
-      title="編輯交易"
-      description="類型不可改，其餘欄位皆可編輯"
+      title={editDialogTitle}
+      description={editDialogDescription}
       cells={
         <>
           <TableCell className="whitespace-nowrap text-muted-foreground">
@@ -126,7 +115,7 @@ function TransactionRow({
           <TableCell className="truncate text-muted-foreground">
             {t.description ?? "—"}
           </TableCell>
-          <TableCell className="truncate">{t.categoryName ?? "未分類"}</TableCell>
+          <TableCell className="truncate">{t.categoryName ?? uncategorizedLabel}</TableCell>
           <TableCell>
             <BookBadge book={t.book} />
           </TableCell>
@@ -193,6 +182,25 @@ export default async function TransactionsPage({
   }>;
 }>) {
   const { orgId } = await requireOrg();
+  const tr = await getTranslations("transactions");
+  const typeLabel: Record<string, string> = {
+    expense: tr("type.expense"),
+    income: tr("type.income"),
+    advance: tr("type.advance"),
+    reimbursement: tr("type.reimbursement"),
+    transfer: tr("type.transfer"),
+  };
+  // table-fixed 下，欄寬由表頭決定，各月份共用同一組欄寬 → 金額欄永遠對齊
+  const COLUMNS: { label: string; width: string; align?: "right" }[] = [
+    { label: tr("columns.date"), width: "w-24" },
+    { label: tr("columns.counterparty"), width: "w-44" },
+    { label: tr("columns.description"), width: "" },
+    { label: tr("columns.category"), width: "w-28" },
+    { label: tr("columns.book"), width: "w-20" },
+    { label: tr("columns.account"), width: "w-40" },
+    { label: tr("columns.lastUpdated"), width: "w-36" },
+    { label: tr("columns.amount"), width: "w-32", align: "right" },
+  ];
   const { book, category, account, period, page: pageParam } = await searchParams;
   const active = (["internal", "external", "both"].includes(book ?? "") ? book : undefined) as
     | Book
@@ -225,13 +233,13 @@ export default async function TransactionsPage({
   // 合約下拉的顯示字串：標題（客戶），避免同名合約難以分辨
   const contractOpts: ContractOption[] = contracts.map((c) => ({
     id: c.id,
-    label: c.customerName ? `${c.title}（${c.customerName}）` : c.title,
+    label: c.customerName ? `${c.title} (${c.customerName})` : c.title,
   }));
   const groups = groupByMonth(rows);
 
   return (
     <>
-      <PageHeader title="內外帳" description="所有交易紀錄，可依帳別、分類篩選">
+      <PageHeader title={tr("page.title")} description={tr("page.description")}>
         <NewTransactionDialog
           accounts={accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }))}
           categories={categories}
@@ -254,7 +262,7 @@ export default async function TransactionsPage({
 
       {groups.length === 0 ? (
         <TableCard>
-          <EmptyState message={total === 0 ? "尚無交易" : "此頁沒有資料"} />
+          <EmptyState message={total === 0 ? tr("empty.noData") : tr("empty.noPageData")} />
         </TableCard>
       ) : (
         <TableCard>
@@ -279,14 +287,22 @@ export default async function TransactionsPage({
                       colSpan={COLUMNS.length}
                       className="bg-muted/50 py-1.5 text-xs"
                     >
-                      <span className="font-medium text-foreground">{g.label}</span>
-                      <span className="ml-2 text-muted-foreground">{g.rows.length} 筆</span>
+                      <span className="font-medium text-foreground">
+                        {tr("table.monthLabel", { year: g.year, month: g.month })}
+                      </span>
+                      <span className="ml-2 text-muted-foreground">
+                        {tr("table.rowsCount", { count: g.rows.length })}
+                      </span>
                     </TableCell>
                   </TableRow>
                   {g.rows.map((t) => (
                     <TransactionRow
                       key={t.id}
                       t={t}
+                      typeLabel={typeLabel}
+                      editDialogTitle={tr("editDialog.title")}
+                      editDialogDescription={tr("editDialog.description")}
+                      uncategorizedLabel={tr("table.uncategorized")}
                       categories={categories}
                       parties={partyOpts}
                       employees={employeeOpts}

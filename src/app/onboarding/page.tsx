@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Building2, MailCheck } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
@@ -32,6 +33,7 @@ type Invite = {
 };
 
 export default function OnboardingPage() {
+  const t = useTranslations("auth.onboarding");
   const router = useRouter();
   const [creating, setCreating] = useState(false);
   const [invites, setInvites] = useState<Invite[]>([]);
@@ -72,10 +74,10 @@ export default function OnboardingPage() {
     });
     if (error) {
       setAcceptingId(null);
-      toast.error(error.message || "接受邀請失敗");
+      toast.error(error.message || t("invites.toast.acceptFailed"));
       return;
     }
-    toast.success(`已加入 ${inv.organizationName}`);
+    toast.success(t("invites.toast.joined", { name: inv.organizationName }));
     await enter(inv.organizationId);
   }
 
@@ -89,17 +91,17 @@ export default function OnboardingPage() {
     const { data: org, error } = await authClient.organization.create({ name, slug });
     if (error || !org) {
       setCreating(false);
-      toast.error(error?.message || "建立組織失敗");
+      toast.error(error?.message || t("create.toast.failed"));
       return;
     }
-    toast.success(`已建立 ${org.name}`);
+    toast.success(t("create.toast.created", { name: org.name }));
     await enter(org.id);
   }
 
   if (checkingMembership) {
     return (
       <div className="flex min-h-full flex-1 items-center justify-center p-6">
-        <div className="text-sm text-muted-foreground">載入中…</div>
+        <div className="text-sm text-muted-foreground">{t("loading")}</div>
       </div>
     );
   }
@@ -112,9 +114,9 @@ export default function OnboardingPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <MailCheck className="size-5 text-muted-foreground" />
-                你收到的邀請
+                {t("invites.title")}
               </CardTitle>
-              <CardDescription>接受邀請以加入既有組織</CardDescription>
+              <CardDescription>{t("invites.description")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
               {invites.map((inv) => (
@@ -124,14 +126,16 @@ export default function OnboardingPage() {
                 >
                   <div className="min-w-0">
                     <div className="truncate font-medium">{inv.organizationName}</div>
-                    <div className="text-xs text-muted-foreground">身分：{inv.role}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {t("invites.role", { role: inv.role })}
+                    </div>
                   </div>
                   <Button
                     size="sm"
                     onClick={() => onAccept(inv)}
                     disabled={acceptingId !== null}
                   >
-                    {acceptingId === inv.id ? "加入中…" : "接受"}
+                    {acceptingId === inv.id ? t("invites.accepting") : t("invites.accept")}
                   </Button>
                 </div>
               ))}
@@ -143,20 +147,25 @@ export default function OnboardingPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Building2 className="size-5 text-muted-foreground" />
-              建立組織
+              {t("create.title")}
             </CardTitle>
             {invites.length > 0 ? (
-              <CardDescription>或建立一個新的組織</CardDescription>
+              <CardDescription>{t("create.descriptionWithInvites")}</CardDescription>
             ) : null}
           </CardHeader>
           <CardContent>
             <form onSubmit={onCreate} className="space-y-4">
               <div className="space-y-1.5">
-                <Label htmlFor="name">組織名稱</Label>
-                <Input id="name" name="name" required placeholder="我的公司" />
+                <Label htmlFor="name">{t("create.nameLabel")}</Label>
+                <Input
+                  id="name"
+                  name="name"
+                  required
+                  placeholder={t("create.namePlaceholder")}
+                />
               </div>
               <Button type="submit" className="w-full" disabled={creating}>
-                {creating ? "建立中…" : "建立並進入"}
+                {creating ? t("create.submitting") : t("create.submit")}
               </Button>
             </form>
           </CardContent>

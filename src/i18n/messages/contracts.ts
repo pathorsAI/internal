@@ -1,0 +1,145 @@
+import type { Dictionary } from "./dictionary";
+
+const contracts = {
+  status: {
+    draft: { "zh-TW": "草稿", en: "Draft" },
+    active: { "zh-TW": "進行中", en: "Active" },
+    completed: { "zh-TW": "已完成", en: "Completed" },
+    cancelled: { "zh-TW": "已取消", en: "Cancelled" },
+  },
+  list: {
+    title: { "zh-TW": "合約", en: "Contracts" },
+    description: { "zh-TW": "客戶合約，點列可編輯", en: "Client contracts — click a row to edit" },
+    newButton: { "zh-TW": "新增合約", en: "Add contract" },
+    rowDescription: { "zh-TW": "合約", en: "Contract" },
+    columns: {
+      title: { "zh-TW": "合約", en: "Contract" },
+      customer: { "zh-TW": "客戶", en: "Client" },
+      project: { "zh-TW": "專案", en: "Project" },
+      collectionProgress: { "zh-TW": "收款進度", en: "Collection progress" },
+      period: { "zh-TW": "期間", en: "Period" },
+      status: { "zh-TW": "狀態", en: "Status" },
+      file: { "zh-TW": "檔案", en: "File" },
+    },
+    empty: {
+      message: { "zh-TW": "尚無合約", en: "No contracts yet" },
+      cta: { "zh-TW": "點右上角新增", en: "Add one from the top right" },
+    },
+    collection: {
+      unsetAmount: { "zh-TW": "未設金額", en: "No amount set" },
+      unpaid: { "zh-TW": "未收 {amount}", en: "{amount} outstanding" },
+      overCollected: { "zh-TW": "溢收 {amount}", en: "{amount} over-collected" },
+      fullyPaid: { "zh-TW": "已收齊", en: "Paid in full" },
+      cost: { "zh-TW": "成本 {amount}", en: "Cost {amount}" },
+    },
+  },
+  fileLink: {
+    label: { "zh-TW": "檔案", en: "File" },
+    ariaLabel: { "zh-TW": "開啟合約檔案", en: "Open contract file" },
+  },
+  newDialog: {
+    trigger: { "zh-TW": "新增合約", en: "Add contract" },
+    title: { "zh-TW": "新增合約", en: "Add contract" },
+    description: { "zh-TW": "客戶合約，可連結到專案", en: "A client contract, optionally linked to a project" },
+    project: {
+      label: { "zh-TW": "專案", en: "Project" },
+      placeholder: { "zh-TW": "— 未指定 —", en: "— None —" },
+    },
+    titleField: {
+      label: { "zh-TW": "合約名稱", en: "Contract name" },
+      placeholder: { "zh-TW": "例：2026 年度維運合約", en: "e.g. 2026 maintenance contract" },
+    },
+    amount: {
+      label: { "zh-TW": "合約金額", en: "Contract amount" },
+      placeholder: { "zh-TW": "選填", en: "Optional" },
+    },
+    currency: { "zh-TW": "幣別", en: "Currency" },
+    status: { "zh-TW": "狀態", en: "Status" },
+    signedDate: { "zh-TW": "簽約日", en: "Signed date" },
+    datePlaceholderNone: { "zh-TW": "— 無 —", en: "— None —" },
+    paymentTermsDays: {
+      label: { "zh-TW": "付款條件（天）", en: "Payment terms (days)" },
+      placeholder: { "zh-TW": "月結 30 天 → 30", en: "Net 30 → 30" },
+    },
+    startDate: { "zh-TW": "開始日期", en: "Start date" },
+    endDate: { "zh-TW": "結束日期", en: "End date" },
+    note: { "zh-TW": "備註", en: "Note" },
+    notePlaceholder: { "zh-TW": "選填", en: "Optional" },
+    fileUrl: {
+      label: { "zh-TW": "合約檔案連結", en: "Contract file link" },
+      placeholder: { "zh-TW": "https://drive.google.com/… （選填）", en: "https://drive.google.com/… (optional)" },
+    },
+    submit: { "zh-TW": "儲存", en: "Save" },
+    submitting: { "zh-TW": "儲存中…", en: "Saving…" },
+    toast: {
+      added: { "zh-TW": "已新增合約", en: "Contract added" },
+    },
+  },
+  editForm: {
+    summary: {
+      received: { "zh-TW": "已收", en: "Collected" },
+      remaining: { "zh-TW": "未收", en: "Outstanding" },
+      cost: { "zh-TW": "累計成本", en: "Total cost" },
+      note: { "zh-TW": "已收來自綁定此合約的收入交易；成本僅供參考，不從合約金額扣除。", en: "Collected comes from income transactions linked to this contract; cost is for reference only and isn't deducted from the contract amount." },
+    },
+    fileUrl: {
+      label: { "zh-TW": "合約檔案連結", en: "Contract file link" },
+      placeholder: { "zh-TW": "https://drive.google.com/…", en: "https://drive.google.com/…" },
+    },
+    cancel: { "zh-TW": "取消", en: "Cancel" },
+    submit: { "zh-TW": "儲存變更", en: "Save changes" },
+    submitting: { "zh-TW": "儲存中…", en: "Saving…" },
+    toast: {
+      updated: { "zh-TW": "已更新", en: "Updated" },
+    },
+  },
+  billingItems: {
+    heading: { "zh-TW": "分期請款", en: "Billing schedule" },
+    addButton: { "zh-TW": "新增一期", en: "Add installment" },
+    empty: { "zh-TW": "尚未排定分期。例如簽約金 / 期中款 / 尾款，設好應請款日後就會出現在請款看板。", en: "No installments scheduled yet. Set up items like a deposit, interim, or final payment with a due date, and they'll appear on the billing board." },
+    dueDate: { "zh-TW": "應請款 {date}", en: "Due {date}" },
+    noDueDate: { "zh-TW": "未設應請款日", en: "No due date set" },
+    manageLink: { "zh-TW": "到請款看板管理", en: "Manage on the billing board" },
+  },
+  billingPlan: {
+    plan: {
+      single: { "zh-TW": "一次付清", en: "Single payment" },
+      installments: { "zh-TW": "分 N 期", en: "Fixed instalments" },
+      milestones: { "zh-TW": "里程碑", en: "Milestones" },
+      subscription: { "zh-TW": "月費 / 訂閱", en: "Subscription / monthly" },
+    },
+    dueRule: {
+      signed_date: { "zh-TW": "簽約日起算，每期間隔固定月數", en: "Fixed number of months from the signing date" },
+      day_of_month: { "zh-TW": "每月第 N 個日曆日", en: "Nth calendar day of the month" },
+      business_day_of_month: { "zh-TW": "每月第 N 個工作日", en: "Nth business day of the month" },
+    },
+    heading: { "zh-TW": "請款方式", en: "Billing schedule" },
+    planLabel: { "zh-TW": "怎麼收這筆錢", en: "How to collect this" },
+    planNone: { "zh-TW": "— 不自動排程 —", en: "— No automatic schedule —" },
+    installmentCount: { "zh-TW": "期數", en: "Number of installments" },
+    installmentSplit: {
+      label: { "zh-TW": "各期比例（%）", en: "Split per installment (%)" },
+      placeholder: { "zh-TW": "30,40,30", en: "30,40,30" },
+    },
+    intervalMonths: { "zh-TW": "每期間隔（月）", en: "Interval between installments (months)" },
+    dueRuleLabel: { "zh-TW": "應請款日怎麼算", en: "How the due date is calculated" },
+    dueDayLabelBusiness: { "zh-TW": "第幾個工作日", en: "Which business day" },
+    dueDayLabelDay: { "zh-TW": "第幾日", en: "Which day" },
+    dueDayHintBusiness: { "zh-TW": "工作日只排除週六日，不含國定假日（每年公告不同）。落在假日的那幾期，之後在看板上逐筆改即可。", en: "Business days exclude weekends only, not public holidays (they vary by year). Adjust any period that lands on a holiday directly on the board." },
+    dueDayHintDay: { "zh-TW": "超過該月天數會自動取月底（例：31 日 → 2 月底）。", en: "A day beyond the month's length rolls back to month-end (e.g. 31 → end of February)." },
+    milestoneHint: { "zh-TW": "里程碑的金額與日期各不相同，不由系統推導。存檔後在下方「分期請款」逐筆新增。", en: "Milestone amounts and dates vary and aren't derived automatically. Add them one by one under \"Billing schedule\" below after saving." },
+    subscriptionHint: { "zh-TW": "月費的期別由「訂閱 / 月費」的週期引擎推算，會直接出現在請款看板，這張合約不另外展開排程。", en: "Subscription periods are generated by the subscription billing engine and appear directly on the billing board — this contract doesn't expand its own schedule." },
+    previewHeading: { "zh-TW": "存檔後會產生這 {count} 期", en: "{count, plural, one {This will create one period on save} other {This will create # periods on save}}" },
+    previewTotal: { "zh-TW": "合計 {amount}", en: "Total {amount}" },
+    missingInputsHint: { "zh-TW": "還缺合約金額或簽約日（沒有簽約日就用開始日期），補齊後這裡會顯示要產生的各期。", en: "Still missing the contract amount or signed date (falls back to the start date) — fill those in and the periods to be created will preview here." },
+    regenerateLabel: { "zh-TW": "存檔時依上面的設定重新產生排程", en: "Regenerate the schedule from the settings above on save" },
+    existingCount: { "zh-TW": "這張合約已有 {count} 期", en: "This contract already has {count, plural, one {one period} other {# periods}}" },
+    lockedCountSuffix: { "zh-TW": "，其中 {count} 期已請款 / 已開票 / 已收款", en: ", {count} of which {count, plural, one {is} other {are}} already billed, invoiced, or paid" },
+    periodEnd: { "zh-TW": "。", en: ". " },
+    regenerateNoteLocked: { "zh-TW": "已經動過的那幾期不會被刪，只重排其餘的。", en: "Periods that have already been touched won't be deleted — only the rest are regenerated." },
+    regenerateNoteAll: { "zh-TW": "既有的排程會被取代。", en: "The existing schedule will be replaced." },
+    newScheduleNote: { "zh-TW": "存檔後可到請款看板逐筆調整金額與日期，改過的不會被這份設定蓋掉。", en: "After saving, you can fine-tune each amount and date on the billing board — edits there won't be overwritten by this setting." },
+  },
+} satisfies Dictionary;
+
+export default contracts;

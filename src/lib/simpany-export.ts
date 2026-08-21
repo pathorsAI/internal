@@ -173,8 +173,13 @@ export type ParseResult = {
   detected: Partial<Record<keyof SimpanyRow, string>>;
   /** 有內容但沒有發票號碼、無從比對的列數 */
   skipped: number;
-  error?: string;
+  error?: ParseError;
 };
+
+/** 顯示端負責翻譯，所以這裡只回代號與需要插入的片段。 */
+export type ParseError =
+  | { code: "empty" }
+  | { code: "noInvoiceColumn"; header: string };
 
 export function parseSimpanyCsv(text: string): ParseResult {
   return parseSimpanyTable(parseCsv(text));
@@ -183,7 +188,7 @@ export function parseSimpanyCsv(text: string): ParseResult {
 /** 表格（來自 CSV 或 xlsx）→ 對帳用的列。第一列當表頭。 */
 export function parseSimpanyTable(table: string[][]): ParseResult {
   if (table.length < 2) {
-    return { rows: [], detected: {}, skipped: 0, error: "檔案是空的或只有表頭" };
+    return { rows: [], detected: {}, skipped: 0, error: { code: "empty" } };
   }
   const [header, ...body] = table;
   const cols = matchHeaders(header);
@@ -192,7 +197,7 @@ export function parseSimpanyTable(table: string[][]): ParseResult {
       rows: [],
       detected: {},
       skipped: 0,
-      error: `找不到發票號碼欄位。表頭讀到：${header.join(" / ")}`,
+      error: { code: "noInvoiceColumn", header: header.join(" / ") },
     };
   }
 
@@ -256,14 +261,6 @@ export type ReconcileRow = {
   simpanyAmount: number | null;
   name: string | null;
   date: string | null;
-};
-
-export const VERDICT_LABELS: Record<ReconcileVerdict, string> = {
-  matched: "相符",
-  amount_mismatch: "金額不符",
-  voided_in_simpany: "Simpany 已作廢",
-  missing_in_simpany: "Simpany 查無",
-  missing_locally: "本系統沒紀錄",
 };
 
 /** Simpany 的發票狀態欄看起來像作廢嗎。 */

@@ -1679,7 +1679,7 @@ export async function listBillingBoard(
         customerPartyId: sub.customerPartyId,
         customerName: sub.customerName,
         customerTaxId: sub.customerTaxId,
-        title: `${sub.name}（${p.periodLabel}）`,
+        title: `${sub.name} (${p.periodLabel})`,
         contractId: null,
         contractTitle: null,
         projectId: sub.projectId,
@@ -1758,17 +1758,12 @@ export function summarizeBilling(rows: BillingRow[]): BillingSummary {
 export const AGING_BUCKETS = ["current", "d1_30", "d31_60", "d61_90", "d90p"] as const;
 export type AgingBucket = (typeof AGING_BUCKETS)[number];
 
-export const AGING_LABELS: Record<AgingBucket, string> = {
-  current: "未逾期",
-  d1_30: "1–30 天",
-  d31_60: "31–60 天",
-  d61_90: "61–90 天",
-  d90p: "90 天以上",
-};
+// 分桶顯示文字交給 reports 命名空間的元件處理（AGING_BUCKETS 本身就是 i18n key）。
 
 export type AgingRow = {
   customerPartyId: number | null;
-  customerName: string;
+  /** 找不到客戶名稱時為 null，交由畫面層決定怎麼顯示。 */
+  customerName: string | null;
   currency: string;
   buckets: Record<AgingBucket, number>;
   total: number;
@@ -1807,7 +1802,7 @@ export function computeReceivableAging(rows: BillingRow[], today: string): Aging
     const key = `${r.customerPartyId ?? 0}:${r.currency}`;
     const entry = byKey.get(key) ?? {
       customerPartyId: r.customerPartyId,
-      customerName: r.customerName ?? "（未指定客戶）",
+      customerName: r.customerName ?? null,
       currency: r.currency,
       buckets: { current: 0, d1_30: 0, d31_60: 0, d61_90: 0, d90p: 0 },
       total: 0,

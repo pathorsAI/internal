@@ -1,4 +1,5 @@
 import { Info } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { PageHeader } from "@/components/page-header";
 import {
   Tooltip,
@@ -31,6 +32,7 @@ import { requireOrg } from "@/lib/session";
 export const dynamic = "force-dynamic";
 
 export default async function AdvancesPage() {
+  const t = await getTranslations("advances");
   const { orgId } = await requireOrg();
   const [rows, accounts] = await Promise.all([
     listOutstandingAdvances(orgId),
@@ -44,46 +46,46 @@ export default async function AdvancesPage() {
       <PageHeader
         title={
           <span className="inline-flex items-center gap-1.5">
-            代墊
+            {t("title")}
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
                     className="text-muted-foreground hover:text-foreground"
-                    aria-label="代墊說明"
+                    aria-label={t("tooltipAria")}
                   >
                     <Info className="size-4" />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent>員工已代墊並納入帳務（進項），公司尚未撥款</TooltipContent>
+                <TooltipContent>{t("tooltipContent")}</TooltipContent>
               </Tooltip>
             </TooltipProvider>
           </span>
         }
-        description="員工先付、公司尚未撥款的費用"
+        description={t("description")}
       />
 
       <Card>
         <CardHeader className="pb-2">
-          <CardDescription>目前未還總額</CardDescription>
+          <CardDescription>{t("card.totalLabel")}</CardDescription>
           <CardTitle className="text-2xl tabular-nums">{formatCurrency(total, "TWD")}</CardTitle>
         </CardHeader>
         <CardContent className={`p-0 ${tableEdgePadding}`}>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>日期</TableHead>
-                <TableHead>代墊人</TableHead>
-                <TableHead>廠商 / 用途</TableHead>
-                <TableHead>分類</TableHead>
-                <TableHead className="text-right">金額</TableHead>
-                <TableHead className="text-right">動作</TableHead>
+                <TableHead>{t("columns.date")}</TableHead>
+                <TableHead>{t("columns.payer")}</TableHead>
+                <TableHead>{t("columns.vendorPurpose")}</TableHead>
+                <TableHead>{t("columns.category")}</TableHead>
+                <TableHead className="text-right">{t("columns.amount")}</TableHead>
+                <TableHead className="text-right">{t("columns.action")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {rows.length === 0 ? (
-                <EmptyRow colSpan={6} message="沒有未還的代墊" />
+                <EmptyRow colSpan={6} message={t("empty")} />
               ) : (
                 rows.map((r) => (
                   <TableRow key={r.id}>
@@ -93,7 +95,7 @@ export default async function AdvancesPage() {
                     <TableCell className="font-medium">{r.settleName ?? "—"}</TableCell>
                     <TableCell className="text-muted-foreground">
                       {r.vendorName ?? "—"}
-                      {r.description ? `（${r.description}）` : ""}
+                      {r.description ? `(${r.description})` : ""}
                     </TableCell>
                     <TableCell className="text-muted-foreground">{r.categoryName ?? "—"}</TableCell>
                     <TableCell className="text-right font-medium tabular-nums">

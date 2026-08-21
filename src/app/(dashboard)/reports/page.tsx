@@ -1,3 +1,4 @@
+import { getTranslations } from "next-intl/server";
 import { PageHeader } from "@/components/page-header";
 import { TableCard } from "@/components/table-card";
 import { EmptyRow } from "@/components/empty-state";
@@ -30,14 +31,14 @@ import { ContractCoverage } from "./contract-coverage";
 
 export const dynamic = "force-dynamic";
 
-const labelMap: Record<string, string> = {
-  vendor: "廠商",
-  customer: "客戶",
-  gov: "政府機關",
-  other: "其他",
-};
-
 export default async function ReportsPage() {
+  const t = await getTranslations("reports");
+  const labelMap: Record<string, string> = {
+    vendor: t("partyLabel.vendor"),
+    customer: t("partyLabel.customer"),
+    gov: t("partyLabel.gov"),
+    other: t("partyLabel.other"),
+  };
   const { orgId } = await requireOrg();
   // 稅期預設看當期；上一期常常還在申報中，一起帶出來比較有用。
   const current = taxPeriodOf(todayStr());
@@ -57,10 +58,7 @@ export default async function ReportsPage() {
 
   return (
     <>
-      <PageHeader
-        title="報表"
-        description="應收帳齡、營業稅期、合約完整性，以及成本與專案損益"
-      />
+      <PageHeader title={t("title")} description={t("description")} />
 
       <div className="grid gap-6">
         <ReceivableAging rows={aging} />
@@ -72,21 +70,21 @@ export default async function ReportsPage() {
 
         <ContractCoverage rows={coverage} />
         <TableCard
-          title="廠商 / infra 成本"
-          action={`依交易對象彙總的支出（含代墊，TWD）— 合計 ${formatCurrency(totalVendorCost)}`}
+          title={t("vendorCosts.title")}
+          action={t("vendorCosts.summary", { total: formatCurrency(totalVendorCost) })}
         >
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>交易對象</TableHead>
-                <TableHead>類型</TableHead>
-                <TableHead className="text-right">交易數</TableHead>
-                <TableHead className="text-right">支出 (TWD)</TableHead>
+                <TableHead>{t("vendorCosts.columns.counterparty")}</TableHead>
+                <TableHead>{t("vendorCosts.columns.type")}</TableHead>
+                <TableHead className="text-right">{t("vendorCosts.columns.txnCount")}</TableHead>
+                <TableHead className="text-right">{t("vendorCosts.columns.amount")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {vendorCosts.length === 0 ? (
-                <EmptyRow colSpan={4} message="尚無支出資料" />
+                <EmptyRow colSpan={4} message={t("vendorCosts.empty")} />
               ) : (
                 vendorCosts.map((v) => (
                   <TableRow key={v.partyId}>
@@ -105,20 +103,20 @@ export default async function ReportsPage() {
           </Table>
         </TableCard>
 
-        <TableCard title="專案損益 (P&L)" action="每個專案的收入、支出與淨額（TWD）">
+        <TableCard title={t("projectPnl.title")} action={t("projectPnl.description")}>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>專案</TableHead>
-                <TableHead>客戶</TableHead>
-                <TableHead className="text-right">收入</TableHead>
-                <TableHead className="text-right">支出</TableHead>
-                <TableHead className="text-right">淨額</TableHead>
+                <TableHead>{t("projectPnl.columns.project")}</TableHead>
+                <TableHead>{t("projectPnl.columns.client")}</TableHead>
+                <TableHead className="text-right">{t("projectPnl.columns.income")}</TableHead>
+                <TableHead className="text-right">{t("projectPnl.columns.expense")}</TableHead>
+                <TableHead className="text-right">{t("projectPnl.columns.net")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {projects.length === 0 ? (
-                <EmptyRow colSpan={5} message="尚無專案" />
+                <EmptyRow colSpan={5} message={t("projectPnl.empty")} />
               ) : (
                 projects.map((p) => (
                   <TableRow key={p.id}>

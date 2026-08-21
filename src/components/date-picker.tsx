@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { CalendarIcon } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,7 @@ function toISO(d: Date) {
 export function DatePicker({
   name,
   defaultValue,
-  placeholder = "選擇日期",
+  placeholder,
   allowEmpty = false,
   onValueChange,
 }: Readonly<{
@@ -29,6 +30,8 @@ export function DatePicker({
   /** 選到日期時通知外層（hidden input 不會發 input 事件，要靠這個做連動預覽） */
   onValueChange?: (iso: string) => void;
 }>) {
+  const t = useTranslations("common");
+  const resolvedPlaceholder = placeholder ?? t("datePicker.placeholder");
   const [date, setDate] = React.useState<Date | undefined>(() => {
     if (defaultValue) return new Date(`${defaultValue}T00:00:00`);
     return allowEmpty ? undefined : new Date();
@@ -50,7 +53,7 @@ export function DatePicker({
             )}
           >
             <CalendarIcon className="mr-2 size-4" />
-            {iso || placeholder}
+            {iso || resolvedPlaceholder}
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-auto p-0" align="start">

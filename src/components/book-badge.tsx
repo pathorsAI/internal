@@ -1,12 +1,21 @@
+import { getTranslations } from "next-intl/server";
 import { Badge } from "@/components/ui/badge";
 
-const map: Record<string, { label: string; variant: "default" | "secondary" | "outline" }> = {
-  internal: { label: "內帳", variant: "secondary" },
-  external: { label: "外帳", variant: "default" },
-  both: { label: "內外", variant: "outline" },
+type BookKey = "internal" | "external" | "both";
+
+const variantByBook: Record<BookKey, "default" | "secondary" | "outline"> = {
+  internal: "secondary",
+  external: "default",
+  both: "outline",
 };
 
-export function BookBadge({ book }: Readonly<{ book: string }>) {
-  const cfg = map[book] ?? { label: book, variant: "outline" as const };
-  return <Badge variant={cfg.variant}>{cfg.label}</Badge>;
+function isBookKey(book: string): book is BookKey {
+  return book in variantByBook;
+}
+
+export async function BookBadge({ book }: Readonly<{ book: string }>) {
+  const t = await getTranslations("common");
+  const variant = isBookKey(book) ? variantByBook[book] : "outline";
+  const label = isBookKey(book) ? t(`bookBadge.${book}`) : book;
+  return <Badge variant={variant}>{label}</Badge>;
 }

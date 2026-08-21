@@ -1,3 +1,4 @@
+import { getTranslations } from "next-intl/server";
 import { PageHeader } from "@/components/page-header";
 import { requireOrg } from "@/lib/session";
 import { MembersClient } from "./members-client";
@@ -5,14 +6,15 @@ import { MembersClient } from "./members-client";
 export const dynamic = "force-dynamic";
 
 export default async function MembersPage() {
+  const t = await getTranslations("members");
   // Guard: redirects to /login or /onboarding when needed.
   await requireOrg();
 
   return (
     <>
       <PageHeader
-        title="成員"
-        description="邀請同事加入這個組織，或管理現有成員"
+        title={t("title")}
+        description={t("description")}
       />
       <MembersClient />
     </>

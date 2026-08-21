@@ -5,12 +5,18 @@
  * 都會自動跟上。格式化本身走 Intl，就算是這裡沒登記的 ISO 代碼也能正確顯示符號與小數位。
  *
  * 注意：本系統「不做匯率換算」（不同幣別分開加總），這裡只負責挑選與顯示。
+ *
+ * i18n：幣別的顯示名稱（中文「台幣」/ 英文 "New Taiwan dollar" 等）不放在這個純
+ * data/util 檔案，改放在 message 檔的 `common.currency.<CODE>`（見
+ * src/i18n/messages/{zh-TW,en}/common.ts）。這裡的 `name` 一律等於 `code`，
+ * 元件要顯示人類可讀名稱時，用 `useTranslations("common")` 查
+ * `currency.${code}`，再自行組字串（或搭配下面的 `currencyLabel(code, name)`）。
  */
 
 export type CurrencyMeta = {
   /** ISO 4217 代碼，例如 "TWD"。 */
   code: string;
-  /** 中文名稱，下拉選單用，例如 "台幣"。 */
+  /** 預設等於 code；顯示名稱改由呼叫端透過 common.currency.<CODE> 翻譯提供。 */
   name: string;
   /** 顯示符號（刻意用可辨識的形式，例如 US$ 而非 $）。 */
   symbol: string;
@@ -22,11 +28,11 @@ export type CurrencyMeta = {
 
 /** 提供給選單的幣別。新增幣別＝在這裡加一行（flag 對應 public/flags/<名稱>.svg）。 */
 export const CURRENCIES: CurrencyMeta[] = [
-  { code: "TWD", name: "台幣", symbol: "NT$", decimals: 0, flag: "Taiwan" },
-  { code: "USD", name: "美金", symbol: "US$", decimals: 2, flag: "United States" },
-  { code: "EUR", name: "歐元", symbol: "€", decimals: 2, flag: "European Union" },
-  { code: "JPY", name: "日圓", symbol: "¥", decimals: 0, flag: "Japan" },
-  { code: "CNY", name: "人民幣", symbol: "CN¥", decimals: 2, flag: "China" },
+  { code: "TWD", name: "TWD", symbol: "NT$", decimals: 0, flag: "Taiwan" },
+  { code: "USD", name: "USD", symbol: "US$", decimals: 2, flag: "United States" },
+  { code: "EUR", name: "EUR", symbol: "€", decimals: 2, flag: "European Union" },
+  { code: "JPY", name: "JPY", symbol: "¥", decimals: 0, flag: "Japan" },
+  { code: "CNY", name: "CNY", symbol: "CN¥", decimals: 2, flag: "China" },
 ];
 
 export const DEFAULT_CURRENCY = "TWD";
@@ -72,10 +78,15 @@ export function currencyMeta(code: string): CurrencyMeta {
   return derived;
 }
 
-/** 選單標籤，例如 "NT$ 台幣"；未登記幣別則退回符號＋代碼。 */
-export function currencyLabel(code: string): string {
+/**
+ * 選單標籤，例如 "NT$ 台幣"；未登記幣別則退回符號＋代碼。
+ * `name` 由呼叫端傳入已透過 common.currency.<CODE> 翻譯過的顯示名稱；
+ * 不傳就退回 meta.name（等於 code），效果同「未登記幣別」的退回格式。
+ */
+export function currencyLabel(code: string, name?: string): string {
   const m = currencyMeta(code);
-  return m.name === code ? `${m.symbol}${code}` : `${m.symbol} ${m.name}`;
+  const label = name ?? m.name;
+  return label === code ? `${m.symbol}${code}` : `${m.symbol} ${label}`;
 }
 
 /** 幣別對應的國旗檔名（public/flags/<name>.svg）；未登記幣別回傳 undefined（顯示地球圖示）。 */

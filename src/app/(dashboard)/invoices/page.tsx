@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Scale } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { PageHeader } from "@/components/page-header";
 import { TableCard } from "@/components/table-card";
 import { EmptyRow } from "@/components/empty-state";
@@ -29,45 +30,43 @@ import { EditInvoiceForm } from "./edit-invoice-form";
 
 export const dynamic = "force-dynamic";
 
-const statusLabel: Record<string, string> = {
-  valid: "有效",
-  void: "作廢",
-  allowance: "折讓",
-};
 const statusVariant: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   valid: "secondary",
   void: "destructive",
   allowance: "outline",
 };
 
-// Simpany（外部發票系統）的開立狀態。進項發票用不到，顯示成一條破折號。
-const externalLabel: Record<string, string> = {
-  pending: "待開立",
-  issued: "已開立",
-  void: "已作廢",
-  n_a: "—",
-};
-
-function ExternalStatusBadge({ status }: Readonly<{ status: string }>) {
+async function ExternalStatusBadge({ status }: Readonly<{ status: string }>) {
+  const t = await getTranslations("invoices.externalStatus");
   if (status === "n_a") return <span className="text-xs text-muted-foreground">—</span>;
   if (status === "pending") {
     return (
       <Badge variant="outline" className="border-expense/40 text-expense">
-        待開立
+        {t("pending")}
       </Badge>
     );
   }
+  const externalLabel: Record<string, string> = {
+    pending: t("pending"),
+    issued: t("issued"),
+    void: t("void"),
+  };
   return <Badge variant="outline">{externalLabel[status] ?? status}</Badge>;
 }
-
-const directions = [
-  { key: "issued" as const, label: "開給客戶" },
-  { key: "received" as const, label: "廠商開給我" },
-];
 
 export default async function InvoicesPage({
   searchParams,
 }: Readonly<{ searchParams: Promise<{ direction?: string }> }>) {
+  const t = await getTranslations("invoices");
+  const statusLabel: Record<string, string> = {
+    valid: t("status.valid"),
+    void: t("status.void"),
+    allowance: t("status.allowance"),
+  };
+  const directions = [
+    { key: "issued" as const, label: t("direction.issued") },
+    { key: "received" as const, label: t("direction.received") },
+  ];
   const { orgId } = await requireOrg();
   const { direction: raw } = await searchParams;
   const direction = raw === "received" ? "received" : "issued";
@@ -83,15 +82,15 @@ export default async function InvoicesPage({
   const contractOptions = contracts.map((c) => ({ id: c.id, name: c.title }));
   const billingOptions = billingItems.map((b) => ({
     id: b.id,
-    name: b.invoiced ? `${b.name}（已開）` : b.name,
+    name: b.invoiced ? t("billingItemInvoiced", { name: b.name }) : b.name,
   }));
 
   return (
     <>
-      <PageHeader title="發票" description="開給客戶與廠商開給我的發票，點列可編輯">
+      <PageHeader title={t("title")} description={t("description")}>
         <Button asChild size="sm" variant="outline">
           <Link href="/invoices/reconcile">
-            <Scale className="size-4" /> Simpany 對帳
+            <Scale className="size-4" /> {t("reconcileLink")}
           </Link>
         </Button>
         <NewInvoiceDialog
@@ -114,29 +113,29 @@ export default async function InvoicesPage({
         ))}
       </div>
 
-      <TableCard action={`${rows.length} 筆`}>
+      <TableCard action={t("rowCount", { count: rows.length })}>
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>日期</TableHead>
-              <TableHead>對象</TableHead>
-              <TableHead>發票號碼</TableHead>
-              <TableHead className="text-right">含稅金額</TableHead>
-              <TableHead>對應請款</TableHead>
-              <TableHead>Simpany</TableHead>
-              <TableHead>狀態</TableHead>
+              <TableHead>{t("columns.date")}</TableHead>
+              <TableHead>{t("columns.counterparty")}</TableHead>
+              <TableHead>{t("columns.invoiceNumber")}</TableHead>
+              <TableHead className="text-right">{t("columns.amountGross")}</TableHead>
+              <TableHead>{t("columns.billingRef")}</TableHead>
+              <TableHead>{t("columns.simpany")}</TableHead>
+              <TableHead>{t("columns.status")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <EmptyRow colSpan={7} message="尚無發票">
-                點右上角新增
+              <EmptyRow colSpan={7} message={t("empty.message")}>
+                {t("empty.hint")}
               </EmptyRow>
             ) : (
               rows.map((inv) => (
                 <RowDialog
                   key={inv.id}
-                  title={inv.invoiceNumber ?? "發票"}
+                  title={inv.invoiceNumber ?? t("defaultTitle")}
                   description={inv.displayName ?? undefined}
                   cells={
                     <>

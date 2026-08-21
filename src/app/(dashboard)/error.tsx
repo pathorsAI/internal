@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useTranslations } from "next-intl";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -12,6 +13,8 @@ export default function DashboardError({
   error: Error & { digest?: string };
   reset: () => void;
 }>) {
+  const t = useTranslations("dashboard");
+
   useEffect(() => {
     console.error(error);
   }, [error]);
@@ -19,9 +22,9 @@ export default function DashboardError({
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 py-24 text-center">
       <AlertTriangle className="size-8 text-muted-foreground/60" />
-      <p className="text-sm text-muted-foreground">載入失敗，請重試。</p>
+      <p className="text-sm text-muted-foreground">{t("error.message")}</p>
       <Button variant="outline" size="sm" onClick={reset}>
-        重新載入
+        {t("error.retry")}
       </Button>
     </div>
   );

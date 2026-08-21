@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import { getTranslations } from "next-intl/server";
 import { PageHeader } from "@/components/page-header";
 import { canManageOrg, requireOrgWithRole } from "@/lib/session";
 import { getDb } from "@/db";
@@ -14,6 +15,7 @@ import { CalendarSettingsClient } from "./calendar-settings-client";
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
+  const t = await getTranslations("settings");
   // Guard: redirects to /login or /onboarding when needed.
   const { orgId, userId, role } = await requireOrgWithRole();
   const [calendar, granted, ownerLabel, orgRow] = await Promise.all([
@@ -29,7 +31,7 @@ export default async function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="組織設定" description="管理這個組織的基本資料與整合" />
+      <PageHeader title={t("title")} description={t("description")} />
       <OrgSettingsClient
         orgId={orgId}
         orgName={orgRow[0]?.name ?? ""}

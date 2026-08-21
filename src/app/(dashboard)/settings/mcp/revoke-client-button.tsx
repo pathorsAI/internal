@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { Trash2 } from "lucide-react";
 import { revokeMcpClient } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,7 @@ export function RevokeClientButton({
   clientId,
   name,
 }: Readonly<{ clientId: string; name: string }>) {
+  const t = useTranslations("settings");
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const router = useRouter();
@@ -31,10 +33,10 @@ export function RevokeClientButton({
       const res = await revokeMcpClient(clientId);
       if (res.ok) {
         setOpen(false);
-        toast.success("已撤銷用戶端");
+        toast.success(t("mcp.clients.revoke.toast.success"));
         router.refresh();
       } else {
-        toast.error(res.error ?? "撤銷失敗");
+        toast.error(res.error ?? t("mcp.clients.revoke.toast.failed"));
       }
     });
   }
@@ -43,24 +45,24 @@ export function RevokeClientButton({
     <AlertDialog open={open} onOpenChange={setOpen}>
       <AlertDialogTrigger asChild>
         <Button type="button" variant="destructive" size="sm">
-          <Trash2 className="size-4" /> 撤銷
+          <Trash2 className="size-4" /> {t("mcp.clients.revoke.trigger")}
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>撤銷「{name}」？</AlertDialogTitle>
+          <AlertDialogTitle>{t("mcp.clients.revoke.confirmTitle", { name })}</AlertDialogTitle>
           <AlertDialogDescription>
-            這會刪除該用戶端的註冊與所有已發出的 token，對方需要重新連線授權。此動作無法復原。
+            {t("mcp.clients.revoke.confirmDescription")}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>取消</AlertDialogCancel>
+          <AlertDialogCancel>{t("mcp.clients.revoke.cancel")}</AlertDialogCancel>
           <AlertDialogAction
             variant="destructive"
             disabled={pending}
             onClick={onConfirm}
           >
-            {pending ? "撤銷中…" : "撤銷"}
+            {pending ? t("mcp.clients.revoke.confirming") : t("mcp.clients.revoke.trigger")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

@@ -1,3 +1,4 @@
+import { getTranslations } from "next-intl/server";
 import { RowDialog } from "@/components/row-dialog";
 import { DeleteButton } from "@/components/delete-button";
 import { deleteEmployee } from "@/db/mutations";
@@ -22,14 +23,14 @@ import { requireOrg } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
-const empType: Record<string, string> = {
-  full_time: "正職",
-  part_time: "兼職",
-  freelancer: "自由",
-  contractor: "承攬",
-};
-
 export default async function EmployeesPage() {
+  const t = await getTranslations("employees");
+  const empType: Record<string, string> = {
+    full_time: t("type.full_time"),
+    part_time: t("type.part_time"),
+    freelancer: t("type.freelancer"),
+    contractor: t("type.contractor"),
+  };
   const { orgId } = await requireOrg();
   const [rows, itemTypes, accounts, members] = await Promise.all([
     listEmployees(orgId),
@@ -42,31 +43,31 @@ export default async function EmployeesPage() {
 
   return (
     <>
-      <PageHeader title="員工" description="員工名冊、基本聯絡資訊與勞健保 / 勞退投保狀態">
+      <PageHeader title={t("title")} description={t("description")}>
         <NewEmployeeDialog members={members} />
       </PageHeader>
-      <TableCard title="員工名冊">
+      <TableCard title={t("table.title")}>
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>姓名</TableHead>
-              <TableHead>類型</TableHead>
-              <TableHead>聯絡方式</TableHead>
-              <TableHead>到職日</TableHead>
-              <TableHead>勞健保投保</TableHead>
-              <TableHead>狀態</TableHead>
-              <TableHead className="text-right">底薪</TableHead>
+              <TableHead>{t("table.columns.name")}</TableHead>
+              <TableHead>{t("table.columns.type")}</TableHead>
+              <TableHead>{t("table.columns.contact")}</TableHead>
+              <TableHead>{t("table.columns.startDate")}</TableHead>
+              <TableHead>{t("table.columns.insurance")}</TableHead>
+              <TableHead>{t("table.columns.status")}</TableHead>
+              <TableHead className="text-right">{t("table.columns.baseSalary")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <EmptyRow colSpan={7} message="尚無員工" />
+              <EmptyRow colSpan={7} message={t("table.empty")} />
             ) : (
               rows.map((e) => (
                 <RowDialog
                   key={e.id}
                   title={e.name}
-                  description="員工"
+                  description={t("dialog.recordLabel")}
                   cells={
                     <>
                       <TableCell className="font-medium">
@@ -74,7 +75,7 @@ export default async function EmployeesPage() {
                           {e.name}
                           {e.userId ? (
                             <Badge variant="secondary" className="font-normal text-xs">
-                              {memberByUserId.get(e.userId)?.name ?? "已綁定"}
+                              {memberByUserId.get(e.userId)?.name ?? t("table.linked")}
                             </Badge>
                           ) : null}
                         </div>
@@ -100,17 +101,17 @@ export default async function EmployeesPage() {
                         <div className="flex flex-wrap gap-1 text-xs">
                           {e.laborInsuredSalary ? (
                             <Badge variant="outline" className="font-normal">
-                              勞保 {formatCurrency(e.laborInsuredSalary)}
+                              {t("insurance.labor")} {formatCurrency(e.laborInsuredSalary)}
                             </Badge>
                           ) : null}
                           {e.healthInsuredSalary ? (
                             <Badge variant="outline" className="font-normal">
-                              健保 {formatCurrency(e.healthInsuredSalary)}
+                              {t("insurance.health")} {formatCurrency(e.healthInsuredSalary)}
                             </Badge>
                           ) : null}
                           {e.hasPension ? (
                             <Badge variant="outline" className="font-normal">
-                              勞退
+                              {t("insurance.pension")}
                             </Badge>
                           ) : null}
                           {!e.laborInsuredSalary && !e.healthInsuredSalary && !e.hasPension ? (
@@ -120,7 +121,7 @@ export default async function EmployeesPage() {
                       </TableCell>
                       <TableCell>
                         <Badge variant={e.isActive ? "outline" : "secondary"}>
-                          {e.isActive ? "在職" : "離職"}
+                          {e.isActive ? t("status.active") : t("status.inactive")}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right font-medium tabular-nums">

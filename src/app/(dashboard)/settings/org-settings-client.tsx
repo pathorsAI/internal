@@ -3,11 +3,12 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { Building2 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field } from "@/components/form-field";
 import {
   Card,
   CardContent,
@@ -37,6 +38,7 @@ export function OrgSettingsClient({
   orgName,
   canEdit,
 }: Readonly<{ orgId: string; orgName: string; canEdit: boolean }>) {
+  const t = useTranslations("settings");
   const router = useRouter();
 
   // `draft` 在使用者真的打字前都是 null，欄位只是「顯示」server 傳來的名稱。
@@ -49,7 +51,7 @@ export function OrgSettingsClient({
     e.preventDefault();
     const value = name.trim();
     if (!value) {
-      toast.error("組織名稱不可空白");
+      toast.error(t("org.toast.nameRequired"));
       return;
     }
     if (value === orgName) return;
@@ -60,10 +62,10 @@ export function OrgSettingsClient({
     });
     setSaving(false);
     if (error) {
-      toast.error(error.message || "更新失敗");
+      toast.error(error.message || t("org.toast.updateFailed"));
       return;
     }
-    toast.success("已更新組織名稱");
+    toast.success(t("org.toast.updated"));
     setDraft(null);
     router.refresh();
   }
@@ -73,16 +75,15 @@ export function OrgSettingsClient({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Building2 className="size-5 text-muted-foreground" />
-          基本資料
+          {t("org.title")}
         </CardTitle>
         <CardDescription>
-          {canEdit ? "修改組織名稱" : "只有擁有者或管理員可以修改組織資料"}
+          {canEdit ? t("org.descriptionEditable") : t("org.descriptionReadOnly")}
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={onSubmit} className="max-w-sm space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="org-name">組織名稱</Label>
+          <Field label={t("org.nameLabel")} htmlFor="org-name">
             <Input
               id="org-name"
               value={name}
@@ -90,10 +91,10 @@ export function OrgSettingsClient({
               disabled={!canEdit || saving}
               required
             />
-          </div>
+          </Field>
           {canEdit && (
             <Button type="submit" disabled={saving || name.trim() === orgName}>
-              {saving ? "儲存中…" : "儲存"}
+              {saving ? t("org.saving") : t("org.save")}
             </Button>
           )}
         </form>

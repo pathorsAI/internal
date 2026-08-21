@@ -28,7 +28,7 @@ function findEocd(view: DataView): number {
 function readCentralDirectory(buf: ArrayBuffer): ZipEntry[] {
   const view = new DataView(buf);
   const eocd = findEocd(view);
-  if (eocd < 0) throw new Error("不是有效的 xlsx（找不到 zip 結尾）");
+  if (eocd < 0) throw new XlsxError("notXlsx");
   const count = view.getUint16(eocd + 10, true);
   let ptr = view.getUint32(eocd + 16, true);
 
@@ -58,7 +58,8 @@ async function readEntry(buf: ArrayBuffer, entry: ZipEntry): Promise<string> {
   const raw = new Uint8Array(buf, start, entry.size);
 
   if (entry.method === 0) return new TextDecoder().decode(raw);
-  if (entry.method !== 8) throw new Error(`xlsx 用了不支援的壓縮方式（${entry.method}）`);
+  if (entry.method !== 8)
+    throw new XlsxError("unsupportedCompression", String(entry.method));
 
   const stream = new Blob([raw as unknown as BlobPart])
     .stream()
@@ -152,12 +153,26 @@ function parseRow(rowXml: string, shared: string[]): string[] {
  * 讀出活頁簿第一張工作表，回傳對齊欄位的字串表格。
  * 空白儲存格補空字串，這樣呼叫端可以直接用欄索引取值。
  */
+/**
+ * 這支解析器跑在瀏覽器端，錯誤訊息會直接顯示給使用者，所以這裡只丟「代號」，
+ * 由畫面端翻成當下語系的句子。
+ */
+export class XlsxError extends Error {
+  constructor(
+    readonly code: "notXlsx" | "unsupportedCompression" | "noSheet",
+    readonly detail?: string,
+  ) {
+    super(code);
+    this.name = "XlsxError";
+  }
+}
+
 export async function readXlsxFirstSheet(buf: ArrayBuffer): Promise<string[][]> {
   const entries = readCentralDirectory(buf);
   const sheet = entries
     .filter((e) => /^xl\/worksheets\/sheet\d+\.xml$/.test(e.name))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))[0];
-  if (!sheet) throw new Error("xlsx 裡找不到工作表");
+  if (!sheet) throw new XlsxError("noSheet");
 
   const shared = await readSharedStrings(buf, entries);
   const xml = await readEntry(buf, sheet);

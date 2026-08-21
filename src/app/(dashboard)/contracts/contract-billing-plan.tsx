@@ -1,9 +1,10 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import { CalendarClock, Info } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field, TextField } from "@/components/form-field";
 import {
   Select,
   SelectContent,
@@ -13,8 +14,6 @@ import {
 } from "@/components/ui/select";
 import { formatCurrency, formatDate } from "@/lib/format";
 import {
-  BILLING_PLAN_LABELS,
-  DUE_RULE_LABELS,
   defaultSplit,
   formatSplit,
   generateSchedule,
@@ -60,6 +59,8 @@ export function ContractBillingPlanFields({
   /** 其中已請款 / 已開票 / 已收款、重新產生時不會動到的筆數 */
   lockedCount?: number;
 }>) {
+  const t = useTranslations("contracts");
+  const tl = useTranslations("lib");
   const [plan, setPlan] = React.useState<string>(defaults?.billingPlan ?? UNSET);
   const [count, setCount] = React.useState<string>(String(defaults?.installmentCount ?? 3));
   const [split, setSplit] = React.useState<string>(
@@ -82,6 +83,19 @@ export function ContractBillingPlanFields({
     if (Number.isFinite(n) && n >= 1 && n <= 60) setSplit(formatSplit(defaultSplit(n)));
   }
 
+  // 期別名稱會寫進 billing_items.title，所以用當下語系產生。
+  const installmentTitles = React.useMemo(
+    () => ({
+      full: tl("installment.full"),
+      first: tl("installment.first"),
+      final: tl("installment.final"),
+      signing: tl("installment.signing"),
+      interim: tl("installment.interim"),
+      nth: (n: number) => tl("installment.nth", { n }),
+    }),
+    [tl],
+  );
+
   const isInstallments = plan === "installments";
   const monthAnchored = dueRule === "day_of_month" || dueRule === "business_day_of_month";
   const numericAmount = amount === "" ? null : Number(amount);
@@ -98,8 +112,8 @@ export function ContractBillingPlanFields({
         dueDay: Number(dueDay) || null,
         signedDate: signedDate || null,
         startDate: startDate || null,
-      }),
-    [plan, numericAmount, count, split, intervalMonths, dueRule, dueDay, signedDate, startDate],
+      }, installmentTitles),
+    [plan, numericAmount, count, split, intervalMonths, dueRule, dueDay, signedDate, startDate, installmentTitles],
   );
 
   const previewTotal = preview.reduce((sum, r) => sum + r.amount, 0);
@@ -108,7 +122,7 @@ export function ContractBillingPlanFields({
     <section className="space-y-3 rounded-lg border p-3 sm:col-span-2">
       <div className="flex items-center gap-2">
         <CalendarClock className="size-4 text-muted-foreground" />
-        <div className="text-sm font-medium">請款方式</div>
+        <div className="text-sm font-medium">{t("billingPlan.heading")}</div>
       </div>
 
       {/* Radix Select 不會送出 name，統一用 hidden input 帶值。 */}
@@ -116,88 +130,82 @@ export function ContractBillingPlanFields({
       <input type="hidden" name="dueRule" value={dueRule} />
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <Label>怎麼收這筆錢</Label>
+        <Field label={t("billingPlan.planLabel")}>
           <Select value={plan} onValueChange={setPlan}>
             <SelectTrigger className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={UNSET}>— 不自動排程 —</SelectItem>
-              <SelectItem value="single">{BILLING_PLAN_LABELS.single}</SelectItem>
-              <SelectItem value="installments">{BILLING_PLAN_LABELS.installments}</SelectItem>
-              <SelectItem value="milestones">{BILLING_PLAN_LABELS.milestones}</SelectItem>
-              <SelectItem value="subscription">{BILLING_PLAN_LABELS.subscription}</SelectItem>
+              <SelectItem value={UNSET}>{t("billingPlan.planNone")}</SelectItem>
+              <SelectItem value="single">{t("billingPlan.plan.single")}</SelectItem>
+              <SelectItem value="installments">{t("billingPlan.plan.installments")}</SelectItem>
+              <SelectItem value="milestones">{t("billingPlan.plan.milestones")}</SelectItem>
+              <SelectItem value="subscription">{t("billingPlan.plan.subscription")}</SelectItem>
             </SelectContent>
           </Select>
-        </div>
+        </Field>
 
         {isInstallments && (
-          <div className="space-y-1.5">
-            <Label htmlFor="installmentCount">期數</Label>
-            <Input
-              id="installmentCount"
-              name="installmentCount"
-              type="number"
-              min="1"
-              max="60"
-              value={count}
-              onChange={(e) => onCountChange(e.target.value)}
-            />
-          </div>
+          <TextField
+            name="installmentCount"
+            label={t("billingPlan.installmentCount")}
+            type="number"
+            min="1"
+            max="60"
+            value={count}
+            onChange={(e) => onCountChange(e.target.value)}
+          />
         )}
 
         {isInstallments && (
-          <div className="space-y-1.5">
-            <Label htmlFor="installmentSplit">各期比例（%）</Label>
-            <Input
-              id="installmentSplit"
-              name="installmentSplit"
-              value={split}
-              onChange={(e) => setSplit(e.target.value)}
-              placeholder="30,40,30"
-            />
-          </div>
+          <TextField
+            name="installmentSplit"
+            label={t("billingPlan.installmentSplit.label")}
+            value={split}
+            onChange={(e) => setSplit(e.target.value)}
+            placeholder={t("billingPlan.installmentSplit.placeholder")}
+          />
         )}
 
         {isInstallments && (
-          <div className="space-y-1.5">
-            <Label htmlFor="billingIntervalMonths">每期間隔（月）</Label>
-            <Input
-              id="billingIntervalMonths"
-              name="billingIntervalMonths"
-              type="number"
-              min="1"
-              max="12"
-              value={intervalMonths}
-              onChange={(e) => setIntervalMonths(e.target.value)}
-            />
-          </div>
+          <TextField
+            name="billingIntervalMonths"
+            label={t("billingPlan.intervalMonths")}
+            type="number"
+            min="1"
+            max="12"
+            value={intervalMonths}
+            onChange={(e) => setIntervalMonths(e.target.value)}
+          />
         )}
 
         {(isInstallments || plan === "single") && (
-          <div className="space-y-1.5 sm:col-span-2">
-            <Label>應請款日怎麼算</Label>
+          <Field label={t("billingPlan.dueRuleLabel")} wide>
             <Select value={dueRule} onValueChange={setDueRule}>
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="signed_date">{DUE_RULE_LABELS.signed_date}</SelectItem>
-                <SelectItem value="day_of_month">{DUE_RULE_LABELS.day_of_month}</SelectItem>
+                <SelectItem value="signed_date">{t("billingPlan.dueRule.signed_date")}</SelectItem>
+                <SelectItem value="day_of_month">{t("billingPlan.dueRule.day_of_month")}</SelectItem>
                 <SelectItem value="business_day_of_month">
-                  {DUE_RULE_LABELS.business_day_of_month}
+                  {t("billingPlan.dueRule.business_day_of_month")}
                 </SelectItem>
               </SelectContent>
             </Select>
-          </div>
+          </Field>
         )}
 
         {(isInstallments || plan === "single") && monthAnchored && (
-          <div className="space-y-1.5 sm:col-span-2">
-            <Label htmlFor="dueDay">
-              {dueRule === "business_day_of_month" ? "第幾個工作日" : "第幾日"}
-            </Label>
+          <Field
+            label={
+              dueRule === "business_day_of_month"
+                ? t("billingPlan.dueDayLabelBusiness")
+                : t("billingPlan.dueDayLabelDay")
+            }
+            htmlFor="dueDay"
+            wide
+          >
             <Input
               id="dueDay"
               name="dueDay"
@@ -209,31 +217,33 @@ export function ContractBillingPlanFields({
             />
             <p className="text-xs text-muted-foreground">
               {dueRule === "business_day_of_month"
-                ? "工作日只排除週六日，不含國定假日（每年公告不同）。落在假日的那幾期，之後在看板上逐筆改即可。"
-                : "超過該月天數會自動取月底（例：31 日 → 2 月底）。"}
+                ? t("billingPlan.dueDayHintBusiness")
+                : t("billingPlan.dueDayHintDay")}
             </p>
-          </div>
+          </Field>
         )}
       </div>
 
       {plan === "milestones" && (
         <p className="flex gap-1.5 text-xs text-muted-foreground">
           <Info className="mt-0.5 size-3.5 shrink-0" />
-          里程碑的金額與日期各不相同，不由系統推導。存檔後在下方「分期請款」逐筆新增。
+          {t("billingPlan.milestoneHint")}
         </p>
       )}
       {plan === "subscription" && (
         <p className="flex gap-1.5 text-xs text-muted-foreground">
           <Info className="mt-0.5 size-3.5 shrink-0" />
-          月費的期別由「訂閱 / 月費」的週期引擎推算，會直接出現在請款看板，這張合約不另外展開排程。
+          {t("billingPlan.subscriptionHint")}
         </p>
       )}
 
       {preview.length > 0 && (
         <div className="space-y-1.5">
           <div className="flex items-baseline justify-between text-xs text-muted-foreground">
-            <span>存檔後會產生這 {preview.length} 期</span>
-            <span className="tabular-nums">合計 {formatCurrency(previewTotal, currency)}</span>
+            <span>{t("billingPlan.previewHeading", { count: preview.length })}</span>
+            <span className="tabular-nums">
+              {t("billingPlan.previewTotal", { amount: formatCurrency(previewTotal, currency) })}
+            </span>
           </div>
           <ul className="divide-y rounded-md border bg-muted/30">
             {preview.map((r) => (
@@ -255,7 +265,7 @@ export function ContractBillingPlanFields({
       {preview.length === 0 && (plan === "single" || isInstallments) && (
         <p className="flex gap-1.5 text-xs text-muted-foreground">
           <Info className="mt-0.5 size-3.5 shrink-0" />
-          還缺合約金額或簽約日（沒有簽約日就用開始日期），補齊後這裡會顯示要產生的各期。
+          {t("billingPlan.missingInputsHint")}
         </p>
       )}
 
@@ -270,13 +280,14 @@ export function ContractBillingPlanFields({
               className="mt-0.5 size-4 accent-primary"
             />
             <span>
-              <span>存檔時依上面的設定重新產生排程</span>
+              <span>{t("billingPlan.regenerateLabel")}</span>
               <span className="mt-0.5 block text-xs text-muted-foreground">
-                這張合約已有 {existingCount} 期
-                {lockedCount > 0 && `，其中 ${lockedCount} 期已請款 / 已開票 / 已收款`}。
+                {t("billingPlan.existingCount", { count: existingCount })}
+                {lockedCount > 0 && t("billingPlan.lockedCountSuffix", { count: lockedCount })}
+                {t("billingPlan.periodEnd")}
                 {lockedCount > 0
-                  ? "已經動過的那幾期不會被刪，只重排其餘的。"
-                  : "既有的排程會被取代。"}
+                  ? t("billingPlan.regenerateNoteLocked")
+                  : t("billingPlan.regenerateNoteAll")}
               </span>
             </span>
           </label>
@@ -285,7 +296,7 @@ export function ContractBillingPlanFields({
 
       {existingCount === 0 && preview.length > 0 && (
         <p className="text-xs text-muted-foreground">
-          存檔後可到請款看板逐筆調整金額與日期，改過的不會被這份設定蓋掉。
+          {t("billingPlan.newScheduleNote")}
         </p>
       )}
     </section>

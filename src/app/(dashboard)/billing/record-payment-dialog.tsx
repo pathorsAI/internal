@@ -3,6 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Banknote, ExternalLink, Loader2 } from "lucide-react";
 import {
@@ -43,6 +44,7 @@ export function RecordPaymentDialog({
   customerPartyId: number | null;
   customerName: string | null;
 }>) {
+  const t = useTranslations("billing.recordPayment");
   const [open, setOpen] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [candidates, setCandidates] = React.useState<PaymentCandidate[] | null>(null);
@@ -72,10 +74,10 @@ export function RecordPaymentDialog({
     setLinking(null);
     if (res.ok) {
       setOpen(false);
-      toast.success("已認列這筆收款");
+      toast.success(t("toast.linked"));
       router.refresh();
     } else {
-      toast.error(res.error ?? "配對失敗");
+      toast.error(res.error ?? t("toast.linkFailed"));
     }
   }
 
@@ -88,29 +90,28 @@ export function RecordPaymentDialog({
     >
       <DialogTrigger asChild>
         <Button type="button" size="sm" variant="outline">
-          <Banknote className="size-4" /> 登記收款
+          <Banknote className="size-4" /> {t("trigger")}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>登記收款</DialogTitle>
+          <DialogTitle>{t("dialog.title")}</DialogTitle>
           <DialogDescription>
-            尚未收 {formatCurrency(outstanding, currency)}
-            {customerName ? `　·　${customerName}` : ""}。
-            下面是還沒綁到任何請款項目的收入交易，金額最接近的排在前面。
+            {t("dialog.description", {
+              amount: formatCurrency(outstanding, currency),
+              customer: customerName ? `　·　${customerName}` : "",
+            })}
           </DialogDescription>
         </DialogHeader>
 
         {loading && (
           <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" /> 搜尋可配對的交易…
+            <Loader2 className="size-4 animate-spin" /> {t("loading")}
           </div>
         )}
 
         {!loading && candidates?.length === 0 && (
-          <p className="py-6 text-center text-sm text-muted-foreground">
-            沒有未綁定的收入交易可以配對。錢還沒入帳的話，先到內外帳建一筆收入。
-          </p>
+          <p className="py-6 text-center text-sm text-muted-foreground">{t("empty")}</p>
         )}
 
         {!loading && candidates && candidates.length > 0 && (
@@ -119,7 +120,7 @@ export function RecordPaymentDialog({
               <li key={c.id} className="flex items-center justify-between gap-3 px-3 py-2">
                 <div className="min-w-0">
                   <div className="truncate text-sm font-medium">
-                    {c.description ?? "（無說明）"}
+                    {c.description ?? t("candidate.noDescription")}
                   </div>
                   <div className="text-xs text-muted-foreground tabular-nums">
                     {formatDate(c.txnDate)}
@@ -137,7 +138,9 @@ export function RecordPaymentDialog({
                         c.gap === 0 ? "text-income" : "text-muted-foreground",
                       )}
                     >
-                      {c.gap === 0 ? "金額吻合" : `差 ${formatCurrency(c.gap, c.currency)}`}
+                      {c.gap === 0
+                        ? t("candidate.matchExact")
+                        : t("candidate.gap", { amount: formatCurrency(c.gap, c.currency) })}
                     </div>
                   </div>
                   <Button
@@ -148,7 +151,7 @@ export function RecordPaymentDialog({
                       void link(c.id);
                     }}
                   >
-                    {linking === c.id ? "配對中…" : "就是這筆"}
+                    {linking === c.id ? t("candidate.linking") : t("candidate.pick")}
                   </Button>
                 </div>
               </li>
@@ -158,7 +161,7 @@ export function RecordPaymentDialog({
 
         <Button asChild variant="ghost" size="sm" className="w-full">
           <Link href="/transactions">
-            <ExternalLink className="size-4" /> 到內外帳建一筆收入
+            <ExternalLink className="size-4" /> {t("goToTransactions")}
           </Link>
         </Button>
       </DialogContent>

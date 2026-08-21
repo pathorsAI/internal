@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button";
 
 // 通用分頁列：上一頁 / 下一頁 + 「第 X / Y 頁，共 N 筆」。
 // params 帶入目前的篩選條件，翻頁時保留（page 由本元件覆寫）。
-export function PaginationNav({
+export async function PaginationNav({
   page,
   totalPages,
   total,
@@ -19,6 +20,7 @@ export function PaginationNav({
   params?: Record<string, string | undefined>;
 }>) {
   if (totalPages <= 1) return null;
+  const t = await getTranslations("common");
 
   function hrefFor(targetPage: number) {
     const sp = new URLSearchParams();
@@ -36,18 +38,18 @@ export function PaginationNav({
   return (
     <nav
       className="flex items-center justify-between gap-2 px-1 py-3 text-sm"
-      aria-label="分頁"
+      aria-label={t("paginationNav.ariaLabel")}
     >
       <span className="text-muted-foreground">
-        第 {page} / {totalPages} 頁 · 共 {total} 筆
+        {t("paginationNav.summary", { page, totalPages, total })}
       </span>
       <div className="flex items-center gap-2">
         <PageLink href={hrefFor(page - 1)} disabled={!hasPrev} rel="prev">
           <ChevronLeft className="size-4" />
-          上一頁
+          {t("paginationNav.prev")}
         </PageLink>
         <PageLink href={hrefFor(page + 1)} disabled={!hasNext} rel="next">
-          下一頁
+          {t("paginationNav.next")}
           <ChevronRight className="size-4" />
         </PageLink>
       </div>
