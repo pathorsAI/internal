@@ -29,8 +29,8 @@ sidebar. The codebase, docs and configuration are English.
 
 > Screenshots are from a demo organization — the company, clients and figures are all made up.
 
-There is also a standalone [landing page](docs/landing/index.html) that walks through the same
-ideas — open the file in a browser, or serve `docs/` with GitHub Pages.
+There is also a [landing page](https://pathorsai.github.io/internal/) that walks through the
+same ideas — it is [`docs/index.html`](docs/index.html), published with GitHub Pages.
 
 <table>
   <tr>
@@ -221,7 +221,7 @@ src/
   lib/            # auth (better-auth), session helpers, object storage, utils
 migrations/       # plain forward-only SQL migrations
 scripts/          # one-off operational SQL (e.g. bootstrap-owner)
-docs/             # deployment guide, MCP docs, landing page, README assets
+docs/             # landing page (GitHub Pages root), deployment guide, MCP docs, assets
 Dockerfile        # vendor-neutral self-host image
 docker-compose.yml
 ```
