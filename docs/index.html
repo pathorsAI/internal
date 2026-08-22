@@ -383,6 +383,8 @@ dl.spec dd{margin:0; color:var(--ink-2)}
 .finale .btn.ghost{background:transparent; color:var(--brand-ink); border-color:color-mix(in srgb,var(--brand-ink) 40%,transparent); box-shadow:none}
 .finale .btn.ghost:hover{border-color:var(--brand-ink); color:var(--brand-ink)}
 .finale .btns{justify-content:center}
+.finale .already{margin:1.6rem 0 0; font-size:.95rem; opacity:.75}
+.finale .already a{color:var(--brand-ink); text-decoration:underline; text-underline-offset:3px}
 
 footer{border-top:1px solid var(--line); padding-block:2.5rem; margin-top:clamp(4rem,8vw,7rem)}
 footer .wrap{display:flex; gap:.8rem 2rem; flex-wrap:wrap; align-items:center; font-size:.88rem; color:var(--ink-3)}
@@ -415,6 +417,7 @@ footer .sp{margin-left:auto}
       <a href="#books" class="hide-s">How it works</a>
       <a href="#billing" class="hide-s">Billing</a>
       <a href="#language" class="hide-s">Languages</a>
+      <a href="https://internal.pathors.com/login">Log in</a>
       <a class="btn ghost sm" href="https://github.com/pathorsAI/internal"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
     </nav>
   </div>
@@ -513,7 +516,7 @@ footer .sp{margin-left:auto}
     </div>
     <div class="rv" data-d="1">
       <p class="shot-label">Dual books</p>
-      <div class="shot"><img src="../images/transactions.png" alt="The ledger listing transactions, each marked as internal, external or both"></div>
+      <div class="shot"><img src="images/transactions.png" alt="The ledger listing transactions, each marked as internal, external or both"></div>
     </div>
   </div>
 </section>
@@ -528,7 +531,7 @@ footer .sp{margin-left:auto}
 
     <div class="rv" style="margin-bottom:clamp(1.5rem,3vw,2.2rem)">
       <p class="shot-label">Billing board</p>
-      <div class="shot"><img src="../images/billing.png" alt="The billing board, with summary cards and every billing item alongside its next step"></div>
+      <div class="shot"><img src="images/billing.png" alt="The billing board, with summary cards and every billing item alongside its next step"></div>
     </div>
 
     <div class="feat" style="margin-top:clamp(2.5rem,5vw,4rem)">
@@ -636,7 +639,7 @@ footer .sp{margin-left:auto}
       <div style="display:grid; gap:clamp(1.5rem,3vw,2.4rem); grid-template-columns:repeat(auto-fit,minmax(320px,1fr))">
         <div class="rv">
           <p class="shot-label">Overview</p>
-          <div class="shot"><img src="../images/dashboard.png" alt="Overview page showing balances per account, monthly cash flow and the balance trend"></div>
+          <div class="shot"><img src="images/dashboard.png" alt="Overview page showing balances per account, monthly cash flow and the balance trend"></div>
           <ul class="pts" style="margin-top:1.2rem">
             <li><b>Every account, every currency.</b> Balances sit side by side, unconverted, so the number you read is the number in the bank.</li>
             <li><b>Money in against money out,</b> month by month, with the trend behind it.</li>
@@ -644,7 +647,7 @@ footer .sp{margin-left:auto}
         </div>
         <div class="rv" data-d="1">
           <p class="shot-label">Reports</p>
-          <div class="shot"><img src="../images/reports.png" alt="Reports page with receivables ageing, tax periods and contract coverage"></div>
+          <div class="shot"><img src="images/reports.png" alt="Reports page with receivables ageing, tax periods and contract coverage"></div>
           <ul class="pts" style="margin-top:1.2rem">
             <li><b>How old the debt is,</b> per client — not just how big it is.</li>
             <li><b>Work you agreed to but never billed for.</b> A signed contract nobody scheduled is money you will forget to ask for.</li>
@@ -801,6 +804,7 @@ footer .sp{margin-left:auto}
         <a class="btn primary" href="https://github.com/pathorsAI/internal"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>Get it on GitHub</a>
         <a class="btn ghost" href="https://github.com/pathorsAI/internal#quick-start">Read the setup guide</a>
       </div>
+      <p class="already">Already using it? <a href="https://internal.pathors.com/login">Log in here</a>.</p>
     </div>
   </div>
 </section>
@@ -811,6 +815,7 @@ footer .sp{margin-left:auto}
   <div class="wrap">
     <span>Pathors Internal</span>
     <span>Apache 2.0</span>
+    <span><a href="https://internal.pathors.com/login">Log in</a></span>
     <span class="sp"><a class="ghlink" href="https://github.com/pathorsAI/internal"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>github.com/pathorsAI/internal</a></span>
   </div>
 </footer>
