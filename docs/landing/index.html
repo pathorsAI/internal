@@ -104,6 +104,8 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
 .btn.ghost{background:var(--surface); color:var(--ink); border-color:var(--line); box-shadow:var(--sh-1)}
 .btn.ghost:hover{border-color:var(--brand); color:var(--brand); transform:translateY(-2px)}
 .btn.sm{padding:.5rem 1rem; font-size:.88rem}
+.btn svg{width:17px; height:17px; fill:currentColor; flex:none}
+.btn.sm svg{width:15px; height:15px}
 .btns{display:flex; flex-wrap:wrap; gap:.7rem}
 
 .card{
@@ -223,9 +225,7 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
 .trio{display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(265px,1fr))}
 .pcard{padding:1.5rem 1.4rem; border-radius:var(--r-m); background:var(--surface); border:1px solid var(--line); box-shadow:var(--sh-1); transition:transform .2s ease, box-shadow .2s ease}
 .pcard:hover{transform:translateY(-3px); box-shadow:var(--sh-2)}
-.pcard .k{width:34px; height:34px; border-radius:10px; display:grid; place-items:center; margin-bottom:1rem; background:var(--rose-wash); color:var(--rose)}
-.pcard .k svg{width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round}
-.pcard h3{margin-bottom:.45rem; font-size:1.08rem}
+.pcard h3{margin-bottom:.55rem; font-size:1.12rem}
 .pcard p{margin:0; font-size:.94rem; color:var(--ink-2)}
 
 /* ---------- alternating feature rows ---------- */
@@ -237,14 +237,9 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
 }
 .fx .sec-head{margin-bottom:1.4rem}
 .pts{list-style:none; padding:0; margin:0; display:grid; gap:.9rem}
-.pts li{position:relative; padding-left:1.65rem; font-size:.96rem; color:var(--ink-2); line-height:1.5}
+.pts li{position:relative; padding-left:1.45rem; font-size:.96rem; color:var(--ink-2); line-height:1.5}
 .pts li::before{
-  content:""; position:absolute; left:0; top:.42em; width:16px; height:16px; border-radius:50%;
-  background:var(--brand-wash);
-}
-.pts li::after{
-  content:""; position:absolute; left:5px; top:.72em; width:6px; height:3px; border-left:1.6px solid var(--brand);
-  border-bottom:1.6px solid var(--brand); transform:rotate(-45deg);
+  content:""; position:absolute; left:0; top:.72em; width:11px; height:1.5px; background:var(--brand);
 }
 .pts li b{color:var(--ink); font-weight:600}
 
@@ -354,9 +349,7 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
 @media(min-width:940px){ .tiles{grid-template-columns:repeat(3,1fr)} }
 .tile{padding:1.4rem 1.35rem; border-radius:var(--r-m); background:var(--surface); border:1px solid var(--line); box-shadow:var(--sh-1); transition:transform .2s ease, box-shadow .2s ease, border-color .2s}
 .tile:hover{transform:translateY(-3px); box-shadow:var(--sh-2); border-color:color-mix(in srgb,var(--brand) 35%,var(--line))}
-.tile .ic{width:34px; height:34px; border-radius:10px; background:var(--brand-wash); color:var(--brand); display:grid; place-items:center; margin-bottom:1rem}
-.tile .ic svg{width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round}
-.tile h3{font-size:1.05rem; margin-bottom:.4rem}
+.tile h3{font-size:1.05rem; margin-bottom:.5rem}
 .tile p{margin:0; font-size:.92rem; color:var(--ink-2); line-height:1.5}
 
 /* ---------- setup ---------- */
@@ -395,6 +388,8 @@ footer{border-top:1px solid var(--line); padding-block:2.5rem; margin-top:clamp(
 footer .wrap{display:flex; gap:.8rem 2rem; flex-wrap:wrap; align-items:center; font-size:.88rem; color:var(--ink-3)}
 footer a{color:var(--ink-2); text-decoration:none}
 footer a:hover{color:var(--brand)}
+footer .ghlink{display:inline-flex; align-items:center; gap:.45rem}
+footer .ghlink svg{width:15px; height:15px; fill:currentColor}
 footer .sp{margin-left:auto}
 
 /* ---------- reveal ---------- */
@@ -420,7 +415,7 @@ footer .sp{margin-left:auto}
       <a href="#books" class="hide-s">How it works</a>
       <a href="#billing" class="hide-s">Billing</a>
       <a href="#language" class="hide-s">Languages</a>
-      <a class="btn ghost sm" href="https://github.com/pathorsAI/internal">GitHub</a>
+      <a class="btn ghost sm" href="https://github.com/pathorsAI/internal"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
     </nav>
   </div>
 </header>
@@ -434,10 +429,10 @@ footer .sp{margin-left:auto}
     <h1>Two sets of books. <br>One set of numbers.</h1>
     <p class="lede">The accounting console we built for our own company. Enter a transaction once, and it lands in the right books on its own — no second spreadsheet to keep in step, no month-end surprise.</p>
     <div class="btns">
-      <a class="btn primary" href="https://github.com/pathorsAI/internal">Get it on GitHub</a>
+      <a class="btn primary" href="https://github.com/pathorsAI/internal"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>Get it on GitHub</a>
       <a class="btn ghost" href="#books">See how it works</a>
     </div>
-    <p class="trust"><b>Run it on your own server</b><span>·</span><b>English &amp; Chinese</b><span>·</span><b>Free forever</b></p>
+    <p class="trust"><b>Run it on your own server</b><span>·</span><b>Free forever</b></p>
   </div>
 
   <div class="wrap stage">
@@ -488,17 +483,14 @@ footer .sp{margin-left:auto}
     </div>
     <div class="trio">
       <div class="pcard rv">
-        <div class="k"><svg viewBox="0 0 24 24"><path d="M4 5h7l2 3h7v11H4z"/><path d="M9 13h6"/></svg></div>
         <h3>The two files stopped matching</h3>
         <p>Someone fixed a number in one place and not the other. You find out in March, when it is far too late to remember which one was right.</p>
       </div>
       <div class="pcard rv" data-d="1">
-        <div class="k"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></div>
         <h3>The invoice never went out</h3>
         <p>The work shipped in May. The invoice went out in August, after the client asked about it. Nobody was watching the gap in between.</p>
       </div>
       <div class="pcard rv" data-d="2">
-        <div class="k"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18z"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.2 2.4c-.5.2-.7.6-.7 1.1v.5"/><path d="M12 17h.01"/></svg></div>
         <h3>Nobody can say what you are owed</h3>
         <p>Not without opening four files, filtering each one and adding it up by hand — and getting a slightly different answer every time.</p>
       </div>
@@ -689,10 +681,9 @@ footer .sp{margin-left:auto}
 
 <section class="band" id="language">
   <div class="wrap">
-    <div class="sec-head center rv">
-      <span class="badge"><span class="dot"></span>Two languages</span>
-      <h2>Everyone reads it in their own language</h2>
-      <p class="lede">Your bookkeeper and your engineer do not have to agree on a language. Switch, and the whole thing follows — buttons, tables, even error messages. Try it:</p>
+    <div class="sec-head rv">
+      <h2 style="font-size:clamp(1.5rem,2.6vw,2rem)">Nobody has to work in a language they are guessing at</h2>
+      <p class="lede" style="font-size:1.05rem">Switch, and the whole thing follows — buttons, tables, even error messages. Try it:</p>
     </div>
 
     <div class="lang card rv">
@@ -737,32 +728,26 @@ footer .sp{margin-left:auto}
     </div>
     <div class="tiles">
       <div class="tile rv">
-        <div class="ic"><svg viewBox="0 0 24 24"><path d="M3 7h18M3 12h13"/><circle cx="18" cy="16" r="3"/><path d="M3 17h9"/></svg></div>
         <h3>Clients and suppliers</h3>
         <p>Everyone you deal with is a proper record, so a name is never typed twice or spelled two ways.</p>
       </div>
       <div class="tile rv" data-d="1">
-        <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3v18M5 8h9a3 3 0 0 1 0 6H5"/></svg></div>
         <h3>Money people fronted</h3>
         <p>Someone paid out of their own pocket. Track what the company owes them and settle it properly.</p>
       </div>
       <div class="tile rv" data-d="2">
-        <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 6h6l2 3h8v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6z"/><path d="M8 14h8"/></svg></div>
         <h3>Checking against the bank</h3>
         <p>Match what the bank says against what you recorded, and write down the difference instead of arguing with it.</p>
       </div>
       <div class="tile rv">
-        <div class="ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0 1 12 0M17 11h4M17 15h4"/></svg></div>
         <h3>Payroll</h3>
         <p>Staff, pay items and pay runs, posting straight into the internal books where salaries belong.</p>
       </div>
       <div class="tile rv" data-d="1">
-        <div class="ic"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg></div>
         <h3>Receipts on file</h3>
         <p>Upload the receipt or the contract and attach it to the entry it justifies. No shoebox.</p>
       </div>
       <div class="tile rv" data-d="2">
-        <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 20V9l8-5 8 5v11"/><path d="M9 20v-6h6v6"/></svg></div>
         <h3>More than one company</h3>
         <p>Run several companies from one install. Each one only ever sees its own numbers, and you switch with a click.</p>
       </div>
@@ -813,7 +798,7 @@ footer .sp{margin-left:auto}
       <h2>Stop reconciling your own files</h2>
       <p>It is the tool we run our own company on — not a general-purpose accounting suite, and not trying to be. If you keep two sets of books and chase your own invoices, it will probably fit.</p>
       <div class="btns">
-        <a class="btn primary" href="https://github.com/pathorsAI/internal">Get it on GitHub</a>
+        <a class="btn primary" href="https://github.com/pathorsAI/internal"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>Get it on GitHub</a>
         <a class="btn ghost" href="https://github.com/pathorsAI/internal#quick-start">Read the setup guide</a>
       </div>
     </div>
@@ -826,7 +811,7 @@ footer .sp{margin-left:auto}
   <div class="wrap">
     <span>Pathors Internal</span>
     <span>Apache 2.0</span>
-    <span class="sp"><a href="https://github.com/pathorsAI/internal">github.com/pathorsAI/internal</a></span>
+    <span class="sp"><a class="ghlink" href="https://github.com/pathorsAI/internal"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>github.com/pathorsAI/internal</a></span>
   </div>
 </footer>
 
