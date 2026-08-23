@@ -9,7 +9,7 @@ import {
   type MemberOption,
 } from "./employee-fields";
 
-export type { MemberOption };
+export type { MemberOption } from "./employee-fields";
 
 type Employee = EmployeeFormValues & { id: number };
 

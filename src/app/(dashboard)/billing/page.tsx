@@ -131,7 +131,9 @@ function RowActions({ row }: Readonly<{ row: BillingRow }>) {
         />
       )}
       {row.needsInvoice &&
-        (itemId != null ? (
+        (itemId == null ? (
+          <QuickMark rowKey={row.key} field="invoicedOn" value={row.invoicedOn} />
+        ) : (
           <IssueInvoiceDialog
             billingItemId={itemId}
             contractId={row.contractId}
@@ -141,8 +143,6 @@ function RowActions({ row }: Readonly<{ row: BillingRow }>) {
             expected={row.expected}
             currency={row.currency}
           />
-        ) : (
-          <QuickMark rowKey={row.key} field="invoicedOn" value={row.invoicedOn} />
         ))}
       <QuickMark rowKey={row.key} field="billedOn" value={row.billedOn} />
     </>

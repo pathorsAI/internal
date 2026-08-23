@@ -124,6 +124,59 @@ async function checkEmployeeUserBinding(orgId: string, userId: string, excludeEm
   }
 }
 
+// update_employee 可搬運的欄位，依取值方式分三組。
+const EMPLOYEE_STRING_FIELDS = [
+  "nationalId",
+  "employmentType",
+  "salaryAccount",
+  "startDate",
+  "endDate",
+  "workEmail",
+  "personalEmail",
+  "phone",
+  "note",
+] as const;
+const EMPLOYEE_DECIMAL_FIELDS = [
+  "baseSalary",
+  "laborInsuredSalary",
+  "healthInsuredSalary",
+] as const;
+const EMPLOYEE_BOOLEAN_FIELDS = [
+  "hasLaborInsurance",
+  "hasHealthInsurance",
+  "hasPension",
+  "isActive",
+] as const;
+
+/** update_employee 的欄位搬運：只有真的帶進來的欄位才會進 patch（userId 另外處理）。 */
+function buildEmployeePatch(args: Record<string, unknown>): Record<string, unknown> {
+  const patch: Record<string, unknown> = {};
+  if (optString(args, "name") !== undefined) patch.name = requireString(args, "name");
+  for (const f of EMPLOYEE_STRING_FIELDS) {
+    if (optString(args, f) !== undefined) patch[f] = optString(args, f);
+  }
+  for (const f of EMPLOYEE_DECIMAL_FIELDS) {
+    if (optNumber(args, f) !== undefined) patch[f] = optDecimal(args, f);
+  }
+  for (const f of EMPLOYEE_BOOLEAN_FIELDS) {
+    if (optBoolean(args, f) !== undefined) patch[f] = optBoolean(args, f);
+  }
+  return patch;
+}
+
+/** null / 空字串 = 解除綁定；其他值要先驗證那位使用者可以綁。 */
+async function resolveEmployeeUserId(
+  args: Record<string, unknown>,
+  orgId: string,
+  employeeId: number,
+): Promise<string | null> {
+  const raw = args.userId;
+  if (raw === null || raw === "") return null;
+  const uid = requireString(args, "userId");
+  await checkEmployeeUserBinding(orgId, uid, employeeId);
+  return uid;
+}
+
 export const hrTools: Record<string, ToolDef> = {
   // ---- employees ----
   list_employees: {
@@ -271,42 +324,8 @@ export const hrTools: Record<string, ToolDef> = {
       checkEmploymentType(optString(args, "employmentType"));
       checkEmailArg(args, "workEmail");
       checkEmailArg(args, "personalEmail");
-      const patch: Record<string, unknown> = {};
-      if (optString(args, "name") !== undefined) patch.name = requireString(args, "name");
-      if (optString(args, "nationalId") !== undefined) patch.nationalId = optString(args, "nationalId");
-      if (optString(args, "employmentType") !== undefined)
-        patch.employmentType = optString(args, "employmentType");
-      if (optNumber(args, "baseSalary") !== undefined) patch.baseSalary = optDecimal(args, "baseSalary");
-      if (optNumber(args, "laborInsuredSalary") !== undefined)
-        patch.laborInsuredSalary = optDecimal(args, "laborInsuredSalary");
-      if (optNumber(args, "healthInsuredSalary") !== undefined)
-        patch.healthInsuredSalary = optDecimal(args, "healthInsuredSalary");
-      if (optString(args, "salaryAccount") !== undefined)
-        patch.salaryAccount = optString(args, "salaryAccount");
-      if (optString(args, "startDate") !== undefined) patch.startDate = optString(args, "startDate");
-      if (optString(args, "endDate") !== undefined) patch.endDate = optString(args, "endDate");
-      if (optString(args, "workEmail") !== undefined) patch.workEmail = optString(args, "workEmail");
-      if (optString(args, "personalEmail") !== undefined)
-        patch.personalEmail = optString(args, "personalEmail");
-      if (optString(args, "phone") !== undefined) patch.phone = optString(args, "phone");
-      if (optString(args, "note") !== undefined) patch.note = optString(args, "note");
-      if ("userId" in args) {
-        // null / empty string = unbind; otherwise validate the binding.
-        const raw = args.userId;
-        if (raw === null || raw === "") {
-          patch.userId = null;
-        } else {
-          const uid = requireString(args, "userId");
-          await checkEmployeeUserBinding(orgId, uid, id);
-          patch.userId = uid;
-        }
-      }
-      if (optBoolean(args, "hasLaborInsurance") !== undefined)
-        patch.hasLaborInsurance = optBoolean(args, "hasLaborInsurance");
-      if (optBoolean(args, "hasHealthInsurance") !== undefined)
-        patch.hasHealthInsurance = optBoolean(args, "hasHealthInsurance");
-      if (optBoolean(args, "hasPension") !== undefined) patch.hasPension = optBoolean(args, "hasPension");
-      if (optBoolean(args, "isActive") !== undefined) patch.isActive = optBoolean(args, "isActive");
+      const patch = buildEmployeePatch(args);
+      if ("userId" in args) patch.userId = await resolveEmployeeUserId(args, orgId, id);
       if (Object.keys(patch).length === 0) throw new Error("Nothing to update.");
       const [row] = await getDb()
         .update(employees)

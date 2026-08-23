@@ -9,12 +9,12 @@ const QUERY = `(max-width: ${MOBILE_BREAKPOINT - 1}px)`
 // subscribes without an effect and takes a separate server snapshot, so SSR renders
 // the desktop layout deterministically instead of hydrating from `undefined`.
 function subscribe(onChange: () => void) {
-  const mql = window.matchMedia(QUERY)
+  const mql = globalThis.matchMedia(QUERY)
   mql.addEventListener("change", onChange)
   return () => mql.removeEventListener("change", onChange)
 }
 
-const getSnapshot = () => window.matchMedia(QUERY).matches
+const getSnapshot = () => globalThis.matchMedia(QUERY).matches
 const getServerSnapshot = () => false
 
 export function useIsMobile() {

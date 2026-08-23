@@ -271,8 +271,9 @@ export function ContractBillingPlanFields({
 
       {existingCount > 0 && (isInstallments || plan === "single") && (
         <div className="space-y-1.5 rounded-md border border-dashed p-2.5">
-          <label className="flex items-start gap-2 text-sm">
+          <label htmlFor="regenerateSchedule" className="flex items-start gap-2 text-sm">
             <input
+              id="regenerateSchedule"
               type="checkbox"
               name="regenerateSchedule"
               checked={regenerate}

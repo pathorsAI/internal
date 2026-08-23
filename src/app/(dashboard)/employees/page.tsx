@@ -23,6 +23,47 @@ import { requireOrg } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
+type EmployeeRow = Awaited<ReturnType<typeof listEmployees>>[number];
+type InsuranceLabels = { labor: string; health: string; pension: string };
+
+/** 聯絡資訊：公司信箱 / 個人信箱 / 電話，三個都空就顯示破折號。 */
+function contactCell(e: EmployeeRow) {
+  if (!e.workEmail && !e.personalEmail && !e.phone) return "—";
+  return (
+    <div className="flex flex-col text-xs">
+      {e.workEmail ? <span>{e.workEmail}</span> : null}
+      {e.personalEmail ? <span>{e.personalEmail}</span> : null}
+      {e.phone ? <span>{e.phone}</span> : null}
+    </div>
+  );
+}
+
+/** 投保狀態：勞保 / 健保 / 勞退各一顆徽章，都沒有就顯示破折號。 */
+function insuranceCell(e: EmployeeRow, labels: InsuranceLabels) {
+  return (
+    <div className="flex flex-wrap gap-1 text-xs">
+      {e.laborInsuredSalary ? (
+        <Badge variant="outline" className="font-normal">
+          {labels.labor} {formatCurrency(e.laborInsuredSalary)}
+        </Badge>
+      ) : null}
+      {e.healthInsuredSalary ? (
+        <Badge variant="outline" className="font-normal">
+          {labels.health} {formatCurrency(e.healthInsuredSalary)}
+        </Badge>
+      ) : null}
+      {e.hasPension ? (
+        <Badge variant="outline" className="font-normal">
+          {labels.pension}
+        </Badge>
+      ) : null}
+      {!e.laborInsuredSalary && !e.healthInsuredSalary && !e.hasPension ? (
+        <span className="text-muted-foreground">—</span>
+      ) : null}
+    </div>
+  );
+}
+
 export default async function EmployeesPage() {
   const t = await getTranslations("employees");
   const empType: Record<string, string> = {
@@ -40,6 +81,11 @@ export default async function EmployeesPage() {
   ]);
   const accountList = accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }));
   const memberByUserId = new Map(members.map((m) => [m.userId, m]));
+  const insuranceLabels: InsuranceLabels = {
+    labor: t("insurance.labor"),
+    health: t("insurance.health"),
+    pension: t("insurance.pension"),
+  };
 
   return (
     <>
@@ -83,42 +129,11 @@ export default async function EmployeesPage() {
                       <TableCell className="text-muted-foreground">
                         {empType[e.employmentType] ?? e.employmentType}
                       </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {e.workEmail || e.personalEmail || e.phone ? (
-                          <div className="flex flex-col text-xs">
-                            {e.workEmail ? <span>{e.workEmail}</span> : null}
-                            {e.personalEmail ? <span>{e.personalEmail}</span> : null}
-                            {e.phone ? <span>{e.phone}</span> : null}
-                          </div>
-                        ) : (
-                          "—"
-                        )}
-                      </TableCell>
+                      <TableCell className="text-muted-foreground">{contactCell(e)}</TableCell>
                       <TableCell className="text-muted-foreground">
                         {e.startDate ? formatDate(e.startDate) : "—"}
                       </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1 text-xs">
-                          {e.laborInsuredSalary ? (
-                            <Badge variant="outline" className="font-normal">
-                              {t("insurance.labor")} {formatCurrency(e.laborInsuredSalary)}
-                            </Badge>
-                          ) : null}
-                          {e.healthInsuredSalary ? (
-                            <Badge variant="outline" className="font-normal">
-                              {t("insurance.health")} {formatCurrency(e.healthInsuredSalary)}
-                            </Badge>
-                          ) : null}
-                          {e.hasPension ? (
-                            <Badge variant="outline" className="font-normal">
-                              {t("insurance.pension")}
-                            </Badge>
-                          ) : null}
-                          {!e.laborInsuredSalary && !e.healthInsuredSalary && !e.hasPension ? (
-                            <span className="text-muted-foreground">—</span>
-                          ) : null}
-                        </div>
-                      </TableCell>
+                      <TableCell>{insuranceCell(e, insuranceLabels)}</TableCell>
                       <TableCell>
                         <Badge variant={e.isActive ? "outline" : "secondary"}>
                           {e.isActive ? t("status.active") : t("status.inactive")}

@@ -36,7 +36,7 @@ export function AuditMeta({
       {showUpdate ? (
         <span className="inline-flex items-center gap-1.5">
           {t("auditMeta.updated")}
-          {meta?.updatedBy ? ` · ${meta.updatedBy}` : ""} · {formatDateTime(updatedAt!)}
+          {meta?.updatedBy ? ` · ${meta.updatedBy}` : ""} · {formatDateTime(updatedAt)}
           {meta?.updatedChannel === "mcp" ? <McpTag /> : null}
         </span>
       ) : null}

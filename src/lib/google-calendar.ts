@@ -132,7 +132,7 @@ async function ensureCalendar(
     throw new Error(
       t("calendar.createFailed", { status: res.status, body: await res.text() }),
     );
-  const created = (await res.json()) as { id: string };
+  const created: { id: string } = await res.json();
 
   await getDb()
     .insert(calendarSettings)
@@ -226,6 +226,103 @@ function eventBody(e: PlannedEvent, reminderDays: number) {
 }
 
 /**
+ * 更新一顆既有事件。回傳 false 代表 Google 端那顆已經不在（對應也一併清掉了），
+ * 呼叫端要改走「重建」那條路。
+ */
+async function patchEvent(
+  token: string,
+  encodedCal: string,
+  existing: { id: number; googleEventId: string },
+  e: PlannedEvent,
+  hash: string,
+  reminderDays: number,
+  t: CalendarText,
+): Promise<boolean> {
+  const db = getDb();
+  const res = await calendarFetch(
+    token,
+    `/calendars/${encodedCal}/events/${encodeURIComponent(existing.googleEventId)}`,
+    { method: "PATCH", body: eventBody(e, reminderDays) },
+  );
+  if (res.ok) {
+    await db
+      .update(calendarEventLinks)
+      .set({ contentHash: hash, syncedAt: new Date().toISOString() })
+      .where(eq(calendarEventLinks.id, existing.id));
+    return true;
+  }
+  if (res.status !== 404 && res.status !== 410) {
+    throw new Error(
+      t("calendar.updateEventFailed", { status: res.status, body: await res.text() }),
+    );
+  }
+  // Google 端已被刪掉 → 移除對應後由呼叫端重建。
+  await db.delete(calendarEventLinks).where(eq(calendarEventLinks.id, existing.id));
+  return false;
+}
+
+/** 建一顆新事件，並記下它的 Google 事件 id 對應。 */
+async function createEvent(
+  orgId: string,
+  token: string,
+  encodedCal: string,
+  e: PlannedEvent,
+  hash: string,
+  reminderDays: number,
+  t: CalendarText,
+): Promise<void> {
+  const res = await calendarFetch(token, `/calendars/${encodedCal}/events`, {
+    method: "POST",
+    body: eventBody(e, reminderDays),
+  });
+  if (!res.ok)
+    throw new Error(
+      t("calendar.createEventFailed", { status: res.status, body: await res.text() }),
+    );
+  const created: { id: string } = await res.json();
+  await getDb()
+    .insert(calendarEventLinks)
+    .values({
+      organizationId: orgId,
+      itemKey: e.itemKey,
+      kind: e.kind,
+      googleEventId: created.id,
+      contentHash: hash,
+    })
+    .onConflictDoUpdate({
+      target: [
+        calendarEventLinks.organizationId,
+        calendarEventLinks.itemKey,
+        calendarEventLinks.kind,
+      ],
+      set: { googleEventId: created.id, contentHash: hash, syncedAt: new Date().toISOString() },
+    });
+}
+
+/** 把 Google 端那些不該再提醒的事件刪掉，回傳處理了幾顆。 */
+async function deleteStaleEvents(
+  token: string,
+  encodedCal: string,
+  stale: { googleEventId: string }[],
+  t: CalendarText,
+): Promise<number> {
+  let deleted = 0;
+  for (const l of stale) {
+    const res = await calendarFetch(
+      token,
+      `/calendars/${encodedCal}/events/${encodeURIComponent(l.googleEventId)}`,
+      { method: "DELETE" },
+    );
+    // 404/410 = 早就不在了，一樣視為已刪除。
+    if (!res.ok && res.status !== 404 && res.status !== 410) {
+      throw new Error(t("calendar.deleteEventFailed", { status: res.status }));
+    }
+    deleted += 1;
+  }
+  return deleted;
+}
+
+/**
  * 全量對帳：把看板現況推到 Google 日曆 —— 新增缺的、更新變動的、刪掉不該再提醒的。
  * 冪等，可以重複按。
  */
@@ -262,77 +359,26 @@ export async function syncBillingCalendar(
     const existing = linkByKey.get(mapKey);
     const hash = hashEvent(e, reminderDays);
 
-    if (existing && existing.contentHash === hash) {
+    if (existing?.contentHash === hash) {
       result.skipped += 1;
       continue;
     }
 
-    if (existing) {
-      const res = await calendarFetch(
-        token,
-        `/calendars/${encodedCal}/events/${encodeURIComponent(existing.googleEventId)}`,
-        { method: "PATCH", body: eventBody(e, reminderDays) },
-      );
-      if (res.ok) {
-        await db
-          .update(calendarEventLinks)
-          .set({ contentHash: hash, syncedAt: new Date().toISOString() })
-          .where(eq(calendarEventLinks.id, existing.id));
-        result.updated += 1;
-        continue;
-      }
-      if (res.status !== 404 && res.status !== 410) {
-        throw new Error(
-          t("calendar.updateEventFailed", { status: res.status, body: await res.text() }),
-        );
-      }
-      // Google 端已被刪掉 → 移除對應後往下重建。
-      await db.delete(calendarEventLinks).where(eq(calendarEventLinks.id, existing.id));
+    if (
+      existing &&
+      (await patchEvent(token, encodedCal, existing, e, hash, reminderDays, t as CalendarText))
+    ) {
+      result.updated += 1;
+      continue;
     }
 
-    const res = await calendarFetch(token, `/calendars/${encodedCal}/events`, {
-      method: "POST",
-      body: eventBody(e, reminderDays),
-    });
-    if (!res.ok)
-      throw new Error(
-        t("calendar.createEventFailed", { status: res.status, body: await res.text() }),
-      );
-    const created = (await res.json()) as { id: string };
-    await db
-      .insert(calendarEventLinks)
-      .values({
-        organizationId: orgId,
-        itemKey: e.itemKey,
-        kind: e.kind,
-        googleEventId: created.id,
-        contentHash: hash,
-      })
-      .onConflictDoUpdate({
-        target: [
-          calendarEventLinks.organizationId,
-          calendarEventLinks.itemKey,
-          calendarEventLinks.kind,
-        ],
-        set: { googleEventId: created.id, contentHash: hash, syncedAt: new Date().toISOString() },
-      });
+    await createEvent(orgId, token, encodedCal, e, hash, reminderDays, t as CalendarText);
     result.created += 1;
   }
 
   // 已收款 / 已開發票 / 被刪掉的列 → 事件該消失，否則日曆上會留著早就處理完的提醒。
   const stale = links.filter((l) => !seen.has(`${l.itemKey}|${l.kind}`));
-  for (const l of stale) {
-    const res = await calendarFetch(
-      token,
-      `/calendars/${encodedCal}/events/${encodeURIComponent(l.googleEventId)}`,
-      { method: "DELETE" },
-    );
-    // 404/410 = 早就不在了，一樣視為已刪除。
-    if (!res.ok && res.status !== 404 && res.status !== 410) {
-      throw new Error(t("calendar.deleteEventFailed", { status: res.status }));
-    }
-    result.deleted += 1;
-  }
+  result.deleted = await deleteStaleEvents(token, encodedCal, stale, t as CalendarText);
   if (stale.length > 0) {
     await db.delete(calendarEventLinks).where(
       inArray(

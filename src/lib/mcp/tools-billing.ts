@@ -56,6 +56,28 @@ async function resolveCustomer(
   throw new Error("customerPartyId is required (or pass a contractId to inherit its customer).");
 }
 
+/** update_billing_item 的欄位搬運：只有真的帶進來的欄位才會進 patch。 */
+function buildBillingItemPatch(
+  args: Record<string, unknown>,
+  ids: { customerPartyId?: number; contractId?: number; projectId?: number },
+): Record<string, unknown> {
+  const patch: Record<string, unknown> = {};
+  if (ids.customerPartyId !== undefined) patch.customerPartyId = ids.customerPartyId;
+  if (ids.contractId !== undefined) patch.contractId = ids.contractId;
+  if (ids.projectId !== undefined) patch.projectId = ids.projectId;
+  if (optString(args, "title") !== undefined) patch.title = requireString(args, "title");
+  if (optNumber(args, "amount") !== undefined) patch.amount = optDecimal(args, "amount");
+  if (optString(args, "currency") !== undefined)
+    patch.currency = normalizeCurrency(args, "currency");
+  for (const f of ["dueDate", "billedOn", "paidOn", "invoicedOn", "note"] as const) {
+    if (optString(args, f) !== undefined) patch[f] = optString(args, f);
+  }
+  if (optBoolean(args, "needsInvoice") !== undefined)
+    patch.needsInvoice = optBoolean(args, "needsInvoice");
+  if (optString(args, "status") !== undefined) patch.status = optString(args, "status");
+  return patch;
+}
+
 export const billingItemTools: Record<string, ToolDef> = {
   list_billing_status: {
     description:
@@ -202,20 +224,7 @@ export const billingItemTools: Record<string, ToolDef> = {
       if (projectId !== undefined) await assertInOrg(db, projects, projectId, orgId, "Project");
       checkEnum(optString(args, "status"), ITEM_STATUS, "status");
 
-      const patch: Record<string, unknown> = {};
-      if (customerPartyId !== undefined) patch.customerPartyId = customerPartyId;
-      if (contractId !== undefined) patch.contractId = contractId;
-      if (projectId !== undefined) patch.projectId = projectId;
-      if (optString(args, "title") !== undefined) patch.title = requireString(args, "title");
-      if (optNumber(args, "amount") !== undefined) patch.amount = optDecimal(args, "amount");
-      if (optString(args, "currency") !== undefined)
-        patch.currency = normalizeCurrency(args, "currency");
-      for (const f of ["dueDate", "billedOn", "paidOn", "invoicedOn", "note"] as const) {
-        if (optString(args, f) !== undefined) patch[f] = optString(args, f);
-      }
-      if (optBoolean(args, "needsInvoice") !== undefined)
-        patch.needsInvoice = optBoolean(args, "needsInvoice");
-      if (optString(args, "status") !== undefined) patch.status = optString(args, "status");
+      const patch = buildBillingItemPatch(args, { customerPartyId, contractId, projectId });
       if (Object.keys(patch).length === 0) throw new Error("Nothing to update.");
 
       const [row] = await db

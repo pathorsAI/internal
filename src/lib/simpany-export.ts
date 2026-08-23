@@ -119,7 +119,7 @@ export function parseCsv(text: string): string[][] {
 
 function matchHeaders(header: string[]): Partial<Record<keyof SimpanyRow, number>> {
   const out: Partial<Record<keyof SimpanyRow, number>> = {};
-  const normalized = header.map((h) => h.trim().toLowerCase().replace(/\s+/g, ""));
+  const normalized = header.map((h) => h.trim().toLowerCase().replaceAll(/\s+/g, ""));
   const taken = new Set<number>();
   for (const { field, keywords } of HEADER_HINTS) {
     // 關鍵字外圈、表頭內圈：具體的關鍵字先贏，不會被排在前面的寬鬆表頭搶走。
@@ -138,7 +138,7 @@ function matchHeaders(header: string[]): Partial<Record<keyof SimpanyRow, number
 /** '1,234' / 'NT$1,234' / '1234.00' → 1234；認不出來回 null。 */
 function parseAmount(raw: string | undefined): number | null {
   if (!raw) return null;
-  const cleaned = raw.replace(/[^0-9.-]/g, "");
+  const cleaned = raw.replaceAll(/[^0-9.-]/g, "");
   if (cleaned === "" || cleaned === "-") return null;
   const n = Number(cleaned);
   return Number.isFinite(n) ? n : null;
@@ -164,7 +164,7 @@ function parseDate(raw: string | undefined): string | null {
 
 /** 發票號碼的比對鍵：去掉分隔符號、統一大寫（AB-12345678 與 ab12345678 視為同一張）。 */
 export function normalizeInvoiceNumber(raw: string | null | undefined): string {
-  return (raw ?? "").replace(/[^0-9a-zA-Z]/g, "").toUpperCase();
+  return (raw ?? "").replaceAll(/[^0-9a-zA-Z]/g, "").toUpperCase();
 }
 
 export type ParseResult = {
