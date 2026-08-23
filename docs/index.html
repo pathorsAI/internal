@@ -4,9 +4,12 @@
 <meta charset="utf-8">
 <title>Books That Agree</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600&family=Noto+Sans+TC:wght@400;500&display=swap">
+<!-- Font @font-face rules are vendored in fonts.css rather than linked from
+     fonts.googleapis.com: that stylesheet varies by User-Agent and is rewritten
+     without notice, so it cannot be pinned with Subresource Integrity. See the
+     header of fonts.css for how to regenerate it. -->
+<link rel="stylesheet" href="fonts.css">
 <style>
 :root{
   --bg:#FBFAFA; --surface:#FFFFFF; --surface-2:#F4F3F1; --surface-3:#EDECE9;
@@ -691,9 +694,9 @@ footer .sp{margin-left:auto}
 
     <div class="lang card rv">
       <div class="lang-bar">
-        <div class="seg" role="group" aria-label="Language">
-          <button aria-selected="true" data-loc="en">English</button>
-          <button aria-selected="false" data-loc="zh-TW" lang="zh-Hant-TW">繁體中文</button>
+        <div class="seg" role="tablist" aria-label="Language">
+          <button role="tab" aria-selected="true" aria-controls="i18ncards" data-loc="en">English</button>
+          <button role="tab" aria-selected="false" aria-controls="i18ncards" data-loc="zh-TW" lang="zh-Hant-TW">繁體中文</button>
         </div>
         <span class="hint">The page address never changes — your bookmarks keep working.</span>
       </div>
@@ -822,22 +825,22 @@ footer .sp{margin-left:auto}
 
 <script>
 (function(){
-  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var reduce = globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   /* Reveal on scroll. IntersectionObserver drives it; a rect sweep is the safety
      net, so content can never stay stuck at opacity 0 if the observer is silent. */
-  var targets = [].slice.call(document.querySelectorAll('.rv, .anim'));
+  var targets = Array.prototype.slice.call(document.querySelectorAll('.rv, .anim'));
   function show(el){
     el.classList.add('in');
     if (el.classList.contains('anim')) el.classList.add('play');
   }
   function sweep(){
-    var h = window.innerHeight || 800;
+    var h = globalThis.innerHeight || 800;
     targets.forEach(function(el){
       if (!el.classList.contains('in') && el.getBoundingClientRect().top < h * 0.9) show(el);
     });
   }
-  if (!('IntersectionObserver' in window) || reduce) {
+  if (!('IntersectionObserver' in globalThis) || reduce) {
     targets.forEach(show);
   } else {
     var io = new IntersectionObserver(function(entries){
@@ -852,7 +855,7 @@ footer .sp{margin-left:auto}
 
   /* Header hairline appears once you leave the hero. */
   var nav = document.getElementById('nav');
-  function onScroll(){ nav.classList.toggle('stuck', window.scrollY > 12); }
+  function onScroll(){ nav.classList.toggle('stuck', globalThis.scrollY > 12); }
   addEventListener('scroll', onScroll, { passive: true }); onScroll();
 
   /* One ledger vs two spreadsheets. */
@@ -860,7 +863,7 @@ footer .sp{margin-left:auto}
   var tabs = document.querySelectorAll('.seg [data-mode]');
   var touched = false;
   function setMode(m){
-    demo.setAttribute('data-mode', m);
+    demo.dataset.mode = m;
     tabs.forEach(function(t){ t.setAttribute('aria-selected', String(t.dataset.mode === m)); });
   }
   tabs.forEach(function(t){ t.addEventListener('click', function(){ touched = true; setMode(t.dataset.mode); }); });
@@ -872,19 +875,23 @@ footer .sp{margin-left:auto}
   /* Language switch. */
   var locBtns = document.querySelectorAll('[data-loc]');
   var cards = document.getElementById('i18ncards');
-  locBtns.forEach(function(b){
-    b.addEventListener('click', function(){
-      var zh = b.dataset.loc === 'zh-TW';
-      locBtns.forEach(function(x){ x.setAttribute('aria-selected', String(x === b)); });
-      cards.classList.add('swapping');
-      setTimeout(function(){
-        cards.querySelectorAll('[data-i18n]').forEach(function(n){
-          n.textContent = zh ? n.dataset.zh : n.dataset.en;
-          n.setAttribute('lang', zh ? 'zh-Hant-TW' : 'en');
-        });
-        cards.classList.remove('swapping');
-      }, reduce ? 0 : 160);
+  function translate(zh){
+    cards.querySelectorAll('[data-i18n]').forEach(function(n){
+      n.textContent = zh ? n.dataset.zh : n.dataset.en;
+      n.setAttribute('lang', zh ? 'zh-Hant-TW' : 'en');
     });
+  }
+  function selectLocale(btn){
+    var zh = btn.dataset.loc === 'zh-TW';
+    locBtns.forEach(function(x){ x.setAttribute('aria-selected', String(x === btn)); });
+    cards.classList.add('swapping');
+    setTimeout(function(){
+      translate(zh);
+      cards.classList.remove('swapping');
+    }, reduce ? 0 : 160);
+  }
+  locBtns.forEach(function(b){
+    b.addEventListener('click', function(){ selectLocale(b); });
   });
 })();
 </script>

@@ -90,7 +90,7 @@ const ENTITIES: Record<string, string> = {
 };
 
 function unescapeXml(s: string): string {
-  return s.replace(/&(#x?[0-9a-fA-F]+|[a-z]+);/g, (whole, body: string) => {
+  return s.replaceAll(/&(#x?[0-9a-fA-F]+|[a-z]+);/g, (whole, body: string) => {
     if (body.startsWith("#x") || body.startsWith("#X")) {
       return String.fromCodePoint(Number.parseInt(body.slice(2), 16));
     }

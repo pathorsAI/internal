@@ -9,7 +9,7 @@ export async function uploadDocument(
   file: File,
   prefix: string,
 ): Promise<{ key: string; fileName: string; contentType: string; size: number }> {
-  const safeName = file.name.replace(/[^\w.-]+/g, "_").slice(-120) || "file";
+  const safeName = file.name.replaceAll(/[^\w.-]+/g, "_").slice(-120) || "file";
   const key = `${prefix}/${crypto.randomUUID()}-${safeName}`;
   const body = await file.arrayBuffer();
   await bucket().put(key, body, {

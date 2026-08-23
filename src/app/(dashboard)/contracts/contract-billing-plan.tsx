@@ -271,8 +271,12 @@ export function ContractBillingPlanFields({
 
       {existingCount > 0 && (isInstallments || plan === "single") && (
         <div className="space-y-1.5 rounded-md border border-dashed p-2.5">
-          <label className="flex items-start gap-2 text-sm">
+          {/* label 只包標題那一行：Sonar 的 S6853 只認得直接掛在 label 底下的文字，
+              包住整塊說明時它看不到（文案來自 t()，靜態分析追不進去）。用 htmlFor
+              明確綁 id，點標題一樣可以切換。 */}
+          <div className="flex items-start gap-2 text-sm">
             <input
+              id="regenerateSchedule"
               type="checkbox"
               name="regenerateSchedule"
               checked={regenerate}
@@ -280,7 +284,7 @@ export function ContractBillingPlanFields({
               className="mt-0.5 size-4 accent-primary"
             />
             <span>
-              <span>{t("billingPlan.regenerateLabel")}</span>
+              <label htmlFor="regenerateSchedule">{t("billingPlan.regenerateLabel")}</label>
               <span className="mt-0.5 block text-xs text-muted-foreground">
                 {t("billingPlan.existingCount", { count: existingCount })}
                 {lockedCount > 0 && t("billingPlan.lockedCountSuffix", { count: lockedCount })}
@@ -290,7 +294,7 @@ export function ContractBillingPlanFields({
                   : t("billingPlan.regenerateNoteAll")}
               </span>
             </span>
-          </label>
+          </div>
         </div>
       )}
 

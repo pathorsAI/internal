@@ -23,6 +23,20 @@ const CloseCtx = React.createContext<() => void>(() => {});
 function hitInteractive(target: EventTarget | null) {
   return Boolean((target as HTMLElement | null)?.closest("button, a, input, label"));
 }
+
+// 有對話框正開著 / 正在關閉時（例如點灰色背景關閉發放薪資 dialog，
+// 那個點擊會「穿透」到下面的列）→ 不要開啟這一列的編輯
+function shouldOpen(target: EventTarget | null) {
+  if (
+    document.querySelector(
+      '[data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"], [data-slot="sheet-overlay"]',
+    )
+  ) {
+    return false;
+  }
+  return !hitInteractive(target);
+}
+
 /** 在 RowDialog 內的表單可呼叫此 hook，存檔成功後關閉對話框 */
 export function useRowDialogClose() {
   return React.useContext(CloseCtx);
@@ -46,19 +60,6 @@ export function RowDialog({
 }>) {
   const [open, setOpen] = React.useState(false);
   const close = React.useCallback(() => setOpen(false), []);
-
-  function shouldOpen(target: EventTarget | null) {
-    // 有對話框正開著 / 正在關閉時（例如點灰色背景關閉發放薪資 dialog，
-    // 那個點擊會「穿透」到下面的列）→ 不要開啟這一列的編輯
-    if (
-      document.querySelector(
-        '[data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"], [data-slot="sheet-overlay"]',
-      )
-    ) {
-      return false;
-    }
-    return !hitInteractive(target);
-  }
 
   function onRowClick(e: React.MouseEvent<HTMLTableRowElement>) {
     if (shouldOpen(e.target)) setOpen(true);
