@@ -19,7 +19,7 @@ const geistMono = Geist_Mono({
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations("common.meta");
   return {
-    title: "Pathors Internal",
+    title: "Internal",
     description: t("description"),
   };
 }

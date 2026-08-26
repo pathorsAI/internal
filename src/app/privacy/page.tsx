@@ -3,9 +3,9 @@ import type { Metadata } from "next";
 import { LegalDoc } from "../legal-doc";
 
 export const metadata: Metadata = {
-  title: "隱私權政策 — Pathors Internal",
+  title: "隱私權政策 — Internal",
   description:
-    "Pathors Internal 收集哪些資料、用途、受託處理者、第三方 AI 客戶端的存取與撤銷方式、保存期限與你的權利。",
+    "Internal 收集哪些資料、用途、受託處理者、第三方 AI 客戶端的存取與撤銷方式、保存期限與你的權利。",
 };
 
 /**
@@ -22,13 +22,13 @@ export default function PrivacyPage() {
     <LegalDoc
       eyebrow="Privacy Policy"
       title="隱私權政策"
-      lede="這份政策說明 Pathors Internal 收集哪些資料、為什麼收集、交給誰處理、保存多久，以及你可以要求我們做什麼。"
+      lede="這份政策說明 Internal 收集哪些資料、為什麼收集、交給誰處理、保存多久，以及你可以要求我們做什麼。"
       otherDoc={{ href: "/terms", label: "服務條款" }}
     >
       <div className="intro">
         <p>
           <strong>派斯科技股份有限公司</strong>（Pathors Technology Co., Ltd.，統一編號
-          60410453，以下稱「我們」）經營 Pathors Internal（<code>internal.pathors.com</code>，以下稱「本服務」）。
+          60410453，以下稱「我們」）經營 Internal（<code>internal.pathors.com</code>，以下稱「本服務」）。
         </p>
         <p>
           本服務是一套多租戶的帳務系統：任何人都可以用 Google
