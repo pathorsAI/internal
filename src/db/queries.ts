@@ -21,7 +21,14 @@ import {
   billingItems,
   activityLog,
 } from "./schema";
-import { oauthApplication, oauthAccessToken, member, organization, user } from "./auth-schema";
+import {
+  oauthApplication,
+  oauthAccessToken,
+  oauthConsent,
+  member,
+  organization,
+  user,
+} from "./auth-schema";
 
 export type Book = "internal" | "external" | "both";
 
@@ -2035,12 +2042,22 @@ export type McpClient = {
 };
 
 /**
- * MCP OAuth clients registered against this deployment (better-auth `mcp`
- * plugin). Self-registered via Dynamic Client Registration, so this is the
- * canonical list of what can talk to /mcp. activeTokens = unexpired access
- * tokens for that client. Not org-scoped (the OAuth provider is deployment-wide).
+ * 這位使用者已經授權過的 MCP OAuth client（better-auth `mcp` plugin）。
+ *
+ * ⚠️ oauth_application 是**部署層級**的：client 透過 Dynamic Client Registration
+ * 自己註冊一次，之後每個使用者各自授權（ChatGPT、Claude 都是這樣）。所以整張表
+ * 不能直接列給使用者看 —— 那會把別的組織連了哪些 app、有幾條有效連線通通攤開。
+ *
+ * 「跟我有關」的定義：我對它發過 token、我同意過它、或它是我自己註冊的。
+ * activeTokens 也只算我自己的 token（join 條件就帶了 user_id），否則光是數字
+ * 也會洩漏別人的使用狀況。
  */
-export async function listMcpClients(): Promise<McpClient[]> {
+export async function listMcpClients(userId: string): Promise<McpClient[]> {
+  // 我同意過這個 client（授權後 token 過期／被清掉，同意紀錄還在）。
+  const consentedByMe = sql`exists (
+    select 1 from ${oauthConsent} c
+    where c.client_id = ${oauthApplication.clientId} and c.user_id = ${userId}
+  )`;
   const rows = await getDb()
     .select({
       id: oauthApplication.id,
@@ -2054,7 +2071,19 @@ export async function listMcpClients(): Promise<McpClient[]> {
     .from(oauthApplication)
     .leftJoin(
       oauthAccessToken,
-      eq(oauthAccessToken.clientId, oauthApplication.clientId),
+      and(
+        eq(oauthAccessToken.clientId, oauthApplication.clientId),
+        eq(oauthAccessToken.userId, userId),
+      ),
+    )
+    .where(
+      or(
+        // 我自己註冊的 client（DCR 註冊時有帶登入身分的話）。
+        eq(oauthApplication.userId, userId),
+        consentedByMe,
+        // join 條件已經限定 user_id，所以有配到 token 就代表是我的 token。
+        sql`${oauthAccessToken.id} is not null`,
+      ),
     )
     .groupBy(
       oauthApplication.id,

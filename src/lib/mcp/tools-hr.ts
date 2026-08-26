@@ -37,6 +37,7 @@ import {
   todayStr,
   type ToolDef,
 } from "./shared";
+import { assertAccountCurrency } from "@/lib/account-currency";
 import { isValidEmail, maskBankAccount, maskNationalId } from "@/lib/pii";
 
 const EMPLOYMENT_TYPES = ["full_time", "part_time", "freelancer", "contractor"] as const;
@@ -100,6 +101,56 @@ function redactEmployee<T extends { nationalId: string | null; salaryAccount: st
     salaryAccount: maskBankAccount(e.salaryAccount),
   };
 }
+
+// 員工列（employees 全欄位）離開 MCP 時的形狀。drizzle 的 numeric 欄位回傳的是
+// 字串而不是數字，date 欄位是 YYYY-MM-DD 字串；nationalId / salaryAccount 描述的
+// 是 redactEmployee 遮罩「之後」的值，所以型別仍是字串，只是內容被 * 蓋掉。
+const EMPLOYEE_PROPS = {
+  id: { type: "number" },
+  organizationId: { type: ["string", "null"] },
+  name: { type: "string" },
+  nationalId: {
+    type: ["string", "null"],
+    description:
+      "Masked: only the first 3 characters survive, the rest become '*' (e.g. A12*******). Null when unset.",
+  },
+  employmentType: { type: "string", enum: [...EMPLOYMENT_TYPES] },
+  hasLaborInsurance: { type: "boolean" },
+  hasHealthInsurance: { type: "boolean" },
+  hasPension: { type: "boolean" },
+  baseSalary: { type: ["string", "null"], description: "Decimal as a string." },
+  laborInsuredSalary: { type: ["string", "null"], description: "Decimal as a string." },
+  healthInsuredSalary: { type: ["string", "null"], description: "Decimal as a string." },
+  salaryAccount: {
+    type: ["string", "null"],
+    description:
+      "Masked: only the last 5 characters survive, the rest become '*' (e.g. ****12345). Null when unset.",
+  },
+  startDate: { type: ["string", "null"], description: "YYYY-MM-DD." },
+  endDate: { type: ["string", "null"], description: "YYYY-MM-DD." },
+  isActive: { type: "boolean" },
+  workEmail: { type: ["string", "null"] },
+  personalEmail: { type: ["string", "null"] },
+  phone: { type: ["string", "null"] },
+  note: { type: ["string", "null"] },
+  userId: { type: ["string", "null"], description: "Bound login user id, or null." },
+  createdAt: { type: "string", description: "ISO 8601 timestamp." },
+  deletedAt: { type: ["string", "null"], description: "ISO 8601 timestamp." },
+};
+// 這些 tool 都用 `.returning()` 回整列，欄位一定到齊（值可能是 null）。
+const EMPLOYEE_REQUIRED = Object.keys(EMPLOYEE_PROPS);
+
+const RECONCILIATION_PROPS = {
+  id: { type: "number" },
+  organizationId: { type: ["string", "null"] },
+  accountId: { type: "number" },
+  asOfDate: { type: "string", description: "YYYY-MM-DD." },
+  statementBalance: { type: "string", description: "Decimal as a string." },
+  note: { type: ["string", "null"] },
+  createdAt: { type: "string", description: "ISO 8601 timestamp." },
+  deletedAt: { type: ["string", "null"], description: "ISO 8601 timestamp." },
+};
+const RECONCILIATION_REQUIRED = Object.keys(RECONCILIATION_PROPS);
 
 /**
  * Validate an employee → login-user binding: the user must be a member of the
@@ -202,6 +253,15 @@ export const hrTools: Record<string, ToolDef> = {
       required: ["id"],
       additionalProperties: false,
     },
+    // 找不到時回的是 { error }，沒有任何欄位「每次都會出現」，所以不列 required。
+    outputSchema: {
+      type: "object",
+      properties: {
+        ...EMPLOYEE_PROPS,
+        error: { type: "string", description: "Present instead of the employee when not found." },
+      },
+      additionalProperties: false,
+    },
     execute: async (args, ctx) => {
       const row = await getEmployee(await resolveOrg(args, ctx), requireNumber(args, "id"));
       return row ? redactEmployee(row) : { error: "Not found." };
@@ -244,6 +304,12 @@ export const hrTools: Record<string, ToolDef> = {
         ...ORG_ARG,
       },
       required: ["name"],
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: "object",
+      properties: { ...EMPLOYEE_PROPS },
+      required: EMPLOYEE_REQUIRED,
       additionalProperties: false,
     },
     execute: async (args, ctx) => {
@@ -318,6 +384,12 @@ export const hrTools: Record<string, ToolDef> = {
       required: ["id"],
       additionalProperties: false,
     },
+    outputSchema: {
+      type: "object",
+      properties: { ...EMPLOYEE_PROPS },
+      required: EMPLOYEE_REQUIRED,
+      additionalProperties: false,
+    },
     execute: async (args, ctx) => {
       const id = requireNumber(args, "id");
       const orgId = await resolveOrg(args, ctx);
@@ -343,6 +415,12 @@ export const hrTools: Record<string, ToolDef> = {
       type: "object",
       properties: { id: { type: "number" }, ...ORG_ARG },
       required: ["id"],
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: "object",
+      properties: { deleted: { type: "boolean" }, id: { type: "number" } },
+      required: ["deleted", "id"],
       additionalProperties: false,
     },
     execute: async (args, ctx) => {
@@ -389,6 +467,42 @@ export const hrTools: Record<string, ToolDef> = {
         periodMonth: { type: "number", description: "1-12. Defaults to current month." },
         ...ORG_ARG,
       },
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: "object",
+      properties: {
+        period: { type: "string", description: "YYYY-MM." },
+        runPayDate: {
+          type: ["string", "null"],
+          description: "YYYY-MM-DD; null when no payroll run exists for the month.",
+        },
+        paidCount: { type: "number" },
+        totalActive: { type: "number" },
+        employees: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              employeeId: { type: "number" },
+              name: { type: "string" },
+              paid: { type: "boolean" },
+              netPay: {
+                type: ["string", "null"],
+                // netPay 直接來自 payslips.net_pay（numeric），所以是字串不是數字。
+                description: "Decimal as a string; null when there is no payslip yet.",
+              },
+              payDate: {
+                type: ["string", "null"],
+                description: "YYYY-MM-DD; null until the salary is actually paid.",
+              },
+            },
+            required: ["employeeId", "name", "paid", "netPay", "payDate"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["period", "runPayDate", "paidCount", "totalActive", "employees"],
       additionalProperties: false,
     },
     execute: async (args, ctx) => {
@@ -492,6 +606,41 @@ export const hrTools: Record<string, ToolDef> = {
       required: ["employeeId", "periodYear", "periodMonth", "payDate", "fromAccountId", "items"],
       additionalProperties: false,
     },
+    outputSchema: {
+      type: "object",
+      properties: {
+        payslipId: { type: "number" },
+        payrollRunId: { type: "number" },
+        period: { type: "string", description: "YYYY-MM." },
+        payDate: { type: "string", description: "YYYY-MM-DD." },
+        employeeId: { type: "number" },
+        employeeName: { type: ["string", "null"] },
+        // 這裡的金額是本地算出來的數字（不是 numeric 欄位讀回來的字串）。
+        taxable: { type: "number" },
+        nontaxable: { type: "number" },
+        deduction: { type: "number" },
+        netPay: { type: "number", description: "taxable + nontaxable − deduction, in TWD." },
+        book: { type: "string", enum: ["both", "internal", "external"] },
+        transactionId: { type: "number", description: "The salary-expense transaction posted." },
+        // 只有找不到「薪資費用」科目時才會出現，所以不列進 required。
+        note: { type: "string" },
+      },
+      required: [
+        "payslipId",
+        "payrollRunId",
+        "period",
+        "payDate",
+        "employeeId",
+        "employeeName",
+        "taxable",
+        "nontaxable",
+        "deduction",
+        "netPay",
+        "book",
+        "transactionId",
+      ],
+      additionalProperties: false,
+    },
     execute: async (args, ctx) => {
       const employeeId = requireNumber(args, "employeeId");
       const year = requireNumber(args, "periodYear");
@@ -568,6 +717,8 @@ export const hrTools: Record<string, ToolDef> = {
         .limit(1);
       const period = `${year}-${String(month).padStart(2, "0")}`;
 
+      // 薪資固定以 TWD 記帳，所以發薪帳戶也必須是 TWD 帳戶。
+      await assertAccountCurrency(db, orgId, "TWD", [fromAccountId]);
       const [txn] = await db
         .insert(transactions)
         .values({
@@ -661,6 +812,12 @@ export const hrTools: Record<string, ToolDef> = {
       required: ["accountId", "asOfDate", "statementBalance"],
       additionalProperties: false,
     },
+    outputSchema: {
+      type: "object",
+      properties: { ...RECONCILIATION_PROPS },
+      required: RECONCILIATION_REQUIRED,
+      additionalProperties: false,
+    },
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       const db = getDb();
@@ -699,6 +856,12 @@ export const hrTools: Record<string, ToolDef> = {
       required: ["id"],
       additionalProperties: false,
     },
+    outputSchema: {
+      type: "object",
+      properties: { ...RECONCILIATION_PROPS },
+      required: RECONCILIATION_REQUIRED,
+      additionalProperties: false,
+    },
     execute: async (args, ctx) => {
       const id = requireNumber(args, "id");
       const orgId = await resolveOrg(args, ctx);
@@ -730,6 +893,12 @@ export const hrTools: Record<string, ToolDef> = {
       required: ["id"],
       additionalProperties: false,
     },
+    outputSchema: {
+      type: "object",
+      properties: { deleted: { type: "boolean" }, id: { type: "number" } },
+      required: ["deleted", "id"],
+      additionalProperties: false,
+    },
     execute: async (args, ctx) => {
       const id = requireNumber(args, "id");
       const orgId = await resolveOrg(args, ctx);
@@ -758,6 +927,15 @@ export const hrTools: Record<string, ToolDef> = {
       required: ["documentId"],
       additionalProperties: false,
     },
+    outputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "number" },
+        accountantNotifiedAt: { type: "string", description: "ISO 8601 timestamp just written." },
+      },
+      required: ["id", "accountantNotifiedAt"],
+      additionalProperties: false,
+    },
     execute: async (args, ctx) => {
       const id = requireNumber(args, "documentId");
       const orgId = await resolveOrg(args, ctx);
@@ -778,6 +956,16 @@ export const hrTools: Record<string, ToolDef> = {
       type: "object",
       properties: { documentId: { type: "number" }, ...ORG_ARG },
       required: ["documentId"],
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "number" },
+        // 這支 tool 的作用就是把旗標清掉，回來的值必定是 null。
+        accountantNotifiedAt: { type: "null" },
+      },
+      required: ["id", "accountantNotifiedAt"],
       additionalProperties: false,
     },
     execute: async (args, ctx) => {

@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-label="Pathors Internal">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="360" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0b1120"/>
+      <stop offset="1" stop-color="#111a2e"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#10b981"/>
+    </linearGradient>
+    <linearGradient id="line" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#34d399"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1280" height="360" fill="url(#bg)"/>
+
+  <!-- subtle ledger rows -->
+  <g stroke="#1e2a44" stroke-width="2">
+    <line x1="120" y1="96" x2="1160" y2="96"/>
+    <line x1="120" y1="156" x2="1160" y2="156"/>
+    <line x1="120" y1="216" x2="1160" y2="216"/>
+    <line x1="120" y1="276" x2="1160" y2="276"/>
+  </g>
+
+  <!-- logo mark: rounded badge with an ascending "path" of nodes -->
+  <g transform="translate(120,116)">
+    <rect x="0" y="0" width="128" height="128" rx="30" fill="#0e1729" stroke="url(#accent)" stroke-width="3"/>
+    <polyline points="26,98 56,66 80,82 102,34" fill="none" stroke="url(#line)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="26" cy="98" r="9" fill="#6366f1"/>
+    <circle cx="56" cy="66" r="9" fill="#818cf8"/>
+    <circle cx="80" cy="82" r="9" fill="#34d399"/>
+    <circle cx="102" cy="34" r="11" fill="#10b981"/>
+  </g>
+
+  <!-- wordmark -->
+  <text x="288" y="172" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="68" font-weight="800" letter-spacing="-1">
+    <tspan fill="#f8fafc">Pathors</tspan><tspan fill="#94a3b8" font-weight="600">&#160;Internal</tspan>
+  </text>
+  <text x="290" y="220" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="26" font-weight="500" fill="#94a3b8">
+    Self-hosted internal accounting &amp; client-finance management
+  </text>
+
+  <!-- tech chips -->
+  <g font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="600">
+    <g transform="translate(290,250)">
+      <rect x="0" y="0" width="118" height="34" rx="17" fill="#0e1729" stroke="#293556"/>
+      <text x="59" y="23" text-anchor="middle" fill="#cbd5e1">Next.js 16</text>
+    </g>
+    <g transform="translate(420,250)">
+      <rect x="0" y="0" width="98" height="34" rx="17" fill="#0e1729" stroke="#293556"/>
+      <text x="49" y="23" text-anchor="middle" fill="#cbd5e1">Drizzle</text>
+    </g>
+    <g transform="translate(530,250)">
+      <rect x="0" y="0" width="112" height="34" rx="17" fill="#0e1729" stroke="#293556"/>
+      <text x="56" y="23" text-anchor="middle" fill="#cbd5e1">Postgres</text>
+    </g>
+    <g transform="translate(654,250)">
+      <rect x="0" y="0" width="124" height="34" rx="17" fill="#0e1729" stroke="#293556"/>
+      <text x="62" y="23" text-anchor="middle" fill="#cbd5e1">better-auth</text>
+    </g>
+  </g>
+</svg>

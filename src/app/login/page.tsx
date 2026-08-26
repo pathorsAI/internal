@@ -51,7 +51,7 @@ function mcpAuthorizeCallback(params: URLSearchParams): string | null {
 function LoginButton() {
   const t = useTranslations("auth.login");
   const params = useSearchParams();
-  const redirectTo = mcpAuthorizeCallback(params) || params.get("redirect") || "/";
+  const redirectTo = mcpAuthorizeCallback(params) || params.get("redirect") || "/dashboard";
   const [pending, setPending] = useState(false);
 
   async function onGoogle() {

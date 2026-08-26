@@ -60,7 +60,10 @@ const errors = {
     invalidItemCode: { "zh-TW": "項目代號不正確", en: "Invalid item code" },
     invalidPeriodCode: { "zh-TW": "期別代號不正確", en: "Invalid period code" },
     unrecognizedItem: { "zh-TW": "無法辨識的項目", en: "Unrecognized item" },
-    onlyOwnerOrAdminCanRevoke: { "zh-TW": "只有擁有者或管理員可以撤銷 MCP 用戶端", en: "Only owners or admins can revoke MCP clients" },
+    accountCurrencyMismatch: {
+      "zh-TW": "「{account}」是 {accountCurrency} 帳戶，不能記一筆 {txnCurrency} 的交易。請改用 {accountCurrency} 帳戶，或把幣別改成 {accountCurrency}。",
+      en: "“{account}” is a {accountCurrency} account, so it cannot hold a {txnCurrency} transaction. Use a {accountCurrency} account, or change the currency to {accountCurrency}.",
+    },
   },
   notFound: {
     advanceRecord: { "zh-TW": "找不到該代墊紀錄", en: "Advance record not found" },
@@ -69,6 +72,9 @@ const errors = {
     payslip: { "zh-TW": "找不到該薪資單", en: "Payslip not found" },
     billingItem: { "zh-TW": "找不到這筆請款項目", en: "Billing item not found" },
     subscription: { "zh-TW": "找不到這張訂閱", en: "Subscription not found" },
+    // 表單送上來的外鍵 id 不屬於這個組織（或已刪除）時的統一訊息。刻意含糊：
+    // 說「那筆屬於別的組織」等於幫人確認該 id 存在，本身就是一種洩漏。
+    referencedRecord: { "zh-TW": "找不到選取的資料，請重新選擇", en: "A selected record was not found. Please choose again." },
   },
   unsupported: {
     transactionType: { "zh-TW": "不支援的交易類型", en: "Unsupported transaction type" },

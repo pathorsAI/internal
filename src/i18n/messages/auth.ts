@@ -18,6 +18,8 @@ const auth = {
       role: { "zh-TW": "身分：{role}", en: "Role: {role}" },
       accept: { "zh-TW": "接受", en: "Accept" },
       accepting: { "zh-TW": "加入中…", en: "Joining…" },
+      expired: { "zh-TW": "已過期", en: "Expired" },
+      expiredHint: { "zh-TW": "這個邀請已過期，請聯絡管理員重新邀請", en: "This invitation has expired — ask an admin to invite you again" },
       toast: {
         acceptFailed: { "zh-TW": "接受邀請失敗", en: "Failed to accept invitation" },
         joined: { "zh-TW": "已加入 {name}", en: "Joined {name}" },

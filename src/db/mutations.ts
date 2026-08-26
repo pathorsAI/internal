@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getTranslations } from "next-intl/server";
 import { headers } from "next/headers";
 import { eq, and, isNull, inArray, desc, sql } from "drizzle-orm";
+import type { AnyPgColumn, PgTable } from "drizzle-orm/pg-core";
 import { getDb } from "./index";
 import { billingItemPaidById } from "./queries";
 import {
@@ -23,8 +24,9 @@ import {
   subscriptionPeriods,
   contracts,
   billingItems,
+  payrollItemTypes,
 } from "./schema";
-import { oauthApplication, member } from "./auth-schema";
+import { oauthAccessToken, oauthConsent, member } from "./auth-schema";
 import { uploadDocument } from "@/lib/storage";
 import { requireOrg } from "@/lib/session";
 import { auth } from "@/lib/auth";
@@ -36,6 +38,7 @@ import {
   type DueRule,
   type ScheduleInput,
 } from "@/lib/billing-schedule";
+import { findAccountCurrencyMismatches } from "@/lib/account-currency";
 
 export type ActionState = { ok: boolean; error?: string };
 
@@ -46,6 +49,82 @@ function str(v: FormDataEntryValue | null) {
 function num(v: FormDataEntryValue | null) {
   const s = str(v);
   return s === null ? null : Number(s);
+}
+
+// ---- 外鍵歸屬驗證 ----
+
+/**
+ * 這個 repo 是多租戶的：任何人都能註冊、開自己的 organization，資料只靠
+ * `organization_id` 隔離。表單送上來的每一個外鍵 id（帳戶、分類、專案、合約…）
+ * 都是使用者可控的 —— 偽造一次 POST 就能把別的組織的 row id 塞進來。
+ *
+ * DB 的 FK constraint 擋不住這件事：別的組織的 id 一樣是合法的 FK 值。寫進去之後
+ * 資料列雖然還掛在自己的 org 底下，但讀取路徑的 join（src/db/queries.ts）是純粹
+ * 用 id 對的、沒帶 org 條件，於是對方的帳戶名／分類名／合約名就會顯示在自己的
+ * 畫面上 —— 那就是跨租戶資訊洩漏。
+ *
+ * 這裡是 web 這側的統一檢查點，語意等同 MCP 的 `assertInOrg`
+ * （src/lib/mcp/shared.ts），只是照本檔慣例回傳 i18n 過的字串而不是 throw。
+ */
+type OrgScopedTable = PgTable & {
+  id: AnyPgColumn;
+  organizationId: AnyPgColumn;
+  /** 沒有軟刪除欄位的表（例如 payroll_item_types）就不帶。 */
+  deletedAt?: AnyPgColumn;
+};
+
+/** 一張表 + 這次要驗的一組 id。null／undefined（欄位留空）一律放行。 */
+type OrgRef = readonly [OrgScopedTable, readonly (number | null | undefined)[]];
+
+/** 去掉留空與重複，回傳真的需要查的 id。 */
+function refIds(ids: readonly (number | null | undefined)[]): number[] {
+  return [...new Set(ids.filter((id): id is number => typeof id === "number"))];
+}
+
+/** 單一張表的歸屬檢查：查得到的筆數要跟丟進去的 id 數一樣多。 */
+async function allIdsOwned(
+  db: ReturnType<typeof getDb>,
+  orgId: string,
+  table: OrgScopedTable,
+  ids: number[],
+): Promise<boolean> {
+  const rows = await db
+    .select({ id: table.id })
+    .from(table)
+    .where(
+      and(
+        eq(table.organizationId, orgId),
+        inArray(table.id, ids),
+        // 指向已軟刪除的 row 也不該通過：那筆在使用者眼中已經不存在了。
+        table.deletedAt ? isNull(table.deletedAt) : undefined,
+      ),
+    );
+  return rows.length === ids.length;
+}
+
+/**
+ * 驗證一批外鍵 id 全都屬於這個 org；有任何一個不是就回傳已翻譯的錯誤字串。
+ *
+ * 一張表一次查完（`in (...)`），不會因為欄位多就變成 N+1；不同表之間平行送。
+ * 錯誤訊息刻意只說「找不到」：講「這個 id 屬於別的組織」等於幫攻擊者確認
+ * 某個 id 存在於系統中的哪裡，是另一種洩漏。
+ */
+async function unownedRefError(
+  db: ReturnType<typeof getDb>,
+  orgId: string,
+  refs: readonly OrgRef[],
+): Promise<string | null> {
+  const pending = refs
+    .map(([table, ids]) => [table, refIds(ids)] as const)
+    .filter(([, ids]) => ids.length > 0);
+  if (pending.length === 0) return null;
+
+  const results = await Promise.all(
+    pending.map(([table, ids]) => allIdsOwned(db, orgId, table, ids)),
+  );
+  if (results.every(Boolean)) return null;
+  const t = await getTranslations("errors");
+  return t("notFound.referencedRecord");
 }
 
 // 「類型」下拉值 → (doc_type, invoice_kind)
@@ -106,7 +185,11 @@ export async function createParty(
 
   try {
     const { orgId } = await requireOrg();
-    const [inserted] = await getDb()
+    const db = getDb();
+    const defaultAccountId = num(formData.get("defaultAccountId"));
+    const refError = await unownedRefError(db, orgId, [[bankAccounts, [defaultAccountId]]]);
+    if (refError) return { ok: false, error: refError };
+    const [inserted] = await db
       .insert(parties)
       .values({
         organizationId: orgId,
@@ -114,14 +197,14 @@ export async function createParty(
         label: str(formData.get("label")) ?? "vendor",
         taxId: str(formData.get("taxId")),
         defaultCurrency: str(formData.get("defaultCurrency")),
-        defaultAccountId: num(formData.get("defaultAccountId")),
+        defaultAccountId,
         typicalAmount: str(formData.get("typicalAmount")),
         contact: str(formData.get("contact")),
         note: str(formData.get("note")),
       })
       .returning({ id: parties.id });
     await logWeb(orgId, "create", "party", inserted.id, name);
-    revalidatePath("/parties");
+    revalidatePath("/dashboard/parties");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
@@ -143,7 +226,10 @@ export async function createReconciliation(
 
   try {
     const { orgId } = await requireOrg();
-    const [inserted] = await getDb()
+    const db = getDb();
+    const refError = await unownedRefError(db, orgId, [[bankAccounts, [accountId]]]);
+    if (refError) return { ok: false, error: refError };
+    const [inserted] = await db
       .insert(accountReconciliations)
       .values({
         organizationId: orgId,
@@ -154,7 +240,7 @@ export async function createReconciliation(
       })
       .returning({ id: accountReconciliations.id });
     await logWeb(orgId, "create", "reconciliation", inserted.id);
-    revalidatePath("/reconciliation");
+    revalidatePath("/dashboard/reconciliation");
     return { ok: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : t("failed.create");
@@ -273,6 +359,12 @@ async function resolveExpenseIncome(
   if (!partyName) return { error: isIncome ? t("required.client") : t("required.counterparty") };
   // 分類可留空 → categoryId 為 null＝未分類（不再強制選分類，避免用另一個帳戶暫存）
   const categoryId = num(formData.get("categoryId"));
+  // 帳戶與分類都是表單直接送 id 上來的，先確認是自己組織的東西才往下走。
+  const refError = await unownedRefError(db, orgId, [
+    [bankAccounts, [accountId]],
+    [categories, [categoryId]],
+  ]);
+  if (refError) return { error: refError };
   const partyId = await getOrCreateParty(db, orgId, partyName, isIncome ? "customer" : "vendor");
   return {
     fields: {
@@ -294,6 +386,8 @@ async function resolveAdvance(
   const partyName = str(formData.get("partyName"));
   if (!partyName) return { error: t("required.vendor") };
   const categoryId = num(formData.get("categoryId")); // 可留空＝未分類
+  const refError = await unownedRefError(db, orgId, [[categories, [categoryId]]]);
+  if (refError) return { error: refError };
   const settleName = str(formData.get("settleEmployeeName"));
   if (!settleName) return { error: t("required.payer") };
   return {
@@ -306,13 +400,22 @@ async function resolveAdvance(
   };
 }
 
-async function resolveTransfer(formData: FormData): Promise<TxnResult> {
+async function resolveTransfer(
+  db: ReturnType<typeof getDb>,
+  orgId: string,
+  formData: FormData,
+): Promise<TxnResult> {
   const fromAccountId = num(formData.get("fromAccountId"));
   const toAccountId = num(formData.get("toAccountId"));
   if (!fromAccountId || !toAccountId) {
     const t = await getTranslations("errors");
     return { error: t("required.transferAccounts") };
   }
+  // 轉帳的兩隻腳都是使用者送上來的 id，兩個都要驗。
+  const refError = await unownedRefError(db, orgId, [
+    [bankAccounts, [fromAccountId, toAccountId]],
+  ]);
+  if (refError) return { error: refError };
   return { fields: { ...blankFields, fromAccountId, toAccountId } };
 }
 
@@ -326,7 +429,7 @@ async function resolveTxnFields(
   if (type === "expense" || type === "income")
     return resolveExpenseIncome(db, orgId, type === "income", formData);
   if (type === "advance") return resolveAdvance(db, orgId, formData);
-  if (type === "transfer") return resolveTransfer(formData);
+  if (type === "transfer") return resolveTransfer(db, orgId, formData);
   const t = await getTranslations("errors");
   return { error: t("unsupported.transactionType") };
 }
@@ -376,6 +479,23 @@ async function readTransactionHeader(
   return { header: { type, txnDate, amount, currency, book, billed } };
 }
 
+/**
+ * 交易表單的「綁定」欄位：專案／合約／訂閱。這三個不分交易類型都會原封不動寫進
+ * transactions，所以獨立於 resolveTxnFields（那支只管各情境自己的帳戶與分類）之外
+ * 驗一次，新增與編輯共用。
+ */
+async function transactionLinkError(
+  db: ReturnType<typeof getDb>,
+  orgId: string,
+  formData: FormData,
+): Promise<string | null> {
+  return unownedRefError(db, orgId, [
+    [projects, [num(formData.get("projectId"))]],
+    [contracts, [num(formData.get("contractId"))]],
+    [subscriptions, [num(formData.get("subscriptionId"))]],
+  ]);
+}
+
 /** insert 與 update 共用的欄位（type 只在新增時寫入，所以不在這裡）。 */
 function transactionColumns(formData: FormData, header: TxnHeader, f: TxnFields) {
   return {
@@ -398,6 +518,32 @@ function transactionColumns(formData: FormData, header: TxnHeader, f: TxnFields)
   };
 }
 
+/**
+ * 交易幣別必須等於它所屬帳戶的幣別（見 @/lib/account-currency 的說明）。
+ * 相符回傳 null，不符回傳已翻譯的錯誤字串，讓呼叫端照本檔慣例包成 ActionState。
+ *
+ * 轉帳是「一列兩腳」：from 與 to 各自要跟自己的帳戶對得起來，所以兩個都丟進來驗。
+ *
+ * ⚠️ 一定要排在帳戶歸屬檢查（unownedRefError）之後：這支只查得到本 org 的帳戶，
+ * 別人的帳戶 id 在這裡查無資料 → 沒有「幣別不符」可回報 → 靜悄悄地通過。先報
+ * 「找不到帳戶」也比較好懂，使用者不會收到一則在講幣別、實際上帳戶根本不存在的訊息。
+ */
+async function accountCurrencyError(
+  db: ReturnType<typeof getDb>,
+  orgId: string,
+  currency: string,
+  accountIds: readonly (number | null | undefined)[],
+): Promise<string | null> {
+  const [bad] = await findAccountCurrencyMismatches(db, orgId, currency, accountIds);
+  if (!bad) return null;
+  const t = await getTranslations("errors");
+  return t("validation.accountCurrencyMismatch", {
+    account: bad.accountName,
+    accountCurrency: bad.accountCurrency,
+    txnCurrency: bad.txnCurrency,
+  });
+}
+
 // 情境優先：type 決定行為，各情境只讀自己需要的欄位。所有金額目前以 TWD 計。
 export async function createTransaction(
   _prev: ActionState,
@@ -414,6 +560,13 @@ export async function createTransaction(
     const resolved = await resolveTxnFields(db, orgId, header.type, formData);
     if ("error" in resolved) return { ok: false, error: resolved.error };
     const f = resolved.fields;
+    const linkError = await transactionLinkError(db, orgId, formData);
+    if (linkError) return { ok: false, error: linkError };
+    const currencyError = await accountCurrencyError(db, orgId, header.currency, [
+      f.fromAccountId,
+      f.toAccountId,
+    ]);
+    if (currencyError) return { ok: false, error: currencyError };
 
     const [inserted] = await db
       .insert(transactions)
@@ -428,9 +581,9 @@ export async function createTransaction(
 
     await logWeb(orgId, "create", "transaction", inserted.id, str(formData.get("description")) ?? header.type);
 
-    revalidatePath("/transactions");
-    revalidatePath("/accountant-notices");
-    revalidatePath("/");
+    revalidatePath("/dashboard/transactions");
+    revalidatePath("/dashboard/accountant-notices");
+    revalidatePath("/dashboard");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
@@ -449,14 +602,18 @@ export async function updateParty(
 
   try {
     const { orgId } = await requireOrg();
-    await getDb()
+    const db = getDb();
+    const defaultAccountId = num(formData.get("defaultAccountId"));
+    const refError = await unownedRefError(db, orgId, [[bankAccounts, [defaultAccountId]]]);
+    if (refError) return { ok: false, error: refError };
+    await db
       .update(parties)
       .set({
         name,
         label: str(formData.get("label")) ?? "vendor",
         taxId: str(formData.get("taxId")),
         defaultCurrency: str(formData.get("defaultCurrency")),
-        defaultAccountId: num(formData.get("defaultAccountId")),
+        defaultAccountId,
         typicalAmount: str(formData.get("typicalAmount")),
         contact: str(formData.get("contact")),
         note: str(formData.get("note")),
@@ -464,8 +621,8 @@ export async function updateParty(
       })
       .where(and(eq(parties.organizationId, orgId), eq(parties.id, id)));
     await logWeb(orgId, "update", "party", id, name);
-    revalidatePath("/parties");
-    revalidatePath(`/parties/${id}`);
+    revalidatePath("/dashboard/parties");
+    revalidatePath(`/dashboard/parties/${id}`);
     return { ok: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : t("failed.update");
@@ -506,7 +663,12 @@ export async function createReimbursement(
       .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, advanceId)))
       .limit(1);
     if (!adv) return { ok: false, error: t("notFound.advanceRecord") };
+    const refError = await unownedRefError(db, orgId, [[bankAccounts, [fromAccountId]]]);
+    if (refError) return { ok: false, error: refError };
     const advCurrency = adv.currency ?? "TWD";
+    // 撥款的幣別跟著原代墊走，所以要驗的是「付款帳戶是不是同一種幣別」。
+    const currencyError = await accountCurrencyError(db, orgId, advCurrency, [fromAccountId]);
+    if (currencyError) return { ok: false, error: currencyError };
 
     const [inserted] = await db
       .insert(transactions)
@@ -527,9 +689,9 @@ export async function createReimbursement(
 
     await logWeb(orgId, "create", "transaction", inserted.id, tRec("activity.advanceReimbursed"));
 
-    revalidatePath("/advances");
-    revalidatePath("/transactions");
-    revalidatePath("/");
+    revalidatePath("/dashboard/advances");
+    revalidatePath("/dashboard/transactions");
+    revalidatePath("/dashboard");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.reimburse") };
@@ -555,8 +717,8 @@ export async function createCategory(
       .values({ organizationId: orgId, name, kind })
       .returning({ id: categories.id });
     await logWeb(orgId, "create", "category", inserted.id, name);
-    revalidatePath("/categories");
-    revalidatePath("/transactions");
+    revalidatePath("/dashboard/categories");
+    revalidatePath("/dashboard/transactions");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
@@ -579,8 +741,8 @@ export async function updateCategory(
       .set({ name })
       .where(and(eq(categories.organizationId, orgId), eq(categories.id, id)));
     await logWeb(orgId, "update", "category", id, name);
-    revalidatePath("/categories");
-    revalidatePath("/transactions");
+    revalidatePath("/dashboard/categories");
+    revalidatePath("/dashboard/transactions");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
@@ -596,8 +758,8 @@ export async function deleteCategory(id: number): Promise<ActionState> {
       .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(categories.organizationId, orgId), eq(categories.id, id)));
     await logWeb(orgId, "delete", "category", id);
-    revalidatePath("/categories");
-    revalidatePath("/transactions");
+    revalidatePath("/dashboard/categories");
+    revalidatePath("/dashboard/transactions");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -626,7 +788,7 @@ export async function createBankAccount(
       })
       .returning({ id: bankAccounts.id });
     await logWeb(orgId, "create", "bank_account", inserted.id, name);
-    revalidatePath("/bank-accounts");
+    revalidatePath("/dashboard/bank-accounts");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
@@ -655,8 +817,8 @@ export async function updateBankAccount(
       })
       .where(and(eq(bankAccounts.organizationId, orgId), eq(bankAccounts.id, id)));
     await logWeb(orgId, "update", "bank_account", id, name);
-    revalidatePath("/bank-accounts");
-    revalidatePath(`/bank-accounts/${id}`);
+    revalidatePath("/dashboard/bank-accounts");
+    revalidatePath(`/dashboard/bank-accounts/${id}`);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
@@ -672,7 +834,7 @@ export async function deleteBankAccount(id: number): Promise<ActionState> {
       .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(bankAccounts.organizationId, orgId), eq(bankAccounts.id, id)));
     await logWeb(orgId, "delete", "bank_account", id);
-    revalidatePath("/bank-accounts");
+    revalidatePath("/dashboard/bank-accounts");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -772,7 +934,7 @@ export async function createEmployee(
       })
       .returning({ id: employees.id });
     await logWeb(orgId, "create", "employee", inserted.id, name);
-    revalidatePath("/employees");
+    revalidatePath("/dashboard/employees");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
@@ -801,8 +963,8 @@ export async function updateEmployee(
       })
       .where(and(eq(employees.organizationId, orgId), eq(employees.id, id)));
     await logWeb(orgId, "update", "employee", id, name);
-    revalidatePath("/employees");
-    revalidatePath(`/employees/${id}`);
+    revalidatePath("/dashboard/employees");
+    revalidatePath(`/dashboard/employees/${id}`);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
@@ -818,7 +980,7 @@ export async function deleteEmployee(id: number): Promise<ActionState> {
       .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(employees.organizationId, orgId), eq(employees.id, id)));
     await logWeb(orgId, "delete", "employee", id);
-    revalidatePath("/employees");
+    revalidatePath("/dashboard/employees");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -835,7 +997,7 @@ export async function deleteParty(id: number): Promise<ActionState> {
       .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(parties.organizationId, orgId), eq(parties.id, id)));
     await logWeb(orgId, "delete", "party", id);
-    revalidatePath("/parties");
+    revalidatePath("/dashboard/parties");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -876,10 +1038,10 @@ export async function deleteTransaction(id: number): Promise<ActionState> {
       .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)));
     await logWeb(orgId, "delete", "transaction", id);
-    revalidatePath("/transactions");
-    revalidatePath("/advances");
-    revalidatePath("/accountant-notices");
-    revalidatePath("/");
+    revalidatePath("/dashboard/transactions");
+    revalidatePath("/dashboard/advances");
+    revalidatePath("/dashboard/accountant-notices");
+    revalidatePath("/dashboard");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -903,7 +1065,7 @@ export async function deleteTransactionDocument(id: number): Promise<ActionState
       .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(documents.organizationId, orgId), eq(documents.id, id)));
     await logWeb(orgId, "delete", "document", id);
-    revalidatePath("/transactions");
+    revalidatePath("/dashboard/transactions");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -919,7 +1081,7 @@ export async function markAccountantNotified(id: number): Promise<ActionState> {
       .update(documents)
       .set({ accountantNotifiedAt: new Date().toISOString() })
       .where(and(eq(documents.organizationId, orgId), eq(documents.id, id)));
-    revalidatePath("/accountant-notices");
+    revalidatePath("/dashboard/accountant-notices");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
@@ -934,7 +1096,7 @@ export async function unmarkAccountantNotified(id: number): Promise<ActionState>
       .update(documents)
       .set({ accountantNotifiedAt: null })
       .where(and(eq(documents.organizationId, orgId), eq(documents.id, id)));
-    revalidatePath("/accountant-notices");
+    revalidatePath("/dashboard/accountant-notices");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
@@ -956,9 +1118,27 @@ export async function updateTransaction(
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
+    // 這筆交易本身也要先確認是自己的。底下的 update 有帶 org 條件、擋得住，但
+    // storeTransactionDocument 會拿同一個 id 新建一列 documents —— 沒先驗的話，
+    // 就能在自己 org 底下插進一列指向別人交易的憑證，而「待通知會計師」頁的
+    // join（queries.ts listAccountantNotices）是純用 id 對的，會把對方的金額、
+    // 對象名稱與分類一起顯示出來。
+    const [owned] = await db
+      .select({ id: transactions.id })
+      .from(transactions)
+      .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)))
+      .limit(1);
+    if (!owned) return { ok: false, error: t("notFound.transaction") };
     const resolved = await resolveTxnFields(db, orgId, header.type, formData);
     if ("error" in resolved) return { ok: false, error: resolved.error };
     const f = resolved.fields;
+    const linkError = await transactionLinkError(db, orgId, formData);
+    if (linkError) return { ok: false, error: linkError };
+    const currencyError = await accountCurrencyError(db, orgId, header.currency, [
+      f.fromAccountId,
+      f.toAccountId,
+    ]);
+    if (currencyError) return { ok: false, error: currencyError };
 
     await db
       .update(transactions)
@@ -970,9 +1150,9 @@ export async function updateTransaction(
     // 編輯時若有補上憑證，新增一筆 documents
     await storeTransactionDocument(db, orgId, id, formData, header.billed);
     await logWeb(orgId, "update", "transaction", id);
-    revalidatePath("/transactions");
-    revalidatePath("/accountant-notices");
-    revalidatePath("/");
+    revalidatePath("/dashboard/transactions");
+    revalidatePath("/dashboard/accountant-notices");
+    revalidatePath("/dashboard");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
@@ -1029,6 +1209,18 @@ function invoiceValues(formData: FormData) {
   };
 }
 
+/** 發票表單上使用者可控的外鍵：綁定的合約與請款項目。 */
+async function invoiceRefError(
+  db: ReturnType<typeof getDb>,
+  orgId: string,
+  formData: FormData,
+): Promise<string | null> {
+  return unownedRefError(db, orgId, [
+    [contracts, [num(formData.get("contractId"))]],
+    [billingItems, [num(formData.get("billingItemId"))]],
+  ]);
+}
+
 /** 把表單值裡的 partyName 換成 partyId（查無就新建）。銷項對象是客戶、進項是廠商。 */
 async function invoiceColumns(orgId: string, formData: FormData) {
   const { partyName, ...columns } = invoiceValues(formData);
@@ -1048,13 +1240,15 @@ export async function createInvoice(
   const t = await getTranslations("errors");
   try {
     const { orgId } = await requireOrg();
+    const refError = await invoiceRefError(getDb(), orgId, formData);
+    if (refError) return { ok: false, error: refError };
     const { columns: v, created } = await invoiceColumns(orgId, formData);
     const [inserted] = await getDb()
       .insert(invoices)
       .values({ organizationId: orgId, ...v })
       .returning({ id: invoices.id });
     await logWeb(orgId, "create", "invoice", inserted.id);
-    if (created) revalidatePath("/parties");
+    if (created) revalidatePath("/dashboard/parties");
     // 綁到請款項目時順手回填開發票日，看板的「待開發票」才會自己消掉，
     // 不必再手動標記一次。已經有日期就不覆蓋。
     if (v.billingItemId && v.invoiceDate) {
@@ -1068,9 +1262,9 @@ export async function createInvoice(
             isNull(billingItems.invoicedOn),
           ),
         );
-      revalidatePath("/billing");
+      revalidatePath("/dashboard/billing");
     }
-    revalidatePath("/invoices");
+    revalidatePath("/dashboard/invoices");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
@@ -1086,15 +1280,17 @@ export async function updateInvoice(
   if (!id) return { ok: false, error: t("required.id") };
   try {
     const { orgId } = await requireOrg();
+    const refError = await invoiceRefError(getDb(), orgId, formData);
+    if (refError) return { ok: false, error: refError };
     const { columns, created } = await invoiceColumns(orgId, formData);
     await getDb()
       .update(invoices)
       .set(columns)
       .where(and(eq(invoices.organizationId, orgId), eq(invoices.id, id)));
     await logWeb(orgId, "update", "invoice", id);
-    if (created) revalidatePath("/parties");
-    revalidatePath("/invoices");
-    revalidatePath(`/invoices/${id}`);
+    if (created) revalidatePath("/dashboard/parties");
+    revalidatePath("/dashboard/invoices");
+    revalidatePath(`/dashboard/invoices/${id}`);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
@@ -1110,7 +1306,7 @@ export async function deleteInvoice(id: number): Promise<ActionState> {
       .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(invoices.organizationId, orgId), eq(invoices.id, id)));
     await logWeb(orgId, "delete", "invoice", id);
-    revalidatePath("/invoices");
+    revalidatePath("/dashboard/invoices");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -1145,8 +1341,8 @@ export async function markInvoiceExternal(
       })
       .where(and(eq(invoices.organizationId, orgId), eq(invoices.id, id)));
     await logWeb(orgId, "update", "invoice", id, `Simpany ${externalStatus}`);
-    revalidatePath("/invoices");
-    revalidatePath("/invoices/reconcile");
+    revalidatePath("/dashboard/invoices");
+    revalidatePath("/dashboard/invoices/reconcile");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
@@ -1169,13 +1365,16 @@ export async function updateReconciliation(
   if (statementBalance === null) return { ok: false, error: t("required.statementBalance") };
   try {
     const { orgId } = await requireOrg();
-    await getDb()
+    const db = getDb();
+    const refError = await unownedRefError(db, orgId, [[bankAccounts, [accountId]]]);
+    if (refError) return { ok: false, error: refError };
+    await db
       .update(accountReconciliations)
       .set({ accountId, asOfDate, statementBalance, note: str(formData.get("note")) })
       .where(and(eq(accountReconciliations.organizationId, orgId), eq(accountReconciliations.id, id)));
     await logWeb(orgId, "update", "reconciliation", id);
-    revalidatePath("/reconciliation");
-    revalidatePath(`/reconciliation/${id}`);
+    revalidatePath("/dashboard/reconciliation");
+    revalidatePath(`/dashboard/reconciliation/${id}`);
     return { ok: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : t("failed.update");
@@ -1195,7 +1394,7 @@ export async function deleteReconciliation(id: number): Promise<ActionState> {
       .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(accountReconciliations.organizationId, orgId), eq(accountReconciliations.id, id)));
     await logWeb(orgId, "delete", "reconciliation", id);
-    revalidatePath("/reconciliation");
+    revalidatePath("/dashboard/reconciliation");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -1208,6 +1407,14 @@ export async function deletePayrollRun(id: number): Promise<ActionState> {
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
+    // payslips 沒有 organization_id（歸屬只能靠 payroll_run），所以要先確認這一期
+    // 真的是自己的，否則下面那句會把別的組織的薪資單整批軟刪除。
+    const [run] = await db
+      .select({ id: payrollRuns.id })
+      .from(payrollRuns)
+      .where(and(eq(payrollRuns.organizationId, orgId), eq(payrollRuns.id, id)))
+      .limit(1);
+    if (!run) return { ok: false, error: t("notFound.referencedRecord") };
     const deletedAt = new Date().toISOString();
     await db
       .update(payslips)
@@ -1218,7 +1425,7 @@ export async function deletePayrollRun(id: number): Promise<ActionState> {
       .set({ deletedAt })
       .where(and(eq(payrollRuns.organizationId, orgId), eq(payrollRuns.id, id)));
     await logWeb(orgId, "delete", "payroll_run", id);
-    revalidatePath("/payroll");
+    revalidatePath("/dashboard/payroll");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -1275,43 +1482,108 @@ async function getOrCreatePayrollRunId(
 // - 自動歸到該年月的薪資批次（沒有就建）
 // - 寫一張薪資單（含底薪/加減項 + 勞健保自付）、快照勞健保
 // - 建一筆薪資支出交易並回寫 paid_transaction_id
+/** 發薪表單解析後的樣子；金額都已經加總完，呼叫端只管寫入。 */
+type PayslipInput = {
+  employeeId: number;
+  year: number;
+  month: number;
+  payDate: string;
+  fromAccountId: number;
+  book: string;
+  items: PayItem[];
+  taxable: number;
+  nontaxable: number;
+  deductionTotal: number;
+  net: number;
+};
+
+/**
+ * 發薪表單的欄位解析與純輸入驗證（不碰 DB）。
+ *
+ * 抽出來是因為這一段有近十個提早 return，全部留在 payEmployeeSalary 裡會讓它的
+ * cognitive complexity 超過門檻（Sonar S3776）；分開之後「哪些是輸入問題、哪些是
+ * 資料庫狀態問題」也比較好讀。
+ */
+async function parsePayslipForm(
+  formData: FormData,
+): Promise<{ error: string } | { input: PayslipInput }> {
+  const t = await getTranslations("errors");
+  const employeeId = num(formData.get("employeeId"));
+  const year = num(formData.get("periodYear"));
+  const month = num(formData.get("periodMonth"));
+  const payDate = str(formData.get("payDate"));
+  const fromAccountId = num(formData.get("fromAccountId"));
+  if (!employeeId) return { error: t("required.employee") };
+  if (!year || !month) return { error: t("required.payPeriod") };
+  if (!payDate) return { error: t("required.payDate") };
+  if (!fromAccountId) return { error: t("required.payingAccount") };
+  // 帳別：沒投保沒合約的可只記內帳、不報稅
+  const bookRaw = str(formData.get("book")) ?? "both";
+  const book = ["internal", "external", "both"].includes(bookRaw) ? bookRaw : "both";
+
+  // 薪資項目（底薪、加班費、獎金、請假扣…）
+  let items: PayItem[];
+  try {
+    items = JSON.parse(str(formData.get("items")) ?? "[]") as PayItem[];
+  } catch {
+    return { error: t("validation.payItemFormat") };
+  }
+  items = items.filter((r) => r?.name && Number.isFinite(r.amount) && r.amount !== 0);
+
+  const { taxable, nontaxable, otherDeduction } = sumPayItems(items);
+  if (taxable + nontaxable <= 0) return { error: t("required.atLeastOnePayItem") };
+
+  return {
+    input: {
+      employeeId,
+      year,
+      month,
+      payDate,
+      fromAccountId,
+      book,
+      items,
+      taxable,
+      nontaxable,
+      deductionTotal: otherDeduction,
+      net: taxable + nontaxable - otherDeduction,
+    },
+  };
+}
+
 export async function payEmployeeSalary(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
   const t = await getTranslations("errors");
   const tRec = await getTranslations("lib");
-  const employeeId = num(formData.get("employeeId"));
-  const year = num(formData.get("periodYear"));
-  const month = num(formData.get("periodMonth"));
-  const payDate = str(formData.get("payDate"));
-  const fromAccountId = num(formData.get("fromAccountId"));
-  if (!employeeId) return { ok: false, error: t("required.employee") };
-  if (!year || !month) return { ok: false, error: t("required.payPeriod") };
-  if (!payDate) return { ok: false, error: t("required.payDate") };
-  if (!fromAccountId) return { ok: false, error: t("required.payingAccount") };
-  // 帳別：沒投保沒合約的可只記內帳、不報稅
-  const bookRaw = str(formData.get("book")) ?? "both";
-  const book = ["internal", "external", "both"].includes(bookRaw) ? bookRaw : "both";
-
-  // 薪資項目（底薪、加班費、獎金、請假扣…）
-  let items: PayItem[] = [];
-  try {
-    items = JSON.parse(str(formData.get("items")) ?? "[]") as PayItem[];
-  } catch {
-    return { ok: false, error: t("validation.payItemFormat") };
-  }
-  items = items.filter((r) => r?.name && Number.isFinite(r.amount) && r.amount !== 0);
-
-  const { taxable, nontaxable, otherDeduction } = sumPayItems(items);
-  if (taxable + nontaxable <= 0) return { ok: false, error: t("required.atLeastOnePayItem") };
-
-  const deductionTotal = otherDeduction;
-  const net = taxable + nontaxable - deductionTotal;
+  const parsed = await parsePayslipForm(formData);
+  if ("error" in parsed) return { ok: false, error: parsed.error };
+  const {
+    employeeId,
+    year,
+    month,
+    payDate,
+    fromAccountId,
+    book,
+    items,
+    taxable,
+    nontaxable,
+    deductionTotal,
+    net,
+  } = parsed.input;
 
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
+    // 員工、發薪帳戶、薪資項目類別都是表單送 id 上來的，先確認全是自己組織的。
+    // 特別是 employeeId：底下取員工姓名的查詢有帶 org，但查不到也只是姓名留白，
+    // 不會擋下寫入，所以歸屬得在這裡驗。
+    const refError = await unownedRefError(db, orgId, [
+      [employees, [employeeId]],
+      [bankAccounts, [fromAccountId]],
+      [payrollItemTypes, items.map((r) => r.itemTypeId)],
+    ]);
+    if (refError) return { ok: false, error: refError };
     const runId = await getOrCreatePayrollRunId(db, orgId, year, month, payDate);
 
     // 一個員工一個月一張：已發放就擋
@@ -1335,6 +1607,9 @@ export async function payEmployeeSalary(
       .where(and(eq(employees.organizationId, orgId), eq(employees.id, employeeId)))
       .limit(1);
     const period = `${year}-${String(month).padStart(2, "0")}`;
+    // 薪資固定以 TWD 記帳，所以發薪帳戶也必須是 TWD 帳戶。
+    const currencyError = await accountCurrencyError(db, orgId, "TWD", [fromAccountId]);
+    if (currencyError) return { ok: false, error: currencyError };
     const [txn] = await db
       .insert(transactions)
       .values({
@@ -1388,10 +1663,10 @@ export async function payEmployeeSalary(
 
     await logWeb(orgId, "create", "transaction", txn.id, tRec("activity.salaryPaid"));
 
-    revalidatePath("/payroll");
-    revalidatePath("/employees");
-    revalidatePath("/transactions");
-    revalidatePath("/");
+    revalidatePath("/dashboard/payroll");
+    revalidatePath("/dashboard/employees");
+    revalidatePath("/dashboard/transactions");
+    revalidatePath("/dashboard");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.pay") };
@@ -1420,9 +1695,9 @@ export async function deletePayslip(id: number): Promise<ActionState> {
         .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, slip.paidTransactionId)));
     }
     await logWeb(orgId, "delete", "payslip", id);
-    revalidatePath("/payroll");
-    revalidatePath("/transactions");
-    revalidatePath("/");
+    revalidatePath("/dashboard/payroll");
+    revalidatePath("/dashboard/transactions");
+    revalidatePath("/dashboard");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -1456,8 +1731,8 @@ export async function createProject(
       })
       .returning({ id: projects.id });
     await logWeb(orgId, "create", "project", inserted.id, name);
-    revalidatePath("/projects");
-    if (client.created) revalidatePath("/parties");
+    revalidatePath("/dashboard/projects");
+    if (client.created) revalidatePath("/dashboard/parties");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
@@ -1489,8 +1764,8 @@ export async function updateProject(
       })
       .where(and(eq(projects.organizationId, orgId), eq(projects.id, id)));
     await logWeb(orgId, "update", "project", id, name);
-    revalidatePath("/projects");
-    if (client.created) revalidatePath("/parties");
+    revalidatePath("/dashboard/projects");
+    if (client.created) revalidatePath("/dashboard/parties");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
@@ -1506,7 +1781,7 @@ export async function deleteProject(id: number): Promise<ActionState> {
       .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(projects.organizationId, orgId), eq(projects.id, id)));
     await logWeb(orgId, "delete", "project", id);
-    revalidatePath("/projects");
+    revalidatePath("/dashboard/projects");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -1577,6 +1852,8 @@ export async function createSubscription(
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
+    const refError = await unownedRefError(db, orgId, [[projects, [v.projectId]]]);
+    if (refError) return { ok: false, error: refError };
     const customer = await requireCustomer(db, orgId, v.customerPartyName);
     if ("error" in customer) return { ok: false, error: customer.error };
     const [inserted] = await db
@@ -1584,8 +1861,8 @@ export async function createSubscription(
       .values({ organizationId: orgId, ...subscriptionColumns(v, customer.id, required) })
       .returning({ id: subscriptions.id });
     await logWeb(orgId, "create", "subscription", inserted.id, v.name ?? undefined);
-    revalidatePath("/subscriptions");
-    if (customer.created) revalidatePath("/parties");
+    revalidatePath("/dashboard/subscriptions");
+    if (customer.created) revalidatePath("/dashboard/parties");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
@@ -1605,6 +1882,8 @@ export async function updateSubscription(
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
+    const refError = await unownedRefError(db, orgId, [[projects, [v.projectId]]]);
+    if (refError) return { ok: false, error: refError };
     const customer = await requireCustomer(db, orgId, v.customerPartyName);
     if ("error" in customer) return { ok: false, error: customer.error };
     await db
@@ -1612,8 +1891,8 @@ export async function updateSubscription(
       .set(subscriptionColumns(v, customer.id, required))
       .where(and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, id)));
     await logWeb(orgId, "update", "subscription", id, v.name ?? undefined);
-    revalidatePath("/subscriptions");
-    if (customer.created) revalidatePath("/parties");
+    revalidatePath("/dashboard/subscriptions");
+    if (customer.created) revalidatePath("/dashboard/parties");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
@@ -1629,7 +1908,7 @@ export async function deleteSubscription(id: number): Promise<ActionState> {
       .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, id)));
     await logWeb(orgId, "delete", "subscription", id);
-    revalidatePath("/subscriptions");
+    revalidatePath("/dashboard/subscriptions");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -1834,6 +2113,9 @@ export async function createContract(
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
+    // projectId 也會被 expandContractSchedule 帶進 billing_items，一定要先驗。
+    const refError = await unownedRefError(db, orgId, [[projects, [v.projectId]]]);
+    if (refError) return { ok: false, error: refError };
     const customer = await requireCustomer(db, orgId, v.customerPartyName);
     if ("error" in customer) return { ok: false, error: customer.error };
     const [inserted] = await db
@@ -1843,10 +2125,10 @@ export async function createContract(
     await logWeb(orgId, "create", "contract", inserted.id, v.title ?? undefined);
     // 新合約一定沒有既有排程，直接展開（展不出來就是 0 期，不是錯誤）。
     const created = await expandContractSchedule(db, orgId, inserted.id, customer.id, v, false);
-    revalidatePath("/contracts");
-    if (customer.created) revalidatePath("/parties");
+    revalidatePath("/dashboard/contracts");
+    if (customer.created) revalidatePath("/dashboard/parties");
     if (created > 0) {
-      revalidatePath("/billing");
+      revalidatePath("/dashboard/billing");
       await syncCalendarBestEffort(orgId);
     }
     return { ok: true };
@@ -1868,6 +2150,8 @@ export async function updateContract(
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
+    const refError = await unownedRefError(db, orgId, [[projects, [v.projectId]]]);
+    if (refError) return { ok: false, error: refError };
     const customer = await requireCustomer(db, orgId, v.customerPartyName);
     if ("error" in customer) return { ok: false, error: customer.error };
     await db
@@ -1884,10 +2168,10 @@ export async function updateContract(
       v,
       v.regenerateSchedule,
     );
-    revalidatePath("/contracts");
-    if (customer.created) revalidatePath("/parties");
+    revalidatePath("/dashboard/contracts");
+    if (customer.created) revalidatePath("/dashboard/parties");
     if (changed > 0) {
-      revalidatePath("/billing");
+      revalidatePath("/dashboard/billing");
       await syncCalendarBestEffort(orgId);
     }
     return { ok: true };
@@ -1905,7 +2189,7 @@ export async function deleteContract(id: number): Promise<ActionState> {
       .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(contracts.organizationId, orgId), eq(contracts.id, id)));
     await logWeb(orgId, "delete", "contract", id);
-    revalidatePath("/contracts");
+    revalidatePath("/dashboard/contracts");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -1952,8 +2236,8 @@ async function resolveBillingCustomer(
 }
 
 function revalidateBilling() {
-  revalidatePath("/billing");
-  revalidatePath("/contracts");
+  revalidatePath("/dashboard/billing");
+  revalidatePath("/dashboard/contracts");
 }
 
 /**
@@ -1986,6 +2270,11 @@ export async function createBillingItem(
   if (!BILLING_ITEM_STATUS.has(v.status)) return { ok: false, error: t("validation.statusInvalid") };
   try {
     const { orgId } = await requireOrg();
+    const refError = await unownedRefError(getDb(), orgId, [
+      [contracts, [v.contractId]],
+      [projects, [v.projectId]],
+    ]);
+    if (refError) return { ok: false, error: refError };
     const customer = await resolveBillingCustomer(orgId, v.customerPartyName, v.contractId);
     if (!customer.id) return { ok: false, error: t("required.client") };
     const [inserted] = await getDb()
@@ -2009,7 +2298,7 @@ export async function createBillingItem(
       .returning({ id: billingItems.id });
     await logWeb(orgId, "create", "billing_item", inserted.id, v.title ?? undefined);
     revalidateBilling();
-    if (customer.created) revalidatePath("/parties");
+    if (customer.created) revalidatePath("/dashboard/parties");
     await syncCalendarBestEffort(orgId);
     return { ok: true };
   } catch (e) {
@@ -2030,6 +2319,11 @@ export async function updateBillingItem(
   if (!BILLING_ITEM_STATUS.has(v.status)) return { ok: false, error: t("validation.statusInvalid") };
   try {
     const { orgId } = await requireOrg();
+    const refError = await unownedRefError(getDb(), orgId, [
+      [contracts, [v.contractId]],
+      [projects, [v.projectId]],
+    ]);
+    if (refError) return { ok: false, error: refError };
     const customer = await resolveBillingCustomer(orgId, v.customerPartyName, v.contractId);
     if (!customer.id) return { ok: false, error: t("required.client") };
     await getDb()
@@ -2052,7 +2346,7 @@ export async function updateBillingItem(
       .where(and(eq(billingItems.organizationId, orgId), eq(billingItems.id, id)));
     await logWeb(orgId, "update", "billing_item", id, v.title ?? undefined);
     revalidateBilling();
-    if (customer.created) revalidatePath("/parties");
+    if (customer.created) revalidatePath("/dashboard/parties");
     await syncCalendarBestEffort(orgId);
     return { ok: true };
   } catch (e) {
@@ -2084,6 +2378,64 @@ export async function deleteBillingItem(id: number): Promise<ActionState> {
  * 所以往 subscription_periods 做 upsert —— 只帶日期、不動 expected_amount，
  * 才不會把「沒有金額覆寫」誤寫成覆寫。
  */
+/**
+ * 看板上「訂閱期別」那一半的推進。從 markBillingRow 抽出來的：兩個分支併在一起
+ * 讓它的 cognitive complexity 超過門檻（Sonar S3776），而兩者除了共用 orgId 與
+ * 錯誤處理之外沒有任何交集。key 的格式是 `sub:<subscriptionId>:<periodStart>`。
+ */
+async function markSubscriptionPeriod(
+  db: ReturnType<typeof getDb>,
+  orgId: string,
+  key: string,
+  field: "billedOn" | "paidOn" | "invoicedOn",
+  date: string | null,
+): Promise<ActionState> {
+  const t = await getTranslations("errors");
+  // paid_on 在訂閱端沒有對應欄位（實收一律看綁定的交易），忽略。
+  if (field === "paidOn") return { ok: false, error: t("validation.subscriptionPaymentViaTransaction") };
+  const [, rawId, periodStart] = key.split(":");
+  const subscriptionId = Number(rawId);
+  if (!Number.isFinite(subscriptionId) || !periodStart) {
+    return { ok: false, error: t("validation.invalidPeriodCode") };
+  }
+  // 這個分支查不到期別時會 insert 一列新的，subscriptionId 直接來自 key，
+  // 沒驗的話就會在自己 org 底下插進一列指向別人訂閱的期別。
+  const subRefError = await unownedRefError(db, orgId, [
+    [subscriptions, [subscriptionId]],
+  ]);
+  if (subRefError) return { ok: false, error: subRefError };
+  const [existing] = await db
+    .select({ id: subscriptionPeriods.id })
+    .from(subscriptionPeriods)
+    .where(
+      and(
+        eq(subscriptionPeriods.organizationId, orgId),
+        eq(subscriptionPeriods.subscriptionId, subscriptionId),
+        eq(subscriptionPeriods.periodStart, periodStart),
+        isNull(subscriptionPeriods.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (existing) {
+    await db
+      .update(subscriptionPeriods)
+      .set({ [field]: date })
+      .where(eq(subscriptionPeriods.id, existing.id));
+  } else {
+    await db.insert(subscriptionPeriods).values({
+      organizationId: orgId,
+      subscriptionId,
+      periodStart,
+      [field]: date,
+    });
+  }
+  await logWeb(orgId, "update", "subscription", subscriptionId, `${periodStart} ${field}`);
+  revalidatePath("/dashboard/billing");
+  revalidatePath("/dashboard/subscriptions");
+  await syncCalendarBestEffort(orgId);
+  return { ok: true };
+}
+
 export async function markBillingRow(
   key: string,
   field: "billedOn" | "paidOn" | "invoicedOn",
@@ -2108,43 +2460,7 @@ export async function markBillingRow(
     }
 
     if (key.startsWith("sub:")) {
-      // paid_on 在訂閱端沒有對應欄位（實收一律看綁定的交易），忽略。
-      if (field === "paidOn") return { ok: false, error: t("validation.subscriptionPaymentViaTransaction") };
-      const [, rawId, periodStart] = key.split(":");
-      const subscriptionId = Number(rawId);
-      if (!Number.isFinite(subscriptionId) || !periodStart) {
-        return { ok: false, error: t("validation.invalidPeriodCode") };
-      }
-      const [existing] = await db
-        .select({ id: subscriptionPeriods.id })
-        .from(subscriptionPeriods)
-        .where(
-          and(
-            eq(subscriptionPeriods.organizationId, orgId),
-            eq(subscriptionPeriods.subscriptionId, subscriptionId),
-            eq(subscriptionPeriods.periodStart, periodStart),
-            isNull(subscriptionPeriods.deletedAt),
-          ),
-        )
-        .limit(1);
-      if (existing) {
-        await db
-          .update(subscriptionPeriods)
-          .set({ [field]: date })
-          .where(eq(subscriptionPeriods.id, existing.id));
-      } else {
-        await db.insert(subscriptionPeriods).values({
-          organizationId: orgId,
-          subscriptionId,
-          periodStart,
-          [field]: date,
-        });
-      }
-      await logWeb(orgId, "update", "subscription", subscriptionId, `${periodStart} ${field}`);
-      revalidatePath("/billing");
-      revalidatePath("/subscriptions");
-      await syncCalendarBestEffort(orgId);
-      return { ok: true };
+      return markSubscriptionPeriod(db, orgId, key, field, date);
     }
 
     return { ok: false, error: t("validation.unrecognizedItem") };
@@ -2333,13 +2649,13 @@ export async function linkPaymentToBillingRow(
         subscriptionId,
         tRec("activity.paymentMatchedPeriod", { period: periodStart, id: transactionId }),
       );
-      revalidatePath("/subscriptions");
+      revalidatePath("/dashboard/subscriptions");
     } else {
       return { ok: false, error: t("validation.unrecognizedItem") };
     }
 
     revalidateBilling();
-    revalidatePath("/transactions");
+    revalidatePath("/dashboard/transactions");
     await syncCalendarBestEffort(orgId);
     return { ok: true };
   } catch (e) {
@@ -2349,28 +2665,31 @@ export async function linkPaymentToBillingRow(
 
 // ---- MCP / OAuth clients ----
 
-// Revoke (delete) an MCP client registration. Cascades to its access/refresh
-// tokens and consents (FK on delete cascade), so the client must re-authorize.
-// Deployment-wide action — gated to org owners/admins.
+/**
+ * 撤銷「我自己」對某個 MCP 用戶端的授權：刪掉我發給它的 token 與我的同意紀錄。
+ *
+ * 刻意**不刪** oauth_application 那一列。OAuth client 是透過 Dynamic Client
+ * Registration 註冊的，一個 client（ChatGPT、Claude…）註冊一次、所有使用者各自
+ * 授權，刪掉註冊等於把整個部署上其他人的連線一起弄壞。
+ *
+ * 也刻意**不檢查組織角色**。這是個人授權，不是組織設定：一般成員本來就該能收回
+ * 自己的連線，而管理員也不該有權收回別人的。where 條件同時帶 clientId 與自己的
+ * userId，所以能撤銷的範圍就恰好是「自己的」。
+ */
 export async function revokeMcpClient(clientId: string): Promise<ActionState> {
   const t = await getTranslations("errors");
   try {
-    const { orgId, userId } = await requireOrg();
+    const { userId } = await requireOrg();
     const db = getDb();
-    const role = (
-      await db
-        .select({ role: member.role })
-        .from(member)
-        .where(and(eq(member.userId, userId), eq(member.organizationId, orgId)))
-        .limit(1)
-    )[0]?.role;
-    if (role !== "owner" && role !== "admin") {
-      return { ok: false, error: t("validation.onlyOwnerOrAdminCanRevoke") };
-    }
     await db
-      .delete(oauthApplication)
-      .where(eq(oauthApplication.clientId, clientId));
-    revalidatePath("/settings/mcp");
+      .delete(oauthAccessToken)
+      .where(
+        and(eq(oauthAccessToken.clientId, clientId), eq(oauthAccessToken.userId, userId)),
+      );
+    await db
+      .delete(oauthConsent)
+      .where(and(eq(oauthConsent.clientId, clientId), eq(oauthConsent.userId, userId)));
+    revalidatePath("/dashboard/settings/mcp");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.revoke") };

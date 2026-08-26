@@ -1,0 +1,908 @@
+// 這頁的 markup / CSS / JS 是從 docs/index.html「原樣搬過來」的，不是手轉 JSX。
+//
+// 為什麼不轉 JSX：那份 landing 有 899 行，手工把 class→className、補 self-closing、
+// 跳脫 {} 的出錯率遠高於它帶來的好處，而且之後 docs/index.html 一改，兩邊就會分岔。
+// 內容全是靜態文案與插圖，沒有任何使用者輸入會流進來，所以用 dangerouslySetInnerHTML
+// 渲染沒有 XSS 風險。
+//
+// docs/index.html 仍然是 GitHub Pages 在用的原件，請把它當唯一真實來源：
+// 那邊改了，就重跑一次搬移（見下方三個常數的差異）並同步資產：圖片在 public/landing/images/，
+// 字體的 @font-face（原 docs/fonts.css）在 src/app/landing-fonts.css，由 page.tsx import。
+//
+// 與原檔的差異只有四處，都是為了讓它變成站內路由：
+//   1. src="images/…"                        → src="/landing/images/…"
+//   2. https://internal.pathors.com/login    → /login（三處：導覽列、結尾、頁尾）
+//   3. 導覽列多一個 <a href="/dashboard">Open app</a> 的入口
+//   4. 頁尾多兩個連結：/privacy 與 /terms（站內的法律文件，見 src/app/legal-doc.tsx）
+
+/** docs/index.html <style> 的內容，一字未改。 */
+export const LANDING_CSS = `:root{
+  --bg:#FBFAFA; --surface:#FFFFFF; --surface-2:#F4F3F1; --surface-3:#EDECE9;
+  --ink:#141318; --ink-2:#55525E; --ink-3:#8A8794;
+  --line:#E6E3DF; --line-soft:#F0EEEB;
+  --brand:#2947F0; --brand-2:#5C77FF; --brand-wash:#EAEDFF; --brand-ink:#FFFFFF;
+  --amber:#A96500; --amber-wash:#FBEFDA;
+  --rose:#C0264D; --rose-wash:#FCE7EC;
+  --deep:#0F0F16; --deep-2:#1A1A24; --deep-ink:#E9E8EE; --deep-line:#2A2A36;
+  --sh-1:0 1px 2px rgba(20,19,24,.05);
+  --sh-2:0 2px 6px rgba(20,19,24,.05), 0 12px 28px -12px rgba(20,19,24,.16);
+  --sh-3:0 4px 12px rgba(20,19,24,.06), 0 32px 64px -24px rgba(20,19,24,.28);
+  --display:"Bricolage Grotesque","Instrument Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --sans:"Instrument Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --mono:"DM Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --cjk:"Noto Sans TC","PingFang TC",sans-serif;
+  --pad:clamp(1.25rem,5vw,3rem);
+  --r-s:10px; --r-m:16px; --r-l:22px;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0C0C11; --surface:#16161D; --surface-2:#1D1D26; --surface-3:#24242F;
+    --ink:#F1F0F4; --ink-2:#ACA9B8; --ink-3:#827F92;
+    --line:#292933; --line-soft:#1F1F28;
+    --brand:#8098FF; --brand-2:#B0C0FF; --brand-wash:#191E3E; --brand-ink:#0C0C11;
+    --amber:#E0A44A; --amber-wash:#2B2314;
+    --rose:#F5798F; --rose-wash:#2D1620;
+    --deep:#08080C; --deep-2:#14141C; --deep-ink:#E9E8EE; --deep-line:#23232E;
+    --sh-1:0 1px 2px rgba(0,0,0,.4);
+    --sh-2:0 2px 6px rgba(0,0,0,.4), 0 14px 30px -14px rgba(0,0,0,.7);
+    --sh-3:0 4px 14px rgba(0,0,0,.5), 0 36px 70px -28px rgba(0,0,0,.9);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0C0C11; --surface:#16161D; --surface-2:#1D1D26; --surface-3:#24242F;
+  --ink:#F1F0F4; --ink-2:#ACA9B8; --ink-3:#827F92;
+  --line:#292933; --line-soft:#1F1F28;
+  --brand:#8098FF; --brand-2:#B0C0FF; --brand-wash:#191E3E; --brand-ink:#0C0C11;
+  --amber:#E0A44A; --amber-wash:#2B2314;
+  --rose:#F5798F; --rose-wash:#2D1620;
+  --deep:#08080C; --deep-2:#14141C; --deep-ink:#E9E8EE; --deep-line:#23232E;
+  --sh-1:0 1px 2px rgba(0,0,0,.4);
+  --sh-2:0 2px 6px rgba(0,0,0,.4), 0 14px 30px -14px rgba(0,0,0,.7);
+  --sh-3:0 4px 14px rgba(0,0,0,.5), 0 36px 70px -28px rgba(0,0,0,.9);
+}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--sans); font-size:1.0625rem; line-height:1.6;
+  -webkit-font-smoothing:antialiased; overflow-x:hidden;
+}
+::selection{background:var(--brand-wash); color:var(--ink)}
+:focus-visible{outline:2px solid var(--brand); outline-offset:3px; border-radius:6px}
+img{max-width:100%; display:block}
+a{color:inherit}
+
+.wrap{width:min(1180px,100% - var(--pad)*2); margin-inline:auto}
+.tight{width:min(880px,100% - var(--pad)*2); margin-inline:auto}
+
+h1,h2,h3{font-family:var(--display); text-wrap:balance; margin:0; font-weight:600}
+h1{font-size:clamp(2rem,7.4vw,5.1rem); line-height:1.02; letter-spacing:-.04em; font-weight:700}
+h2{font-size:clamp(2rem,4.2vw,3.15rem); line-height:1.05; letter-spacing:-.033em}
+h3{font-size:1.22rem; line-height:1.25; letter-spacing:-.02em}
+p{margin:0 0 1em}
+.lede{font-size:clamp(1.1rem,1.75vw,1.32rem); line-height:1.5; color:var(--ink-2); text-wrap:pretty}
+.sub{color:var(--ink-2)}
+.num{font-family:var(--mono); font-variant-numeric:tabular-nums; letter-spacing:-.02em}
+
+section{padding-block:clamp(4rem,8vw,7rem); position:relative}
+.sec-head{max-width:44ch; margin-bottom:clamp(2rem,4vw,3rem)}
+.sec-head h2{margin-bottom:.7rem}
+.sec-head .lede{margin:0}
+.center{margin-inline:auto; text-align:center}
+
+/* pill badge — replaces the mono eyebrow-and-rule */
+.badge{
+  display:inline-flex; align-items:center; gap:.5rem; margin-bottom:1.1rem;
+  padding:.36rem .8rem .36rem .55rem; border-radius:999px;
+  background:var(--brand-wash); color:var(--brand);
+  font-size:.78rem; font-weight:600; letter-spacing:-.005em; line-height:1.4;
+}
+.badge .dot{width:6px; height:6px; border-radius:50%; background:currentColor; flex:none}
+.badge.plain{background:var(--surface-2); color:var(--ink-2); border:1px solid var(--line)}
+
+.btn{
+  display:inline-flex; align-items:center; gap:.5rem; text-decoration:none; cursor:pointer;
+  font-family:var(--sans); font-size:.97rem; font-weight:600; letter-spacing:-.01em;
+  padding:.78rem 1.35rem; border-radius:999px; border:1px solid transparent;
+  transition:transform .16s ease, background .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+.btn.primary{background:var(--brand); color:var(--brand-ink); box-shadow:var(--sh-2)}
+.btn.primary:hover{background:var(--brand-2); transform:translateY(-2px)}
+.btn.ghost{background:var(--surface); color:var(--ink); border-color:var(--line); box-shadow:var(--sh-1)}
+.btn.ghost:hover{border-color:var(--brand); color:var(--brand); transform:translateY(-2px)}
+.btn.sm{padding:.5rem 1rem; font-size:.88rem}
+.btn svg{width:17px; height:17px; fill:currentColor; flex:none}
+.btn.sm svg{width:15px; height:15px}
+.btns{display:flex; flex-wrap:wrap; gap:.7rem}
+
+.card{
+  background:var(--surface); border:1px solid var(--line); border-radius:var(--r-m);
+  box-shadow:var(--sh-2);
+}
+/* ---------- header ---------- */
+.nav{position:sticky; top:0; z-index:60; background:color-mix(in srgb,var(--bg) 82%,transparent); backdrop-filter:blur(16px) saturate(1.6); border-bottom:1px solid transparent; transition:border-color .25s}
+.nav.stuck{border-bottom-color:var(--line)}
+.nav .wrap{display:flex; align-items:center; gap:1.2rem; height:66px}
+.logo{display:flex; align-items:center; gap:.55rem; text-decoration:none; font-weight:600; font-size:.98rem; letter-spacing:-.02em}
+.logo .mark{width:28px; height:28px; border-radius:8px; background:var(--brand); display:grid; place-items:center; flex:none}
+.logo .mark svg{width:17px; height:17px; fill:none; stroke:var(--brand-ink); stroke-width:2.4; stroke-linecap:round; stroke-linejoin:round}
+.nav nav{margin-left:auto; display:flex; align-items:center; gap:1.6rem}
+.nav nav a{text-decoration:none; font-size:.93rem; font-weight:500; color:var(--ink-2); transition:color .16s}
+.nav nav a:hover{color:var(--ink)}
+@media(max-width:760px){ .nav nav a.hide-s{display:none} .nav nav{gap:.9rem} }
+
+/* ---------- hero ---------- */
+.hero{padding-top:clamp(3rem,7vw,5.5rem); padding-bottom:0; text-align:center; overflow:hidden}
+.glow{
+  position:absolute; top:-14%; left:50%; transform:translateX(-50%);
+  width:min(1150px,140%); height:640px; pointer-events:none; z-index:0;
+  background:radial-gradient(46% 50% at 50% 50%, color-mix(in srgb,var(--brand) 20%,transparent) 0%, transparent 72%);
+}
+.hero > .tight, .hero > .stage{position:relative; z-index:1}
+.hero h1{margin-bottom:1.25rem}
+@media(max-width:600px){ .hero h1 br{display:none} }
+.hero .lede{margin:0 auto 2rem; max-width:44ch}
+.hero .btns{justify-content:center}
+.hero .trust{margin:1.6rem 0 0; font-size:.85rem; color:var(--ink-3); display:flex; gap:.5rem 1.1rem; justify-content:center; flex-wrap:wrap}
+.hero .trust b{font-weight:500; color:var(--ink-2)}
+
+/* the demo card overlaps into the next band — a landing move, not a document one */
+.stage{margin-top:clamp(2.5rem,5vw,3.75rem); padding-bottom:clamp(3rem,6vw,5rem)}
+.band{background:var(--surface-2); border-block:1px solid var(--line)}
+.pull{margin-top:calc(clamp(3rem,6vw,5rem) * -1 - clamp(2rem,5vw,4rem))}
+
+/* ---------- segmented control ---------- */
+.seg{display:inline-flex; padding:4px; gap:4px; border-radius:999px; background:var(--surface-2); border:1px solid var(--line)}
+.seg button{
+  font-family:var(--sans); font-size:.85rem; font-weight:600; letter-spacing:-.01em;
+  padding:.44rem 1rem; border:0; border-radius:999px; background:transparent; color:var(--ink-3); cursor:pointer;
+  transition:.18s ease;
+}
+.seg button[aria-selected="true"]{background:var(--surface); color:var(--ink); box-shadow:var(--sh-1)}
+.seg button:hover{color:var(--ink)}
+
+/* ---------- split demo ---------- */
+.demo{max-width:940px; margin-inline:auto; border-radius:var(--r-l); padding:clamp(1rem,2.5vw,1.6rem); text-align:left; box-shadow:var(--sh-3)}
+.demo-top{display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin-bottom:1.1rem}
+.demo-top h3{font-size:1.02rem; color:var(--ink-2); font-weight:500; font-family:var(--sans); letter-spacing:-.01em}
+.split{position:relative}
+.src{
+  border:1px solid var(--brand); border-radius:var(--r-s); background:var(--brand-wash);
+  padding:.72rem .9rem; display:flex; align-items:center; gap:.8rem; flex-wrap:wrap;
+  max-height:100px; overflow:hidden;
+  transition:opacity .45s ease, transform .45s ease, max-height .45s ease, margin .45s ease, padding .45s ease, border-color .45s;
+}
+.src .tag{font-size:.72rem; font-weight:600; color:var(--brand); letter-spacing:-.005em; flex:none}
+.src .desc{font-size:.92rem; font-weight:500; flex:1; min-width:150px}
+.src .amt{font-family:var(--mono); font-size:.95rem; font-weight:500; font-variant-numeric:tabular-nums; flex:none}
+.split[data-mode="two"] .src{opacity:0; max-height:0; padding-block:0; margin-bottom:-1rem; transform:translateY(-10px); border-color:transparent}
+/* Drawn in CSS, not SVG: a stretched viewBox scales stroke width non-uniformly,
+   which turned the connector's legs into thick blue bars. */
+.stem{height:30px; position:relative; transition:opacity .4s ease}
+.stem::before{
+  content:""; position:absolute; left:50%; top:0; width:1.5px; height:13px;
+  background:var(--brand); transform:translateX(-50%);
+}
+.stem::after{
+  content:""; position:absolute; left:25%; right:25%; top:12.5px; height:15px;
+  border:1.5px solid var(--brand); border-bottom:0; border-radius:7px 7px 0 0;
+}
+.split[data-mode="two"] .stem{opacity:0}
+@media(max-width:560px){ .stem{display:none} }
+.books{display:grid; grid-template-columns:1fr 1fr; gap:.85rem; transition:gap .5s cubic-bezier(.4,0,.2,1)}
+.split[data-mode="two"] .books{gap:2.8rem}
+@media(max-width:560px){ .books{grid-template-columns:1fr} .split[data-mode="two"] .books{gap:1.5rem} }
+.book{border:1px solid var(--line); border-radius:var(--r-s); background:var(--surface); overflow:hidden; transition:border-color .4s, border-style .4s}
+.split[data-mode="two"] .book{border-style:dashed; border-color:var(--ink-3)}
+.book-hd{display:flex; align-items:center; gap:.5rem; padding:.6rem .85rem; border-bottom:1px solid var(--line); background:var(--surface-2)}
+.book-hd .nm{font-size:.86rem; font-weight:600; letter-spacing:-.01em; white-space:nowrap}
+.book-hd .file{margin-left:auto; opacity:0; transition:opacity .4s; color:var(--rose); font-family:var(--mono); font-size:.72rem; white-space:nowrap}
+.book-hd .live{margin-left:auto; transition:opacity .4s; font-size:.72rem; color:var(--ink-3); display:inline-flex; align-items:center; gap:.35rem}
+.book-hd .live::before{content:""; width:6px; height:6px; border-radius:50%; background:var(--brand)}
+.split[data-mode="two"] .book-hd .file{opacity:1}
+.split[data-mode="two"] .book-hd .live{opacity:0}
+.row{display:flex; align-items:center; gap:.6rem; padding:.5rem .85rem; border-bottom:1px solid var(--line-soft); font-size:.85rem; transition:.45s ease}
+.row:last-child{border-bottom:0}
+.row .d{font-family:var(--mono); font-size:.74rem; color:var(--ink-3); flex:none}
+.row .t{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink-2)}
+.row .a{font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:.82rem; font-weight:500; flex:none}
+.row.key{background:var(--brand-wash)}
+.split[data-mode="two"] .row.key{background:var(--rose-wash)}
+.row .a .alt{display:none}
+.split[data-mode="two"] .row.edited .a .now{display:none}
+.split[data-mode="two"] .row.edited .a .alt{display:inline; color:var(--rose)}
+.split[data-mode="two"] .row.orphan{opacity:.3; text-decoration:line-through}
+.verdict{margin-top:1.1rem; min-height:30px; font-size:.92rem; color:var(--ink-2)}
+.verdict .v{display:none; align-items:center; gap:.7rem; flex-wrap:wrap}
+.split[data-mode="one"] .verdict .v-one{display:flex}
+.split[data-mode="two"] .verdict .v-two{display:flex}
+
+/* ---------- chips ---------- */
+.chip{
+  display:inline-flex; align-items:center; gap:.4rem; white-space:nowrap; flex:none;
+  font-size:.78rem; font-weight:600; letter-spacing:-.005em;
+  padding:.26rem .68rem; border-radius:999px; line-height:1.45;
+}
+.chip .dot{width:6px; height:6px; border-radius:50%; background:currentColor}
+.chip.ok{background:var(--brand-wash); color:var(--brand)}
+.chip.bad{background:var(--rose-wash); color:var(--rose)}
+.chip.warn{background:var(--amber-wash); color:var(--amber)}
+.chip.flat{background:var(--surface-2); color:var(--ink-2); border:1px solid var(--line)}
+/* ---------- problem cards ---------- */
+.trio{display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(265px,1fr))}
+.pcard{padding:1.5rem 1.4rem; border-radius:var(--r-m); background:var(--surface); border:1px solid var(--line); box-shadow:var(--sh-1); transition:transform .2s ease, box-shadow .2s ease}
+.pcard:hover{transform:translateY(-3px); box-shadow:var(--sh-2)}
+.pcard h3{margin-bottom:.55rem; font-size:1.12rem}
+.pcard p{margin:0; font-size:.94rem; color:var(--ink-2)}
+
+/* ---------- alternating feature rows ---------- */
+.feat{display:grid; gap:clamp(2rem,4vw,3.5rem); align-items:center; grid-template-columns:minmax(0,1fr)}
+@media(min-width:940px){
+  .feat{grid-template-columns:minmax(0,.86fr) minmax(0,1.14fr)}
+  .feat.flip{grid-template-columns:minmax(0,1.14fr) minmax(0,.86fr)}
+  .feat.flip > .fx{order:2}
+}
+.fx .sec-head{margin-bottom:1.4rem}
+.pts{list-style:none; padding:0; margin:0; display:grid; gap:.9rem}
+.pts li{position:relative; padding-left:1.45rem; font-size:.96rem; color:var(--ink-2); line-height:1.5}
+.pts li::before{
+  content:""; position:absolute; left:0; top:.72em; width:11px; height:1.5px; background:var(--brand);
+}
+.pts li b{color:var(--ink); font-weight:600}
+
+/* ---------- screenshots ---------- */
+.shot{border-radius:var(--r-m); overflow:hidden; border:1px solid var(--line); box-shadow:var(--sh-3); background:var(--surface); line-height:0}
+.shot img{width:100%}
+.shot-label{display:flex; align-items:center; gap:.5rem; margin-bottom:.8rem; font-size:.82rem; color:var(--ink-3); font-family:var(--mono)}
+.shot-label::before{content:""; width:7px; height:7px; border-radius:2px; background:var(--brand)}
+
+/* ---------- lifecycle ---------- */
+.flow{padding:clamp(1.4rem,3vw,2rem); border-radius:var(--r-m)}
+.track{position:relative; display:grid; grid-template-columns:repeat(5,1fr); gap:.5rem}
+.track::before{content:""; position:absolute; left:10%; right:10%; top:17px; height:2px; border-radius:2px; background:var(--line)}
+.track .fill{position:absolute; left:10%; top:17px; height:2px; border-radius:2px; background:var(--brand); width:0; transition:width 2.3s cubic-bezier(.4,0,.2,1)}
+.play .track .fill{width:80%}
+.node{text-align:center; position:relative}
+.node .pip{
+  width:36px; height:36px; margin:0 auto .7rem; border-radius:50%; border:2px solid var(--line);
+  background:var(--surface); display:grid; place-items:center; position:relative; z-index:2;
+  font-family:var(--mono); font-size:.8rem; color:var(--ink-3); transition:.45s ease;
+}
+.node .lb{font-size:.87rem; font-weight:600; letter-spacing:-.01em; line-height:1.25}
+.play .node.on .pip{border-color:var(--brand); background:var(--brand); color:var(--brand-ink); transform:scale(1.05)}
+.node:nth-child(3) .pip{transition-delay:.5s} .node:nth-child(4) .pip{transition-delay:1s}
+.node:nth-child(5) .pip{transition-delay:1.5s} .node:nth-child(6) .pip{transition-delay:2s}
+.alert{
+  margin-top:1.5rem; display:flex; align-items:center; gap:.8rem; flex-wrap:wrap;
+  padding:.85rem 1rem; border-radius:var(--r-s); background:var(--rose-wash);
+  font-size:.92rem; color:var(--ink-2); opacity:0; transform:translateY(8px); transition:.5s 1.8s ease;
+}
+.play .alert{opacity:1; transform:none}
+@media(max-width:640px){ .track{grid-template-columns:1fr 1fr 1fr; row-gap:1.3rem} .track::before,.track .fill{display:none} }
+
+/* ---------- merge ---------- */
+.merge{display:grid; gap:1rem; padding:1.3rem; border-radius:var(--r-m); grid-template-columns:minmax(0,1fr)}
+@media(min-width:820px){ .merge{grid-template-columns:minmax(0,1fr) 60px minmax(0,1fr); align-items:center} }
+.stackcol{display:grid; gap:.9rem}
+.mini{border:1px solid var(--line); border-radius:var(--r-s); background:var(--surface-2); overflow:hidden}
+.mini .mh{padding:.5rem .8rem; border-bottom:1px solid var(--line); font-size:.8rem; font-weight:600; letter-spacing:-.01em; color:var(--ink-2); white-space:nowrap}
+.mini .mh span{font-weight:400; color:var(--ink-3)}
+.ticks{display:flex; gap:6px; padding:1.5rem .8rem .8rem; align-items:flex-end; min-height:64px}
+.tick{flex:1; border-radius:4px; background:var(--line); position:relative; transform:scaleY(.2); transform-origin:bottom; transition:transform .55s cubic-bezier(.34,1.4,.64,1)}
+.play .tick{transform:scaleY(1)}
+.tick.i{background:var(--brand); height:36px} .tick.s{background:var(--amber); height:22px}
+.tick small{position:absolute; top:-17px; left:50%; transform:translateX(-50%); font-family:var(--mono); font-size:.63rem; color:var(--ink-3)}
+.arrows{display:grid; place-items:center}
+.arrows svg{width:50px; height:86px; overflow:visible}
+.arrows path{fill:none; stroke:var(--line); stroke-width:1.6; stroke-linecap:round; stroke-dasharray:100; stroke-dashoffset:100; transition:stroke-dashoffset 1s ease .3s, stroke .6s}
+.play .arrows path{stroke-dashoffset:0; stroke:var(--brand)}
+@media(max-width:819px){ .arrows{transform:rotate(90deg); height:56px} }
+.out{border:1px solid var(--brand); border-radius:var(--r-s); background:var(--surface); overflow:hidden}
+.out .mh{background:var(--brand-wash); color:var(--brand); border-color:transparent; white-space:nowrap}
+.out .row{opacity:0; transform:translateX(-12px); transition:.45s ease}
+.play .out .row{opacity:1; transform:none}
+.play .out .row:nth-child(2){transition-delay:.35s} .play .out .row:nth-child(3){transition-delay:.5s}
+.play .out .row:nth-child(4){transition-delay:.65s} .play .out .row:nth-child(5){transition-delay:.8s}
+.play .out .row:nth-child(6){transition-delay:.95s}
+
+/* ---------- calendar ---------- */
+.cal{padding:1.3rem; border-radius:var(--r-m); display:grid; gap:1.3rem; grid-template-columns:minmax(0,1fr)}
+@media(min-width:700px){ .cal{grid-template-columns:minmax(0,.9fr) minmax(0,1fr)} }
+.cal-grid{border:1px solid var(--line); border-radius:var(--r-s); overflow:hidden; background:var(--surface)}
+.cal-hd{padding:.55rem .85rem; background:var(--surface-2); border-bottom:1px solid var(--line); font-size:.82rem; font-weight:600; letter-spacing:-.01em}
+.days{display:grid; grid-template-columns:repeat(7,1fr)}
+.day{aspect-ratio:1/.86; border-right:1px solid var(--line-soft); border-bottom:1px solid var(--line-soft); padding:.3rem .35rem; font-family:var(--mono); font-size:.66rem; color:var(--ink-3); position:relative}
+.day:nth-child(7n){border-right:0}
+.day.out{opacity:.3}
+.day .ev{position:absolute; left:4px; right:4px; bottom:4px; height:7px; border-radius:3px; opacity:0; transform:translateY(-16px) scale(.5); transition:.6s cubic-bezier(.34,1.35,.64,1)}
+.play .day .ev{opacity:1; transform:none}
+.ev.b{background:var(--brand)} .ev.c{background:var(--amber)} .ev.i{background:var(--rose)}
+.play .day:nth-child(12) .ev{transition-delay:.25s}
+.play .day:nth-child(19) .ev{transition-delay:.55s}
+.play .day:nth-child(26) .ev{transition-delay:.85s}
+.legend{display:grid; gap:.85rem; align-content:center}
+.lg{display:flex; align-items:flex-start; gap:.7rem; font-size:.93rem; color:var(--ink-2)}
+.lg .sw{width:11px; height:11px; border-radius:3px; flex:none; margin-top:.42em}
+.lg b{color:var(--ink); font-weight:600}
+/* ---------- assistant panel ---------- */
+.term{background:var(--deep); border:1px solid var(--deep-line); border-radius:var(--r-m); overflow:hidden; box-shadow:var(--sh-3)}
+.term .th{padding:.75rem 1rem; background:var(--deep-2); border-bottom:1px solid var(--deep-line); font-size:.83rem; font-weight:600; color:var(--deep-ink); opacity:.65; display:flex; align-items:center; gap:.5rem}
+.term .th::before{content:""; width:7px; height:7px; border-radius:50%; background:#5C77FF}
+.term .tb{padding:1.15rem 1.1rem; font-family:var(--mono); font-size:.82rem; line-height:1.85; color:var(--deep-ink)}
+.term .l{opacity:0; transform:translateY(5px); transition:.4s ease}
+.term.play .l{opacity:1; transform:none}
+.term.play .l:nth-child(2){transition-delay:.4s} .term.play .l:nth-child(3){transition-delay:.9s}
+.term.play .l:nth-child(4){transition-delay:1.2s} .term.play .l:nth-child(5){transition-delay:1.4s}
+.term.play .l:nth-child(6){transition-delay:1.6s} .term.play .l:nth-child(7){transition-delay:1.9s}
+.term .q{color:#B0C0FF} .term .k{color:#E0A44A} .term .r{color:#F5798F} .term .c{opacity:.42}
+
+/* ---------- language demo ---------- */
+.lang{padding:clamp(1.2rem,2.5vw,1.7rem); border-radius:var(--r-m)}
+.lang-bar{display:flex; align-items:center; gap:.8rem; margin-bottom:1.2rem; flex-wrap:wrap}
+.lang-bar .hint{margin-left:auto; font-size:.83rem; color:var(--ink-3)}
+.kcards{display:grid; grid-template-columns:repeat(auto-fit,minmax(168px,1fr)); gap:.8rem}
+.kcard{border:1px solid var(--line); border-radius:var(--r-s); background:var(--surface-2); padding:.9rem 1rem}
+.kcard .kl{font-size:.86rem; color:var(--ink-2); font-weight:500; min-height:1.45em}
+.kcard .kv{font-family:var(--mono); font-size:1.75rem; font-weight:500; letter-spacing:-.03em; margin:.2rem 0 .05rem; font-variant-numeric:tabular-nums}
+.kcard .ks{font-family:var(--mono); font-size:.75rem; color:var(--ink-2)}
+.kcard .kh{font-size:.76rem; color:var(--ink-3); margin-top:.45rem; line-height:1.4; min-height:2.6em}
+.kcard[data-k="overdue"] .kv{color:var(--rose)}
+[data-i18n]{transition:opacity .16s ease}
+.swapping [data-i18n]{opacity:0}
+[data-i18n]:lang(zh-Hant){font-family:var(--cjk)}
+
+/* ---------- tiles ---------- */
+.tiles{display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(255px,1fr))}
+@media(min-width:940px){ .tiles{grid-template-columns:repeat(3,1fr)} }
+.tile{padding:1.4rem 1.35rem; border-radius:var(--r-m); background:var(--surface); border:1px solid var(--line); box-shadow:var(--sh-1); transition:transform .2s ease, box-shadow .2s ease, border-color .2s}
+.tile:hover{transform:translateY(-3px); box-shadow:var(--sh-2); border-color:color-mix(in srgb,var(--brand) 35%,var(--line))}
+.tile h3{font-size:1.05rem; margin-bottom:.5rem}
+.tile p{margin:0; font-size:.92rem; color:var(--ink-2); line-height:1.5}
+
+/* ---------- setup ---------- */
+.setup{display:grid; gap:clamp(1.5rem,3vw,2.5rem); grid-template-columns:minmax(0,1fr)}
+@media(min-width:900px){ .setup{grid-template-columns:minmax(0,1fr) minmax(0,1fr)} }
+pre{
+  margin:0; background:var(--deep); color:var(--deep-ink); border:1px solid var(--deep-line);
+  border-radius:var(--r-s); padding:1rem 1.1rem; overflow-x:auto;
+  font-family:var(--mono); font-size:.84rem; line-height:1.8;
+}
+pre .c{opacity:.42} pre .k{color:#B0C0FF}
+.steps{display:grid; gap:1rem}
+.step .sl{font-size:.82rem; font-weight:600; color:var(--ink-3); margin-bottom:.45rem; display:flex; gap:.55rem; align-items:center}
+.step .sl b{color:var(--brand); font-family:var(--mono); font-weight:500}
+dl.spec{margin:0; border:1px solid var(--line); border-radius:var(--r-m); overflow:hidden; background:var(--surface)}
+dl.spec .r{display:grid; grid-template-columns:130px 1fr; gap:1rem; padding:.85rem 1.1rem; border-bottom:1px solid var(--line-soft); font-size:.92rem}
+dl.spec .r:last-child{border-bottom:0}
+dl.spec dt{margin:0; font-size:.82rem; font-weight:600; color:var(--ink-3)}
+dl.spec dd{margin:0; color:var(--ink-2)}
+@media(max-width:560px){ dl.spec .r{grid-template-columns:1fr; gap:.15rem} }
+
+/* ---------- closing ---------- */
+.finale{
+  border-radius:var(--r-l); padding:clamp(2.5rem,6vw,4.5rem) clamp(1.5rem,4vw,3rem); text-align:center;
+  background:var(--brand); color:var(--brand-ink); position:relative; overflow:hidden;
+}
+.finale h2{color:var(--brand-ink); margin-bottom:.9rem; max-width:17ch; margin-inline:auto}
+.finale p{color:var(--brand-ink); opacity:.82; max-width:44ch; margin:0 auto 2rem; font-size:1.08rem}
+.finale .btn.primary{background:var(--brand-ink); color:var(--brand)}
+.finale .btn.primary:hover{background:var(--brand-ink); opacity:.9}
+.finale .btn.ghost{background:transparent; color:var(--brand-ink); border-color:color-mix(in srgb,var(--brand-ink) 40%,transparent); box-shadow:none}
+.finale .btn.ghost:hover{border-color:var(--brand-ink); color:var(--brand-ink)}
+.finale .btns{justify-content:center}
+.finale .already{margin:1.6rem 0 0; font-size:.95rem; opacity:.75}
+.finale .already a{color:var(--brand-ink); text-decoration:underline; text-underline-offset:3px}
+
+footer{border-top:1px solid var(--line); padding-block:2.5rem; margin-top:clamp(4rem,8vw,7rem)}
+footer .wrap{display:flex; gap:.8rem 2rem; flex-wrap:wrap; align-items:center; font-size:.88rem; color:var(--ink-3)}
+footer a{color:var(--ink-2); text-decoration:none}
+footer a:hover{color:var(--brand)}
+footer .ghlink{display:inline-flex; align-items:center; gap:.45rem}
+footer .ghlink svg{width:15px; height:15px; fill:currentColor}
+footer .sp{margin-left:auto}
+
+/* ---------- reveal ---------- */
+.rv{opacity:0; transform:translateY(18px); transition:opacity .75s cubic-bezier(.4,0,.2,1), transform .75s cubic-bezier(.4,0,.2,1)}
+.rv.in{opacity:1; transform:none}
+.rv[data-d="1"]{transition-delay:.1s} .rv[data-d="2"]{transition-delay:.2s} .rv[data-d="3"]{transition-delay:.3s}
+
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important}
+  .rv{opacity:1; transform:none}
+}`;
+
+/** docs/index.html <body> 的內容（不含 <script>），只改了上面列的三處。 */
+export const LANDING_HTML = `<header class="nav" id="nav">
+  <div class="wrap">
+    <a class="logo" href="#top">
+      <span class="mark"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="4,17 10,11 14,15 20,6"/></svg></span>
+      Pathors Internal
+    </a>
+    <nav>
+      <a href="#books" class="hide-s">How it works</a>
+      <a href="#billing" class="hide-s">Billing</a>
+      <a href="#language" class="hide-s">Languages</a>
+      <a href="/dashboard">Open app</a>
+      <a href="/login">Log in</a>
+      <a class="btn ghost sm" href="https://github.com/pathorsAI/internal"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+<section class="hero">
+  <div class="glow" aria-hidden="true"></div>
+  <div class="tight">
+    <span class="badge"><span class="dot"></span>Open source · Apache 2.0</span>
+    <h1>Two sets of books. <br>One set of numbers.</h1>
+    <p class="lede">The accounting console we built for our own company. Enter a transaction once, and it lands in the right books on its own — no second spreadsheet to keep in step, no month-end surprise.</p>
+    <div class="btns">
+      <a class="btn primary" href="https://github.com/pathorsAI/internal"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>Get it on GitHub</a>
+      <a class="btn ghost" href="#books">See how it works</a>
+    </div>
+    <p class="trust"><b>Run it on your own server</b><span>·</span><b>Free forever</b></p>
+  </div>
+
+  <div class="wrap stage">
+    <div class="demo card rv">
+      <div class="demo-top">
+        <h3>The same three transactions, kept two ways</h3>
+        <div class="seg" role="tablist" aria-label="Bookkeeping approach">
+          <button role="tab" aria-selected="true" aria-controls="splitdemo" data-mode="one">One ledger</button>
+          <button role="tab" aria-selected="false" aria-controls="splitdemo" data-mode="two">Two spreadsheets</button>
+        </div>
+      </div>
+      <div class="split" id="splitdemo" data-mode="one">
+        <div class="src">
+          <span class="tag">One entry</span>
+          <span class="desc">Verdant Biosciences — data dashboard add-on</span>
+          <span class="chip ok"><span class="dot"></span>Both books</span>
+          <span class="amt">NT$260,000</span>
+        </div>
+        <div class="stem" aria-hidden="true"></div>
+        <div class="books">
+          <div class="book">
+            <div class="book-hd"><span class="nm">Internal book</span><span class="live">in sync</span><span class="file">internal.xlsx</span></div>
+            <div class="row"><span class="d">08/14</span><span class="t">Morningside Creative</span><span class="a">60,000</span></div>
+            <div class="row key edited"><span class="d">08/11</span><span class="t">Verdant Biosciences</span><span class="a"><span class="now">260,000</span><span class="alt">280,000</span></span></div>
+            <div class="row orphan"><span class="d">08/05</span><span class="t">Monthly payroll run</span><span class="a">−201,000</span></div>
+          </div>
+          <div class="book">
+            <div class="book-hd"><span class="nm">External book</span><span class="live">in sync</span><span class="file">external.xlsx</span></div>
+            <div class="row"><span class="d">08/14</span><span class="t">Morningside Creative</span><span class="a">60,000</span></div>
+            <div class="row"><span class="d">08/12</span><span class="t">Team software subscriptions</span><span class="a">−9,800</span></div>
+            <div class="row key"><span class="d">08/11</span><span class="t">Verdant Biosciences</span><span class="a">260,000</span></div>
+          </div>
+        </div>
+        <div class="verdict">
+          <span class="v v-one"><span class="chip ok"><span class="dot"></span>Agreeing</span> <span>One entry, marked as belonging to both. Change it once and both books change with it.</span></span>
+          <span class="v v-two"><span class="chip bad"><span class="dot"></span>Off by NT$20,000</span> <span>Someone corrected one file. Nobody corrected the other.</span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band pull" style="padding-top:calc(clamp(4rem,8vw,7rem) + clamp(2rem,5vw,4rem))">
+  <div class="wrap">
+    <div class="sec-head center rv">
+      <h2>You already know how this goes wrong</h2>
+      <p class="lede">Three things that happen to every small company that keeps its own books.</p>
+    </div>
+    <div class="trio">
+      <div class="pcard rv">
+        <h3>The two files stopped matching</h3>
+        <p>Someone fixed a number in one place and not the other. You find out in March, when it is far too late to remember which one was right.</p>
+      </div>
+      <div class="pcard rv" data-d="1">
+        <h3>The invoice never went out</h3>
+        <p>The work shipped in May. The invoice went out in August, after the client asked about it. Nobody was watching the gap in between.</p>
+      </div>
+      <div class="pcard rv" data-d="2">
+        <h3>Nobody can say what you are owed</h3>
+        <p>Not without opening four files, filtering each one and adding it up by hand — and getting a slightly different answer every time.</p>
+      </div>
+    </div>
+  </div>
+</section>
+<section id="books">
+  <div class="wrap feat">
+    <div class="fx rv">
+      <div class="sec-head">
+        <span class="badge"><span class="dot"></span>Dual books</span>
+        <h2>Mark it once. It files itself.</h2>
+        <p class="lede">Every transaction says which books it belongs to — internal, external, or both. The two views read from the same rows, so they cannot drift apart.</p>
+      </div>
+      <ul class="pts">
+        <li><b>Salaries stay internal.</b> A pay run marked internal never appears in the external view. You do not delete it, and you do not keep a second copy of it.</li>
+        <li><b>Client income counts twice, on purpose.</b> Revenue that belongs in both books is entered once and shows up in both.</li>
+        <li><b>Two currencies, two totals.</b> New Taiwan dollars and US dollars are added up separately. Nothing invents an exchange rate for you.</li>
+      </ul>
+    </div>
+    <div class="rv" data-d="1">
+      <p class="shot-label">Dual books</p>
+      <div class="shot"><img src="/landing/images/transactions.png" alt="The ledger listing transactions, each marked as internal, external or both"></div>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="billing">
+  <div class="wrap">
+    <div class="sec-head center rv">
+      <span class="badge"><span class="dot"></span>Billing board</span>
+      <h2>One page for everything you are owed</h2>
+      <p class="lede">Who should be billed, who has been billed, and who still has not paid — with the next thing to do sitting on every row.</p>
+    </div>
+
+    <div class="rv" style="margin-bottom:clamp(1.5rem,3vw,2.2rem)">
+      <p class="shot-label">Billing board</p>
+      <div class="shot"><img src="/landing/images/billing.png" alt="The billing board, with summary cards and every billing item alongside its next step"></div>
+    </div>
+
+    <div class="feat" style="margin-top:clamp(2.5rem,5vw,4rem)">
+      <div class="fx rv">
+        <div class="sec-head">
+          <h2 style="font-size:clamp(1.5rem,2.6vw,2rem)">Nothing sits in limbo</h2>
+          <p class="lede" style="font-size:1.05rem">An item moves forward on its own as dates pass and payments arrive. You never set a status by hand, so it is never quietly wrong.</p>
+        </div>
+      </div>
+      <div class="flow card rv anim" data-d="1">
+        <div class="track">
+          <span class="fill"></span>
+          <div class="node on"><div class="pip">1</div><div class="lb">Upcoming</div></div>
+          <div class="node on"><div class="pip">2</div><div class="lb">Time to bill</div></div>
+          <div class="node on"><div class="pip">3</div><div class="lb">Billed</div></div>
+          <div class="node on"><div class="pip">4</div><div class="lb">Part paid</div></div>
+          <div class="node on"><div class="pip">5</div><div class="lb">Paid</div></div>
+        </div>
+        <div class="alert">
+          <span class="chip bad"><span class="dot"></span>Overdue</span>
+          <span>Past the deadline and still not paid. It leaves the queue and gets counted on its own card, where you cannot miss it.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="feat flip" style="margin-top:clamp(2.5rem,5vw,4rem)">
+      <div class="fx rv">
+        <div class="sec-head">
+          <h2 style="font-size:clamp(1.5rem,2.6vw,2rem)">Two kinds of money, one list</h2>
+          <p class="lede" style="font-size:1.05rem">A contract is signed once and billed in stages. A subscription bills every month, forever. On a Tuesday morning they are the same job, so they share the same list.</p>
+        </div>
+      </div>
+      <div class="merge card rv anim" data-d="1">
+        <div class="stackcol">
+          <div class="mini">
+            <div class="mh">Contract <span>· billed in stages</span></div>
+            <div class="ticks">
+              <div class="tick i" style="height:32px"><small>30%</small></div>
+              <div class="tick i" style="height:42px"><small>40%</small></div>
+              <div class="tick i" style="height:32px"><small>30%</small></div>
+            </div>
+          </div>
+          <div class="mini">
+            <div class="mh">Subscription <span>· every month</span></div>
+            <div class="ticks">
+              <div class="tick s"></div><div class="tick s"></div><div class="tick s"></div>
+              <div class="tick s"></div><div class="tick s"></div><div class="tick s"></div>
+            </div>
+          </div>
+        </div>
+        <div class="arrows" aria-hidden="true">
+          <svg viewBox="0 0 50 86"><path d="M0 20 C 14 20 18 43 27 43 M0 66 C 14 66 18 43 27 43 M27 43 H46 M40 37 l6 6 -6 6"/></svg>
+        </div>
+        <div class="out">
+          <div class="mh">Due, in date order</div>
+          <div class="row"><span class="d">05/31</span><span class="t">Phase 1 — build kickoff</span><span class="a">800,000</span></div>
+          <div class="row"><span class="d">06/01</span><span class="t">Platform operations</span><span class="a">40,000</span></div>
+          <div class="row"><span class="d">07/01</span><span class="t">POS maintenance</span><span class="a">25,000</span></div>
+          <div class="row"><span class="d">07/31</span><span class="t">Interim payment 30%</span><span class="a">360,000</span></div>
+          <div class="row"><span class="d">08/01</span><span class="t">Platform operations</span><span class="a">40,000</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="reminders">
+  <div class="wrap feat flip">
+    <div class="fx rv" data-d="1">
+      <div class="sec-head">
+        <span class="badge"><span class="dot"></span>Reminders</span>
+        <h2>Nagging that reaches you</h2>
+        <p class="lede">A reminder inside the app only works if someone opens the app. These go into a Google Calendar instead — so they turn up on your phone at nine in the morning, next to your meetings.</p>
+      </div>
+      <p class="sub" style="font-size:.95rem; margin:0">Connect the calendar once. Dates move when the work moves. There is nothing to keep running in the background.</p>
+    </div>
+    <div class="cal card rv anim">
+      <div class="cal-grid">
+        <div class="cal-hd">August 2026</div>
+        <div class="days">
+          <div class="day out">27</div><div class="day out">28</div><div class="day out">29</div><div class="day out">30</div><div class="day out">31</div><div class="day">1</div><div class="day">2</div>
+          <div class="day">3</div><div class="day">4</div><div class="day">5</div><div class="day">6</div><div class="day">7<span class="ev b"></span></div><div class="day">8</div><div class="day">9</div>
+          <div class="day">10</div><div class="day">11</div><div class="day">12</div><div class="day">13</div><div class="day">14<span class="ev c"></span></div><div class="day">15</div><div class="day">16</div>
+          <div class="day">17</div><div class="day">18</div><div class="day">19</div><div class="day">20</div><div class="day">21<span class="ev i"></span></div><div class="day">22</div><div class="day">23</div>
+          <div class="day">24</div><div class="day">25</div><div class="day">26</div><div class="day">27</div><div class="day">28</div><div class="day">29</div><div class="day">30</div>
+        </div>
+      </div>
+      <div class="legend">
+        <div class="lg"><span class="sw" style="background:var(--brand)"></span><span><b>Send the bill.</b> The date a stage of a contract comes due.</span></div>
+        <div class="lg"><span class="sw" style="background:var(--amber)"></span><span><b>Chase the payment.</b> The deadline you gave the client.</span></div>
+        <div class="lg"><span class="sw" style="background:var(--rose)"></span><span><b>Issue the invoice.</b> The end of a tax period you still owe paperwork for.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="reports">
+  <div class="wrap">
+    <div class="sec-head center rv">
+      <span class="badge"><span class="dot"></span>Overview &amp; reports</span>
+      <h2>Where the money is, and who is late</h2>
+      <p class="lede">Two questions you ask constantly, answered on two pages instead of in a spreadsheet you rebuild every quarter.</p>
+    </div>
+    <div class="feat" style="grid-template-columns:minmax(0,1fr)">
+      <div style="display:grid; gap:clamp(1.5rem,3vw,2.4rem); grid-template-columns:repeat(auto-fit,minmax(320px,1fr))">
+        <div class="rv">
+          <p class="shot-label">Overview</p>
+          <div class="shot"><img src="/landing/images/dashboard.png" alt="Overview page showing balances per account, monthly cash flow and the balance trend"></div>
+          <ul class="pts" style="margin-top:1.2rem">
+            <li><b>Every account, every currency.</b> Balances sit side by side, unconverted, so the number you read is the number in the bank.</li>
+            <li><b>Money in against money out,</b> month by month, with the trend behind it.</li>
+          </ul>
+        </div>
+        <div class="rv" data-d="1">
+          <p class="shot-label">Reports</p>
+          <div class="shot"><img src="/landing/images/reports.png" alt="Reports page with receivables ageing, tax periods and contract coverage"></div>
+          <ul class="pts" style="margin-top:1.2rem">
+            <li><b>How old the debt is,</b> per client — not just how big it is.</li>
+            <li><b>Work you agreed to but never billed for.</b> A signed contract nobody scheduled is money you will forget to ask for.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+<section id="assistant">
+  <div class="wrap feat">
+    <div class="fx rv">
+      <div class="sec-head">
+        <span class="badge"><span class="dot"></span>AI assistant</span>
+        <h2>Ask your books a question</h2>
+        <p class="lede">Point an AI assistant at it and ask in plain words. It reads exactly what you can read, and nothing you cannot.</p>
+      </div>
+      <p class="sub" style="font-size:.95rem; margin:0">It can write, too — “log that NT$18,500 cloud bill as an external expense” is a sentence, not a form.</p>
+    </div>
+    <div class="term rv anim" data-d="1">
+      <div class="th">Assistant</div>
+      <div class="tb">
+        <div class="l"><span class="c">you</span> <span class="q">Which clients are overdue, and by how much?</span></div>
+        <div class="l"><span class="c">reading the billing board…</span></div>
+        <div class="l">&nbsp;</div>
+        <div class="l">Highbridge Construction <span class="c">·</span> Phase 1 <span class="c">·</span> <span class="r">NT$800,000</span> <span class="c">· 82 days late</span></div>
+        <div class="l">Northwind Labs <span class="c">·</span> Data pipeline <span class="c">·</span> <span class="r">US$6,500</span> <span class="c">· 31 days late</span></div>
+        <div class="l">&nbsp;</div>
+        <div class="l"><span class="c">Two clients. Totals kept in their own currency.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="language">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <h2 style="font-size:clamp(1.5rem,2.6vw,2rem)">Nobody has to work in a language they are guessing at</h2>
+      <p class="lede" style="font-size:1.05rem">Switch, and the whole thing follows — buttons, tables, even error messages. Try it:</p>
+    </div>
+
+    <div class="lang card rv">
+      <div class="lang-bar">
+        <div class="seg" role="tablist" aria-label="Language">
+          <button role="tab" aria-selected="true" aria-controls="i18ncards" data-loc="en">English</button>
+          <button role="tab" aria-selected="false" aria-controls="i18ncards" data-loc="zh-TW" lang="zh-Hant-TW">繁體中文</button>
+        </div>
+        <span class="hint">The page address never changes — your bookmarks keep working.</span>
+      </div>
+      <div class="kcards" id="i18ncards">
+        <div class="kcard" data-k="due">
+          <div class="kl" data-i18n data-en="Due to bill" data-zh="該請款">Due to bill</div>
+          <div class="kv">3</div><div class="ks">NT$545,000</div>
+          <div class="kh" data-i18n data-en="Due date has passed, not yet billed" data-zh="已到應請款日、還沒請款">Due date has passed, not yet billed</div>
+        </div>
+        <div class="kcard" data-k="await">
+          <div class="kl" data-i18n data-en="Awaiting payment" data-zh="待收款">Awaiting payment</div>
+          <div class="kv">2</div><div class="ks">NT$420,000</div>
+          <div class="kh" data-i18n data-en="Billed, not yet fully collected" data-zh="已請款、還沒收齊">Billed, not yet fully collected</div>
+        </div>
+        <div class="kcard" data-k="overdue">
+          <div class="kl" data-i18n data-en="Overdue" data-zh="逾期未收">Overdue</div>
+          <div class="kv">2</div><div class="ks">NT$800,000 · US$6,500</div>
+          <div class="kh" data-i18n data-en="Past the payment deadline, still not collected" data-zh="超過付款期限仍未收齊">Past the payment deadline, still not collected</div>
+        </div>
+        <div class="kcard" data-k="inv">
+          <div class="kl" data-i18n data-en="Invoice pending" data-zh="待開發票">Invoice pending</div>
+          <div class="kv">8</div><div class="ks">NT$636,000</div>
+          <div class="kh" data-i18n data-en="Billed or paid, invoice not issued yet" data-zh="已請款或已收款、發票還沒開">Billed or paid, invoice not issued yet</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="more">
+  <div class="wrap">
+    <div class="sec-head center rv">
+      <h2>The rest of the month</h2>
+      <p class="lede">Bookkeeping is not only ledgers and invoices. These are the parts that make it survivable.</p>
+    </div>
+    <div class="tiles">
+      <div class="tile rv">
+        <h3>Clients and suppliers</h3>
+        <p>Everyone you deal with is a proper record, so a name is never typed twice or spelled two ways.</p>
+      </div>
+      <div class="tile rv" data-d="1">
+        <h3>Money people fronted</h3>
+        <p>Someone paid out of their own pocket. Track what the company owes them and settle it properly.</p>
+      </div>
+      <div class="tile rv" data-d="2">
+        <h3>Checking against the bank</h3>
+        <p>Match what the bank says against what you recorded, and write down the difference instead of arguing with it.</p>
+      </div>
+      <div class="tile rv">
+        <h3>Payroll</h3>
+        <p>Staff, pay items and pay runs, posting straight into the internal books where salaries belong.</p>
+      </div>
+      <div class="tile rv" data-d="1">
+        <h3>Receipts on file</h3>
+        <p>Upload the receipt or the contract and attach it to the entry it justifies. No shoebox.</p>
+      </div>
+      <div class="tile rv" data-d="2">
+        <h3>More than one company</h3>
+        <p>Run several companies from one install. Each one only ever sees its own numbers, and you switch with a click.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="setup">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="badge plain"><span class="dot"></span>For whoever sets it up</span>
+      <h2>Three commands, your own server</h2>
+      <p class="lede">It is an ordinary web app with an ordinary database behind it. Put it wherever you already put things.</p>
+    </div>
+    <div class="setup">
+      <div class="steps rv">
+        <div class="step">
+          <div class="sl"><b>01</b> Install it</div>
+<pre>bun install</pre>
+        </div>
+        <div class="step">
+          <div class="sl"><b>02</b> Point it at your database</div>
+<pre>cp .env.example .env.local
+<span class="c"># database address, a secret, Google sign-in</span></pre>
+        </div>
+        <div class="step">
+          <div class="sl"><b>03</b> Start it</div>
+<pre>bun dev   <span class="c"># then open localhost:3000</span></pre>
+        </div>
+        <p class="sub" style="font-size:.9rem; margin:.4rem 0 0">The first person to sign in sets up the company. There is a Docker setup in the repo if you would rather not think about versions.</p>
+      </div>
+      <div class="rv" data-d="1">
+        <dl class="spec">
+          <div class="r"><dt>Built with</dt><dd>Next.js 16, React 19, Tailwind CSS</dd></div>
+          <div class="r"><dt>Database</dt><dd>Any PostgreSQL — nothing in it is tied to one provider</dd></div>
+          <div class="r"><dt>Sign-in</dt><dd>Google, with invites and owner &amp; admin roles</dd></div>
+          <div class="r"><dt>Hosting</dt><dd>Your server, a container, or a serverless platform — the repo does not insist</dd></div>
+          <div class="r"><dt>Licence</dt><dd>Apache 2.0. Use it, change it, sell what you build with it</dd></div>
+        </dl>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="end">
+  <div class="wrap">
+    <div class="finale rv">
+      <h2>Stop reconciling your own files</h2>
+      <p>It is the tool we run our own company on — not a general-purpose accounting suite, and not trying to be. If you keep two sets of books and chase your own invoices, it will probably fit.</p>
+      <div class="btns">
+        <a class="btn primary" href="https://github.com/pathorsAI/internal"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>Get it on GitHub</a>
+        <a class="btn ghost" href="https://github.com/pathorsAI/internal#quick-start">Read the setup guide</a>
+      </div>
+      <p class="already">Already using it? <a href="/login">Log in here</a>.</p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Pathors Internal</span>
+    <span>Apache 2.0</span>
+    <span><a href="/login">Log in</a></span>
+    <span><a href="/privacy">Privacy</a></span>
+    <span><a href="/terms">Terms</a></span>
+    <span class="sp"><a class="ghlink" href="https://github.com/pathorsAI/internal"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>github.com/pathorsAI/internal</a></span>
+  </div>
+</footer>
+`;
+
+/**
+ * docs/index.html <script> 的內容，一字未改。
+ * dangerouslySetInnerHTML 不會執行 <script>，所以這段是靠 next/script 以
+ * afterInteractive 注入的（見 page.tsx）。
+ */
+export const LANDING_SCRIPT = `(function(){
+  var reduce = globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* Reveal on scroll. IntersectionObserver drives it; a rect sweep is the safety
+     net, so content can never stay stuck at opacity 0 if the observer is silent. */
+  var targets = Array.prototype.slice.call(document.querySelectorAll('.rv, .anim'));
+  function show(el){
+    el.classList.add('in');
+    if (el.classList.contains('anim')) el.classList.add('play');
+  }
+  function sweep(){
+    var h = globalThis.innerHeight || 800;
+    targets.forEach(function(el){
+      if (!el.classList.contains('in') && el.getBoundingClientRect().top < h * 0.9) show(el);
+    });
+  }
+  if (!('IntersectionObserver' in globalThis) || reduce) {
+    targets.forEach(show);
+  } else {
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){ if (e.isIntersecting) { show(e.target); io.unobserve(e.target); } });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.12 });
+    targets.forEach(function(el){ io.observe(el); });
+    addEventListener('scroll', sweep, { passive: true });
+    addEventListener('resize', sweep);
+    document.addEventListener('visibilitychange', function(){ if (!document.hidden) sweep(); });
+    sweep();
+  }
+
+  /* Header hairline appears once you leave the hero. */
+  var nav = document.getElementById('nav');
+  function onScroll(){ nav.classList.toggle('stuck', globalThis.scrollY > 12); }
+  addEventListener('scroll', onScroll, { passive: true }); onScroll();
+
+  /* One ledger vs two spreadsheets. */
+  var demo = document.getElementById('splitdemo');
+  var tabs = document.querySelectorAll('.seg [data-mode]');
+  var touched = false;
+  function setMode(m){
+    demo.dataset.mode = m;
+    tabs.forEach(function(t){ t.setAttribute('aria-selected', String(t.dataset.mode === m)); });
+  }
+  tabs.forEach(function(t){ t.addEventListener('click', function(){ touched = true; setMode(t.dataset.mode); }); });
+  if (!reduce) {
+    setTimeout(function(){ if (!touched) setMode('two'); }, 3000);
+    setTimeout(function(){ if (!touched) setMode('one'); }, 6600);
+  }
+
+  /* Language switch. */
+  var locBtns = document.querySelectorAll('[data-loc]');
+  var cards = document.getElementById('i18ncards');
+  function translate(zh){
+    cards.querySelectorAll('[data-i18n]').forEach(function(n){
+      n.textContent = zh ? n.dataset.zh : n.dataset.en;
+      n.setAttribute('lang', zh ? 'zh-Hant-TW' : 'en');
+    });
+  }
+  function selectLocale(btn){
+    var zh = btn.dataset.loc === 'zh-TW';
+    locBtns.forEach(function(x){ x.setAttribute('aria-selected', String(x === btn)); });
+    cards.classList.add('swapping');
+    setTimeout(function(){
+      translate(zh);
+      cards.classList.remove('swapping');
+    }, reduce ? 0 : 160);
+  }
+  locBtns.forEach(function(b){
+    b.addEventListener('click', function(){ selectLocale(b); });
+  });
+})();`;

@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { contracts, parties, projects, subscriptions } from "@/db/schema";
 import {
   assertInOrg,
+  type JsonSchemaObject,
   normalizeCurrency,
   optDecimal,
   optNumber,
@@ -19,6 +20,102 @@ import {
 const PROJECT_STATUS = ["active", "archived"] as const;
 const SUB_STATUS = ["active", "paused", "ended"] as const;
 const CONTRACT_STATUS = ["draft", "active", "completed", "cancelled"] as const;
+
+// ---- outputSchema 素材 ----
+// create_*/update_* 回的是 drizzle `.returning()` 的整列，所以形狀直接對應
+// db/schema.ts：numeric 欄位回來是字串、date 欄位是 YYYY-MM-DD 字串、可為 null 的
+// 欄位寫成 ["x", "null"]。整列一定會帶回所有 key（值可能是 null），故 required 列滿。
+
+const DELETED_RESULT: JsonSchemaObject = {
+  type: "object",
+  properties: {
+    deleted: { type: "boolean" },
+    id: { type: "number", description: "The id that was soft-deleted." },
+  },
+  required: ["deleted", "id"],
+  additionalProperties: false,
+};
+
+const PROJECT_ROW_PROPS = {
+  id: { type: "number" },
+  deletedAt: { type: ["string", "null"], description: "Soft-delete timestamp; null while active." },
+  organizationId: { type: ["string", "null"] },
+  name: { type: "string" },
+  clientPartyId: { type: ["number", "null"] },
+  status: { type: "string", enum: [...PROJECT_STATUS] },
+  description: { type: ["string", "null"] },
+  createdAt: { type: "string" },
+} as const;
+
+const PROJECT_ROW: JsonSchemaObject = {
+  type: "object",
+  properties: { ...PROJECT_ROW_PROPS },
+  required: Object.keys(PROJECT_ROW_PROPS),
+  additionalProperties: false,
+};
+
+const SUBSCRIPTION_ROW_PROPS = {
+  id: { type: "number" },
+  deletedAt: { type: ["string", "null"] },
+  organizationId: { type: ["string", "null"] },
+  customerPartyId: { type: "number" },
+  projectId: { type: ["number", "null"] },
+  name: { type: "string" },
+  amount: { type: "string", description: "Decimal as a string." },
+  currency: { type: "string", description: "3-letter code." },
+  intervalMonths: { type: "number" },
+  startDate: { type: "string", description: "YYYY-MM-DD." },
+  endDate: { type: ["string", "null"], description: "YYYY-MM-DD." },
+  status: { type: "string", enum: [...SUB_STATUS] },
+  note: { type: ["string", "null"] },
+  createdAt: { type: "string" },
+} as const;
+
+const SUBSCRIPTION_ROW: JsonSchemaObject = {
+  type: "object",
+  properties: { ...SUBSCRIPTION_ROW_PROPS },
+  required: Object.keys(SUBSCRIPTION_ROW_PROPS),
+  additionalProperties: false,
+};
+
+const CONTRACT_ROW_PROPS = {
+  id: { type: "number" },
+  deletedAt: { type: ["string", "null"] },
+  organizationId: { type: ["string", "null"] },
+  customerPartyId: { type: "number" },
+  projectId: { type: ["number", "null"] },
+  title: { type: "string" },
+  amount: { type: ["string", "null"], description: "Decimal as a string; null when not agreed." },
+  currency: { type: "string", description: "3-letter code." },
+  startDate: { type: ["string", "null"], description: "YYYY-MM-DD." },
+  endDate: { type: ["string", "null"], description: "YYYY-MM-DD." },
+  signedDate: { type: ["string", "null"], description: "YYYY-MM-DD; 簽約日, distinct from startDate." },
+  paymentTermsDays: { type: ["number", "null"] },
+  status: { type: "string", enum: [...CONTRACT_STATUS] },
+  note: { type: ["string", "null"] },
+  fileUrl: { type: ["string", "null"] },
+  createdAt: { type: "string" },
+  // 以下是請款計畫欄位：這兩支 tool 不接受它們當輸入，但整列會一起回來。
+  billingPlan: {
+    type: ["string", "null"],
+    enum: ["single", "installments", "milestones", "subscription", null],
+  },
+  installmentCount: { type: ["number", "null"] },
+  installmentSplit: {
+    type: ["string", "null"],
+    description: "Comma-separated percentages, e.g. '30,40,30'; null = split evenly.",
+  },
+  billingIntervalMonths: { type: "number" },
+  dueRule: { type: "string", enum: ["signed_date", "day_of_month", "business_day_of_month"] },
+  dueDay: { type: ["number", "null"] },
+} as const;
+
+const CONTRACT_ROW: JsonSchemaObject = {
+  type: "object",
+  properties: { ...CONTRACT_ROW_PROPS },
+  required: Object.keys(CONTRACT_ROW_PROPS),
+  additionalProperties: false,
+};
 
 function checkEnum(v: string | undefined, allowed: readonly string[], field: string) {
   if (v !== undefined && !allowed.includes(v)) {
@@ -42,6 +139,7 @@ export const clientTools: Record<string, ToolDef> = {
       required: ["name"],
       additionalProperties: false,
     },
+    outputSchema: PROJECT_ROW,
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       const db = getDb();
@@ -77,6 +175,7 @@ export const clientTools: Record<string, ToolDef> = {
       required: ["id"],
       additionalProperties: false,
     },
+    outputSchema: PROJECT_ROW,
     execute: async (args, ctx) => {
       const id = requireNumber(args, "id");
       const orgId = await resolveOrg(args, ctx);
@@ -109,6 +208,7 @@ export const clientTools: Record<string, ToolDef> = {
       required: ["id"],
       additionalProperties: false,
     },
+    outputSchema: DELETED_RESULT,
     execute: async (args, ctx) => {
       const id = requireNumber(args, "id");
       const orgId = await resolveOrg(args, ctx);
@@ -144,6 +244,7 @@ export const clientTools: Record<string, ToolDef> = {
       required: ["customerPartyId", "name", "amount", "startDate"],
       additionalProperties: false,
     },
+    outputSchema: SUBSCRIPTION_ROW,
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       const db = getDb();
@@ -193,6 +294,7 @@ export const clientTools: Record<string, ToolDef> = {
       required: ["id"],
       additionalProperties: false,
     },
+    outputSchema: SUBSCRIPTION_ROW,
     execute: async (args, ctx) => {
       const id = requireNumber(args, "id");
       const orgId = await resolveOrg(args, ctx);
@@ -233,6 +335,7 @@ export const clientTools: Record<string, ToolDef> = {
       required: ["id"],
       additionalProperties: false,
     },
+    outputSchema: DELETED_RESULT,
     execute: async (args, ctx) => {
       const id = requireNumber(args, "id");
       const orgId = await resolveOrg(args, ctx);
@@ -272,6 +375,7 @@ export const clientTools: Record<string, ToolDef> = {
       required: ["customerPartyId", "title"],
       additionalProperties: false,
     },
+    outputSchema: CONTRACT_ROW,
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       const db = getDb();
@@ -326,6 +430,7 @@ export const clientTools: Record<string, ToolDef> = {
       required: ["id"],
       additionalProperties: false,
     },
+    outputSchema: CONTRACT_ROW,
     execute: async (args, ctx) => {
       const id = requireNumber(args, "id");
       const orgId = await resolveOrg(args, ctx);
@@ -365,6 +470,7 @@ export const clientTools: Record<string, ToolDef> = {
       required: ["id"],
       additionalProperties: false,
     },
+    outputSchema: DELETED_RESULT,
     execute: async (args, ctx) => {
       const id = requireNumber(args, "id");
       const orgId = await resolveOrg(args, ctx);

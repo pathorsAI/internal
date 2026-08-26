@@ -11,6 +11,19 @@ export type ToolAnnotations = {
   readOnlyHint?: boolean;
   destructiveHint?: boolean;
   idempotentHint?: boolean;
+  // True only when the tool can change *publicly visible* internet state
+  // (posting publicly, mailing external recipients, pushing to a third party).
+  // Writes that stay inside this org's own data are `false`. Required by the
+  // OpenAI plugin review; see docs/mcp.md.
+  openWorldHint?: boolean;
+};
+
+export type JsonSchemaObject = {
+  type: "object";
+  properties?: Record<string, unknown>;
+  required?: string[];
+  additionalProperties?: boolean;
+  [key: string]: unknown;
 };
 
 export type ToolDef = {
@@ -21,6 +34,13 @@ export type ToolDef = {
     required?: string[];
     additionalProperties: boolean;
   };
+  // Optional JSON Schema for the tool's return value. When present the handler
+  // advertises it on tools/list AND mirrors the result into `structuredContent`
+  // (MCP requires structuredContent to validate against the declared schema, so
+  // only declare it when the shape really is stable and object-valued — tools
+  // that return a bare array must not declare one). Tools without it keep the
+  // JSON-in-a-text-block result shape.
+  outputSchema?: JsonSchemaObject;
   // Optional override; otherwise derived from the tool's verb in the handler.
   annotations?: ToolAnnotations;
   execute: (args: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;

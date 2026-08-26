@@ -34,9 +34,81 @@ import {
   resolveOrg,
   type ToolDef,
 } from "./shared";
+import {
+  assertAccountCurrency,
+  findMismatchInMap,
+  accountCurrencyErrorMessage,
+  type AccountCurrencyRef,
+} from "@/lib/account-currency";
 
 const TXN_TYPES = ["expense", "income", "advance", "transfer"] as const;
 const BOOKS = ["both", "internal", "external"] as const;
+
+// 建立/更新/撥款/查單筆都直接把 transactions 整列回出去，形狀共用一份避免各寫各的走鐘。
+// 型別對照 db/schema.ts：numeric → string（drizzle 不轉 number，避免精度失真）、
+// date 與 timestamp(mode:'string') → string、bigint(mode:'number') → number。
+const TXN_ROW_PROPS: Record<string, unknown> = {
+  id: { type: "number" },
+  organizationId: { type: ["string", "null"] },
+  type: { type: "string", description: "expense | income | advance | transfer | reimbursement" },
+  txnDate: { type: "string", description: "YYYY-MM-DD." },
+  description: { type: ["string", "null"] },
+  amount: { type: "string", description: "Decimal as a string (numeric(18,2))." },
+  currency: { type: "string", description: "3-letter code." },
+  amountTwd: { type: ["string", "null"], description: "Only set when currency is TWD." },
+  book: { type: "string", enum: [...BOOKS] },
+  billedToCompanyTaxId: { type: "boolean" },
+  categoryId: { type: ["number", "null"] },
+  partyId: { type: ["number", "null"] },
+  settleEmployeeId: { type: ["number", "null"] },
+  projectId: { type: ["number", "null"] },
+  contractId: { type: ["number", "null"] },
+  subscriptionId: { type: ["number", "null"] },
+  subscriptionPeriod: { type: ["string", "null"], description: "Period start, YYYY-MM-DD." },
+  billingItemId: { type: ["number", "null"] },
+  invoiceId: { type: ["number", "null"] },
+  relatedToId: { type: ["number", "null"], description: "The advance a reimbursement pays back." },
+  deletedAt: { type: ["string", "null"] },
+  createdAt: { type: "string" },
+  updatedAt: { type: "string" },
+};
+
+// 整列回傳時每個欄位都在（可為 null，但一定有 key）。
+const TXN_ROW_REQUIRED = Object.keys(TXN_ROW_PROPS);
+
+// 註：用到 TXN_ROW_PROPS 的 schema 一律不寫 additionalProperties: false —— 這些是
+// `.returning()` 的整列回傳，資料表一加欄位就會多帶 key，封死等於讓下次 migration
+// 靜靜地把 structuredContent 打成不合法。手工組出來的固定形狀才封。
+
+// shared.ts 的 ContractProgress。`action` 只有在「已收滿但狀態還開著」時才附上，
+// 所以不進 required。
+const CONTRACT_PROGRESS_SCHEMA = {
+  type: "object",
+  properties: {
+    contractId: { type: "number" },
+    title: { type: "string" },
+    status: { type: "string" },
+    currency: { type: "string" },
+    amount: { type: ["number", "null"] },
+    received: { type: "number" },
+    remaining: { type: ["number", "null"] },
+    fullyCollected: { type: "boolean" },
+    action: {
+      type: "string",
+      description: "Present only when the contract is fully collected but still open.",
+    },
+  },
+  required: [
+    "contractId",
+    "title",
+    "status",
+    "currency",
+    "amount",
+    "received",
+    "remaining",
+    "fullyCollected",
+  ],
+};
 
 type Db = ReturnType<typeof getDb>;
 
@@ -490,6 +562,15 @@ export const transactionTools: Record<string, ToolDef> = {
       required: ["id"],
       additionalProperties: false,
     },
+    // 查不到時回的是 { error } 而不是丟錯，兩種形狀共用一個 schema，所以沒有任何欄位
+    // 能列進 required。
+    outputSchema: {
+      type: "object",
+      properties: {
+        ...TXN_ROW_PROPS,
+        error: { type: "string", description: "Present instead of the row when not found." },
+      },
+    },
     execute: async (args, ctx) =>
       (await getTransaction(await resolveOrg(args, ctx), requireNumber(args, "id"))) ?? {
         error: "Not found.",
@@ -551,6 +632,19 @@ export const transactionTools: Record<string, ToolDef> = {
       required: ["type", "txnDate", "amount"],
       additionalProperties: false,
     },
+    // 建立成功回的是整列交易；只有帶了 contractId 才多一個 contractProgress
+    // （單一物件，跟 bulk/update 的陣列不同）。
+    outputSchema: {
+      type: "object",
+      properties: {
+        ...TXN_ROW_PROPS,
+        contractProgress: {
+          anyOf: [CONTRACT_PROGRESS_SCHEMA, { type: "null" }],
+          description: "Only present when contractId was supplied.",
+        },
+      },
+      required: TXN_ROW_REQUIRED,
+    },
     execute: async (args, ctx) => {
       const type = requireString(args, "type");
       if (!TXN_TYPES.includes(type as (typeof TXN_TYPES)[number])) {
@@ -570,6 +664,8 @@ export const transactionTools: Record<string, ToolDef> = {
       }
       const amount = requireDecimal(args, "amount");
       const currency = normalizeCurrency(args, "currency");
+      // 每一腳（expense/income 的單一帳戶、transfer 的 from + to）都要跟自己的帳戶同幣別。
+      await assertAccountCurrency(db, orgId, currency, [f.fromAccountId, f.toAccountId]);
       const reported = type === "transfer" || optBoolean(args, "reported") === true;
       const [row] = await db
         .insert(transactions)
@@ -653,6 +749,21 @@ export const transactionTools: Record<string, ToolDef> = {
       required: ["items"],
       additionalProperties: false,
     },
+    // 只回 id，不回整列；沒有任何一列綁合約時 contractProgress 整個 key 不會出現。
+    outputSchema: {
+      type: "object",
+      properties: {
+        created: { type: "number" },
+        ids: { type: "array", items: { type: "number" } },
+        contractProgress: {
+          type: "array",
+          items: CONTRACT_PROGRESS_SCHEMA,
+          description: "One entry per contract any item linked to; omitted when none did.",
+        },
+      },
+      required: ["created", "ids"],
+      additionalProperties: false,
+    },
     execute: async (args, ctx) => {
       const items = args.items;
       if (!Array.isArray(items) || items.length === 0) {
@@ -667,13 +778,18 @@ export const transactionTools: Record<string, ToolDef> = {
       // Load the org's valid FK ids once, so each row is validated in memory
       // instead of issuing an assertInOrg round trip per row.
       const [acctRows, catRows, projRows, contractRows, subscriptionRows] = await Promise.all([
-        db.select({ id: bankAccounts.id }).from(bankAccounts).where(eq(bankAccounts.organizationId, orgId)),
+        db
+          .select({ id: bankAccounts.id, name: bankAccounts.name, currency: bankAccounts.currency })
+          .from(bankAccounts)
+          .where(eq(bankAccounts.organizationId, orgId)),
         db.select({ id: categories.id }).from(categories).where(eq(categories.organizationId, orgId)),
         db.select({ id: projects.id }).from(projects).where(eq(projects.organizationId, orgId)),
         db.select({ id: contracts.id }).from(contracts).where(eq(contracts.organizationId, orgId)),
         db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.organizationId, orgId)),
       ]);
       const acctSet = new Set(acctRows.map((r) => r.id));
+      // 幣別驗證跟 FK 驗證一樣在記憶體裡做，避免每列各發一次 query。
+      const acctById = new Map<number, AccountCurrencyRef>(acctRows.map((r) => [r.id, r]));
       const catSet = new Set(catRows.map((r) => r.id));
       const projSet = new Set(projRows.map((r) => r.id));
       const contractSet = new Set(contractRows.map((r) => r.id));
@@ -685,6 +801,10 @@ export const transactionTools: Record<string, ToolDef> = {
       const norms: Norm[] = items.map((raw, i) =>
         normalizeBulkTxnItem(raw, i, sets, partyLabelByName, employeeNames),
       );
+      norms.forEach((n, i) => {
+        const bad = findMismatchInMap(acctById, n.currency, [n.fromAccountId, n.toAccountId]);
+        if (bad) throw new Error(`items[${i}]: ${accountCurrencyErrorMessage(bad)}`);
+      });
 
       const partyId = await resolvePartyNames(db, orgId, partyLabelByName);
       const employeeId = await resolveEmployeeNames(db, orgId, employeeNames);
@@ -748,6 +868,20 @@ export const transactionTools: Record<string, ToolDef> = {
       required: ["id"],
       additionalProperties: false,
     },
+    // 整列更新後的交易；有動到合約時才多一個 contractProgress（陣列，因為原本綁的與
+    // 改綁的合約可能各算一次）。
+    outputSchema: {
+      type: "object",
+      properties: {
+        ...TXN_ROW_PROPS,
+        contractProgress: {
+          type: "array",
+          items: CONTRACT_PROGRESS_SCHEMA,
+          description: "The contracts whose progress this edit touched; omitted when none.",
+        },
+      },
+      required: TXN_ROW_REQUIRED,
+    },
     execute: async (args, ctx) => {
       const id = requireNumber(args, "id");
       const orgId = await resolveOrg(args, ctx);
@@ -758,6 +892,8 @@ export const transactionTools: Record<string, ToolDef> = {
           amount: transactions.amount,
           currency: transactions.currency,
           contractId: transactions.contractId,
+          fromAccountId: transactions.fromAccountId,
+          toAccountId: transactions.toAccountId,
         })
         .from(transactions)
         .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)))
@@ -773,6 +909,13 @@ export const transactionTools: Record<string, ToolDef> = {
       }
       await applyTxnRelationPatch(patch, db, args, orgId);
       applyTxnAmountPatch(patch, args, existing);
+      // 這支工具改不了帳戶，但改得了幣別 —— 改完仍要跟原本綁的帳戶對得起來。
+      if (typeof patch.currency === "string") {
+        await assertAccountCurrency(db, orgId, patch.currency, [
+          existing.fromAccountId,
+          existing.toAccountId,
+        ]);
+      }
       const [row] = await db
         .update(transactions)
         .set(patch)
@@ -794,6 +937,15 @@ export const transactionTools: Record<string, ToolDef> = {
       type: "object",
       properties: { id: { type: "number" }, ...ORG_ARG },
       required: ["id"],
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: "object",
+      properties: {
+        deleted: { type: "boolean" },
+        id: { type: "number" },
+      },
+      required: ["deleted", "id"],
       additionalProperties: false,
     },
     execute: async (args, ctx) => {
@@ -846,6 +998,12 @@ export const transactionTools: Record<string, ToolDef> = {
       required: ["advanceId", "fromAccountId", "payDate", "amount"],
       additionalProperties: false,
     },
+    // 回的是新建的那一列（type='reimbursement'，relatedToId 指回原代墊）。
+    outputSchema: {
+      type: "object",
+      properties: { ...TXN_ROW_PROPS },
+      required: TXN_ROW_REQUIRED,
+    },
     execute: async (args, ctx) => {
       const advanceId = requireNumber(args, "advanceId");
       const fromAccountId = requireNumber(args, "fromAccountId");
@@ -868,6 +1026,8 @@ export const transactionTools: Record<string, ToolDef> = {
         throw new Error(`Transaction ${advanceId} is not an advance (type=${adv.type}).`);
       }
       const currency = adv.currency ?? "TWD";
+      // 撥款的幣別跟著原代墊走，付款帳戶必須是同一種幣別。
+      await assertAccountCurrency(db, orgId, currency, [fromAccountId]);
       const [row] = await db
         .insert(transactions)
         .values({

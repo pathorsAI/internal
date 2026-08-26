@@ -20,34 +20,36 @@ import type { NavItemKey } from "@/components/app-sidebar";
  * nav — same keys so a page's name is identical in both places).
  */
 const routeKeys: Record<string, NavItemKey> = {
-  "/": "dashboard",
-  "/transactions": "transactions",
-  "/parties": "parties",
-  "/categories": "categories",
-  "/advances": "advances",
-  "/accountant-notices": "accountantNotices",
-  "/bank-accounts": "bankAccounts",
-  "/reconciliation": "reconciliation",
-  "/projects": "projects",
-  "/subscriptions": "subscriptions",
-  "/contracts": "contracts",
-  "/billing": "billing",
-  "/invoices": "invoices",
-  "/reports": "reports",
-  "/employees": "employees",
-  "/payroll": "payroll",
-  "/members": "members",
-  "/settings": "settings",
-  "/settings/mcp": "mcp",
+  "/dashboard": "dashboard",
+  "/dashboard/transactions": "transactions",
+  "/dashboard/parties": "parties",
+  "/dashboard/categories": "categories",
+  "/dashboard/advances": "advances",
+  "/dashboard/accountant-notices": "accountantNotices",
+  "/dashboard/bank-accounts": "bankAccounts",
+  "/dashboard/reconciliation": "reconciliation",
+  "/dashboard/projects": "projects",
+  "/dashboard/subscriptions": "subscriptions",
+  "/dashboard/contracts": "contracts",
+  "/dashboard/billing": "billing",
+  "/dashboard/invoices": "invoices",
+  "/dashboard/reports": "reports",
+  "/dashboard/employees": "employees",
+  "/dashboard/payroll": "payroll",
+  "/dashboard/members": "members",
+  "/dashboard/settings": "settings",
+  "/dashboard/settings/mcp": "mcp",
 };
 
 export function HeaderBreadcrumb() {
   const t = useTranslations("common");
   const pathname = usePathname();
 
-  const segments = pathname.split("/").filter(Boolean);
+  // 應用程式掛在 /dashboard 底下，麵包屑的「根」就是它 —— 把這一段去掉，
+  // 麵包屑才不會每一頁都多出一層重複的「儀表板」。
+  const segments = pathname.split("/").filter(Boolean).slice(1);
   const crumbs = segments.map((segment, index) => {
-    const href = "/" + segments.slice(0, index + 1).join("/");
+    const href = "/dashboard/" + segments.slice(0, index + 1).join("/");
     const key = routeKeys[href];
     return { href, label: key ? t(`nav.items.${key}`) : segment };
   });
@@ -60,7 +62,7 @@ export function HeaderBreadcrumb() {
             <BreadcrumbPage>{t("nav.root")}</BreadcrumbPage>
           ) : (
             <BreadcrumbLink asChild>
-              <Link href="/">{t("nav.root")}</Link>
+              <Link href="/dashboard">{t("nav.root")}</Link>
             </BreadcrumbLink>
           )}
         </BreadcrumbItem>
