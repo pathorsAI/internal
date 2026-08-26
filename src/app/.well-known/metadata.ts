@@ -29,7 +29,7 @@ export function discoveryPreflight(): Response {
  * reads to explain the connector to users and admins.
  *
  * The policy and terms URLs default to the pages this deployment serves itself
- * (/privacy and /terms, public — see src/middleware.ts), so the metadata is
+ * (/privacy and /terms, public — see src/proxy.ts), so the metadata is
  * complete out of the box; the env vars stay as an override for deployments
  * that host their documents elsewhere. Documentation has no in-app page, so it
  * is still env-only and omitted when unset.

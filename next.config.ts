@@ -5,9 +5,10 @@ import createNextIntlPlugin from "next-intl/plugin";
 // 安全性 response header
 // ---------------------------------------------------------------------------
 //
-// 為什麼放在 next.config 而不是 middleware：middleware 的 matcher 刻意排除了
+// 為什麼放在 next.config 而不是 proxy（Next 16 之前叫 middleware）：proxy 的
+// matcher 刻意排除了
 // `/`（landing page）、`/login`、`/api/auth`、`/mcp`、`/.well-known`，而這些正是
-// 最需要安全 header 的公開路徑 —— 放進 middleware 等於漏掉一半的站。next.config
+// 最需要安全 header 的公開路徑 —— 放進 proxy 等於漏掉一半的站。next.config
 // 的 headers() 是在 Next 的路由層貼上去的，頁面、route handler、靜態資產一體適用。
 
 /** 每條路徑都該有的傳輸層 header，不會跟任何 handler 自己設的 header 打架。 */
@@ -71,7 +72,7 @@ const CSP_ENFORCED = [
  *
  * 為什麼不能 enforce：這份 policy 的重點是 `script-src 'self'`（不含
  * 'unsafe-inline'），而要在 Next 上做到那件事，唯一的辦法是每個 request 產生一個
- * nonce、由 middleware 塞進 request header 再由 Next 注入到它自己的 bootstrap
+ * nonce、由 proxy 塞進 request header 再由 Next 注入到它自己的 bootstrap
  * script 上。nonce 天生是 per-request 的，next.config 的 headers() 是靜態的，
  * 這裡生不出來。而現況有三個沒有 nonce 就一定違規的 inline script 來源：
  *   1. Next 自己的 bootstrap / flight data inline script（每一頁都有）
@@ -84,9 +85,9 @@ const CSP_ENFORCED = [
  * 有做事的 header 給稽核看。寧可誠實地標成 Report-Only。
  *
  * 要改成 enforce，需要先做完這三件事：
- *   (a) 在 src/middleware.ts 產生 per-request nonce，寫進 `x-nonce` request header，
- *       並把 CSP header 改成由 middleware 動態組（含 `'nonce-…' 'strict-dynamic'`）；
- *       middleware 的 matcher 也要放寬到涵蓋 `/` 與 `/login`。
+ *   (a) 在 src/proxy.ts 產生 per-request nonce，寫進 `x-nonce` request header，
+ *       並把 CSP header 改成由 proxy 動態組（含 `'nonce-…' 'strict-dynamic'`）；
+ *       proxy 的 matcher 也要放寬到涵蓋 `/` 與 `/login`。
  *   (b) landing 的 inline <script> 改成帶 nonce（next/script 會從 Next 的 nonce
  *       機制取，前提是 (a) 已經做了）。
  *   (c) style-src 的 'unsafe-inline' 大概率得留著 —— React 的 style={{…}} 會產生

@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 };
 
 /**
- * 公開的 landing page（internal.pathors.com 的根目錄），不需要登入 —— middleware
+ * 公開的 landing page（internal.pathors.com 的根目錄），不需要登入 —— proxy（Next 16 之前叫 middleware）
  * 對 `/` 與 `/landing/*` 直接放行。系統本體在 /dashboard。
  *
  * markup / CSS / script 都原封不動來自 docs/index.html（見 ./landing-content），

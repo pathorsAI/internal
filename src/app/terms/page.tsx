@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 };
 
 /**
- * 公開的服務條款（免登入，見 src/middleware.ts 的 matcher），同時是 MCP
+ * 公開的服務條款（免登入，見 src/proxy.ts 的 matcher），同時是 MCP
  * RFC 9728 metadata 的 `resource_tos_uri` 預設值（見 ../.well-known/metadata.ts）。
  *
  * 「費用」一節刻意寫成中性描述：目前 repo 裡沒有任何計費、方案或付款相關的
