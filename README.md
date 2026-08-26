@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/banner.svg" alt="Pathors Internal" width="100%" />
+  <img src="public/landing/images/banner.svg" alt="Internal" width="100%" />
 </p>
 
 <p align="center">
@@ -7,7 +7,7 @@
   <img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg">
 </p>
 
-<h1 align="center">Pathors Internal</h1>
+<h1 align="center">Internal</h1>
 
 <p align="center">
   <b>Self-hosted internal accounting (內外帳) &amp; client-finance management for small companies.</b><br/>
@@ -35,14 +35,14 @@ same ideas — it is [`docs/index.html`](docs/index.html), published with GitHub
 <table>
   <tr>
     <td width="50%" valign="top">
-      <img src="docs/images/billing.png" alt="Billing board" width="100%" />
+      <img src="public/landing/images/billing.png" alt="Billing board" width="100%" />
       <p><b>Billing board</b> — one page for the whole billing cycle.<br/>
       <sub>Who should be billed, who has been billed, who still owes you. One-off
       contract instalments and recurring subscription periods merge into a single
       list, and every row carries its next action.</sub></p>
     </td>
     <td width="50%" valign="top">
-      <img src="docs/images/transactions.png" alt="Dual-book ledger" width="100%" />
+      <img src="public/landing/images/transactions.png" alt="Dual-book ledger" width="100%" />
       <p><b>Dual books</b> — the internal / external ledger.<br/>
       <sub>Every transaction carries a <code>book</code> tag, so both views come from
       the same records instead of two spreadsheets that drift apart. Filter by month,
@@ -51,13 +51,13 @@ same ideas — it is [`docs/index.html`](docs/index.html), published with GitHub
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <img src="docs/images/dashboard.png" alt="Overview" width="100%" />
+      <img src="public/landing/images/dashboard.png" alt="Overview" width="100%" />
       <p><b>Overview</b> — where the money actually is.<br/>
       <sub>Balances per account and per currency with no implicit FX conversion,
       monthly income against expense, and the balance trend.</sub></p>
     </td>
     <td width="50%" valign="top">
-      <img src="docs/images/reports.png" alt="Reports" width="100%" />
+      <img src="public/landing/images/reports.png" alt="Reports" width="100%" />
       <p><b>Reports</b> — receivables, tax periods, contract coverage.<br/>
       <sub>Ageing buckets per client, what each VAT period still needs invoiced, and a
       check that every contract's value has actually been scheduled into billable items.</sub></p>

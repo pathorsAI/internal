@@ -4,9 +4,9 @@ import Link from "next/link";
 import { LegalDoc } from "../legal-doc";
 
 export const metadata: Metadata = {
-  title: "服務條款 — Pathors Internal",
+  title: "服務條款 — Internal",
   description:
-    "使用 Pathors Internal 的條款：服務內容、帳號與工作空間的權責、可接受使用、內容歸屬、費用、免責與責任限制、終止與準據法。",
+    "使用 Internal 的條款：服務內容、帳號與工作空間的權責、可接受使用、內容歸屬、費用、免責與責任限制、終止與準據法。",
 };
 
 /**
@@ -21,13 +21,13 @@ export default function TermsPage() {
     <LegalDoc
       eyebrow="Terms of Service"
       title="服務條款"
-      lede="這份條款規範你使用 Pathors Internal 的權利與義務。開始使用本服務，即表示你同意以下內容。"
+      lede="這份條款規範你使用 Internal 的權利與義務。開始使用本服務，即表示你同意以下內容。"
       otherDoc={{ href: "/privacy", label: "隱私權政策" }}
     >
       <div className="intro">
         <p>
           本條款是你與<strong>派斯科技股份有限公司</strong>（Pathors Technology Co., Ltd.，統一編號
-          60410453，以下稱「我們」）之間，關於 Pathors Internal（<code>internal.pathors.com</code>，以下稱「本服務」）的協議。
+          60410453，以下稱「我們」）之間，關於 Internal（<code>internal.pathors.com</code>，以下稱「本服務」）的協議。
         </p>
       </div>
 
