@@ -28,8 +28,7 @@ export default function PrivacyPage() {
       <div className="intro">
         <p>
           <strong>派斯科技股份有限公司</strong>（Pathors Technology Co., Ltd.，統一編號
-          60410453，以下稱「我們」）經營 Pathors Internal（
-          <code>internal.pathors.com</code>，以下稱「本服務」）。
+          60410453，以下稱「我們」）經營 Pathors Internal（<code>internal.pathors.com</code>，以下稱「本服務」）。
         </p>
         <p>
           本服務是一套多租戶的帳務系統：任何人都可以用 Google
@@ -73,9 +72,7 @@ export default function PrivacyPage() {
           <li>邀請紀錄：受邀者的 email、角色、狀態、到期時間、邀請人。</li>
           <li>
             若你另外連結 <strong>Google 日曆</strong>（可選功能，與登入分開授權）：我們會取得該次授權的
-            access token 與 refresh token，存放在資料庫的帳號表中。授權範圍為 <code>openid</code>、
-            <code>email</code>、<code>profile</code> 與 Google 日曆（
-            <code>https://www.googleapis.com/auth/calendar</code>）。
+            access token 與 refresh token，存放在資料庫的帳號表中。授權範圍為 <code>openid</code>、<code>email</code>、<code>profile</code> 與 Google 日曆（<code>https://www.googleapis.com/auth/calendar</code>）。
           </li>
         </ul>
 
@@ -126,8 +123,7 @@ export default function PrivacyPage() {
           </li>
           <li>
             <strong>遮罩只發生在輸出的那一層，而且只針對 MCP</strong>：透過 MCP
-            讀取員工資料時，身分證字號只保留前 3 碼、薪轉帳號只保留末 5 碼，其餘以
-            <code>*</code> 取代。
+            讀取員工資料時，身分證字號只保留前 3 碼、薪轉帳號只保留末 5 碼，其餘以<code>*</code> 取代。
           </li>
           <li>
             在網頁介面上，同組織中有權限的成員<strong>看得到完整值</strong>（勞健保申報與薪轉作業需要）。
@@ -226,21 +222,17 @@ export default function PrivacyPage() {
           </p>
           <h3>每一次存取都留紀錄</h3>
           <p>
-            所有經由 MCP 的寫入，以及員工資料的讀取，都會寫進稽核紀錄，通道標記為
-            <code>mcp</code>，可在系統內查看。
+            所有經由 MCP 的寫入，以及員工資料的讀取，都會寫進稽核紀錄，通道標記為<code>mcp</code>，可在系統內查看。
           </p>
           <h3>token 存在哪裡</h3>
           <p>
-            access token 與 refresh token 連同到期時間存放在我們資料庫的
-            <code>oauth_access_token</code>；你同意過的客戶端與範圍記在
-            <code>oauth_consent</code>；客戶端本身（名稱、類型、redirect URI）記在
-            <code>oauth_application</code>。
+            access token 與 refresh token 連同到期時間存放在我們資料庫的<code>oauth_access_token</code>；你同意過的客戶端與範圍記在<code>oauth_consent</code>；客戶端本身（名稱、類型、redirect URI）記在<code>oauth_application</code>。
           </p>
           <h3>怎麼撤銷</h3>
           <p>
-            到系統的「設定 → MCP」頁面（<code>/dashboard/settings/mcp</code>）撤銷。撤銷會刪除該客戶端的登錄資料，
-            <strong>連同它的 token 與同意紀錄一併移除</strong>，該客戶端立即失去存取權。這個動作限組織的
-            owner 或 admin 執行。
+            到系統的「設定 → MCP」頁面（<code>/dashboard/settings/mcp</code>）撤銷。該頁面只列出<strong>你自己授權過的</strong>客戶端，撤銷也只會刪除<strong>你自己的</strong> token 與同意紀錄，該客戶端立即失去代你存取的權限。
+            由於同一個客戶端（例如 ChatGPT）可能被許多使用者各自授權，撤銷不會刪除客戶端本身的登錄資料，其他人的授權也不受影響。
+            這個動作不需要組織管理員權限 —— 授權是你個人給出的，也由你自己收回。
           </p>
         </div>
         <p>
@@ -269,8 +261,7 @@ export default function PrivacyPage() {
             但該組織的帳務資料列目前仍留在資料庫中，不會被連帶清除。
           </li>
           <li>
-            需要<strong>真正的永久刪除</strong>（含資料庫列與 R2 檔案），請寫信到
-            <a href="mailto:contact@pathors.com"> contact@pathors.com</a>{" "}
+            需要<strong>真正的永久刪除</strong>（含資料庫列與 R2 檔案），請寫信到{" "}<a href="mailto:contact@pathors.com">contact@pathors.com</a>{" "}
             提出，我們會人工處理並回覆完成情形。
           </li>
         </ul>

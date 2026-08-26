@@ -27,8 +27,7 @@ export default function TermsPage() {
       <div className="intro">
         <p>
           本條款是你與<strong>派斯科技股份有限公司</strong>（Pathors Technology Co., Ltd.，統一編號
-          60410453，以下稱「我們」）之間，關於 Pathors Internal（
-          <code>internal.pathors.com</code>，以下稱「本服務」）的協議。
+          60410453，以下稱「我們」）之間，關於 Pathors Internal（<code>internal.pathors.com</code>，以下稱「本服務」）的協議。
         </p>
       </div>
 
@@ -43,8 +42,7 @@ export default function TermsPage() {
           等 AI 客戶端操作自己的資料。
         </p>
         <p>
-          本服務的原始碼以 Apache 2.0 授權公開。<strong>本條款規範的是我們營運的託管服務</strong>
-          （<code>internal.pathors.com</code>），不是原始碼授權本身；你自行取得原始碼架設的環境不適用本條款，我們也不對其負責。
+          本服務的原始碼以 Apache 2.0 授權公開。<strong>本條款規範的是我們營運的託管服務</strong>（<code>internal.pathors.com</code>），不是原始碼授權本身；你自行取得原始碼架設的環境不適用本條款，我們也不對其負責。
         </p>
       </section>
 
@@ -146,8 +144,7 @@ export default function TermsPage() {
           本服務依「現況」與「現有」提供。在法律允許的範圍內，我們不就特定用途的適用性、不受干擾或無錯誤作出任何明示或默示的擔保。
         </p>
         <p>
-          <strong>本服務是記帳與帳務管理工具，不構成會計、稅務、財務或法律意見。</strong>
-          系統產生的報表、試算與提醒僅供參考，你應自行與會計師、記帳士或稅務代理人核對；稅務申報、帳簿憑證保存與其正確性的責任在你。
+          <strong>本服務是記帳與帳務管理工具，不構成會計、稅務、財務或法律意見。</strong>系統產生的報表、試算與提醒僅供參考，你應自行與會計師、記帳士或稅務代理人核對；稅務申報、帳簿憑證保存與其正確性的責任在你。
         </p>
       </section>
 

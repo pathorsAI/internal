@@ -1482,39 +1482,95 @@ async function getOrCreatePayrollRunId(
 // - 自動歸到該年月的薪資批次（沒有就建）
 // - 寫一張薪資單（含底薪/加減項 + 勞健保自付）、快照勞健保
 // - 建一筆薪資支出交易並回寫 paid_transaction_id
+/** 發薪表單解析後的樣子；金額都已經加總完，呼叫端只管寫入。 */
+type PayslipInput = {
+  employeeId: number;
+  year: number;
+  month: number;
+  payDate: string;
+  fromAccountId: number;
+  book: string;
+  items: PayItem[];
+  taxable: number;
+  nontaxable: number;
+  deductionTotal: number;
+  net: number;
+};
+
+/**
+ * 發薪表單的欄位解析與純輸入驗證（不碰 DB）。
+ *
+ * 抽出來是因為這一段有近十個提早 return，全部留在 payEmployeeSalary 裡會讓它的
+ * cognitive complexity 超過門檻（Sonar S3776）；分開之後「哪些是輸入問題、哪些是
+ * 資料庫狀態問題」也比較好讀。
+ */
+async function parsePayslipForm(
+  formData: FormData,
+): Promise<{ error: string } | { input: PayslipInput }> {
+  const t = await getTranslations("errors");
+  const employeeId = num(formData.get("employeeId"));
+  const year = num(formData.get("periodYear"));
+  const month = num(formData.get("periodMonth"));
+  const payDate = str(formData.get("payDate"));
+  const fromAccountId = num(formData.get("fromAccountId"));
+  if (!employeeId) return { error: t("required.employee") };
+  if (!year || !month) return { error: t("required.payPeriod") };
+  if (!payDate) return { error: t("required.payDate") };
+  if (!fromAccountId) return { error: t("required.payingAccount") };
+  // 帳別：沒投保沒合約的可只記內帳、不報稅
+  const bookRaw = str(formData.get("book")) ?? "both";
+  const book = ["internal", "external", "both"].includes(bookRaw) ? bookRaw : "both";
+
+  // 薪資項目（底薪、加班費、獎金、請假扣…）
+  let items: PayItem[];
+  try {
+    items = JSON.parse(str(formData.get("items")) ?? "[]") as PayItem[];
+  } catch {
+    return { error: t("validation.payItemFormat") };
+  }
+  items = items.filter((r) => r?.name && Number.isFinite(r.amount) && r.amount !== 0);
+
+  const { taxable, nontaxable, otherDeduction } = sumPayItems(items);
+  if (taxable + nontaxable <= 0) return { error: t("required.atLeastOnePayItem") };
+
+  return {
+    input: {
+      employeeId,
+      year,
+      month,
+      payDate,
+      fromAccountId,
+      book,
+      items,
+      taxable,
+      nontaxable,
+      deductionTotal: otherDeduction,
+      net: taxable + nontaxable - otherDeduction,
+    },
+  };
+}
+
 export async function payEmployeeSalary(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
   const t = await getTranslations("errors");
   const tRec = await getTranslations("lib");
-  const employeeId = num(formData.get("employeeId"));
-  const year = num(formData.get("periodYear"));
-  const month = num(formData.get("periodMonth"));
-  const payDate = str(formData.get("payDate"));
-  const fromAccountId = num(formData.get("fromAccountId"));
-  if (!employeeId) return { ok: false, error: t("required.employee") };
-  if (!year || !month) return { ok: false, error: t("required.payPeriod") };
-  if (!payDate) return { ok: false, error: t("required.payDate") };
-  if (!fromAccountId) return { ok: false, error: t("required.payingAccount") };
-  // 帳別：沒投保沒合約的可只記內帳、不報稅
-  const bookRaw = str(formData.get("book")) ?? "both";
-  const book = ["internal", "external", "both"].includes(bookRaw) ? bookRaw : "both";
-
-  // 薪資項目（底薪、加班費、獎金、請假扣…）
-  let items: PayItem[] = [];
-  try {
-    items = JSON.parse(str(formData.get("items")) ?? "[]") as PayItem[];
-  } catch {
-    return { ok: false, error: t("validation.payItemFormat") };
-  }
-  items = items.filter((r) => r?.name && Number.isFinite(r.amount) && r.amount !== 0);
-
-  const { taxable, nontaxable, otherDeduction } = sumPayItems(items);
-  if (taxable + nontaxable <= 0) return { ok: false, error: t("required.atLeastOnePayItem") };
-
-  const deductionTotal = otherDeduction;
-  const net = taxable + nontaxable - deductionTotal;
+  const parsed = await parsePayslipForm(formData);
+  if ("error" in parsed) return { ok: false, error: parsed.error };
+  const {
+    employeeId,
+    year,
+    month,
+    payDate,
+    fromAccountId,
+    book,
+    items,
+    taxable,
+    nontaxable,
+    deductionTotal,
+    net,
+  } = parsed.input;
 
   try {
     const { orgId } = await requireOrg();
@@ -2322,6 +2378,64 @@ export async function deleteBillingItem(id: number): Promise<ActionState> {
  * 所以往 subscription_periods 做 upsert —— 只帶日期、不動 expected_amount，
  * 才不會把「沒有金額覆寫」誤寫成覆寫。
  */
+/**
+ * 看板上「訂閱期別」那一半的推進。從 markBillingRow 抽出來的：兩個分支併在一起
+ * 讓它的 cognitive complexity 超過門檻（Sonar S3776），而兩者除了共用 orgId 與
+ * 錯誤處理之外沒有任何交集。key 的格式是 `sub:<subscriptionId>:<periodStart>`。
+ */
+async function markSubscriptionPeriod(
+  db: ReturnType<typeof getDb>,
+  orgId: string,
+  key: string,
+  field: "billedOn" | "paidOn" | "invoicedOn",
+  date: string | null,
+): Promise<ActionState> {
+  const t = await getTranslations("errors");
+  // paid_on 在訂閱端沒有對應欄位（實收一律看綁定的交易），忽略。
+  if (field === "paidOn") return { ok: false, error: t("validation.subscriptionPaymentViaTransaction") };
+  const [, rawId, periodStart] = key.split(":");
+  const subscriptionId = Number(rawId);
+  if (!Number.isFinite(subscriptionId) || !periodStart) {
+    return { ok: false, error: t("validation.invalidPeriodCode") };
+  }
+  // 這個分支查不到期別時會 insert 一列新的，subscriptionId 直接來自 key，
+  // 沒驗的話就會在自己 org 底下插進一列指向別人訂閱的期別。
+  const subRefError = await unownedRefError(db, orgId, [
+    [subscriptions, [subscriptionId]],
+  ]);
+  if (subRefError) return { ok: false, error: subRefError };
+  const [existing] = await db
+    .select({ id: subscriptionPeriods.id })
+    .from(subscriptionPeriods)
+    .where(
+      and(
+        eq(subscriptionPeriods.organizationId, orgId),
+        eq(subscriptionPeriods.subscriptionId, subscriptionId),
+        eq(subscriptionPeriods.periodStart, periodStart),
+        isNull(subscriptionPeriods.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (existing) {
+    await db
+      .update(subscriptionPeriods)
+      .set({ [field]: date })
+      .where(eq(subscriptionPeriods.id, existing.id));
+  } else {
+    await db.insert(subscriptionPeriods).values({
+      organizationId: orgId,
+      subscriptionId,
+      periodStart,
+      [field]: date,
+    });
+  }
+  await logWeb(orgId, "update", "subscription", subscriptionId, `${periodStart} ${field}`);
+  revalidatePath("/dashboard/billing");
+  revalidatePath("/dashboard/subscriptions");
+  await syncCalendarBestEffort(orgId);
+  return { ok: true };
+}
+
 export async function markBillingRow(
   key: string,
   field: "billedOn" | "paidOn" | "invoicedOn",
@@ -2346,49 +2460,7 @@ export async function markBillingRow(
     }
 
     if (key.startsWith("sub:")) {
-      // paid_on 在訂閱端沒有對應欄位（實收一律看綁定的交易），忽略。
-      if (field === "paidOn") return { ok: false, error: t("validation.subscriptionPaymentViaTransaction") };
-      const [, rawId, periodStart] = key.split(":");
-      const subscriptionId = Number(rawId);
-      if (!Number.isFinite(subscriptionId) || !periodStart) {
-        return { ok: false, error: t("validation.invalidPeriodCode") };
-      }
-      // 這個分支查不到期別時會 insert 一列新的，subscriptionId 直接來自 key，
-      // 沒驗的話就會在自己 org 底下插進一列指向別人訂閱的期別。
-      const subRefError = await unownedRefError(db, orgId, [
-        [subscriptions, [subscriptionId]],
-      ]);
-      if (subRefError) return { ok: false, error: subRefError };
-      const [existing] = await db
-        .select({ id: subscriptionPeriods.id })
-        .from(subscriptionPeriods)
-        .where(
-          and(
-            eq(subscriptionPeriods.organizationId, orgId),
-            eq(subscriptionPeriods.subscriptionId, subscriptionId),
-            eq(subscriptionPeriods.periodStart, periodStart),
-            isNull(subscriptionPeriods.deletedAt),
-          ),
-        )
-        .limit(1);
-      if (existing) {
-        await db
-          .update(subscriptionPeriods)
-          .set({ [field]: date })
-          .where(eq(subscriptionPeriods.id, existing.id));
-      } else {
-        await db.insert(subscriptionPeriods).values({
-          organizationId: orgId,
-          subscriptionId,
-          periodStart,
-          [field]: date,
-        });
-      }
-      await logWeb(orgId, "update", "subscription", subscriptionId, `${periodStart} ${field}`);
-      revalidatePath("/dashboard/billing");
-      revalidatePath("/dashboard/subscriptions");
-      await syncCalendarBestEffort(orgId);
-      return { ok: true };
+      return markSubscriptionPeriod(db, orgId, key, field, date);
     }
 
     return { ok: false, error: t("validation.unrecognizedItem") };

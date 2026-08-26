@@ -190,8 +190,7 @@ export function LegalDoc({ title, eyebrow, lede, otherDoc, children }: LegalDocP
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <polyline points="4,17 10,11 14,15 20,6" />
                 </svg>
-              </span>
-              Pathors Internal
+              </span>Pathors Internal
             </Link>
             <Link className="alt" href={otherDoc.href}>
               {otherDoc.label}
@@ -212,8 +211,7 @@ export function LegalDoc({ title, eyebrow, lede, otherDoc, children }: LegalDocP
               <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
             </svg>
             <p>
-              <strong>本文件尚未經律師審閱。</strong>
-              內容是依系統實際行為逐條寫成的，力求準確，但用字未必符合法律文書慣例。
+              <strong>本文件尚未經律師審閱。</strong>內容是依系統實際行為逐條寫成的，力求準確，但用字未必符合法律文書慣例。
               正式版本會在律師檢視後更新於本頁。
             </p>
           </div>

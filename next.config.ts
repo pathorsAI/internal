@@ -139,7 +139,7 @@ const nextConfig: NextConfig = {
         // chatgpt.com 這類外站跨源讀取），所以這裡只給它們下面那組最小的
         // transport header，絕不套 CSP / COOP / X-Frame-Options 之類會影響
         // 跨源取用或框架行為的東西。
-        source: "/((?!mcp$|mcp/|\\.well-known/).*)",
+        source: String.raw`/((?!mcp$|mcp/|\.well-known/).*)`,
         headers: [
           ...TRANSPORT_HEADERS,
           {
@@ -171,7 +171,7 @@ const nextConfig: NextConfig = {
         // 外部 origin 跨源取用，所以只加不影響取用方式的 header。
         // 特別注意這裡沒有 Cross-Origin-Resource-Policy —— 設了會直接擋掉
         // chatgpt.com / claude.ai 從瀏覽器端讀 discovery 文件。
-        source: "/(mcp|\\.well-known/.*)",
+        source: String.raw`/(mcp|\.well-known/.*)`,
         headers: [
           ...TRANSPORT_HEADERS,
           // 這些 URL 只會被程式抓取，沒有「上一頁」可言；一律不送 referrer。
