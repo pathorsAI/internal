@@ -120,8 +120,6 @@ export function NewTransactionDialog({
   const lockedCurrency =
     scenario === "transfer" ? fromCurrency : accountCurrency(accounts, accountId);
 
-  const current = SCENARIOS.find((s) => s.key === scenario);
-
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetTrigger asChild>
@@ -135,20 +133,7 @@ export function NewTransactionDialog({
         ) : (
           <form onSubmit={submitAction(action)} className="flex min-h-0 flex-1 flex-col">
             <input type="hidden" name="type" value={scenario} />
-            <SheetHeader>
-              <SheetTitle className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => pickScenario(null)}
-                  className="text-muted-foreground hover:text-foreground"
-                  aria-label={t("form.reselect")}
-                >
-                  <ArrowLeft className="size-4" />
-                </button>
-                {current ? <current.icon className="size-4" /> : null}
-                {current ? t(`form.scenario.${current.key}.label`) : null}
-              </SheetTitle>
-            </SheetHeader>
+            <ScenarioHeader scenario={scenario} onBack={() => pickScenario(null)} />
 
             <div className="grid flex-1 gap-4 overflow-y-auto px-4 py-4 sm:grid-cols-2">
               <Field label={t("form.date")} required>
@@ -170,30 +155,152 @@ export function NewTransactionDialog({
                 <LockedCurrencyField currency={lockedCurrency} />
               )}
 
-              {/* 帳戶互轉 */}
-              {scenario === "transfer" && (
-                <>
+              {scenario === "transfer" ? (
+                <TransferFields
+                  accounts={accounts}
+                  fromAccountId={fromAccountId}
+                  toAccountId={toAccountId}
+                  onFrom={setFromAccountId}
+                  onTo={setToAccountId}
+                  fromCurrency={fromCurrency}
+                  toCurrency={toCurrency}
+                />
+              ) : (
+                <LedgerFields
+                  scenario={scenario}
+                  accounts={accounts}
+                  categories={categories}
+                  parties={parties}
+                  employees={employees}
+                  projects={projects}
+                  contracts={contracts}
+                  accountId={accountId}
+                  onAccount={setAccountId}
+                />
+              )}
+
+              <TextField
+                name="description"
+                label={t("form.description")}
+                wide
+                placeholder={t("form.descriptionPlaceholder")}
+              />
+
+              {scenario !== "transfer" && (
+                <TaxAndVoucherFields billed={billed} onBilled={setBilled} />
+              )}
+            </div>
+
+            <SheetFooter>
+              <Button type="submit" disabled={pending}>
+                {pending ? t("form.saving") : t("form.save")}
+              </Button>
+            </SheetFooter>
+          </form>
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+/** 表單頂端：回到情境選擇的返回鍵 + 目前情境的圖示與名稱。 */
+function ScenarioHeader({
+  scenario,
+  onBack,
+}: Readonly<{ scenario: Scenario; onBack: () => void }>) {
+  const t = useTranslations("transactions");
+  const current = SCENARIOS.find((s) => s.key === scenario);
+  return (
+    <SheetHeader>
+      <SheetTitle className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onBack}
+          className="text-muted-foreground hover:text-foreground"
+          aria-label={t("form.reselect")}
+        >
+          <ArrowLeft className="size-4" />
+        </button>
+        {current && (
+          <>
+            <current.icon className="size-4" />
+            {t(`form.scenario.${current.key}.label`)}
+          </>
+        )}
+      </SheetTitle>
+    </SheetHeader>
+  );
+}
+
+// 下面三塊本來全部內嵌在 NewTransactionDialog 的 JSX 裡，靠 `scenario === …` 的巢狀
+// 條件互相排斥。抽成獨立元件是為了把主元件的 cognitive complexity 壓回門檻內
+// （Sonar S3776），順便讓「哪些欄位屬於哪個情境」用型別講清楚，而不是靠讀縮排。
+
+/** 帳戶互轉專屬：來源與目的地帳戶，以及跨幣別的提醒。 */
+function TransferFields({
+  accounts,
+  fromAccountId,
+  toAccountId,
+  onFrom,
+  onTo,
+  fromCurrency,
+  toCurrency,
+}: Readonly<{
+  accounts: Account[];
+  fromAccountId: string;
+  toAccountId: string;
+  onFrom: (v: string) => void;
+  onTo: (v: string) => void;
+  fromCurrency: string | null;
+  toCurrency: string | null;
+}>) {
+  const t = useTranslations("transactions");
+  return (
+    <>
                   <AccountSelectField
                     name="fromAccountId"
                     label={t("form.fromAccount")}
                     accounts={accounts}
                     value={fromAccountId}
-                    onChange={setFromAccountId}
+                    onChange={onFrom}
                   />
                   <AccountSelectField
                     name="toAccountId"
                     label={t("form.toAccount")}
                     accounts={accounts}
                     value={toAccountId}
-                    onChange={setToAccountId}
+                    onChange={onTo}
                   />
                   <TransferCurrencyWarning from={fromCurrency} to={toCurrency} />
-                </>
-              )}
+    </>
+  );
+}
 
-              {/* 支出 / 收入 / 代墊 共用：對象 + 分類 */}
-              {scenario !== "transfer" && (
-                <>
+/** 支出 / 收入 / 代墊 共用：對象、分類、帳戶、專案、合約。 */
+function LedgerFields({
+  scenario,
+  accounts,
+  categories,
+  parties,
+  employees,
+  projects,
+  contracts,
+  accountId,
+  onAccount,
+}: Readonly<{
+  scenario: Exclude<Scenario, "transfer">;
+  accounts: Account[];
+  categories: { id: number; name: string; kind: string }[];
+  parties: { id: number; name: string }[];
+  employees: { id: number; name: string }[];
+  projects: { id: number; name: string }[];
+  contracts: ContractOption[];
+  accountId: string;
+  onAccount: (v: string) => void;
+}>) {
+  const t = useTranslations("transactions");
+  return (
+    <>
                   <Field
                     label={scenario === "income" ? t("form.client") : t("form.vendor")}
                     required
@@ -223,7 +330,7 @@ export function NewTransactionDialog({
                       label={scenario === "income" ? t("form.receivingAccount") : t("form.payingAccount")}
                       accounts={accounts}
                       value={accountId}
-                      onChange={setAccountId}
+                      onChange={onAccount}
                     />
                   )}
 
@@ -248,18 +355,17 @@ export function NewTransactionDialog({
                         : t("form.contractHintOther")}
                     </p>
                   </Field>
-                </>
-              )}
+    </>
+  );
+}
 
-              <TextField
-                name="description"
-                label={t("form.description")}
-                wide
-                placeholder={t("form.descriptionPlaceholder")}
-              />
-
-              {/* 報稅 + 統編 + 憑證（轉帳沒有） */}
-              {scenario !== "transfer" && (
+/** 報稅 / 統編 / 憑證。轉帳沒有這一段。 */
+function TaxAndVoucherFields({
+  billed,
+  onBilled,
+}: Readonly<{ billed: boolean; onBilled: (v: boolean) => void }>) {
+  const t = useTranslations("transactions");
+  return (
                 <div className="space-y-3 sm:col-span-2">
                   <label className="flex items-center gap-2 text-sm">
                     <input type="checkbox" name="reported" defaultChecked className="size-4" />
@@ -270,7 +376,7 @@ export function NewTransactionDialog({
                       type="checkbox"
                       name="billedToCompanyTaxId"
                       checked={billed}
-                      onChange={(e) => setBilled(e.target.checked)}
+                      onChange={(e) => onBilled(e.target.checked)}
                       className="size-4"
                     />
                     <span>{t("form.billedToCompanyTaxId")}</span>
@@ -278,18 +384,6 @@ export function NewTransactionDialog({
 
                   <VoucherBox billed={billed} />
                 </div>
-              )}
-            </div>
-
-            <SheetFooter>
-              <Button type="submit" disabled={pending}>
-                {pending ? t("form.saving") : t("form.save")}
-              </Button>
-            </SheetFooter>
-          </form>
-        )}
-      </SheetContent>
-    </Sheet>
   );
 }
 

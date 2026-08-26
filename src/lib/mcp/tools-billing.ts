@@ -56,6 +56,30 @@ async function resolveCustomer(
   throw new Error("customerPartyId is required (or pass a contractId to inherit its customer).");
 }
 
+// billing_items 整列離開 MCP 時的形狀（create / update 都用 `.returning()` 回整列）。
+// amount 是 drizzle 的 numeric，讀回來是字串不是數字；四個日期欄位是 YYYY-MM-DD 字串。
+const BILLING_ITEM_PROPS = {
+  id: { type: "number" },
+  organizationId: { type: ["string", "null"] },
+  customerPartyId: { type: "number" },
+  contractId: { type: ["number", "null"] },
+  projectId: { type: ["number", "null"] },
+  title: { type: "string" },
+  amount: { type: "string", description: "Decimal as a string." },
+  currency: { type: "string", description: "3-letter code, e.g. TWD." },
+  dueDate: { type: ["string", "null"], description: "應請款日, YYYY-MM-DD." },
+  billedOn: { type: ["string", "null"], description: "實際請款日, YYYY-MM-DD." },
+  paidOn: { type: ["string", "null"], description: "收款日 (人工註記), YYYY-MM-DD." },
+  invoicedOn: { type: ["string", "null"], description: "開發票日, YYYY-MM-DD." },
+  needsInvoice: { type: "boolean" },
+  status: { type: "string", enum: [...ITEM_STATUS] },
+  note: { type: ["string", "null"] },
+  createdAt: { type: "string", description: "ISO 8601 timestamp." },
+  deletedAt: { type: ["string", "null"], description: "ISO 8601 timestamp." },
+};
+// 整列回傳，欄位一定到齊（值可能是 null）。
+const BILLING_ITEM_REQUIRED = Object.keys(BILLING_ITEM_PROPS);
+
 /** update_billing_item 的欄位搬運：只有真的帶進來的欄位才會進 patch。 */
 function buildBillingItemPatch(
   args: Record<string, unknown>,
@@ -148,6 +172,12 @@ export const billingItemTools: Record<string, ToolDef> = {
       required: ["title", "amount"],
       additionalProperties: false,
     },
+    outputSchema: {
+      type: "object",
+      properties: { ...BILLING_ITEM_PROPS },
+      required: BILLING_ITEM_REQUIRED,
+      additionalProperties: false,
+    },
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       const db = getDb();
@@ -211,6 +241,12 @@ export const billingItemTools: Record<string, ToolDef> = {
       required: ["id"],
       additionalProperties: false,
     },
+    outputSchema: {
+      type: "object",
+      properties: { ...BILLING_ITEM_PROPS },
+      required: BILLING_ITEM_REQUIRED,
+      additionalProperties: false,
+    },
     execute: async (args, ctx) => {
       const id = requireNumber(args, "id");
       const orgId = await resolveOrg(args, ctx);
@@ -252,6 +288,17 @@ export const billingItemTools: Record<string, ToolDef> = {
       additionalProperties: false,
     },
     annotations: { readOnlyHint: false, idempotentHint: true, destructiveHint: false },
+    outputSchema: {
+      type: "object",
+      properties: {
+        created: { type: "number" },
+        updated: { type: "number" },
+        deleted: { type: "number" },
+        skipped: { type: "number", description: "Unchanged reminders (content hash matched)." },
+      },
+      required: ["created", "updated", "deleted", "skipped"],
+      additionalProperties: false,
+    },
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       // 這裡不能用 auth.api.listOrganizations（MCP 沒有 session cookie），直接查表。
@@ -271,6 +318,12 @@ export const billingItemTools: Record<string, ToolDef> = {
       type: "object",
       properties: { id: { type: "number" }, ...ORG_ARG },
       required: ["id"],
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: "object",
+      properties: { id: { type: "number" }, deleted: { type: "boolean" } },
+      required: ["id", "deleted"],
       additionalProperties: false,
     },
     execute: async (args, ctx) => {

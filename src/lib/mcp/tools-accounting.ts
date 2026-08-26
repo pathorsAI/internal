@@ -13,6 +13,7 @@ import {
 import {
   assertInOrg,
   fkError,
+  type JsonSchemaObject,
   normalizeCurrency,
   optBoolean,
   optDecimal,
@@ -36,6 +37,129 @@ const CATEGORY_KINDS = [
 ] as const;
 const INVOICE_DIRECTIONS = ["issued", "received"] as const;
 const INVOICE_STATUSES = ["valid", "void", "allowance"] as const;
+
+// ---- outputSchema 素材 ----
+// 這些 tool 直接回 drizzle 的資料列，所以形狀就是 db/schema.ts 的欄位：numeric 回
+// 來是字串（不是 number）、date/timestamp 也是字串、可為 null 的欄位誠實寫成
+// ["x", "null"]。required 列的是「key 一定會出現」的欄位 —— select()/returning()
+// 會帶回整列，所以每個欄位都在，值可能是 null。
+
+const DELETED_RESULT: JsonSchemaObject = {
+  type: "object",
+  properties: {
+    deleted: { type: "boolean" },
+    id: { type: "number", description: "The id that was soft-deleted." },
+  },
+  required: ["deleted", "id"],
+  additionalProperties: false,
+};
+
+const PARTY_ROW_PROPS = {
+  id: { type: "number" },
+  deletedAt: { type: ["string", "null"], description: "Soft-delete timestamp; null while active." },
+  organizationId: { type: ["string", "null"] },
+  name: { type: "string" },
+  label: { type: "string", enum: [...PARTY_LABELS] },
+  taxId: { type: ["string", "null"] },
+  defaultCurrency: { type: ["string", "null"], description: "3-letter code." },
+  defaultAccountId: { type: ["number", "null"] },
+  typicalAmount: { type: ["string", "null"], description: "Decimal as a string." },
+  contact: { type: ["string", "null"] },
+  note: { type: ["string", "null"] },
+  isActive: { type: "boolean" },
+  createdAt: { type: "string" },
+} as const;
+
+const PARTY_ROW: JsonSchemaObject = {
+  type: "object",
+  properties: { ...PARTY_ROW_PROPS },
+  required: Object.keys(PARTY_ROW_PROPS),
+  additionalProperties: false,
+};
+
+const CATEGORY_ROW_PROPS = {
+  id: { type: "number" },
+  deletedAt: { type: ["string", "null"] },
+  organizationId: { type: ["string", "null"] },
+  name: { type: "string" },
+  kind: { type: "string", enum: [...CATEGORY_KINDS] },
+  isActive: { type: "boolean" },
+} as const;
+
+const CATEGORY_ROW: JsonSchemaObject = {
+  type: "object",
+  properties: { ...CATEGORY_ROW_PROPS },
+  required: Object.keys(CATEGORY_ROW_PROPS),
+  additionalProperties: false,
+};
+
+const BANK_ACCOUNT_ROW_PROPS = {
+  id: { type: "number" },
+  deletedAt: { type: ["string", "null"] },
+  organizationId: { type: ["string", "null"] },
+  name: { type: "string" },
+  kind: { type: "string", description: "e.g. bank, cash." },
+  currency: { type: "string", description: "3-letter code." },
+  openingBalance: { type: "string", description: "Decimal as a string." },
+  isActive: { type: "boolean" },
+  createdAt: { type: "string" },
+} as const;
+
+const BANK_ACCOUNT_ROW: JsonSchemaObject = {
+  type: "object",
+  properties: { ...BANK_ACCOUNT_ROW_PROPS },
+  required: Object.keys(BANK_ACCOUNT_ROW_PROPS),
+  additionalProperties: false,
+};
+
+const INVOICE_ROW_PROPS = {
+  id: { type: "number" },
+  deletedAt: { type: ["string", "null"] },
+  organizationId: { type: ["string", "null"] },
+  direction: { type: "string", enum: [...INVOICE_DIRECTIONS] },
+  invoiceNumber: { type: ["string", "null"] },
+  invoiceDate: { type: ["string", "null"], description: "YYYY-MM-DD." },
+  counterpartyName: { type: ["string", "null"] },
+  counterpartyTaxId: { type: ["string", "null"] },
+  amountNet: { type: ["string", "null"], description: "Decimal as a string." },
+  tax: { type: ["string", "null"], description: "Decimal as a string." },
+  amountGross: { type: ["string", "null"], description: "Decimal as a string." },
+  currency: { type: "string", description: "3-letter code." },
+  status: { type: "string", enum: [...INVOICE_STATUSES] },
+  note: { type: ["string", "null"] },
+  createdAt: { type: "string" },
+  partyId: { type: ["number", "null"] },
+  contractId: { type: ["number", "null"] },
+  billingItemId: { type: ["number", "null"] },
+  externalStatus: {
+    type: "string",
+    enum: ["pending", "issued", "void", "n_a"],
+    description: "Issuing state in Simpany, the external invoicing system.",
+  },
+  externalRef: { type: ["string", "null"] },
+} as const;
+
+const INVOICE_ROW: JsonSchemaObject = {
+  type: "object",
+  properties: { ...INVOICE_ROW_PROPS },
+  required: Object.keys(INVOICE_ROW_PROPS),
+  additionalProperties: false,
+};
+
+/**
+ * get_* 找不到資料時回的是 `{ error }`，跟資料列是兩種形狀，所以合併後的 schema
+ * 不能宣告 required —— 沒有任何欄位在兩種情況下都會出現。
+ */
+function orNotFound(row: JsonSchemaObject): JsonSchemaObject {
+  return {
+    type: "object",
+    properties: {
+      ...row.properties,
+      error: { type: "string", description: "Returned instead of the record when nothing matched." },
+    },
+    additionalProperties: false,
+  };
+}
 
 function optLabel(args: Record<string, unknown>): string | undefined {
   const v = optString(args, "label");
@@ -74,6 +198,7 @@ export const accountingTools: Record<string, ToolDef> = {
       required: ["id"],
       additionalProperties: false,
     },
+    outputSchema: orNotFound(PARTY_ROW),
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       return (await getParty(orgId, requireNumber(args, "id"))) ?? { error: "Not found." };
@@ -99,6 +224,7 @@ export const accountingTools: Record<string, ToolDef> = {
       required: ["name"],
       additionalProperties: false,
     },
+    outputSchema: PARTY_ROW,
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       const db = getDb();
@@ -151,6 +277,7 @@ export const accountingTools: Record<string, ToolDef> = {
       required: ["id"],
       additionalProperties: false,
     },
+    outputSchema: PARTY_ROW,
     execute: async (args, ctx) => {
       const id = requireNumber(args, "id");
       const orgId = await resolveOrg(args, ctx);
@@ -195,6 +322,7 @@ export const accountingTools: Record<string, ToolDef> = {
       required: ["id"],
       additionalProperties: false,
     },
+    outputSchema: DELETED_RESULT,
     execute: async (args, ctx) => {
       const id = requireNumber(args, "id");
       const orgId = await resolveOrg(args, ctx);
@@ -228,6 +356,7 @@ export const accountingTools: Record<string, ToolDef> = {
       required: ["name"],
       additionalProperties: false,
     },
+    outputSchema: CATEGORY_ROW,
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       const kind = optString(args, "kind");
@@ -250,6 +379,7 @@ export const accountingTools: Record<string, ToolDef> = {
       required: ["id", "name"],
       additionalProperties: false,
     },
+    outputSchema: CATEGORY_ROW,
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       const [row] = await getDb()
@@ -270,6 +400,7 @@ export const accountingTools: Record<string, ToolDef> = {
       required: ["id"],
       additionalProperties: false,
     },
+    outputSchema: DELETED_RESULT,
     execute: async (args, ctx) => {
       const id = requireNumber(args, "id");
       const orgId = await resolveOrg(args, ctx);
@@ -299,6 +430,7 @@ export const accountingTools: Record<string, ToolDef> = {
       required: ["id"],
       additionalProperties: false,
     },
+    outputSchema: orNotFound(BANK_ACCOUNT_ROW),
     execute: async (args, ctx) =>
       (await getBankAccount(await resolveOrg(args, ctx), requireNumber(args, "id"))) ?? {
         error: "Not found.",
@@ -319,6 +451,7 @@ export const accountingTools: Record<string, ToolDef> = {
       required: ["name"],
       additionalProperties: false,
     },
+    outputSchema: BANK_ACCOUNT_ROW,
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       const [row] = await getDb()
@@ -351,6 +484,7 @@ export const accountingTools: Record<string, ToolDef> = {
       required: ["id"],
       additionalProperties: false,
     },
+    outputSchema: BANK_ACCOUNT_ROW,
     execute: async (args, ctx) => {
       const id = requireNumber(args, "id");
       const orgId = await resolveOrg(args, ctx);
@@ -381,6 +515,7 @@ export const accountingTools: Record<string, ToolDef> = {
       required: ["id"],
       additionalProperties: false,
     },
+    outputSchema: DELETED_RESULT,
     execute: async (args, ctx) => {
       const id = requireNumber(args, "id");
       const orgId = await resolveOrg(args, ctx);
@@ -414,6 +549,7 @@ export const accountingTools: Record<string, ToolDef> = {
       required: ["id"],
       additionalProperties: false,
     },
+    outputSchema: orNotFound(INVOICE_ROW),
     execute: async (args, ctx) =>
       (await getInvoice(await resolveOrg(args, ctx), requireNumber(args, "id"))) ?? {
         error: "Not found.",
@@ -447,6 +583,7 @@ export const accountingTools: Record<string, ToolDef> = {
       },
       additionalProperties: false,
     },
+    outputSchema: INVOICE_ROW,
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       const direction = optString(args, "direction") ?? "received";
@@ -510,6 +647,7 @@ export const accountingTools: Record<string, ToolDef> = {
       required: ["id"],
       additionalProperties: false,
     },
+    outputSchema: DELETED_RESULT,
     execute: async (args, ctx) => {
       const id = requireNumber(args, "id");
       const orgId = await resolveOrg(args, ctx);

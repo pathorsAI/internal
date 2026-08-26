@@ -1,6 +1,7 @@
 import { type ToolContext, tools } from "./tools";
 import { type ToolAnnotations, type ToolDef, resolveOrg } from "./shared";
 import { logMcp, type ActivityAction } from "@/db/activity";
+import { publicBaseUrl } from "@/lib/base-url";
 
 // Derive an audit-log entry from a tool name + its result. Returns null for
 // most read-only tools (list_/get_/...) so only writes get logged — except
@@ -43,9 +44,7 @@ export const SERVER_VERSION = "1.1.0";
 
 /** Public base URL of this deployment; doubles as the OAuth issuer.
  *  Keep in sync with the `resource` passed to `mcp()` in src/lib/auth.ts. */
-export const PUBLIC_BASE_URL = (
-  process.env.BETTER_AUTH_URL ?? "https://internal.pathors.com"
-).replace(/\/+$/, "");
+export const PUBLIC_BASE_URL = publicBaseUrl();
 
 /** Canonical resource identifier of this MCP server (RFC 8707 / RFC 9728).
  *  ChatGPT echoes this exact string as the `resource` OAuth parameter. */
@@ -262,7 +261,7 @@ const TITLE_OVERRIDES: Record<string, string> = {
 function humanTitle(name: string): string {
   const override = TITLE_OVERRIDES[name];
   if (override) return override;
-  const words = name.replace(/_/g, " ");
+  const words = name.replaceAll("_", " ");
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 

@@ -97,6 +97,48 @@ const billingTools: Record<string, ToolDef> = {
       },
       additionalProperties: false,
     },
+    outputSchema: {
+      type: "object",
+      properties: {
+        today: { type: "string", description: "YYYY-MM-DD." },
+        windowDays: { type: "number" },
+        upcomingCount: { type: "number" },
+        upcoming: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              kind: { type: "string", enum: ["subscription_projected", "billing_item"] },
+              id: {
+                type: "number",
+                description: "Subscription id or billing item id, per `kind`.",
+              },
+              customer: { type: ["string", "null"] },
+              label: { type: "string" },
+              // 金額直接來自 numeric 欄位，drizzle 回的是字串。
+              amount: { type: "string" },
+              currency: { type: "string" },
+              date: { type: "string", description: "Charge / due date, YYYY-MM-DD." },
+              daysUntilDue: { type: "number" },
+            },
+            required: [
+              "kind",
+              "id",
+              "customer",
+              "label",
+              "amount",
+              "currency",
+              "date",
+              "daysUntilDue",
+            ],
+            additionalProperties: false,
+          },
+        },
+        note: { type: "string" },
+      },
+      required: ["today", "windowDays", "upcomingCount", "upcoming", "note"],
+      additionalProperties: false,
+    },
     execute: async (args, ctx) => {
       const days = optNumber(args, "days") ?? 60;
       const orgId = await resolveOrg(args, ctx);
@@ -262,6 +304,76 @@ const billingTools: Record<string, ToolDef> = {
       required: ["subscriptionId"],
       additionalProperties: false,
     },
+    // 對應 db/queries.ts 的 SubscriptionSchedule。amount 是 numeric 欄位（字串），
+    // 但 periods 裡的 expected/paid 已經在 computeSubscriptionSchedule 轉成 number。
+    outputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "number" },
+        name: { type: "string" },
+        customerName: { type: ["string", "null"] },
+        amount: { type: "string", description: "The subscription's default per-period amount." },
+        currency: { type: "string" },
+        intervalMonths: { type: "number" },
+        startDate: { type: "string" },
+        endDate: { type: ["string", "null"] },
+        status: { type: "string", enum: ["active", "paused", "ended"] },
+        nextChargeDate: { type: ["string", "null"] },
+        periods: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              periodStart: { type: "string", description: "YYYY-MM-DD." },
+              periodLabel: { type: "string" },
+              expected: { type: "number", description: "應收 for the period." },
+              paid: { type: "number", description: "已收 for the period." },
+              status: {
+                type: "string",
+                enum: ["paid", "partial", "overdue", "upcoming"],
+              },
+              note: { type: ["string", "null"] },
+              isOverride: {
+                type: "boolean",
+                description: "True when `expected` comes from a set_subscription_period override.",
+              },
+              dueDate: { type: ["string", "null"] },
+              billedOn: { type: ["string", "null"] },
+              invoicedOn: { type: ["string", "null"] },
+            },
+            required: [
+              "periodStart",
+              "periodLabel",
+              "expected",
+              "paid",
+              "status",
+              "note",
+              "isOverride",
+              "dueDate",
+              "billedOn",
+              "invoicedOn",
+            ],
+            additionalProperties: false,
+          },
+        },
+        totalOutstanding: { type: "number" },
+      },
+      required: [
+        "id",
+        "name",
+        "customerName",
+        "amount",
+        "currency",
+        "intervalMonths",
+        "startDate",
+        "endDate",
+        "status",
+        "nextChargeDate",
+        "periods",
+        "totalOutstanding",
+      ],
+      additionalProperties: false,
+    },
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       const subscriptionId = requireNumber(args, "subscriptionId");
@@ -284,6 +396,17 @@ const billingTools: Record<string, ToolDef> = {
         ...ORG_ARG,
       },
       required: ["subscriptionId", "periodStart", "expectedAmount"],
+      additionalProperties: false,
+    },
+    // upsertSubscriptionPeriod 只回覆寫本身（已轉成 number），不回整列。
+    outputSchema: {
+      type: "object",
+      properties: {
+        periodStart: { type: "string", description: "YYYY-MM-DD." },
+        expectedAmount: { type: "number" },
+        note: { type: ["string", "null"] },
+      },
+      required: ["periodStart", "expectedAmount", "note"],
       additionalProperties: false,
     },
     execute: async (args, ctx) => {
@@ -309,6 +432,16 @@ const billingTools: Record<string, ToolDef> = {
         ...ORG_ARG,
       },
       required: ["subscriptionId", "periodStart"],
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: "object",
+      properties: {
+        deleted: { type: "boolean" },
+        subscriptionId: { type: "number" },
+        periodStart: { type: "string", description: "YYYY-MM-DD." },
+      },
+      required: ["deleted", "subscriptionId", "periodStart"],
       additionalProperties: false,
     },
     execute: async (args, ctx) => {

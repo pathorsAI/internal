@@ -4,6 +4,7 @@ import { genericOAuth, mcp, organization } from "better-auth/plugins";
 import { nextCookies } from "better-auth/next-js";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
+import { publicBaseUrl } from "@/lib/base-url";
 import * as authSchema from "@/db/auth-schema";
 
 /** better-auth 的 provider id，用來取日曆的 access token。 */
@@ -115,7 +116,7 @@ export const auth = betterAuth({
       // the `resource` parameter on the authorize + token requests, and it is
       // what the `WWW-Authenticate` challenge from /mcp binds to. Mirrors
       // MCP_RESOURCE in src/lib/mcp/handler.ts.
-      resource: `${(process.env.BETTER_AUTH_URL ?? "https://internal.pathors.com").replace(/\/+$/, "")}/mcp`,
+      resource: `${publicBaseUrl()}/mcp`,
     }),
     nextCookies(),
   ],

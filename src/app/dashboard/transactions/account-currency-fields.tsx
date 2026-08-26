@@ -78,7 +78,9 @@ export function LockedCurrencyField({
   name?: string;
 }>) {
   const t = useTranslations("transactions");
-  const drifted = !!currency && !!original && original !== currency;
+  // 有值就代表「原幣別跟帳戶對不起來」，同時把兩個已收窄的字串一起帶出去 ——
+  // 這樣下面不需要 `original!` 這種斷言（Sonar S4325 會把它標成多餘）。
+  const drift = currency && original && original !== currency ? { original, currency } : null;
   return (
     <Field label={t("form.currency")}>
       <div className="flex h-9 items-center gap-2 rounded-md border bg-muted px-3 text-sm">
@@ -92,9 +94,9 @@ export function LockedCurrencyField({
         )}
       </div>
       {currency ? <input type="hidden" name={name} value={currency} /> : null}
-      <p className={drifted ? "text-xs text-destructive" : "text-xs text-muted-foreground"}>
-        {drifted
-          ? t("form.currencyWasMismatched", { original: original!, currency })
+      <p className={drift ? "text-xs text-destructive" : "text-xs text-muted-foreground"}>
+        {drift
+          ? t("form.currencyWasMismatched", drift)
           : t("form.currencyFollowsAccount")}
       </p>
     </Field>
