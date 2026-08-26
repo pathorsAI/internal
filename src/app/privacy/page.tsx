@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 };
 
 /**
- * 公開的隱私權政策（免登入，見 src/middleware.ts 的 matcher），同時是 MCP
+ * 公開的隱私權政策（免登入，見 src/proxy.ts 的 matcher），同時是 MCP
  * RFC 9728 metadata 的 `resource_policy_uri` 預設值（見 ../.well-known/metadata.ts）。
  *
  * 內容是照 code 實際行為寫的，不是樣板。改動系統行為時請一起改這裡，特別是：

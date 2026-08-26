@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionCookie } from "better-auth/cookies";
 
-export function middleware(request: NextRequest) {
+// Next 16 把 `middleware` 這個 file convention 改名為 `proxy`（檔名與匯出的函式名
+// 都要改），因為「middleware」容易跟 Express 的中介層混淆，而它實際上是跑在應用程式
+// 前面的一層網路邊界。行為完全沒變：config.matcher 的語意、NextRequest / NextResponse
+// 都一樣。見 https://nextjs.org/docs/messages/middleware-to-proxy
+
+export function proxy(request: NextRequest) {
   // 根目錄是公開的 landing page（internal.pathors.com），任何人都看得到；
   // 系統本身掛在 /dashboard 底下，那才需要登入。
   if (request.nextUrl.pathname === "/") return NextResponse.next();
