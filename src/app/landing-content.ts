@@ -344,21 +344,6 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
 .term.play .l:nth-child(6){transition-delay:1.6s} .term.play .l:nth-child(7){transition-delay:1.9s}
 .term .q{color:#B0C0FF} .term .k{color:#E0A44A} .term .r{color:#F5798F} .term .c{opacity:.42}
 
-/* ---------- language demo ---------- */
-.lang{padding:clamp(1.2rem,2.5vw,1.7rem); border-radius:var(--r-m)}
-.lang-bar{display:flex; align-items:center; gap:.8rem; margin-bottom:1.2rem; flex-wrap:wrap}
-.lang-bar .hint{margin-left:auto; font-size:.83rem; color:var(--ink-3)}
-.kcards{display:grid; grid-template-columns:repeat(auto-fit,minmax(168px,1fr)); gap:.8rem}
-.kcard{border:1px solid var(--line); border-radius:var(--r-s); background:var(--surface-2); padding:.9rem 1rem}
-.kcard .kl{font-size:.86rem; color:var(--ink-2); font-weight:500; min-height:1.45em}
-.kcard .kv{font-family:var(--mono); font-size:1.75rem; font-weight:500; letter-spacing:-.03em; margin:.2rem 0 .05rem; font-variant-numeric:tabular-nums}
-.kcard .ks{font-family:var(--mono); font-size:.75rem; color:var(--ink-2)}
-.kcard .kh{font-size:.76rem; color:var(--ink-3); margin-top:.45rem; line-height:1.4; min-height:2.6em}
-.kcard[data-k="overdue"] .kv{color:var(--rose)}
-[data-i18n]{transition:opacity .16s ease}
-.swapping [data-i18n]{opacity:0}
-[data-i18n]:lang(zh-Hant){font-family:var(--cjk)}
-
 /* ---------- tiles ---------- */
 .tiles{display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(255px,1fr))}
 @media(min-width:940px){ .tiles{grid-template-columns:repeat(3,1fr)} }
@@ -366,25 +351,6 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
 .tile:hover{transform:translateY(-3px); box-shadow:var(--sh-2); border-color:color-mix(in srgb,var(--brand) 35%,var(--line))}
 .tile h3{font-size:1.05rem; margin-bottom:.5rem}
 .tile p{margin:0; font-size:.92rem; color:var(--ink-2); line-height:1.5}
-
-/* ---------- setup ---------- */
-.setup{display:grid; gap:clamp(1.5rem,3vw,2.5rem); grid-template-columns:minmax(0,1fr)}
-@media(min-width:900px){ .setup{grid-template-columns:minmax(0,1fr) minmax(0,1fr)} }
-pre{
-  margin:0; background:var(--deep); color:var(--deep-ink); border:1px solid var(--deep-line);
-  border-radius:var(--r-s); padding:1rem 1.1rem; overflow-x:auto;
-  font-family:var(--mono); font-size:.84rem; line-height:1.8;
-}
-pre .c{opacity:.42} pre .k{color:#B0C0FF}
-.steps{display:grid; gap:1rem}
-.step .sl{font-size:.82rem; font-weight:600; color:var(--ink-3); margin-bottom:.45rem; display:flex; gap:.55rem; align-items:center}
-.step .sl b{color:var(--brand); font-family:var(--mono); font-weight:500}
-dl.spec{margin:0; border:1px solid var(--line); border-radius:var(--r-m); overflow:hidden; background:var(--surface)}
-dl.spec .r{display:grid; grid-template-columns:130px 1fr; gap:1rem; padding:.85rem 1.1rem; border-bottom:1px solid var(--line-soft); font-size:.92rem}
-dl.spec .r:last-child{border-bottom:0}
-dl.spec dt{margin:0; font-size:.82rem; font-weight:600; color:var(--ink-3)}
-dl.spec dd{margin:0; color:var(--ink-2)}
-@media(max-width:560px){ dl.spec .r{grid-template-columns:1fr; gap:.15rem} }
 
 /* ---------- closing ---------- */
 .finale{
@@ -557,6 +523,32 @@ export const LANDING_HTML = `<main id="top">
   </div>
 </section>
 
+<section id="assistant" style="border-top:1px solid var(--line)">
+  <div class="wrap feat">
+    <div class="fx rv">
+      <div class="sec-head">
+        <span class="badge"><span class="dot"></span>{{assistant.badge}}</span>
+        <h2>{{assistant.heading}}</h2>
+        <p class="lede">{{assistant.lede}}</p>
+      </div>
+      <p class="sub" style="font-size:.95rem; margin:0">{{assistant.sub}}</p>
+      <p class="sub" style="font-size:.95rem; margin:.7rem 0 0">{{assistant.audit}}</p>
+    </div>
+    <div class="term rv anim" data-d="1">
+      <div class="th">{{assistant.termTitle}}</div>
+      <div class="tb">
+        <div class="l"><span class="c">{{assistant.termYou}}</span> <span class="q">{{assistant.termAsk}}</span></div>
+        <div class="l"><span class="c">{{assistant.termBot}}</span> {{assistant.termRead}}</div>
+        <div class="l">&nbsp;</div>
+        <div class="l"><span class="c">{{assistant.termBot}}</span> <span class="r">{{assistant.termItem}}</span> {{assistant.termWhich}}</div>
+        <div class="l"><span class="c">{{assistant.termYou}}</span> <span class="q">{{assistant.termAnswer}}</span></div>
+        <div class="l">&nbsp;</div>
+        <div class="l"><span class="c">{{assistant.termBot}}</span> {{assistant.termDone}}</div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section class="band" id="billing">
   <div class="wrap">
     <div class="sec-head center rv">
@@ -693,71 +685,6 @@ export const LANDING_HTML = `<main id="top">
     </div>
   </div>
 </section>
-<section id="assistant">
-  <div class="wrap feat">
-    <div class="fx rv">
-      <div class="sec-head">
-        <span class="badge"><span class="dot"></span>{{assistant.badge}}</span>
-        <h2>{{assistant.heading}}</h2>
-        <p class="lede">{{assistant.lede}}</p>
-      </div>
-      <p class="sub" style="font-size:.95rem; margin:0">{{assistant.sub}}</p>
-    </div>
-    <div class="term rv anim" data-d="1">
-      <div class="th">{{assistant.termTitle}}</div>
-      <div class="tb">
-        <div class="l"><span class="c">{{assistant.termYou}}</span> <span class="q">{{assistant.termQuestion}}</span></div>
-        <div class="l"><span class="c">{{assistant.termThinking}}</span></div>
-        <div class="l">&nbsp;</div>
-        <div class="l">Highbridge Construction <span class="c">·</span> {{assistant.termItemPhase}} <span class="c">·</span> <span class="r">NT$800,000</span> <span class="c">{{assistant.termLate82}}</span></div>
-        <div class="l">Northwind Labs <span class="c">·</span> {{assistant.termItemPipeline}} <span class="c">·</span> <span class="r">US$6,500</span> <span class="c">{{assistant.termLate31}}</span></div>
-        <div class="l">&nbsp;</div>
-        <div class="l"><span class="c">{{assistant.termClose}}</span></div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section class="band" id="language">
-  <div class="wrap">
-    <div class="sec-head rv">
-      <h2 style="font-size:clamp(1.5rem,2.6vw,2rem)">{{language.heading}}</h2>
-      <p class="lede" style="font-size:1.05rem">{{language.lede}}</p>
-    </div>
-
-    <div class="lang card rv">
-      <div class="lang-bar">
-        <div class="seg" role="tablist" aria-label="{{language.tablistLabel}}">
-          <button role="tab" aria-selected="true" aria-controls="i18ncards" data-loc="en">English</button>
-          <button role="tab" aria-selected="false" aria-controls="i18ncards" data-loc="zh-TW" lang="zh-Hant-TW">繁體中文</button>
-        </div>
-        <span class="hint">{{language.hint}}</span>
-      </div>
-      <div class="kcards" id="i18ncards">
-        <div class="kcard" data-k="due">
-          <div class="kl" data-i18n data-en="Due to bill" data-zh="該請款">Due to bill</div>
-          <div class="kv">3</div><div class="ks">NT$545,000</div>
-          <div class="kh" data-i18n data-en="Due date has passed, not yet billed" data-zh="已到應請款日、還沒請款">Due date has passed, not yet billed</div>
-        </div>
-        <div class="kcard" data-k="await">
-          <div class="kl" data-i18n data-en="Awaiting payment" data-zh="待收款">Awaiting payment</div>
-          <div class="kv">2</div><div class="ks">NT$420,000</div>
-          <div class="kh" data-i18n data-en="Billed, not yet fully collected" data-zh="已請款、還沒收齊">Billed, not yet fully collected</div>
-        </div>
-        <div class="kcard" data-k="overdue">
-          <div class="kl" data-i18n data-en="Overdue" data-zh="逾期未收">Overdue</div>
-          <div class="kv">2</div><div class="ks">NT$800,000 · US$6,500</div>
-          <div class="kh" data-i18n data-en="Past the payment deadline, still not collected" data-zh="超過付款期限仍未收齊">Past the payment deadline, still not collected</div>
-        </div>
-        <div class="kcard" data-k="inv">
-          <div class="kl" data-i18n data-en="Invoice pending" data-zh="待開發票">Invoice pending</div>
-          <div class="kv">8</div><div class="ks">NT$636,000</div>
-          <div class="kh" data-i18n data-en="Billed or paid, invoice not issued yet" data-zh="已請款或已收款、發票還沒開">Billed or paid, invoice not issued yet</div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
 
 <section id="more">
   <div class="wrap">
@@ -790,42 +717,13 @@ export const LANDING_HTML = `<main id="top">
         <h3>{{more.orgsTitle}}</h3>
         <p>{{more.orgsBody}}</p>
       </div>
-    </div>
-  </div>
-</section>
-
-<section class="band" id="setup">
-  <div class="wrap">
-    <div class="sec-head rv">
-      <span class="badge plain"><span class="dot"></span>{{setup.badge}}</span>
-      <h2>{{setup.heading}}</h2>
-      <p class="lede">{{setup.lede}}</p>
-    </div>
-    <div class="setup">
-      <div class="steps rv">
-        <div class="step">
-          <div class="sl"><b>01</b> {{setup.stepInstall}}</div>
-<pre>bun install</pre>
-        </div>
-        <div class="step">
-          <div class="sl"><b>02</b> {{setup.stepConfigure}}</div>
-<pre>cp .env.example .env.local
-<span class="c"># {{setup.stepConfigureComment}}</span></pre>
-        </div>
-        <div class="step">
-          <div class="sl"><b>03</b> {{setup.stepStart}}</div>
-<pre>bun dev   <span class="c"># {{setup.stepStartComment}}</span></pre>
-        </div>
-        <p class="sub" style="font-size:.9rem; margin:.4rem 0 0">{{setup.note}}</p>
+      <div class="tile rv">
+        <h3>{{more.currencyTitle}}</h3>
+        <p>{{more.currencyBody}}</p>
       </div>
-      <div class="rv" data-d="1">
-        <dl class="spec">
-          <div class="r"><dt>{{setup.specBuiltWith}}</dt><dd>Next.js 16, React 19, Tailwind CSS</dd></div>
-          <div class="r"><dt>{{setup.specDatabase}}</dt><dd>{{setup.specDatabaseValue}}</dd></div>
-          <div class="r"><dt>{{setup.specSignIn}}</dt><dd>{{setup.specSignInValue}}</dd></div>
-          <div class="r"><dt>{{setup.specHosting}}</dt><dd>{{setup.specHostingValue}}</dd></div>
-          <div class="r"><dt>{{setup.specLicence}}</dt><dd>{{setup.specLicenceValue}}</dd></div>
-        </dl>
+      <div class="tile rv" data-d="1">
+        <h3>{{more.languagesTitle}}</h3>
+        <p>{{more.languagesBody}}</p>
       </div>
     </div>
   </div>
@@ -911,26 +809,4 @@ export const LANDING_SCRIPT = `(function(){
     setTimeout(function(){ if (!touched) setMode('two'); }, 3000);
     setTimeout(function(){ if (!touched) setMode('one'); }, 6600);
   }
-
-  /* Language switch. */
-  var locBtns = document.querySelectorAll('[data-loc]');
-  var cards = document.getElementById('i18ncards');
-  function translate(zh){
-    cards.querySelectorAll('[data-i18n]').forEach(function(n){
-      n.textContent = zh ? n.dataset.zh : n.dataset.en;
-      n.setAttribute('lang', zh ? 'zh-Hant-TW' : 'en');
-    });
-  }
-  function selectLocale(btn){
-    var zh = btn.dataset.loc === 'zh-TW';
-    locBtns.forEach(function(x){ x.setAttribute('aria-selected', String(x === btn)); });
-    cards.classList.add('swapping');
-    setTimeout(function(){
-      translate(zh);
-      cards.classList.remove('swapping');
-    }, reduce ? 0 : 160);
-  }
-  locBtns.forEach(function(b){
-    b.addEventListener('click', function(){ selectLocale(b); });
-  });
 })();`;

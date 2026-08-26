@@ -12,15 +12,15 @@ import type { Dictionary } from "./dictionary";
  *  2. **中文是「寫」的，不是翻的。** 英文那側是有語氣的行銷文案，中文照台灣人講話的
  *     方式重寫，用語跟系統內其他 namespace 對齊（內外帳／請款／對帳／發票）。
  *
- * 專有名詞不翻：Pathors Internal、Apache 2.0、GitHub、PostgreSQL、Google。
+ * 專有名詞不翻：Internal、MCP、Apache 2.0、GitHub、PostgreSQL、Google。
  * demo 裡的虛構公司名（Verdant Biosciences 等）與檔名、金額同理，留在模板裡。
  */
 const landing = {
   meta: {
-    title: { "zh-TW": "對得起來的兩本帳", en: "Books That Agree" },
+    title: { "zh-TW": "你的 AI 也接得進來的總帳", en: "A Ledger Your AI Can Plug Into" },
     description: {
-      "zh-TW": "內外帳一致的記帳系統：一筆交易同時交代兩本帳，對得起來才收工。",
-      en: "One entry, both books. The accounting console we run our own company on — internal and external books that cannot drift apart.",
+      "zh-TW": "台幣帳、美金帳、內帳、外帳 —— 一筆交易只記一次，兩邊自己對得起來。它是一台 MCP 伺服器：你自己的 AI 讀得到帳本，也能把每個月的對帳單直接寫進來。",
+      en: "A TWD account, a USD account, the internal books, the external books — enter a transaction once and both sides stay in step. It is an MCP server too, so your own AI can read the ledger and write the month\u2019s statement straight into it.",
     },
   },
 
@@ -31,21 +31,21 @@ const landing = {
 
   nav: {
     howItWorks: { "zh-TW": "怎麼運作", en: "How it works" },
+    assistant: { "zh-TW": "接上你的 AI", en: "Your AI" },
     billing: { "zh-TW": "請款", en: "Billing" },
-    languages: { "zh-TW": "語言", en: "Languages" },
   },
 
   hero: {
     badge: { "zh-TW": "開源 · Apache 2.0", en: "Open source · Apache 2.0" },
-    titleA: { "zh-TW": "內帳外帳兩本。", en: "Two sets of books." },
-    titleB: { "zh-TW": "數字只有一組。", en: "One set of numbers." },
+    titleA: { "zh-TW": "你負責決定，", en: "You decide." },
+    titleB: { "zh-TW": "AI 負責記帳。", en: "Your AI books it." },
     lede: {
-      "zh-TW": "我們自己公司在用的記帳系統。一筆交易只輸入一次，就會自己落到該去的帳上 —— 不必再維護第二份試算表，月底也不會突然冒出對不起來的數字。",
-      en: "The accounting console we built for our own company. Enter a transaction once, and it lands in the right books on its own — no second spreadsheet to keep in step, no month-end surprise.",
+      "zh-TW": "一本總帳裝下所有帳戶 —— 台幣、美金、內帳、外帳。透過 MCP，你自己的 AI 讀得到也寫得進去；拿不準的帳，它會先問你再寫。",
+      en: "One ledger holds every account — TWD, USD, the internal books, the external books. Over MCP your own AI reads it and writes to it, and asks you before committing anything it is unsure about.",
     },
     secondary: { "zh-TW": "看看怎麼運作", en: "See how it works" },
-    trustSelfHost: { "zh-TW": "架在自己的伺服器上", en: "Run it on your own server" },
-    trustFree: { "zh-TW": "永遠免費", en: "Free forever" },
+    trustSelfHost: { "zh-TW": "雲端直接用，或自己架", en: "Hosted, or run it yourself" },
+    trustFree: { "zh-TW": "自架永遠免費", en: "Free forever if you self-host" },
   },
 
   demo: {
@@ -240,46 +240,46 @@ const landing = {
   },
 
   assistant: {
-    badge: { "zh-TW": "AI 助理", en: "AI assistant" },
-    heading: { "zh-TW": "直接問你的帳", en: "Ask your books a question" },
+    badge: { "zh-TW": "AI 助理 · MCP", en: "AI assistant · MCP" },
+    heading: {
+      "zh-TW": "不用等我們串接你的銀行",
+      en: "You do not have to wait for a bank integration",
+    },
     lede: {
-      "zh-TW": "把 AI 助理接上來，用白話問就好。它讀得到的範圍跟你完全一樣，不會多一分。",
-      en: "Point an AI assistant at it and ask in plain words. It reads exactly what you can read, and nothing you cannot.",
+      "zh-TW": "大部分記帳工具在拼銀行 API。但你每個月本來就拿得到一份對帳單 —— 把它丟給你自己的 AI，它會直接把交易寫進來。",
+      en: "Most bookkeeping tools are racing to integrate with banks. But you already get a statement every month — hand it to your own AI and it writes the transactions straight in.",
     },
     sub: {
-      "zh-TW": "它也寫得了 ——「把那筆 NT$18,500 的雲端費用記成外帳支出」是一句話，不是一張表單。",
-      en: "It can write, too — “log that NT$18,500 cloud bill as an external expense” is a sentence, not a form.",
+      "zh-TW": "關鍵是它會問。哪幾筆只進內帳、哪幾筆外帳也要認、分類拿不準的，它會先跟你確認再寫，而不是猜完就送出。",
+      en: "The point is that it asks. Which entries belong only to the internal books, which the external books must own, which category is ambiguous — it checks with you before writing, instead of guessing and committing.",
+    },
+    audit: {
+      "zh-TW": "每一筆經由 AI 的寫入都會留下稽核紀錄，員工個資送出前會遮罩。",
+      en: "Every write through the AI lands in the audit log, and employee personal data is masked before it leaves.",
     },
     termTitle: { "zh-TW": "助理", en: "Assistant" },
     termYou: { "zh-TW": "你", en: "you" },
-    termQuestion: {
-      "zh-TW": "有哪些客戶逾期沒付？各欠多少？",
-      en: "Which clients are overdue, and by how much?",
+    termBot: { "zh-TW": "助理", en: "assistant" },
+    termAsk: {
+      "zh-TW": "這是上個月的對帳單，幫我入帳",
+      en: "Here is last month\u2019s statement, book it for me",
     },
-    termThinking: { "zh-TW": "正在讀請款看板…", en: "reading the billing board…" },
-    termItemPhase: { "zh-TW": "第一期", en: "Phase 1" },
-    termItemPipeline: { "zh-TW": "資料串接", en: "Data pipeline" },
-    termLate82: { "zh-TW": "· 逾期 82 天", en: "· 82 days late" },
-    termLate31: { "zh-TW": "· 逾期 31 天", en: "· 31 days late" },
-    termClose: {
-      "zh-TW": "兩個客戶。金額各自以原幣別計。",
-      en: "Two clients. Totals kept in their own currency.",
+    termRead: {
+      "zh-TW": "讀到 23 筆…有 3 筆我不確定",
+      en: "23 transactions read… 3 of them I am not sure about",
     },
-  },
-
-  language: {
-    heading: {
-      "zh-TW": "沒有人需要在看不懂的語言裡工作",
-      en: "Nobody has to work in a language they are guessing at",
+    termItem: {
+      "zh-TW": "「顧問費 NT$45,000」",
+      en: "\u201CConsulting fee, NT$45,000\u201D",
     },
-    lede: {
-      "zh-TW": "切換一下，整套跟著換 —— 按鈕、表格，連錯誤訊息都是。試試看：",
-      en: "Switch, and the whole thing follows — buttons, tables, even error messages. Try it:",
+    termWhich: {
+      "zh-TW": "—— 只進內帳，還是外帳也認？",
+      en: "— internal books only, or do the external books take it too?",
     },
-    tablistLabel: { "zh-TW": "語言", en: "Language" },
-    hint: {
-      "zh-TW": "網址完全不會變 —— 你的書籤照樣能用。",
-      en: "The page address never changes — your bookmarks keep working.",
+    termAnswer: { "zh-TW": "外帳也要", en: "Yes, external too" },
+    termDone: {
+      "zh-TW": "好，23 筆都寫進去了",
+      en: "Done. All 23 written in.",
     },
   },
 
@@ -319,47 +319,15 @@ const landing = {
       "zh-TW": "一套系統管好幾家公司，彼此只看得到自己的數字，切換只要一個點擊。",
       en: "Run several companies from one install. Each one only ever sees its own numbers, and you switch with a click.",
     },
-  },
-
-  setup: {
-    badge: { "zh-TW": "給負責架設的人", en: "For whoever sets it up" },
-    heading: { "zh-TW": "三行指令，架在自己的機器上", en: "Three commands, your own server" },
-    lede: {
-      "zh-TW": "它就是一支普通的 web app，後面接一個普通的資料庫。你平常東西放哪，它就放哪。",
-      en: "It is an ordinary web app with an ordinary database behind it. Put it wherever you already put things.",
+    currencyTitle: { "zh-TW": "多幣別帳戶", en: "Accounts in more than one currency" },
+    currencyBody: {
+      "zh-TW": "美金帳戶就只收美金的交易，系統會擋掉記錯幣別的那一筆。報表按幣別分開加總，不會偷偷幫你換算。",
+      en: "A USD account only takes USD transactions — the wrong currency is rejected, not quietly converted. Reports total each currency separately.",
     },
-    stepInstall: { "zh-TW": "安裝", en: "Install it" },
-    stepConfigure: { "zh-TW": "指向你的資料庫", en: "Point it at your database" },
-    stepConfigureComment: {
-      "zh-TW": "資料庫位址、一組密鑰、Google 登入",
-      en: "database address, a secret, Google sign-in",
-    },
-    stepStart: { "zh-TW": "啟動", en: "Start it" },
-    stepStartComment: { "zh-TW": "接著打開 localhost:3000", en: "then open localhost:3000" },
-    note: {
-      "zh-TW": "第一個登入的人就是建立公司的人。如果你懶得處理版本問題，repo 裡有現成的 Docker 設定。",
-      en: "The first person to sign in sets up the company. There is a Docker setup in the repo if you would rather not think about versions.",
-    },
-    specBuiltWith: { "zh-TW": "技術組成", en: "Built with" },
-    specDatabase: { "zh-TW": "資料庫", en: "Database" },
-    specDatabaseValue: {
-      "zh-TW": "任何 PostgreSQL 都可以 —— 沒有綁定特定供應商",
-      en: "Any PostgreSQL — nothing in it is tied to one provider",
-    },
-    specSignIn: { "zh-TW": "登入", en: "Sign-in" },
-    specSignInValue: {
-      "zh-TW": "Google 登入，含邀請機制與 owner / admin 角色",
-      en: "Google, with invites and owner & admin roles",
-    },
-    specHosting: { "zh-TW": "部署", en: "Hosting" },
-    specHostingValue: {
-      "zh-TW": "自己的伺服器、容器，或 serverless 平台 —— repo 沒有意見",
-      en: "Your server, a container, or a serverless platform — the repo does not insist",
-    },
-    specLicence: { "zh-TW": "授權", en: "Licence" },
-    specLicenceValue: {
-      "zh-TW": "Apache 2.0。可以用、可以改，用它做出來的東西也可以賣",
-      en: "Apache 2.0. Use it, change it, sell what you build with it",
+    languagesTitle: { "zh-TW": "中英文介面", en: "Chinese and English" },
+    languagesBody: {
+      "zh-TW": "整套跟著切換，連錯誤訊息都是。網址不變，書籤照樣能用。",
+      en: "The whole thing switches, error messages included. The address never changes, so bookmarks keep working.",
     },
   },
 
