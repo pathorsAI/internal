@@ -36,7 +36,7 @@ function lookup(strings: LandingStrings, path: string): string {
         : undefined;
   }
   if (typeof node !== "string") {
-    throw new Error(`landing: 字典裡沒有 "${path}" 這個 key（或它不是字串）`);
+    throw new TypeError(`landing: 字典裡沒有 "${path}" 這個 key（或它不是字串）`);
   }
   return node;
 }

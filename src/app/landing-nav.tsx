@@ -23,8 +23,7 @@ export async function LandingNav({ signedIn }: { readonly signedIn: boolean }) {
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <polyline points="4,17 10,11 14,15 20,6" />
             </svg>
-          </span>
-          Internal
+          </span>Internal
         </a>
         <nav>
           <a href="#books" className="hide-s">
