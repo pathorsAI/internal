@@ -1,7 +1,10 @@
-// OAuth 2.0 Protected Resource Metadata (RFC 9728). Tells MCP clients which
-// authorization server protects the /mcp resource. The 401 from /mcp
-// points here via its WWW-Authenticate header.
-import { oAuthProtectedResourceMetadata } from "better-auth/plugins";
-import { auth } from "@/lib/auth";
+// OAuth 2.0 Protected Resource Metadata (RFC 9728) — root form.
+//
+// The canonical location for a resource that lives under a path is the
+// path-inserted URL (`/.well-known/oauth-protected-resource/mcp`, see the
+// sibling `mcp/route.ts`). This root document is kept for clients that skip
+// path insertion and probe the origin directly; both serve the same JSON.
+import { discoveryPreflight, protectedResourceMetadata } from "../metadata";
 
-export const GET = oAuthProtectedResourceMetadata(auth);
+export const GET = protectedResourceMetadata;
+export const OPTIONS = discoveryPreflight;

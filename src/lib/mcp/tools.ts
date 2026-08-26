@@ -40,6 +40,35 @@ const billingTools: Record<string, ToolDef> = {
       properties: {},
       additionalProperties: false,
     },
+    // Reference implementation of an `outputSchema` (see ToolDef in shared.ts).
+    // Declaring one makes the handler also return the result as MCP
+    // `structuredContent`, which ChatGPT/Codex prefer over parsing the JSON text
+    // block. Worth adding to the other tools whose return shape is stable and
+    // object-valued — tools that return a bare array must NOT declare one.
+    outputSchema: {
+      type: "object",
+      properties: {
+        organizations: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              organizationId: {
+                type: "string",
+                description: "Pass this back as `organizationId` on other tools.",
+              },
+              id: { type: "string" },
+              slug: { type: ["string", "null"] },
+            },
+            required: ["name", "organizationId", "id"],
+          },
+        },
+        hint: { type: "string" },
+      },
+      required: ["organizations", "hint"],
+      additionalProperties: false,
+    },
     execute: async (_args, ctx) => {
       const orgs = await listMyOrgs(ctx.userId);
       return {

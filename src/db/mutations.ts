@@ -36,6 +36,7 @@ import {
   type DueRule,
   type ScheduleInput,
 } from "@/lib/billing-schedule";
+import { findAccountCurrencyMismatches } from "@/lib/account-currency";
 
 export type ActionState = { ok: boolean; error?: string };
 
@@ -121,7 +122,7 @@ export async function createParty(
       })
       .returning({ id: parties.id });
     await logWeb(orgId, "create", "party", inserted.id, name);
-    revalidatePath("/parties");
+    revalidatePath("/dashboard/parties");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
@@ -154,7 +155,7 @@ export async function createReconciliation(
       })
       .returning({ id: accountReconciliations.id });
     await logWeb(orgId, "create", "reconciliation", inserted.id);
-    revalidatePath("/reconciliation");
+    revalidatePath("/dashboard/reconciliation");
     return { ok: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : t("failed.create");
@@ -398,6 +399,28 @@ function transactionColumns(formData: FormData, header: TxnHeader, f: TxnFields)
   };
 }
 
+/**
+ * 交易幣別必須等於它所屬帳戶的幣別（見 @/lib/account-currency 的說明）。
+ * 相符回傳 null，不符回傳已翻譯的錯誤字串，讓呼叫端照本檔慣例包成 ActionState。
+ *
+ * 轉帳是「一列兩腳」：from 與 to 各自要跟自己的帳戶對得起來，所以兩個都丟進來驗。
+ */
+async function accountCurrencyError(
+  db: ReturnType<typeof getDb>,
+  orgId: string,
+  currency: string,
+  accountIds: readonly (number | null | undefined)[],
+): Promise<string | null> {
+  const [bad] = await findAccountCurrencyMismatches(db, orgId, currency, accountIds);
+  if (!bad) return null;
+  const t = await getTranslations("errors");
+  return t("validation.accountCurrencyMismatch", {
+    account: bad.accountName,
+    accountCurrency: bad.accountCurrency,
+    txnCurrency: bad.txnCurrency,
+  });
+}
+
 // 情境優先：type 決定行為，各情境只讀自己需要的欄位。所有金額目前以 TWD 計。
 export async function createTransaction(
   _prev: ActionState,
@@ -414,6 +437,11 @@ export async function createTransaction(
     const resolved = await resolveTxnFields(db, orgId, header.type, formData);
     if ("error" in resolved) return { ok: false, error: resolved.error };
     const f = resolved.fields;
+    const currencyError = await accountCurrencyError(db, orgId, header.currency, [
+      f.fromAccountId,
+      f.toAccountId,
+    ]);
+    if (currencyError) return { ok: false, error: currencyError };
 
     const [inserted] = await db
       .insert(transactions)
@@ -428,9 +456,9 @@ export async function createTransaction(
 
     await logWeb(orgId, "create", "transaction", inserted.id, str(formData.get("description")) ?? header.type);
 
-    revalidatePath("/transactions");
-    revalidatePath("/accountant-notices");
-    revalidatePath("/");
+    revalidatePath("/dashboard/transactions");
+    revalidatePath("/dashboard/accountant-notices");
+    revalidatePath("/dashboard");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
@@ -464,8 +492,8 @@ export async function updateParty(
       })
       .where(and(eq(parties.organizationId, orgId), eq(parties.id, id)));
     await logWeb(orgId, "update", "party", id, name);
-    revalidatePath("/parties");
-    revalidatePath(`/parties/${id}`);
+    revalidatePath("/dashboard/parties");
+    revalidatePath(`/dashboard/parties/${id}`);
     return { ok: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : t("failed.update");
@@ -507,6 +535,9 @@ export async function createReimbursement(
       .limit(1);
     if (!adv) return { ok: false, error: t("notFound.advanceRecord") };
     const advCurrency = adv.currency ?? "TWD";
+    // 撥款的幣別跟著原代墊走，所以要驗的是「付款帳戶是不是同一種幣別」。
+    const currencyError = await accountCurrencyError(db, orgId, advCurrency, [fromAccountId]);
+    if (currencyError) return { ok: false, error: currencyError };
 
     const [inserted] = await db
       .insert(transactions)
@@ -527,9 +558,9 @@ export async function createReimbursement(
 
     await logWeb(orgId, "create", "transaction", inserted.id, tRec("activity.advanceReimbursed"));
 
-    revalidatePath("/advances");
-    revalidatePath("/transactions");
-    revalidatePath("/");
+    revalidatePath("/dashboard/advances");
+    revalidatePath("/dashboard/transactions");
+    revalidatePath("/dashboard");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.reimburse") };
@@ -555,8 +586,8 @@ export async function createCategory(
       .values({ organizationId: orgId, name, kind })
       .returning({ id: categories.id });
     await logWeb(orgId, "create", "category", inserted.id, name);
-    revalidatePath("/categories");
-    revalidatePath("/transactions");
+    revalidatePath("/dashboard/categories");
+    revalidatePath("/dashboard/transactions");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
@@ -579,8 +610,8 @@ export async function updateCategory(
       .set({ name })
       .where(and(eq(categories.organizationId, orgId), eq(categories.id, id)));
     await logWeb(orgId, "update", "category", id, name);
-    revalidatePath("/categories");
-    revalidatePath("/transactions");
+    revalidatePath("/dashboard/categories");
+    revalidatePath("/dashboard/transactions");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
@@ -596,8 +627,8 @@ export async function deleteCategory(id: number): Promise<ActionState> {
       .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(categories.organizationId, orgId), eq(categories.id, id)));
     await logWeb(orgId, "delete", "category", id);
-    revalidatePath("/categories");
-    revalidatePath("/transactions");
+    revalidatePath("/dashboard/categories");
+    revalidatePath("/dashboard/transactions");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -626,7 +657,7 @@ export async function createBankAccount(
       })
       .returning({ id: bankAccounts.id });
     await logWeb(orgId, "create", "bank_account", inserted.id, name);
-    revalidatePath("/bank-accounts");
+    revalidatePath("/dashboard/bank-accounts");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
@@ -655,8 +686,8 @@ export async function updateBankAccount(
       })
       .where(and(eq(bankAccounts.organizationId, orgId), eq(bankAccounts.id, id)));
     await logWeb(orgId, "update", "bank_account", id, name);
-    revalidatePath("/bank-accounts");
-    revalidatePath(`/bank-accounts/${id}`);
+    revalidatePath("/dashboard/bank-accounts");
+    revalidatePath(`/dashboard/bank-accounts/${id}`);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
@@ -672,7 +703,7 @@ export async function deleteBankAccount(id: number): Promise<ActionState> {
       .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(bankAccounts.organizationId, orgId), eq(bankAccounts.id, id)));
     await logWeb(orgId, "delete", "bank_account", id);
-    revalidatePath("/bank-accounts");
+    revalidatePath("/dashboard/bank-accounts");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -772,7 +803,7 @@ export async function createEmployee(
       })
       .returning({ id: employees.id });
     await logWeb(orgId, "create", "employee", inserted.id, name);
-    revalidatePath("/employees");
+    revalidatePath("/dashboard/employees");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
@@ -801,8 +832,8 @@ export async function updateEmployee(
       })
       .where(and(eq(employees.organizationId, orgId), eq(employees.id, id)));
     await logWeb(orgId, "update", "employee", id, name);
-    revalidatePath("/employees");
-    revalidatePath(`/employees/${id}`);
+    revalidatePath("/dashboard/employees");
+    revalidatePath(`/dashboard/employees/${id}`);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
@@ -818,7 +849,7 @@ export async function deleteEmployee(id: number): Promise<ActionState> {
       .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(employees.organizationId, orgId), eq(employees.id, id)));
     await logWeb(orgId, "delete", "employee", id);
-    revalidatePath("/employees");
+    revalidatePath("/dashboard/employees");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -835,7 +866,7 @@ export async function deleteParty(id: number): Promise<ActionState> {
       .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(parties.organizationId, orgId), eq(parties.id, id)));
     await logWeb(orgId, "delete", "party", id);
-    revalidatePath("/parties");
+    revalidatePath("/dashboard/parties");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -876,10 +907,10 @@ export async function deleteTransaction(id: number): Promise<ActionState> {
       .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)));
     await logWeb(orgId, "delete", "transaction", id);
-    revalidatePath("/transactions");
-    revalidatePath("/advances");
-    revalidatePath("/accountant-notices");
-    revalidatePath("/");
+    revalidatePath("/dashboard/transactions");
+    revalidatePath("/dashboard/advances");
+    revalidatePath("/dashboard/accountant-notices");
+    revalidatePath("/dashboard");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -903,7 +934,7 @@ export async function deleteTransactionDocument(id: number): Promise<ActionState
       .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(documents.organizationId, orgId), eq(documents.id, id)));
     await logWeb(orgId, "delete", "document", id);
-    revalidatePath("/transactions");
+    revalidatePath("/dashboard/transactions");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -919,7 +950,7 @@ export async function markAccountantNotified(id: number): Promise<ActionState> {
       .update(documents)
       .set({ accountantNotifiedAt: new Date().toISOString() })
       .where(and(eq(documents.organizationId, orgId), eq(documents.id, id)));
-    revalidatePath("/accountant-notices");
+    revalidatePath("/dashboard/accountant-notices");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
@@ -934,7 +965,7 @@ export async function unmarkAccountantNotified(id: number): Promise<ActionState>
       .update(documents)
       .set({ accountantNotifiedAt: null })
       .where(and(eq(documents.organizationId, orgId), eq(documents.id, id)));
-    revalidatePath("/accountant-notices");
+    revalidatePath("/dashboard/accountant-notices");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
@@ -959,6 +990,11 @@ export async function updateTransaction(
     const resolved = await resolveTxnFields(db, orgId, header.type, formData);
     if ("error" in resolved) return { ok: false, error: resolved.error };
     const f = resolved.fields;
+    const currencyError = await accountCurrencyError(db, orgId, header.currency, [
+      f.fromAccountId,
+      f.toAccountId,
+    ]);
+    if (currencyError) return { ok: false, error: currencyError };
 
     await db
       .update(transactions)
@@ -970,9 +1006,9 @@ export async function updateTransaction(
     // 編輯時若有補上憑證，新增一筆 documents
     await storeTransactionDocument(db, orgId, id, formData, header.billed);
     await logWeb(orgId, "update", "transaction", id);
-    revalidatePath("/transactions");
-    revalidatePath("/accountant-notices");
-    revalidatePath("/");
+    revalidatePath("/dashboard/transactions");
+    revalidatePath("/dashboard/accountant-notices");
+    revalidatePath("/dashboard");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
@@ -1054,7 +1090,7 @@ export async function createInvoice(
       .values({ organizationId: orgId, ...v })
       .returning({ id: invoices.id });
     await logWeb(orgId, "create", "invoice", inserted.id);
-    if (created) revalidatePath("/parties");
+    if (created) revalidatePath("/dashboard/parties");
     // 綁到請款項目時順手回填開發票日，看板的「待開發票」才會自己消掉，
     // 不必再手動標記一次。已經有日期就不覆蓋。
     if (v.billingItemId && v.invoiceDate) {
@@ -1068,9 +1104,9 @@ export async function createInvoice(
             isNull(billingItems.invoicedOn),
           ),
         );
-      revalidatePath("/billing");
+      revalidatePath("/dashboard/billing");
     }
-    revalidatePath("/invoices");
+    revalidatePath("/dashboard/invoices");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
@@ -1092,9 +1128,9 @@ export async function updateInvoice(
       .set(columns)
       .where(and(eq(invoices.organizationId, orgId), eq(invoices.id, id)));
     await logWeb(orgId, "update", "invoice", id);
-    if (created) revalidatePath("/parties");
-    revalidatePath("/invoices");
-    revalidatePath(`/invoices/${id}`);
+    if (created) revalidatePath("/dashboard/parties");
+    revalidatePath("/dashboard/invoices");
+    revalidatePath(`/dashboard/invoices/${id}`);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
@@ -1110,7 +1146,7 @@ export async function deleteInvoice(id: number): Promise<ActionState> {
       .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(invoices.organizationId, orgId), eq(invoices.id, id)));
     await logWeb(orgId, "delete", "invoice", id);
-    revalidatePath("/invoices");
+    revalidatePath("/dashboard/invoices");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -1145,8 +1181,8 @@ export async function markInvoiceExternal(
       })
       .where(and(eq(invoices.organizationId, orgId), eq(invoices.id, id)));
     await logWeb(orgId, "update", "invoice", id, `Simpany ${externalStatus}`);
-    revalidatePath("/invoices");
-    revalidatePath("/invoices/reconcile");
+    revalidatePath("/dashboard/invoices");
+    revalidatePath("/dashboard/invoices/reconcile");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
@@ -1174,8 +1210,8 @@ export async function updateReconciliation(
       .set({ accountId, asOfDate, statementBalance, note: str(formData.get("note")) })
       .where(and(eq(accountReconciliations.organizationId, orgId), eq(accountReconciliations.id, id)));
     await logWeb(orgId, "update", "reconciliation", id);
-    revalidatePath("/reconciliation");
-    revalidatePath(`/reconciliation/${id}`);
+    revalidatePath("/dashboard/reconciliation");
+    revalidatePath(`/dashboard/reconciliation/${id}`);
     return { ok: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : t("failed.update");
@@ -1195,7 +1231,7 @@ export async function deleteReconciliation(id: number): Promise<ActionState> {
       .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(accountReconciliations.organizationId, orgId), eq(accountReconciliations.id, id)));
     await logWeb(orgId, "delete", "reconciliation", id);
-    revalidatePath("/reconciliation");
+    revalidatePath("/dashboard/reconciliation");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -1218,7 +1254,7 @@ export async function deletePayrollRun(id: number): Promise<ActionState> {
       .set({ deletedAt })
       .where(and(eq(payrollRuns.organizationId, orgId), eq(payrollRuns.id, id)));
     await logWeb(orgId, "delete", "payroll_run", id);
-    revalidatePath("/payroll");
+    revalidatePath("/dashboard/payroll");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -1335,6 +1371,9 @@ export async function payEmployeeSalary(
       .where(and(eq(employees.organizationId, orgId), eq(employees.id, employeeId)))
       .limit(1);
     const period = `${year}-${String(month).padStart(2, "0")}`;
+    // 薪資固定以 TWD 記帳，所以發薪帳戶也必須是 TWD 帳戶。
+    const currencyError = await accountCurrencyError(db, orgId, "TWD", [fromAccountId]);
+    if (currencyError) return { ok: false, error: currencyError };
     const [txn] = await db
       .insert(transactions)
       .values({
@@ -1388,10 +1427,10 @@ export async function payEmployeeSalary(
 
     await logWeb(orgId, "create", "transaction", txn.id, tRec("activity.salaryPaid"));
 
-    revalidatePath("/payroll");
-    revalidatePath("/employees");
-    revalidatePath("/transactions");
-    revalidatePath("/");
+    revalidatePath("/dashboard/payroll");
+    revalidatePath("/dashboard/employees");
+    revalidatePath("/dashboard/transactions");
+    revalidatePath("/dashboard");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.pay") };
@@ -1420,9 +1459,9 @@ export async function deletePayslip(id: number): Promise<ActionState> {
         .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, slip.paidTransactionId)));
     }
     await logWeb(orgId, "delete", "payslip", id);
-    revalidatePath("/payroll");
-    revalidatePath("/transactions");
-    revalidatePath("/");
+    revalidatePath("/dashboard/payroll");
+    revalidatePath("/dashboard/transactions");
+    revalidatePath("/dashboard");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -1456,8 +1495,8 @@ export async function createProject(
       })
       .returning({ id: projects.id });
     await logWeb(orgId, "create", "project", inserted.id, name);
-    revalidatePath("/projects");
-    if (client.created) revalidatePath("/parties");
+    revalidatePath("/dashboard/projects");
+    if (client.created) revalidatePath("/dashboard/parties");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
@@ -1489,8 +1528,8 @@ export async function updateProject(
       })
       .where(and(eq(projects.organizationId, orgId), eq(projects.id, id)));
     await logWeb(orgId, "update", "project", id, name);
-    revalidatePath("/projects");
-    if (client.created) revalidatePath("/parties");
+    revalidatePath("/dashboard/projects");
+    if (client.created) revalidatePath("/dashboard/parties");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
@@ -1506,7 +1545,7 @@ export async function deleteProject(id: number): Promise<ActionState> {
       .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(projects.organizationId, orgId), eq(projects.id, id)));
     await logWeb(orgId, "delete", "project", id);
-    revalidatePath("/projects");
+    revalidatePath("/dashboard/projects");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -1584,8 +1623,8 @@ export async function createSubscription(
       .values({ organizationId: orgId, ...subscriptionColumns(v, customer.id, required) })
       .returning({ id: subscriptions.id });
     await logWeb(orgId, "create", "subscription", inserted.id, v.name ?? undefined);
-    revalidatePath("/subscriptions");
-    if (customer.created) revalidatePath("/parties");
+    revalidatePath("/dashboard/subscriptions");
+    if (customer.created) revalidatePath("/dashboard/parties");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
@@ -1612,8 +1651,8 @@ export async function updateSubscription(
       .set(subscriptionColumns(v, customer.id, required))
       .where(and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, id)));
     await logWeb(orgId, "update", "subscription", id, v.name ?? undefined);
-    revalidatePath("/subscriptions");
-    if (customer.created) revalidatePath("/parties");
+    revalidatePath("/dashboard/subscriptions");
+    if (customer.created) revalidatePath("/dashboard/parties");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
@@ -1629,7 +1668,7 @@ export async function deleteSubscription(id: number): Promise<ActionState> {
       .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, id)));
     await logWeb(orgId, "delete", "subscription", id);
-    revalidatePath("/subscriptions");
+    revalidatePath("/dashboard/subscriptions");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -1843,10 +1882,10 @@ export async function createContract(
     await logWeb(orgId, "create", "contract", inserted.id, v.title ?? undefined);
     // 新合約一定沒有既有排程，直接展開（展不出來就是 0 期，不是錯誤）。
     const created = await expandContractSchedule(db, orgId, inserted.id, customer.id, v, false);
-    revalidatePath("/contracts");
-    if (customer.created) revalidatePath("/parties");
+    revalidatePath("/dashboard/contracts");
+    if (customer.created) revalidatePath("/dashboard/parties");
     if (created > 0) {
-      revalidatePath("/billing");
+      revalidatePath("/dashboard/billing");
       await syncCalendarBestEffort(orgId);
     }
     return { ok: true };
@@ -1884,10 +1923,10 @@ export async function updateContract(
       v,
       v.regenerateSchedule,
     );
-    revalidatePath("/contracts");
-    if (customer.created) revalidatePath("/parties");
+    revalidatePath("/dashboard/contracts");
+    if (customer.created) revalidatePath("/dashboard/parties");
     if (changed > 0) {
-      revalidatePath("/billing");
+      revalidatePath("/dashboard/billing");
       await syncCalendarBestEffort(orgId);
     }
     return { ok: true };
@@ -1905,7 +1944,7 @@ export async function deleteContract(id: number): Promise<ActionState> {
       .set({ deletedAt: new Date().toISOString() })
       .where(and(eq(contracts.organizationId, orgId), eq(contracts.id, id)));
     await logWeb(orgId, "delete", "contract", id);
-    revalidatePath("/contracts");
+    revalidatePath("/dashboard/contracts");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -1952,8 +1991,8 @@ async function resolveBillingCustomer(
 }
 
 function revalidateBilling() {
-  revalidatePath("/billing");
-  revalidatePath("/contracts");
+  revalidatePath("/dashboard/billing");
+  revalidatePath("/dashboard/contracts");
 }
 
 /**
@@ -2009,7 +2048,7 @@ export async function createBillingItem(
       .returning({ id: billingItems.id });
     await logWeb(orgId, "create", "billing_item", inserted.id, v.title ?? undefined);
     revalidateBilling();
-    if (customer.created) revalidatePath("/parties");
+    if (customer.created) revalidatePath("/dashboard/parties");
     await syncCalendarBestEffort(orgId);
     return { ok: true };
   } catch (e) {
@@ -2052,7 +2091,7 @@ export async function updateBillingItem(
       .where(and(eq(billingItems.organizationId, orgId), eq(billingItems.id, id)));
     await logWeb(orgId, "update", "billing_item", id, v.title ?? undefined);
     revalidateBilling();
-    if (customer.created) revalidatePath("/parties");
+    if (customer.created) revalidatePath("/dashboard/parties");
     await syncCalendarBestEffort(orgId);
     return { ok: true };
   } catch (e) {
@@ -2141,8 +2180,8 @@ export async function markBillingRow(
         });
       }
       await logWeb(orgId, "update", "subscription", subscriptionId, `${periodStart} ${field}`);
-      revalidatePath("/billing");
-      revalidatePath("/subscriptions");
+      revalidatePath("/dashboard/billing");
+      revalidatePath("/dashboard/subscriptions");
       await syncCalendarBestEffort(orgId);
       return { ok: true };
     }
@@ -2333,13 +2372,13 @@ export async function linkPaymentToBillingRow(
         subscriptionId,
         tRec("activity.paymentMatchedPeriod", { period: periodStart, id: transactionId }),
       );
-      revalidatePath("/subscriptions");
+      revalidatePath("/dashboard/subscriptions");
     } else {
       return { ok: false, error: t("validation.unrecognizedItem") };
     }
 
     revalidateBilling();
-    revalidatePath("/transactions");
+    revalidatePath("/dashboard/transactions");
     await syncCalendarBestEffort(orgId);
     return { ok: true };
   } catch (e) {
@@ -2370,7 +2409,7 @@ export async function revokeMcpClient(clientId: string): Promise<ActionState> {
     await db
       .delete(oauthApplication)
       .where(eq(oauthApplication.clientId, clientId));
-    revalidatePath("/settings/mcp");
+    revalidatePath("/dashboard/settings/mcp");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.revoke") };

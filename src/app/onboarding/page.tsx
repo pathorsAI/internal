@@ -30,6 +30,7 @@ type Invite = {
   organizationId: string;
   organizationName: string;
   role: string;
+  expiresAt: string | Date;
 };
 
 export default function OnboardingPage() {
@@ -42,6 +43,9 @@ export default function OnboardingPage() {
   // Until we know whether the user already belongs to an org, render nothing so
   // we don't flash the create-org UI at members who shouldn't see it.
   const [checkingMembership, setCheckingMembership] = useState(true);
+  // 掛載時取一次「現在」的快照：在 render 裡直接讀 Date.now() 是不純的，而邀請
+  // 的到期是以天為單位，不需要跟著時間跳動。
+  const [now] = useState(() => Date.now());
 
   useEffect(() => {
     (async () => {
@@ -61,9 +65,16 @@ export default function OnboardingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // listUserInvitations 只 filter status === "pending"，不管 expiresAt，而過期的邀請
+  // 在 DB 裡 status 仍然是 pending。所以後端回來的清單裡可能夾著一按就必定失敗
+  // （INVITATION_NOT_FOUND，訊息看起來像「找不到邀請」）的邀請，得在前端自己分開。
+  const expired = (inv: Invite) => new Date(inv.expiresAt).getTime() < now;
+  const acceptableInvites = invites.filter((i) => !expired(i));
+  const expiredInvites = invites.filter(expired);
+
   async function enter(organizationId: string) {
     await authClient.organization.setActive({ organizationId });
-    router.push("/");
+    router.push("/dashboard");
     router.refresh();
   }
 
@@ -119,7 +130,7 @@ export default function OnboardingPage() {
               <CardDescription>{t("invites.description")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
-              {invites.map((inv) => (
+              {acceptableInvites.map((inv) => (
                 <div
                   key={inv.id}
                   className="flex items-center justify-between gap-3 rounded-md border px-3 py-2"
@@ -137,6 +148,25 @@ export default function OnboardingPage() {
                   >
                     {acceptingId === inv.id ? t("invites.accepting") : t("invites.accept")}
                   </Button>
+                </div>
+              ))}
+              {/* 過期的只顯示、不給按鈕 —— 接受一定會失敗，給按鈕只是騙人。 */}
+              {expiredInvites.map((inv) => (
+                <div
+                  key={inv.id}
+                  className="flex items-center justify-between gap-3 rounded-md border border-dashed px-3 py-2 opacity-60"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate font-medium text-muted-foreground">
+                      {inv.organizationName}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {t("invites.expiredHint")}
+                    </div>
+                  </div>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {t("invites.expired")}
+                  </span>
                 </div>
               ))}
             </CardContent>

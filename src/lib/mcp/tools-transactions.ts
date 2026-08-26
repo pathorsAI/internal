@@ -34,6 +34,12 @@ import {
   resolveOrg,
   type ToolDef,
 } from "./shared";
+import {
+  assertAccountCurrency,
+  findMismatchInMap,
+  accountCurrencyErrorMessage,
+  type AccountCurrencyRef,
+} from "@/lib/account-currency";
 
 const TXN_TYPES = ["expense", "income", "advance", "transfer"] as const;
 const BOOKS = ["both", "internal", "external"] as const;
@@ -570,6 +576,8 @@ export const transactionTools: Record<string, ToolDef> = {
       }
       const amount = requireDecimal(args, "amount");
       const currency = normalizeCurrency(args, "currency");
+      // 每一腳（expense/income 的單一帳戶、transfer 的 from + to）都要跟自己的帳戶同幣別。
+      await assertAccountCurrency(db, orgId, currency, [f.fromAccountId, f.toAccountId]);
       const reported = type === "transfer" || optBoolean(args, "reported") === true;
       const [row] = await db
         .insert(transactions)
@@ -667,13 +675,18 @@ export const transactionTools: Record<string, ToolDef> = {
       // Load the org's valid FK ids once, so each row is validated in memory
       // instead of issuing an assertInOrg round trip per row.
       const [acctRows, catRows, projRows, contractRows, subscriptionRows] = await Promise.all([
-        db.select({ id: bankAccounts.id }).from(bankAccounts).where(eq(bankAccounts.organizationId, orgId)),
+        db
+          .select({ id: bankAccounts.id, name: bankAccounts.name, currency: bankAccounts.currency })
+          .from(bankAccounts)
+          .where(eq(bankAccounts.organizationId, orgId)),
         db.select({ id: categories.id }).from(categories).where(eq(categories.organizationId, orgId)),
         db.select({ id: projects.id }).from(projects).where(eq(projects.organizationId, orgId)),
         db.select({ id: contracts.id }).from(contracts).where(eq(contracts.organizationId, orgId)),
         db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.organizationId, orgId)),
       ]);
       const acctSet = new Set(acctRows.map((r) => r.id));
+      // 幣別驗證跟 FK 驗證一樣在記憶體裡做，避免每列各發一次 query。
+      const acctById = new Map<number, AccountCurrencyRef>(acctRows.map((r) => [r.id, r]));
       const catSet = new Set(catRows.map((r) => r.id));
       const projSet = new Set(projRows.map((r) => r.id));
       const contractSet = new Set(contractRows.map((r) => r.id));
@@ -685,6 +698,10 @@ export const transactionTools: Record<string, ToolDef> = {
       const norms: Norm[] = items.map((raw, i) =>
         normalizeBulkTxnItem(raw, i, sets, partyLabelByName, employeeNames),
       );
+      norms.forEach((n, i) => {
+        const bad = findMismatchInMap(acctById, n.currency, [n.fromAccountId, n.toAccountId]);
+        if (bad) throw new Error(`items[${i}]: ${accountCurrencyErrorMessage(bad)}`);
+      });
 
       const partyId = await resolvePartyNames(db, orgId, partyLabelByName);
       const employeeId = await resolveEmployeeNames(db, orgId, employeeNames);
@@ -758,6 +775,8 @@ export const transactionTools: Record<string, ToolDef> = {
           amount: transactions.amount,
           currency: transactions.currency,
           contractId: transactions.contractId,
+          fromAccountId: transactions.fromAccountId,
+          toAccountId: transactions.toAccountId,
         })
         .from(transactions)
         .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)))
@@ -773,6 +792,13 @@ export const transactionTools: Record<string, ToolDef> = {
       }
       await applyTxnRelationPatch(patch, db, args, orgId);
       applyTxnAmountPatch(patch, args, existing);
+      // 這支工具改不了帳戶，但改得了幣別 —— 改完仍要跟原本綁的帳戶對得起來。
+      if (typeof patch.currency === "string") {
+        await assertAccountCurrency(db, orgId, patch.currency, [
+          existing.fromAccountId,
+          existing.toAccountId,
+        ]);
+      }
       const [row] = await db
         .update(transactions)
         .set(patch)
@@ -868,6 +894,8 @@ export const transactionTools: Record<string, ToolDef> = {
         throw new Error(`Transaction ${advanceId} is not an advance (type=${adv.type}).`);
       }
       const currency = adv.currency ?? "TWD";
+      // 撥款的幣別跟著原代墊走，付款帳戶必須是同一種幣別。
+      await assertAccountCurrency(db, orgId, currency, [fromAccountId]);
       const [row] = await db
         .insert(transactions)
         .values({

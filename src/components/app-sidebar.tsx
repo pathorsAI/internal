@@ -70,38 +70,38 @@ export type NavItemKey =
   | "settings";
 
 const daily = [
-  { key: "dashboard", href: "/", icon: LayoutDashboard },
-  { key: "billing", href: "/billing", icon: CalendarClock },
+  { key: "dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { key: "billing", href: "/dashboard/billing", icon: CalendarClock },
 ] as const satisfies { key: NavItemKey; href: string; icon: typeof LayoutDashboard }[];
 
 const nav = [
-  { key: "transactions", href: "/transactions", icon: ArrowLeftRight },
-  { key: "parties", href: "/parties", icon: Truck },
-  { key: "categories", href: "/categories", icon: Tags },
-  { key: "advances", href: "/advances", icon: ReceiptText },
-  { key: "accountantNotices", href: "/accountant-notices", icon: BellRing },
-  { key: "bankAccounts", href: "/bank-accounts", icon: Landmark },
-  { key: "reconciliation", href: "/reconciliation", icon: Scale },
+  { key: "transactions", href: "/dashboard/transactions", icon: ArrowLeftRight },
+  { key: "parties", href: "/dashboard/parties", icon: Truck },
+  { key: "categories", href: "/dashboard/categories", icon: Tags },
+  { key: "advances", href: "/dashboard/advances", icon: ReceiptText },
+  { key: "accountantNotices", href: "/dashboard/accountant-notices", icon: BellRing },
+  { key: "bankAccounts", href: "/dashboard/bank-accounts", icon: Landmark },
+  { key: "reconciliation", href: "/dashboard/reconciliation", icon: Scale },
 ] as const satisfies { key: NavItemKey; href: string; icon: typeof LayoutDashboard }[];
 
 const clients = [
-  { key: "projects", href: "/projects", icon: FolderKanban },
-  { key: "subscriptions", href: "/subscriptions", icon: Repeat },
-  { key: "contracts", href: "/contracts", icon: FileSignature },
-  { key: "invoices", href: "/invoices", icon: Receipt },
-  { key: "reports", href: "/reports", icon: BarChart3 },
+  { key: "projects", href: "/dashboard/projects", icon: FolderKanban },
+  { key: "subscriptions", href: "/dashboard/subscriptions", icon: Repeat },
+  { key: "contracts", href: "/dashboard/contracts", icon: FileSignature },
+  { key: "invoices", href: "/dashboard/invoices", icon: Receipt },
+  { key: "reports", href: "/dashboard/reports", icon: BarChart3 },
 ] as const satisfies { key: NavItemKey; href: string; icon: typeof LayoutDashboard }[];
 
 const hr = [
-  { key: "employees", href: "/employees", icon: Users },
-  { key: "payroll", href: "/payroll", icon: ReceiptText },
+  { key: "employees", href: "/dashboard/employees", icon: Users },
+  { key: "payroll", href: "/dashboard/payroll", icon: ReceiptText },
 ] as const satisfies { key: NavItemKey; href: string; icon: typeof LayoutDashboard }[];
 
 const org = [
-  { key: "members", href: "/members", icon: UserCog },
-  { key: "activity", href: "/activity", icon: History },
-  { key: "mcp", href: "/settings/mcp", icon: Plug },
-  { key: "settings", href: "/settings", icon: Settings },
+  { key: "members", href: "/dashboard/members", icon: UserCog },
+  { key: "activity", href: "/dashboard/activity", icon: History },
+  { key: "mcp", href: "/dashboard/settings/mcp", icon: Plug },
+  { key: "settings", href: "/dashboard/settings", icon: Settings },
 ] as const satisfies { key: NavItemKey; href: string; icon: typeof LayoutDashboard }[];
 
 /** 側邊欄的分組順序。五個區塊的結構完全一樣，所以用資料驅動而不是抄五遍。 */
@@ -118,10 +118,10 @@ export function AppSidebar() {
   const pathname = usePathname();
 
   const isActive = (href: string) => {
-    if (href === "/") return pathname === "/";
+    if (href === "/dashboard") return pathname === "/dashboard";
     // /settings is a prefix of /settings/mcp — match it exactly so only the
     // specific sub-page (e.g. MCP) highlights, not both.
-    if (href === "/settings") return pathname === "/settings";
+    if (href === "/dashboard/settings") return pathname === "/dashboard/settings";
     return pathname.startsWith(href);
   };
 

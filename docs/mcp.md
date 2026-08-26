@@ -20,11 +20,26 @@ discovered via `list_*` tools — so the model looks them up rather than guessin
 | Purpose | URL |
 | --- | --- |
 | MCP server (configure this in your client) | `<BASE_URL>/mcp` |
-| OAuth Authorization Server metadata | `<BASE_URL>/.well-known/oauth-authorization-server` |
-| OAuth Protected Resource metadata | `<BASE_URL>/.well-known/oauth-protected-resource` |
+| OAuth Authorization Server metadata (RFC 8414) | `<BASE_URL>/.well-known/oauth-authorization-server` |
+| OAuth Protected Resource metadata (RFC 9728), canonical | `<BASE_URL>/.well-known/oauth-protected-resource/mcp` |
+| …same document, root form for clients that skip path insertion | `<BASE_URL>/.well-known/oauth-protected-resource` |
+| OpenAI plugin domain verification (only while a submission is open) | `<BASE_URL>/.well-known/openai-apps-challenge` |
 
 `<BASE_URL>` is `BETTER_AUTH_URL`. It must be the public URL the client reaches
 (it doubles as the OAuth issuer), e.g. `https://app.example.com`.
+
+### Transport
+
+Streamable HTTP, **stateless**. Everything goes over `POST /mcp`; the server
+never opens an SSE stream and never issues an `Mcp-Session-Id`, so `GET` and
+`DELETE` answer `405` with an `Allow: POST, OPTIONS` header (both are explicitly
+permitted by the spec, and clients must handle them). `OPTIONS` answers the CORS
+preflight, and `Mcp-Session-Id` / `MCP-Protocol-Version` / `WWW-Authenticate` are
+allowed and exposed so a browser-side client can work. `Origin` is validated
+against an allowlist (DNS-rebinding defence) — requests with no `Origin` at all,
+which is how ChatGPT, Codex and Claude connect, are unaffected. An unsupported
+`MCP-Protocol-Version` header gets `400`. Negotiated protocol revisions:
+`2025-06-18` (default), `2025-03-26`, `2024-11-05`.
 
 ## Auth
 
@@ -33,6 +48,18 @@ Dynamic Client Registration, PKCE, authorize/token, and bearer-token validation.
 On first connect the client opens the OAuth flow; you sign in with Google (the
 same login as the dashboard) and a token is issued. The `/login` page then
 returns you to `/api/auth/mcp/authorize` to complete the grant.
+
+An unauthenticated request gets `401` with an RFC 9728 challenge:
+
+```
+WWW-Authenticate: Bearer resource_metadata="<BASE_URL>/.well-known/oauth-protected-resource/mcp",
+                  scope="openid profile email offline_access", error="invalid_token", …
+```
+
+so a client that has never seen this server can bootstrap the whole OAuth flow
+from that one response. The `resource` published in that metadata document is
+`<BASE_URL>/mcp` — the endpoint itself, not the bare origin — because clients
+echo it back as the `resource` parameter on the authorize and token requests.
 
 All data is scoped to your organization. The token only carries your user id, so
 the server resolves your org from membership (matching the dashboard's behaviour).
@@ -46,17 +73,40 @@ If you belong to **multiple orgs**, the server never guesses. Two options:
   error listing the choices, so it must ask and retry — no data ever lands in the
   wrong org.
 - **Pin per connection:** add `<BASE_URL>/mcp?org=<slug-or-id>` (validated
-  against your memberships) — one connection per org, no asking. The `/settings/mcp`
+  against your memberships) — one connection per org, no asking. The `/dashboard/settings/mcp`
   page lists ready-to-copy per-org URLs.
 
 With a single-org account it just uses that org automatically.
 
 ## Tools
 
-Every tool is categorized via MCP `annotations` (`readOnlyHint` / `destructiveHint`
-/ `idempotentHint`, derived from the verb) plus a `[read]` / `[write]` / `[delete]`
-tag prefixed to its description — so clients can group read vs write and gate
-destructive calls.
+Every tool carries, all derived centrally in `src/lib/mcp/handler.ts` (never in
+the `tools-*.ts` modules):
+
+- a human-readable `title` — de-snake-cased from the tool name, with a small
+  override table for names that don't read well;
+- MCP `annotations`: `readOnlyHint` / `destructiveHint` / `idempotentHint`
+  derived from the verb, plus `openWorldHint`, which is `false` for everything
+  except `sync_billing_calendar` (the only tool that writes to a third-party
+  system). Two overrides correct the verb heuristic: `sync_billing_calendar`
+  gets `openWorldHint: true`, and `pay_employee_salary` gets
+  `destructiveHint: true` — it posts a salary expense to the ledger and the
+  month can't be re-paid, with no "unpay" tool to undo it;
+- a `[read]` / `[write]` / `[delete]` tag prefixed to the description, so
+  clients can group read vs write at a glance;
+- `securitySchemes: [{ type: "oauth2", scopes: [...] }]` (mirrored under `_meta`
+  for clients that only read `_meta`) — every tool touches org-private data, and
+  ChatGPT only offers account linking for tools that declare this;
+- `_meta["openai/toolInvocation/invoking" | "invoked"]`, the status line ChatGPT
+  shows while a call is in flight.
+
+**Output schemas.** A tool may declare an `outputSchema`; when it does, the
+handler additionally returns the result as MCP `structuredContent` (the JSON
+text block stays, per MCP's back-compat recommendation). Only `list_organizations`
+declares one today — it's the reference implementation. Adding schemas to the
+rest is worthwhile (OpenAI's guidance is to declare one for every tool that
+returns structured data), but the schema is a promise: `structuredContent` must
+validate against it, and tools that return a bare array must not declare one.
 
 **Discovery** — `list_organizations` (call first), `create_organization` (spin up a
 new org, makes you its owner), `get_financial_overview`.
@@ -129,3 +179,47 @@ break references return a clear error suggesting deactivation/archiving instead.
 2. Ensure `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL` are set.
 3. Add the server to your MCP client using `<BASE_URL>/mcp` and complete the
    OAuth sign-in when prompted.
+
+### Optional environment variables
+
+| Variable | Effect |
+| --- | --- |
+| `MCP_RESOURCE_DOCUMENTATION_URL` | Published as `resource_documentation` in the protected resource metadata. |
+| `MCP_PRIVACY_POLICY_URL` | Published as `resource_policy_uri`. Also the privacy policy URL an OpenAI submission requires. |
+| `MCP_TERMS_URL` | Published as `resource_tos_uri`. |
+| `OPENAI_APPS_CHALLENGE_TOKEN` | Served verbatim at `/.well-known/openai-apps-challenge` for OpenAI domain verification. Unset ⇒ that route 404s. |
+
+## Connecting from ChatGPT / Codex
+
+The protocol side is done: OAuth 2.1 with PKCE (`S256`), RFC 7591 dynamic client
+registration, RFC 9728 protected resource metadata, per-tool `securitySchemes`,
+titles and annotations. What's left is account-level.
+
+**To try it privately (no review, no listing):** use ChatGPT
+[developer mode](https://platform.openai.com/docs/guides/developer-mode) and add
+`<BASE_URL>/mcp` as a custom connector. This is the right mode for an internal
+tool — OpenAI is explicit that a directory submission is only for plugins you
+intend to make *publicly* available.
+
+**To publish it in the Plugins Directory** (ChatGPT + Codex share one directory),
+the submission portal at <https://platform.openai.com/plugins> additionally needs
+things that don't live in this repo:
+
+- an OpenAI org where the submitter has **Apps Management: write**, and a
+  completed **individual or business identity verification** — publishing under
+  an unverified name is an automatic rejection;
+- public listing URLs: website, support, **privacy policy**, **terms**; plus a
+  name, logo, short/long description and category;
+- **domain verification**: set `OPENAI_APPS_CHALLENGE_TOKEN` to the token the
+  portal generates and redeploy, so `/.well-known/openai-apps-challenge` returns
+  it as bare text;
+- **reviewer demo credentials** that work without MFA, SMS, email confirmation
+  or VPN — today this server signs in with Google only, which is a problem
+  worth solving before submitting;
+- five positive and three negative test cases, starter prompts, country
+  availability, and release notes.
+
+Sources: [Build an MCP server](https://developers.openai.com/plugins/build/mcp-server),
+[Authentication](https://developers.openai.com/plugins/build/auth),
+[Submit plugins](https://developers.openai.com/plugins/deploy/submission),
+[MCP server review requirements](https://developers.openai.com/plugins/deploy/app-review).

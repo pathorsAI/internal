@@ -37,6 +37,7 @@ import {
   todayStr,
   type ToolDef,
 } from "./shared";
+import { assertAccountCurrency } from "@/lib/account-currency";
 import { isValidEmail, maskBankAccount, maskNationalId } from "@/lib/pii";
 
 const EMPLOYMENT_TYPES = ["full_time", "part_time", "freelancer", "contractor"] as const;
@@ -568,6 +569,8 @@ export const hrTools: Record<string, ToolDef> = {
         .limit(1);
       const period = `${year}-${String(month).padStart(2, "0")}`;
 
+      // 薪資固定以 TWD 記帳，所以發薪帳戶也必須是 TWD 帳戶。
+      await assertAccountCurrency(db, orgId, "TWD", [fromAccountId]);
       const [txn] = await db
         .insert(transactions)
         .values({

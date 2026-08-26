@@ -31,10 +31,15 @@ const members = {
     title: { "zh-TW": "待接受的邀請（{count}）", en: "Pending invitations ({count})" },
     description: { "zh-TW": "對方用該 email 登入後即可接受", en: "They can accept after signing in with that email" },
     pending: { "zh-TW": "待接受", en: "Pending" },
+    expired: { "zh-TW": "已過期", en: "Expired" },
+    expiresAt: { "zh-TW": "到期：{date}", en: "Expires: {date}" },
     cancel: { "zh-TW": "取消邀請", en: "Cancel invitation" },
+    resend: { "zh-TW": "重新邀請", en: "Resend invitation" },
     toast: {
       failed: { "zh-TW": "取消失敗", en: "Failed to cancel" },
       success: { "zh-TW": "已取消邀請", en: "Invitation canceled" },
+      resent: { "zh-TW": "已重新邀請 {email}", en: "Re-invited {email}" },
+      resendFailed: { "zh-TW": "重新邀請失敗", en: "Failed to resend invitation" },
     },
   },
   danger: {

@@ -26,6 +26,14 @@ const advances = {
     payDate: { "zh-TW": "撥款日期", en: "Payment date" },
     fromAccount: { "zh-TW": "付款帳戶", en: "Payment account" },
     fromAccountPlaceholder: { "zh-TW": "— 選擇帳戶 —", en: "— Select account —" },
+    fromAccountHint: {
+      "zh-TW": "撥款幣別跟著代墊走，只能選 {currency} 帳戶",
+      en: "The reimbursement follows the advance's currency, so only {currency} accounts can be used",
+    },
+    noMatchingAccount: {
+      "zh-TW": "目前沒有 {currency} 帳戶，請先到「銀行帳戶」建立一個。",
+      en: "There is no {currency} account yet — create one on the Bank accounts page first.",
+    },
     amountLabel: { "zh-TW": "金額（依代墊，不可改）", en: "Amount (fixed by the advance, can't change)" },
     confirm: { "zh-TW": "確認撥款", en: "Confirm reimbursement" },
     saving: { "zh-TW": "儲存中…", en: "Saving…" },

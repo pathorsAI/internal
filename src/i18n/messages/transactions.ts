@@ -79,6 +79,22 @@ const transactions = {
     amount: { "zh-TW": "金額", en: "Amount" },
     amountPlaceholder: { "zh-TW": "正數", en: "Positive number" },
     currency: { "zh-TW": "幣別", en: "Currency" },
+    currencyFollowsAccount: {
+      "zh-TW": "幣別跟隨所選帳戶，不可自行更改",
+      en: "The currency follows the selected account and cannot be changed",
+    },
+    currencyPickAccount: {
+      "zh-TW": "請先選擇帳戶",
+      en: "Select an account first",
+    },
+    currencyWasMismatched: {
+      "zh-TW": "這筆原本記為 {original}，與帳戶幣別 {currency} 不符（舊資料）。儲存後會改成 {currency}，金額數字不會做匯率換算，請自行確認。",
+      en: "This entry was recorded as {original}, which does not match the account currency {currency} (legacy data). Saving will change it to {currency}; the amount is not converted, so check it yourself.",
+    },
+    transferCurrencyMismatch: {
+      "zh-TW": "轉出帳戶是 {from}、轉入帳戶是 {to}，幣別不同。系統目前不支援跨幣別轉帳（一筆交易只有一個幣別），請改選同幣別的帳戶。",
+      en: "The from account is {from} and the to account is {to}. Cross-currency transfers are not supported yet (a transaction carries a single currency) — pick accounts with the same currency.",
+    },
     fromAccount: { "zh-TW": "轉出帳戶", en: "From account" },
     toAccount: { "zh-TW": "轉入帳戶", en: "To account" },
     accountPlaceholder: { "zh-TW": "— 選擇帳戶 —", en: "— Select an account —" },
