@@ -1,0 +1,37 @@
+{
+  // 這份設定會被提交進 repo，因為 Cloudflare Workers Builds 是 clone 之後在它的
+  // 容器裡跑 `wrangler deploy`，讀不到只存在本機的檔案。裡面沒有機密：worker 名稱、
+  // R2 bucket 名稱與 internal.pathors.com 都是公開資訊，真正的密鑰走 wrangler secret。
+  //
+  // account_id 刻意省略 —— Workers Builds 本來就跑在該帳號底下；本機部署則靠
+  // 環境變數 CLOUDFLARE_ACCOUNT_ID（wrangler 原生會讀）。
+  //
+  // 自架的人：改 name / routes / r2_buckets[].bucket_name 成自己的值，
+  // 或用 `wrangler deploy --config <你的檔案>` 指到另一份設定。
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pathors-internal",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2025-08-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "workers_dev": true,
+  "routes": [{ "pattern": "internal.pathors.com", "custom_domain": true }],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "r2_buckets": [
+    { "binding": "STORAGE", "bucket_name": "pathors-internal-storage" }
+  ],
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    },
+    "traces": {
+      "enabled": false
+    }
+  },
+  "vars": {
+    "NEXT_PUBLIC_APP_NAME": "Pathors Internal"
+  }
+}
