@@ -52,19 +52,54 @@ any Postgres-over-HTTP option, or move off Workers entirely, and it still runs.
 ### Deploy
 
 ```bash
-# First time only: create your own wrangler config from the template
-cp wrangler.jsonc.example wrangler.jsonc   # fill in account_id, routes, bucket name, worker name
-
 # Build with OpenNext and deploy to Workers
 bun run cf:deploy
 ```
 
-`wrangler.jsonc` is gitignored (it holds account-specific values). In it:
+`wrangler.jsonc` is **committed to the repo** — Cloudflare Workers Builds clones
+the repository and runs `wrangler deploy` inside its own container, so a config
+that only exists on one laptop is not enough. It holds no secrets: the worker
+name, the R2 bucket name and the custom domain are all public information, and
+real credentials go through `wrangler secret` (below).
 
-- `account_id` — set it here, or omit it and export `CLOUDFLARE_ACCOUNT_ID`
-  (wrangler reads it natively).
+If you are self-hosting a fork, change these fields:
+
+- `name` (worker name) and `r2_buckets[].bucket_name` — your own.
 - `routes` — your custom domain; delete the block to deploy on `*.workers.dev`.
-- `r2_buckets[].bucket_name` and the top-level `name` (worker name) — your own.
+- `account_id` — deliberately absent. Workers Builds already runs inside the
+  right account; for local deploys export `CLOUDFLARE_ACCOUNT_ID` (wrangler
+  reads it natively). Add the field back if you prefer it pinned in the file.
+
+…or leave the file alone and point wrangler at your own copy:
+`wrangler deploy --config wrangler.local.jsonc` (that filename is gitignored).
+
+### Continuous deployment (Cloudflare Workers Builds)
+
+To deploy on every push to `main` instead of running `cf:deploy` by hand, connect
+the repository in the Cloudflare dashboard (Workers → the worker → Settings →
+Builds) and use:
+
+| Field | Value |
+| --- | --- |
+| Build command | `bun run cf:build` |
+| Deploy command | `bunx wrangler deploy` |
+| Root directory | *(leave empty)* |
+| Build variables | **none** |
+
+Two things worth knowing:
+
+- **Deploy command is `wrangler deploy`, not `bun run cf:deploy`.** The latter is
+  `cf:build && deploy`, which would build the app twice.
+- **The build needs no environment variables at all** — not even `DATABASE_URL`.
+  That is a property worth protecting: the database client is a lazy proxy (see
+  [`src/db/index.ts`](../src/db/index.ts)), so modules can hold a `getDb()`
+  reference at import time — which `next build` does when it collects page data —
+  without any credentials. If someone ever runs a query at module scope, the
+  build will start demanding a live connection string and CI will need a fake one
+  to get past it. Don't let that happen.
+
+Secrets set with `wrangler secret put` live on the Worker, not in the build, so
+they survive every Workers Builds deploy and do not need to be re-entered.
 
 ### Secrets
 
