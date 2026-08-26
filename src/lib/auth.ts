@@ -21,6 +21,56 @@ export const auth = betterAuth({
     "https://pathors-internal.pathors.workers.dev",
     "http://localhost:3000",
   ],
+  advanced: {
+    ipAddress: {
+      // better-auth 預設只讀 `x-forwarded-for`，而那個 header 的第一段是**用戶端
+      // 送什麼就是什麼** —— 它取 value.split(",")[0]，等於任何人都能自稱任意 IP，
+      // 讓 rate limit 形同虛設。在 Cloudflare 前面，`cf-connecting-ip` 是邊緣節點
+      // 寫死的、用戶端偽造不了，所以擺第一順位；x-forwarded-for 只當 CF 不在
+      // 路徑上（本機 / 其他 proxy）時的退路。
+      ipAddressHeaders: ["cf-connecting-ip", "x-forwarded-for"],
+    },
+  },
+  // ---------------------------------------------------------------------
+  // Rate limiting
+  // ---------------------------------------------------------------------
+  // ⚠️ 這裡的效果在 Cloudflare Workers 上是「有限」的，不要把它當成真的防線：
+  // storage 是 memory（見下），而 Worker 的 isolate 短命又同時有很多份，計數
+  // 不會跨 isolate、跨 colo 共享。實際上它擋得住「同一個人手滑連按」與單機
+  // 腳本的暴衝，擋不住刻意分散來源的攻擊。
+  //
+  // 要變成真的有效，得把 storage 換成共享儲存，兩條路都需要另一個 PR：
+  //   (a) storage: "database" —— better-auth 會用 `rateLimit` model（欄位
+  //       key / count / lastRequest，見 @better-auth/core db/schema/rate-limit）。
+  //       src/db/auth-schema.ts 目前沒有這張表，需要一份 migration；本次刻意
+  //       不自己寫 migration（見回報）。另外每個 auth request 會多兩次 Neon
+  //       round trip，延遲成本要一起評估。
+  //   (b) secondaryStorage 指到 Cloudflare KV —— 效能上最合適，但 wrangler
+  //       設定目前沒有 KV binding，而且 secondaryStorage 一旦設了，session 也會
+  //       改走它，那是比 rate limit 大得多的行為改變。
+  //
+  // enabled 沒有明寫：better-auth 預設只在 production 開啟，dev 不擋，正是我們要的。
+  rateLimit: {
+    // 全站預設維持 better-auth 的預設值（每個 IP × 每個 endpoint，10 秒 100 次），
+    // 只是明寫出來。刻意不調嚴：計數是 IP 為單位，客戶端在同一個 NAT 出口後面
+    // （辦公室、公司 VPN）會共用一組配額，調太緊會先弄壞正常使用者。
+    window: 10,
+    max: 100,
+    // 路徑是去掉 basePath 後的相對路徑（/api/auth/sign-in/social → /sign-in/social），
+    // 支援 `*` 萬用字元。這裡只針對「被濫用會有實際代價」的端點加嚴。
+    customRules: {
+      // 登入入口。better-auth 內建的特別規則是 10 秒 3 次；換成 60 秒 20 次，
+      // 對同一個 IP 的長時間打點更有效，又留得下整間辦公室早上一起登入的空間。
+      "/sign-in/*": { window: 60, max: 20 },
+      // RFC 7591 動態註冊：不需要任何憑證就能建一筆 oauth_application。這是整個
+      // MCP 表面唯一「匿名可寫 DB」的端點，也就是最該限流的一個。正常的 MCP
+      // client（ChatGPT / Claude / Codex）一條連線只註冊一次。
+      "/mcp/register": { window: 3600, max: 20 },
+      // 發邀請會寫 invitation 並把 email 暴露給流程，拿來當帳號探測或洗信箱都
+      // 划算。一小時 30 封對真人管理者綽綽有餘。
+      "/organization/invite-member": { window: 3600, max: 30 },
+    },
+  },
   database: drizzleAdapter(getDb(), {
     provider: "pg",
     schema: authSchema,

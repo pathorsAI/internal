@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getTranslations } from "next-intl/server";
 import { headers } from "next/headers";
 import { eq, and, isNull, inArray, desc, sql } from "drizzle-orm";
+import type { AnyPgColumn, PgTable } from "drizzle-orm/pg-core";
 import { getDb } from "./index";
 import { billingItemPaidById } from "./queries";
 import {
@@ -23,8 +24,9 @@ import {
   subscriptionPeriods,
   contracts,
   billingItems,
+  payrollItemTypes,
 } from "./schema";
-import { oauthApplication, member } from "./auth-schema";
+import { oauthAccessToken, oauthConsent, member } from "./auth-schema";
 import { uploadDocument } from "@/lib/storage";
 import { requireOrg } from "@/lib/session";
 import { auth } from "@/lib/auth";
@@ -47,6 +49,82 @@ function str(v: FormDataEntryValue | null) {
 function num(v: FormDataEntryValue | null) {
   const s = str(v);
   return s === null ? null : Number(s);
+}
+
+// ---- 外鍵歸屬驗證 ----
+
+/**
+ * 這個 repo 是多租戶的：任何人都能註冊、開自己的 organization，資料只靠
+ * `organization_id` 隔離。表單送上來的每一個外鍵 id（帳戶、分類、專案、合約…）
+ * 都是使用者可控的 —— 偽造一次 POST 就能把別的組織的 row id 塞進來。
+ *
+ * DB 的 FK constraint 擋不住這件事：別的組織的 id 一樣是合法的 FK 值。寫進去之後
+ * 資料列雖然還掛在自己的 org 底下，但讀取路徑的 join（src/db/queries.ts）是純粹
+ * 用 id 對的、沒帶 org 條件，於是對方的帳戶名／分類名／合約名就會顯示在自己的
+ * 畫面上 —— 那就是跨租戶資訊洩漏。
+ *
+ * 這裡是 web 這側的統一檢查點，語意等同 MCP 的 `assertInOrg`
+ * （src/lib/mcp/shared.ts），只是照本檔慣例回傳 i18n 過的字串而不是 throw。
+ */
+type OrgScopedTable = PgTable & {
+  id: AnyPgColumn;
+  organizationId: AnyPgColumn;
+  /** 沒有軟刪除欄位的表（例如 payroll_item_types）就不帶。 */
+  deletedAt?: AnyPgColumn;
+};
+
+/** 一張表 + 這次要驗的一組 id。null／undefined（欄位留空）一律放行。 */
+type OrgRef = readonly [OrgScopedTable, readonly (number | null | undefined)[]];
+
+/** 去掉留空與重複，回傳真的需要查的 id。 */
+function refIds(ids: readonly (number | null | undefined)[]): number[] {
+  return [...new Set(ids.filter((id): id is number => typeof id === "number"))];
+}
+
+/** 單一張表的歸屬檢查：查得到的筆數要跟丟進去的 id 數一樣多。 */
+async function allIdsOwned(
+  db: ReturnType<typeof getDb>,
+  orgId: string,
+  table: OrgScopedTable,
+  ids: number[],
+): Promise<boolean> {
+  const rows = await db
+    .select({ id: table.id })
+    .from(table)
+    .where(
+      and(
+        eq(table.organizationId, orgId),
+        inArray(table.id, ids),
+        // 指向已軟刪除的 row 也不該通過：那筆在使用者眼中已經不存在了。
+        table.deletedAt ? isNull(table.deletedAt) : undefined,
+      ),
+    );
+  return rows.length === ids.length;
+}
+
+/**
+ * 驗證一批外鍵 id 全都屬於這個 org；有任何一個不是就回傳已翻譯的錯誤字串。
+ *
+ * 一張表一次查完（`in (...)`），不會因為欄位多就變成 N+1；不同表之間平行送。
+ * 錯誤訊息刻意只說「找不到」：講「這個 id 屬於別的組織」等於幫攻擊者確認
+ * 某個 id 存在於系統中的哪裡，是另一種洩漏。
+ */
+async function unownedRefError(
+  db: ReturnType<typeof getDb>,
+  orgId: string,
+  refs: readonly OrgRef[],
+): Promise<string | null> {
+  const pending = refs
+    .map(([table, ids]) => [table, refIds(ids)] as const)
+    .filter(([, ids]) => ids.length > 0);
+  if (pending.length === 0) return null;
+
+  const results = await Promise.all(
+    pending.map(([table, ids]) => allIdsOwned(db, orgId, table, ids)),
+  );
+  if (results.every(Boolean)) return null;
+  const t = await getTranslations("errors");
+  return t("notFound.referencedRecord");
 }
 
 // 「類型」下拉值 → (doc_type, invoice_kind)
@@ -107,7 +185,11 @@ export async function createParty(
 
   try {
     const { orgId } = await requireOrg();
-    const [inserted] = await getDb()
+    const db = getDb();
+    const defaultAccountId = num(formData.get("defaultAccountId"));
+    const refError = await unownedRefError(db, orgId, [[bankAccounts, [defaultAccountId]]]);
+    if (refError) return { ok: false, error: refError };
+    const [inserted] = await db
       .insert(parties)
       .values({
         organizationId: orgId,
@@ -115,7 +197,7 @@ export async function createParty(
         label: str(formData.get("label")) ?? "vendor",
         taxId: str(formData.get("taxId")),
         defaultCurrency: str(formData.get("defaultCurrency")),
-        defaultAccountId: num(formData.get("defaultAccountId")),
+        defaultAccountId,
         typicalAmount: str(formData.get("typicalAmount")),
         contact: str(formData.get("contact")),
         note: str(formData.get("note")),
@@ -144,7 +226,10 @@ export async function createReconciliation(
 
   try {
     const { orgId } = await requireOrg();
-    const [inserted] = await getDb()
+    const db = getDb();
+    const refError = await unownedRefError(db, orgId, [[bankAccounts, [accountId]]]);
+    if (refError) return { ok: false, error: refError };
+    const [inserted] = await db
       .insert(accountReconciliations)
       .values({
         organizationId: orgId,
@@ -274,6 +359,12 @@ async function resolveExpenseIncome(
   if (!partyName) return { error: isIncome ? t("required.client") : t("required.counterparty") };
   // 分類可留空 → categoryId 為 null＝未分類（不再強制選分類，避免用另一個帳戶暫存）
   const categoryId = num(formData.get("categoryId"));
+  // 帳戶與分類都是表單直接送 id 上來的，先確認是自己組織的東西才往下走。
+  const refError = await unownedRefError(db, orgId, [
+    [bankAccounts, [accountId]],
+    [categories, [categoryId]],
+  ]);
+  if (refError) return { error: refError };
   const partyId = await getOrCreateParty(db, orgId, partyName, isIncome ? "customer" : "vendor");
   return {
     fields: {
@@ -295,6 +386,8 @@ async function resolveAdvance(
   const partyName = str(formData.get("partyName"));
   if (!partyName) return { error: t("required.vendor") };
   const categoryId = num(formData.get("categoryId")); // 可留空＝未分類
+  const refError = await unownedRefError(db, orgId, [[categories, [categoryId]]]);
+  if (refError) return { error: refError };
   const settleName = str(formData.get("settleEmployeeName"));
   if (!settleName) return { error: t("required.payer") };
   return {
@@ -307,13 +400,22 @@ async function resolveAdvance(
   };
 }
 
-async function resolveTransfer(formData: FormData): Promise<TxnResult> {
+async function resolveTransfer(
+  db: ReturnType<typeof getDb>,
+  orgId: string,
+  formData: FormData,
+): Promise<TxnResult> {
   const fromAccountId = num(formData.get("fromAccountId"));
   const toAccountId = num(formData.get("toAccountId"));
   if (!fromAccountId || !toAccountId) {
     const t = await getTranslations("errors");
     return { error: t("required.transferAccounts") };
   }
+  // 轉帳的兩隻腳都是使用者送上來的 id，兩個都要驗。
+  const refError = await unownedRefError(db, orgId, [
+    [bankAccounts, [fromAccountId, toAccountId]],
+  ]);
+  if (refError) return { error: refError };
   return { fields: { ...blankFields, fromAccountId, toAccountId } };
 }
 
@@ -327,7 +429,7 @@ async function resolveTxnFields(
   if (type === "expense" || type === "income")
     return resolveExpenseIncome(db, orgId, type === "income", formData);
   if (type === "advance") return resolveAdvance(db, orgId, formData);
-  if (type === "transfer") return resolveTransfer(formData);
+  if (type === "transfer") return resolveTransfer(db, orgId, formData);
   const t = await getTranslations("errors");
   return { error: t("unsupported.transactionType") };
 }
@@ -377,6 +479,23 @@ async function readTransactionHeader(
   return { header: { type, txnDate, amount, currency, book, billed } };
 }
 
+/**
+ * 交易表單的「綁定」欄位：專案／合約／訂閱。這三個不分交易類型都會原封不動寫進
+ * transactions，所以獨立於 resolveTxnFields（那支只管各情境自己的帳戶與分類）之外
+ * 驗一次，新增與編輯共用。
+ */
+async function transactionLinkError(
+  db: ReturnType<typeof getDb>,
+  orgId: string,
+  formData: FormData,
+): Promise<string | null> {
+  return unownedRefError(db, orgId, [
+    [projects, [num(formData.get("projectId"))]],
+    [contracts, [num(formData.get("contractId"))]],
+    [subscriptions, [num(formData.get("subscriptionId"))]],
+  ]);
+}
+
 /** insert 與 update 共用的欄位（type 只在新增時寫入，所以不在這裡）。 */
 function transactionColumns(formData: FormData, header: TxnHeader, f: TxnFields) {
   return {
@@ -404,6 +523,10 @@ function transactionColumns(formData: FormData, header: TxnHeader, f: TxnFields)
  * 相符回傳 null，不符回傳已翻譯的錯誤字串，讓呼叫端照本檔慣例包成 ActionState。
  *
  * 轉帳是「一列兩腳」：from 與 to 各自要跟自己的帳戶對得起來，所以兩個都丟進來驗。
+ *
+ * ⚠️ 一定要排在帳戶歸屬檢查（unownedRefError）之後：這支只查得到本 org 的帳戶，
+ * 別人的帳戶 id 在這裡查無資料 → 沒有「幣別不符」可回報 → 靜悄悄地通過。先報
+ * 「找不到帳戶」也比較好懂，使用者不會收到一則在講幣別、實際上帳戶根本不存在的訊息。
  */
 async function accountCurrencyError(
   db: ReturnType<typeof getDb>,
@@ -437,6 +560,8 @@ export async function createTransaction(
     const resolved = await resolveTxnFields(db, orgId, header.type, formData);
     if ("error" in resolved) return { ok: false, error: resolved.error };
     const f = resolved.fields;
+    const linkError = await transactionLinkError(db, orgId, formData);
+    if (linkError) return { ok: false, error: linkError };
     const currencyError = await accountCurrencyError(db, orgId, header.currency, [
       f.fromAccountId,
       f.toAccountId,
@@ -477,14 +602,18 @@ export async function updateParty(
 
   try {
     const { orgId } = await requireOrg();
-    await getDb()
+    const db = getDb();
+    const defaultAccountId = num(formData.get("defaultAccountId"));
+    const refError = await unownedRefError(db, orgId, [[bankAccounts, [defaultAccountId]]]);
+    if (refError) return { ok: false, error: refError };
+    await db
       .update(parties)
       .set({
         name,
         label: str(formData.get("label")) ?? "vendor",
         taxId: str(formData.get("taxId")),
         defaultCurrency: str(formData.get("defaultCurrency")),
-        defaultAccountId: num(formData.get("defaultAccountId")),
+        defaultAccountId,
         typicalAmount: str(formData.get("typicalAmount")),
         contact: str(formData.get("contact")),
         note: str(formData.get("note")),
@@ -534,6 +663,8 @@ export async function createReimbursement(
       .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, advanceId)))
       .limit(1);
     if (!adv) return { ok: false, error: t("notFound.advanceRecord") };
+    const refError = await unownedRefError(db, orgId, [[bankAccounts, [fromAccountId]]]);
+    if (refError) return { ok: false, error: refError };
     const advCurrency = adv.currency ?? "TWD";
     // 撥款的幣別跟著原代墊走，所以要驗的是「付款帳戶是不是同一種幣別」。
     const currencyError = await accountCurrencyError(db, orgId, advCurrency, [fromAccountId]);
@@ -987,9 +1118,22 @@ export async function updateTransaction(
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
+    // 這筆交易本身也要先確認是自己的。底下的 update 有帶 org 條件、擋得住，但
+    // storeTransactionDocument 會拿同一個 id 新建一列 documents —— 沒先驗的話，
+    // 就能在自己 org 底下插進一列指向別人交易的憑證，而「待通知會計師」頁的
+    // join（queries.ts listAccountantNotices）是純用 id 對的，會把對方的金額、
+    // 對象名稱與分類一起顯示出來。
+    const [owned] = await db
+      .select({ id: transactions.id })
+      .from(transactions)
+      .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)))
+      .limit(1);
+    if (!owned) return { ok: false, error: t("notFound.transaction") };
     const resolved = await resolveTxnFields(db, orgId, header.type, formData);
     if ("error" in resolved) return { ok: false, error: resolved.error };
     const f = resolved.fields;
+    const linkError = await transactionLinkError(db, orgId, formData);
+    if (linkError) return { ok: false, error: linkError };
     const currencyError = await accountCurrencyError(db, orgId, header.currency, [
       f.fromAccountId,
       f.toAccountId,
@@ -1065,6 +1209,18 @@ function invoiceValues(formData: FormData) {
   };
 }
 
+/** 發票表單上使用者可控的外鍵：綁定的合約與請款項目。 */
+async function invoiceRefError(
+  db: ReturnType<typeof getDb>,
+  orgId: string,
+  formData: FormData,
+): Promise<string | null> {
+  return unownedRefError(db, orgId, [
+    [contracts, [num(formData.get("contractId"))]],
+    [billingItems, [num(formData.get("billingItemId"))]],
+  ]);
+}
+
 /** 把表單值裡的 partyName 換成 partyId（查無就新建）。銷項對象是客戶、進項是廠商。 */
 async function invoiceColumns(orgId: string, formData: FormData) {
   const { partyName, ...columns } = invoiceValues(formData);
@@ -1084,6 +1240,8 @@ export async function createInvoice(
   const t = await getTranslations("errors");
   try {
     const { orgId } = await requireOrg();
+    const refError = await invoiceRefError(getDb(), orgId, formData);
+    if (refError) return { ok: false, error: refError };
     const { columns: v, created } = await invoiceColumns(orgId, formData);
     const [inserted] = await getDb()
       .insert(invoices)
@@ -1122,6 +1280,8 @@ export async function updateInvoice(
   if (!id) return { ok: false, error: t("required.id") };
   try {
     const { orgId } = await requireOrg();
+    const refError = await invoiceRefError(getDb(), orgId, formData);
+    if (refError) return { ok: false, error: refError };
     const { columns, created } = await invoiceColumns(orgId, formData);
     await getDb()
       .update(invoices)
@@ -1205,7 +1365,10 @@ export async function updateReconciliation(
   if (statementBalance === null) return { ok: false, error: t("required.statementBalance") };
   try {
     const { orgId } = await requireOrg();
-    await getDb()
+    const db = getDb();
+    const refError = await unownedRefError(db, orgId, [[bankAccounts, [accountId]]]);
+    if (refError) return { ok: false, error: refError };
+    await db
       .update(accountReconciliations)
       .set({ accountId, asOfDate, statementBalance, note: str(formData.get("note")) })
       .where(and(eq(accountReconciliations.organizationId, orgId), eq(accountReconciliations.id, id)));
@@ -1244,6 +1407,14 @@ export async function deletePayrollRun(id: number): Promise<ActionState> {
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
+    // payslips 沒有 organization_id（歸屬只能靠 payroll_run），所以要先確認這一期
+    // 真的是自己的，否則下面那句會把別的組織的薪資單整批軟刪除。
+    const [run] = await db
+      .select({ id: payrollRuns.id })
+      .from(payrollRuns)
+      .where(and(eq(payrollRuns.organizationId, orgId), eq(payrollRuns.id, id)))
+      .limit(1);
+    if (!run) return { ok: false, error: t("notFound.referencedRecord") };
     const deletedAt = new Date().toISOString();
     await db
       .update(payslips)
@@ -1348,6 +1519,15 @@ export async function payEmployeeSalary(
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
+    // 員工、發薪帳戶、薪資項目類別都是表單送 id 上來的，先確認全是自己組織的。
+    // 特別是 employeeId：底下取員工姓名的查詢有帶 org，但查不到也只是姓名留白，
+    // 不會擋下寫入，所以歸屬得在這裡驗。
+    const refError = await unownedRefError(db, orgId, [
+      [employees, [employeeId]],
+      [bankAccounts, [fromAccountId]],
+      [payrollItemTypes, items.map((r) => r.itemTypeId)],
+    ]);
+    if (refError) return { ok: false, error: refError };
     const runId = await getOrCreatePayrollRunId(db, orgId, year, month, payDate);
 
     // 一個員工一個月一張：已發放就擋
@@ -1616,6 +1796,8 @@ export async function createSubscription(
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
+    const refError = await unownedRefError(db, orgId, [[projects, [v.projectId]]]);
+    if (refError) return { ok: false, error: refError };
     const customer = await requireCustomer(db, orgId, v.customerPartyName);
     if ("error" in customer) return { ok: false, error: customer.error };
     const [inserted] = await db
@@ -1644,6 +1826,8 @@ export async function updateSubscription(
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
+    const refError = await unownedRefError(db, orgId, [[projects, [v.projectId]]]);
+    if (refError) return { ok: false, error: refError };
     const customer = await requireCustomer(db, orgId, v.customerPartyName);
     if ("error" in customer) return { ok: false, error: customer.error };
     await db
@@ -1873,6 +2057,9 @@ export async function createContract(
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
+    // projectId 也會被 expandContractSchedule 帶進 billing_items，一定要先驗。
+    const refError = await unownedRefError(db, orgId, [[projects, [v.projectId]]]);
+    if (refError) return { ok: false, error: refError };
     const customer = await requireCustomer(db, orgId, v.customerPartyName);
     if ("error" in customer) return { ok: false, error: customer.error };
     const [inserted] = await db
@@ -1907,6 +2094,8 @@ export async function updateContract(
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
+    const refError = await unownedRefError(db, orgId, [[projects, [v.projectId]]]);
+    if (refError) return { ok: false, error: refError };
     const customer = await requireCustomer(db, orgId, v.customerPartyName);
     if ("error" in customer) return { ok: false, error: customer.error };
     await db
@@ -2025,6 +2214,11 @@ export async function createBillingItem(
   if (!BILLING_ITEM_STATUS.has(v.status)) return { ok: false, error: t("validation.statusInvalid") };
   try {
     const { orgId } = await requireOrg();
+    const refError = await unownedRefError(getDb(), orgId, [
+      [contracts, [v.contractId]],
+      [projects, [v.projectId]],
+    ]);
+    if (refError) return { ok: false, error: refError };
     const customer = await resolveBillingCustomer(orgId, v.customerPartyName, v.contractId);
     if (!customer.id) return { ok: false, error: t("required.client") };
     const [inserted] = await getDb()
@@ -2069,6 +2263,11 @@ export async function updateBillingItem(
   if (!BILLING_ITEM_STATUS.has(v.status)) return { ok: false, error: t("validation.statusInvalid") };
   try {
     const { orgId } = await requireOrg();
+    const refError = await unownedRefError(getDb(), orgId, [
+      [contracts, [v.contractId]],
+      [projects, [v.projectId]],
+    ]);
+    if (refError) return { ok: false, error: refError };
     const customer = await resolveBillingCustomer(orgId, v.customerPartyName, v.contractId);
     if (!customer.id) return { ok: false, error: t("required.client") };
     await getDb()
@@ -2154,6 +2353,12 @@ export async function markBillingRow(
       if (!Number.isFinite(subscriptionId) || !periodStart) {
         return { ok: false, error: t("validation.invalidPeriodCode") };
       }
+      // 這個分支查不到期別時會 insert 一列新的，subscriptionId 直接來自 key，
+      // 沒驗的話就會在自己 org 底下插進一列指向別人訂閱的期別。
+      const subRefError = await unownedRefError(db, orgId, [
+        [subscriptions, [subscriptionId]],
+      ]);
+      if (subRefError) return { ok: false, error: subRefError };
       const [existing] = await db
         .select({ id: subscriptionPeriods.id })
         .from(subscriptionPeriods)
@@ -2388,27 +2593,30 @@ export async function linkPaymentToBillingRow(
 
 // ---- MCP / OAuth clients ----
 
-// Revoke (delete) an MCP client registration. Cascades to its access/refresh
-// tokens and consents (FK on delete cascade), so the client must re-authorize.
-// Deployment-wide action — gated to org owners/admins.
+/**
+ * 撤銷「我自己」對某個 MCP 用戶端的授權：刪掉我發給它的 token 與我的同意紀錄。
+ *
+ * 刻意**不刪** oauth_application 那一列。OAuth client 是透過 Dynamic Client
+ * Registration 註冊的，一個 client（ChatGPT、Claude…）註冊一次、所有使用者各自
+ * 授權，刪掉註冊等於把整個部署上其他人的連線一起弄壞。
+ *
+ * 也刻意**不檢查組織角色**。這是個人授權，不是組織設定：一般成員本來就該能收回
+ * 自己的連線，而管理員也不該有權收回別人的。where 條件同時帶 clientId 與自己的
+ * userId，所以能撤銷的範圍就恰好是「自己的」。
+ */
 export async function revokeMcpClient(clientId: string): Promise<ActionState> {
   const t = await getTranslations("errors");
   try {
-    const { orgId, userId } = await requireOrg();
+    const { userId } = await requireOrg();
     const db = getDb();
-    const role = (
-      await db
-        .select({ role: member.role })
-        .from(member)
-        .where(and(eq(member.userId, userId), eq(member.organizationId, orgId)))
-        .limit(1)
-    )[0]?.role;
-    if (role !== "owner" && role !== "admin") {
-      return { ok: false, error: t("validation.onlyOwnerOrAdminCanRevoke") };
-    }
     await db
-      .delete(oauthApplication)
-      .where(eq(oauthApplication.clientId, clientId));
+      .delete(oauthAccessToken)
+      .where(
+        and(eq(oauthAccessToken.clientId, clientId), eq(oauthAccessToken.userId, userId)),
+      );
+    await db
+      .delete(oauthConsent)
+      .where(and(eq(oauthConsent.clientId, clientId), eq(oauthConsent.userId, userId)));
     revalidatePath("/dashboard/settings/mcp");
     return { ok: true };
   } catch (e) {

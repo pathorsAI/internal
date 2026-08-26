@@ -15,15 +15,19 @@ export function middleware(request: NextRequest) {
   return NextResponse.next();
 }
 
-// Protect everything except the landing page and its assets, auth pages, the
-// auth API, static assets, and the public MCP surface: the OAuth discovery docs
-// (.well-known) and the MCP endpoint (/mcp), which must be reachable without a
-// session cookie so MCP clients can discover OAuth and receive a proper 401
-// (not an HTML login redirect). /mcp does its own bearer-token auth via
-// withMcpAuth. The MCP management UI lives at /dashboard/settings/mcp and stays
-// protected.
+// Protect everything except the landing page and its assets, the legal
+// documents, auth pages, the auth API, static assets, and the public MCP
+// surface: the OAuth discovery docs (.well-known) and the MCP endpoint (/mcp),
+// which must be reachable without a session cookie so MCP clients can discover
+// OAuth and receive a proper 401 (not an HTML login redirect). /mcp does its own
+// bearer-token auth via withMcpAuth. The MCP management UI lives at
+// /dashboard/settings/mcp and stays protected.
+//
+// /privacy and /terms must stay public: they are linked from the landing page
+// and published as `resource_policy_uri` / `resource_tos_uri` in the RFC 9728
+// metadata, where OpenAI's plugin review fetches them without any session.
 export const config = {
   matcher: [
-    "/((?!login|signup|landing|api/auth|mcp|.well-known|_next/static|_next/image|favicon.ico).*)",
+    "/((?!login|signup|landing|privacy|terms|api/auth|mcp|.well-known|_next/static|_next/image|favicon.ico).*)",
   ],
 };

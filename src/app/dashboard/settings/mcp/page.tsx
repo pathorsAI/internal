@@ -20,7 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { listMcpClients, getMemberRole, listMyOrgs } from "@/db/queries";
+import { listMcpClients, listMyOrgs } from "@/db/queries";
 import { formatDate } from "@/lib/format";
 import { requireOrg } from "@/lib/session";
 import { RevokeClientButton } from "./revoke-client-button";
@@ -35,14 +35,14 @@ export default async function McpPage() {
     "user-agent-based": t("mcp.clients.type.user-agent-based"),
     public: t("mcp.clients.type.public"),
   };
-  const { orgId, userId } = await requireOrg();
-  const [clients, role, myOrgs, h] = await Promise.all([
-    listMcpClients(),
-    getMemberRole(orgId, userId),
+  const { userId } = await requireOrg();
+  // MCP 授權是個人的、不是組織的：這頁只列出這位使用者自己授權過的用戶端，
+  // 撤銷也只撤銷自己的，所以不需要（也不該）判斷組織角色。
+  const [clients, myOrgs, h] = await Promise.all([
+    listMcpClients(userId),
     listMyOrgs(userId),
     headers(),
   ]);
-  const canManage = role === "owner" || role === "admin";
 
   const host = h.get("host") ?? "localhost:3000";
   const proto =
@@ -50,8 +50,6 @@ export default async function McpPage() {
   const origin = `${proto}://${host}`;
   const mcpUrl = `${origin}/mcp`;
   const discoveryUrl = `${origin}/.well-known/oauth-authorization-server`;
-
-  const colSpan = canManage ? 7 : 6;
 
   return (
     <>
@@ -77,6 +75,9 @@ export default async function McpPage() {
                 </code>
                 <CopyButton value={mcpUrl} />
               </div>
+              <p className="text-xs text-muted-foreground">
+                {t("mcp.connectionInfo.serverUrlHint")}
+              </p>
             </div>
             {myOrgs.length > 1 && (
               <div className="space-y-1.5">
@@ -109,9 +110,7 @@ export default async function McpPage() {
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
             {t("mcp.clients.hint")}
-            {canManage
-              ? t("mcp.clients.hintManage")
-              : t("mcp.clients.hintNoManage")}
+            {t("mcp.clients.hintManage")}
           </p>
           <TableCard title={t("mcp.clients.title")} action={t("mcp.clients.count", { count: clients.length })}>
             <Table>
@@ -123,12 +122,12 @@ export default async function McpPage() {
                   <TableHead className="text-right">{t("mcp.clients.columns.activeTokens")}</TableHead>
                   <TableHead>{t("mcp.clients.columns.status")}</TableHead>
                   <TableHead>{t("mcp.clients.columns.createdAt")}</TableHead>
-                  {canManage && <TableHead className="text-right">{t("mcp.clients.columns.actions")}</TableHead>}
+                  <TableHead className="text-right">{t("mcp.clients.columns.actions")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {clients.length === 0 ? (
-                  <EmptyRow colSpan={colSpan} message={t("mcp.clients.empty")}>
+                  <EmptyRow colSpan={7} message={t("mcp.clients.empty")}>
                     {t("mcp.clients.emptyHint")}
                   </EmptyRow>
                 ) : (
@@ -161,14 +160,12 @@ export default async function McpPage() {
                       <TableCell className="text-xs text-muted-foreground">
                         {formatDate(c.createdAt)}
                       </TableCell>
-                      {canManage && (
-                        <TableCell className="text-right">
-                          <RevokeClientButton
-                            clientId={c.clientId}
-                            name={c.name || t("mcp.clients.unnamedClient")}
-                          />
-                        </TableCell>
-                      )}
+                      <TableCell className="text-right">
+                        <RevokeClientButton
+                          clientId={c.clientId}
+                          name={c.name || t("mcp.clients.unnamedClient")}
+                        />
+                      </TableCell>
                     </TableRow>
                   ))
                 )}
