@@ -120,6 +120,33 @@ const CSP_REPORT_ONLY = [
   "manifest-src 'self'",
 ].join("; ");
 
+/**
+ * 這個系統原本掛在網域根目錄，後來整個搬到 /dashboard，根目錄改成公開的 landing。
+ * 這些是舊的頂層路徑 —— 使用者的書籤、聊天室裡貼過的連結、瀏覽器的自動完成都還
+ * 指著它們，不導的話會直接 404（而且是「先被導去登入、登入完才發現沒這頁」的
+ * 那種 404，比單純 404 更難懂）。用 308 而不是 302：這次搬遷是永久的。
+ */
+const MOVED_TO_DASHBOARD = [
+  "accountant-notices",
+  "activity",
+  "advances",
+  "bank-accounts",
+  "billing",
+  "categories",
+  "contracts",
+  "employees",
+  "invoices",
+  "members",
+  "parties",
+  "payroll",
+  "projects",
+  "reconciliation",
+  "reports",
+  "settings",
+  "subscriptions",
+  "transactions",
+] as const;
+
 const nextConfig: NextConfig = {
   // Production/OpenNext builds use a separate dist dir (NEXT_DIST_DIR=.next-prod)
   // so they never clobber the `.next` that `next dev` is actively using.
@@ -129,6 +156,13 @@ const nextConfig: NextConfig = {
     serverActions: {
       bodySizeLimit: "10mb",
     },
+  },
+  async redirects() {
+    return MOVED_TO_DASHBOARD.map((segment) => ({
+      source: `/${segment}/:path*`,
+      destination: `/dashboard/${segment}/:path*`,
+      permanent: true,
+    }));
   },
   async headers() {
     return [

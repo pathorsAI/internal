@@ -41,8 +41,9 @@ yarn-error.log*
 /.open-next/
 /.wrangler/
 
-# wrangler config — deployment-specific (copy from wrangler.jsonc.example)
-wrangler.jsonc
+# wrangler.jsonc 現在是提交進 repo 的（Workers Builds 需要它，見檔頭註解）。
+# 本機的覆寫用 wrangler.local.jsonc + `wrangler deploy --config`。
+wrangler.local.jsonc
 
 # vercel
 .vercel
