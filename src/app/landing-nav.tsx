@@ -29,11 +29,11 @@ export async function LandingNav({ signedIn }: { readonly signedIn: boolean }) {
           <a href="#books" className="hide-s">
             {t("nav.howItWorks")}
           </a>
+          <a href="#assistant" className="hide-s">
+            {t("nav.assistant")}
+          </a>
           <a href="#billing" className="hide-s">
             {t("nav.billing")}
-          </a>
-          <a href="#language" className="hide-s">
-            {t("nav.languages")}
           </a>
           <a href="https://github.com/pathorsAI/internal" className="hide-s">
             GitHub
