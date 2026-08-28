@@ -101,15 +101,24 @@ function SignInMethods() {
     const email = typeof emailEntry === "string" ? emailEntry.trim() : "";
     const password = typeof passwordEntry === "string" ? passwordEntry : "";
     setPending(true);
-    const { error } = await signIn.email({ email, password, callbackURL: redirectTo });
+    // ⚠️ 不能傳 callbackURL。better-auth 的 email 登入是走 fetch，帶 callbackURL
+    // 時伺服器會回 302，fetch 自動跟著 redirect 一路走；當 callbackURL 是 MCP 的
+    // /api/auth/mcp/authorize（ChatGPT / Claude / Codex 的授權入口）時，它下一跳
+    // 會 302 到 claude.ai/api/mcp/auth_callback（跨網域），fetch 撞 CORS 直接
+    // Failed to fetch，按鈕永遠卡在 submitting、OAuth 斷掉。Google / SSO 沒這問題
+    // 是因為它們走整頁跳轉。所以這裡只用 email 登入「建立 session」，成功後由我們
+    // 自己做整頁導頁——top-level navigation 跟著 302 到 claude.ai 不受 CORS 限制。
+    const { error } = await signIn.email({ email, password });
     if (error) {
       setPending(false);
       // 401 一律講「email 或密碼不正確」，不區分哪一個錯 —— 分開講就成了帳號探測。
       toast.error(
         error.status === 401 ? t("toast.badCredentials") : error.message || t("toast.failed"),
       );
+      return;
     }
-    // 成功時 client 依 callbackURL 自行導頁。
+    // session 已建立，整頁導去 redirectTo（可能是 MCP authorize，會再 302 去 claude.ai）。
+    window.location.href = redirectTo;
   }
 
   return (
