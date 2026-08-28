@@ -24,6 +24,8 @@ import {
 import {
   assertInOrg,
   fkError,
+  listResult,
+  listSchema,
   optBoolean,
   optDecimal,
   optNumber,
@@ -34,6 +36,7 @@ import {
   requireNumber,
   requireString,
   resolveOrg,
+  rowSchema,
   todayStr,
   type ToolDef,
 } from "./shared";
@@ -152,6 +155,73 @@ const RECONCILIATION_PROPS = {
 };
 const RECONCILIATION_REQUIRED = Object.keys(RECONCILIATION_PROPS);
 
+// 下面幾支清單工具回的是 db/queries.ts 的投影（不是整列），形狀照那邊的 select。
+
+const ORG_MEMBER_ROW = rowSchema({
+  userId: { type: "string", description: "Pass this back as `userId` when binding an employee." },
+  name: { type: "string" },
+  email: { type: "string" },
+});
+
+const PAYROLL_RUN_ROW = rowSchema({
+  id: { type: "number" },
+  periodYear: { type: "number" },
+  periodMonth: { type: "number", description: "1-12." },
+  payDate: { type: ["string", "null"], description: "YYYY-MM-DD." },
+  status: { type: "string", enum: ["draft", "finalized", "paid"] },
+  note: { type: ["string", "null"] },
+  payslipCount: { type: "number" },
+  netTotal: { type: "string", description: "Sum of the run's net pay, decimal as a string." },
+});
+
+const PAYSLIP_ROW = rowSchema({
+  id: { type: "number" },
+  employeeName: { type: ["string", "null"] },
+  periodYear: { type: "number" },
+  periodMonth: { type: "number", description: "1-12." },
+  payDate: { type: ["string", "null"], description: "YYYY-MM-DD." },
+  taxableTotal: { type: "string", description: "Decimal as a string." },
+  nontaxableTotal: { type: "string", description: "Decimal as a string." },
+  deductionTotal: { type: "string", description: "Decimal as a string." },
+  netPay: { type: "string", description: "Decimal as a string." },
+  paidTransactionId: {
+    type: ["number", "null"],
+    description: "The salary-expense ledger entry; null while the payslip is still unbooked.",
+  },
+});
+
+const RECONCILIATION_LIST_ROW = rowSchema({
+  id: { type: "number" },
+  accountId: { type: "number" },
+  accountName: { type: ["string", "null"] },
+  currency: { type: ["string", "null"], description: "3-letter code, from the account." },
+  asOfDate: { type: "string", description: "YYYY-MM-DD." },
+  statementBalance: { type: "string", description: "Decimal as a string." },
+  note: { type: ["string", "null"] },
+  bookBalance: {
+    type: ["string", "null"],
+    description: "Computed book balance on asOfDate; decimal as a string.",
+  },
+});
+
+const ACCOUNTANT_NOTICE_ROW = rowSchema({
+  id: { type: "number", description: "Document id; pass as documentId to mark_accountant_notified." },
+  fileName: { type: ["string", "null"] },
+  r2Key: { type: "string", description: "Object-storage key of the scanned invoice." },
+  notifiedAt: {
+    type: ["string", "null"],
+    description: "ISO 8601 timestamp; null while the accountant has not been told.",
+  },
+  uploadedAt: { type: "string", description: "ISO 8601 timestamp." },
+  txnId: { type: "number" },
+  txnDate: { type: "string", description: "YYYY-MM-DD." },
+  amount: { type: "string", description: "Decimal as a string." },
+  currency: { type: "string", description: "3-letter code." },
+  description: { type: ["string", "null"] },
+  partyName: { type: ["string", "null"] },
+  categoryName: { type: ["string", "null"] },
+});
+
 /**
  * Validate an employee → login-user binding: the user must be a member of the
  * org and not already bound to another (non-deleted) employee. Binding is
@@ -232,15 +302,23 @@ export const hrTools: Record<string, ToolDef> = {
   // ---- employees ----
   list_employees: {
     description:
-      "List employees (for payroll, advances, reimbursements). National ID and salary account are masked; use the web app when the full values are needed.",
+      "List employees (for payroll records, advances, reimbursements). National ID and salary account are masked; use the web app when the full values are needed.",
     inputSchema: {
       type: "object",
       properties: { limit: { type: "number", description: "Default 200." }, ...ORG_ARG },
       additionalProperties: false,
     },
+    outputSchema: listSchema({
+      type: "object",
+      properties: { ...EMPLOYEE_PROPS },
+      required: EMPLOYEE_REQUIRED,
+      additionalProperties: false,
+    }),
     execute: async (args, ctx) =>
-      (await listEmployees(await resolveOrg(args, ctx), optNumber(args, "limit") ?? 200)).map(
-        redactEmployee,
+      listResult(
+        (await listEmployees(await resolveOrg(args, ctx), optNumber(args, "limit") ?? 200)).map(
+          redactEmployee,
+        ),
       ),
   },
 
@@ -272,7 +350,8 @@ export const hrTools: Record<string, ToolDef> = {
     description:
       "List login users (members) of the organization — for binding an employee to a user via create_employee / update_employee userId. Not every employee has a login; binding is optional.",
     inputSchema: { type: "object", properties: { ...ORG_ARG }, additionalProperties: false },
-    execute: async (args, ctx) => listOrgMembers(await resolveOrg(args, ctx)),
+    outputSchema: listSchema(ORG_MEMBER_ROW),
+    execute: async (args, ctx) => listResult(await listOrgMembers(await resolveOrg(args, ctx))),
   },
 
   create_employee: {
@@ -438,28 +517,34 @@ export const hrTools: Record<string, ToolDef> = {
 
   // ---- payroll ----
   list_payroll_runs: {
-    description: "List payroll runs with payslip counts and net totals.",
+    description: "List the payroll runs recorded in the books, with payslip counts and net totals.",
     inputSchema: {
       type: "object",
       properties: { limit: { type: "number", description: "Default 50." }, ...ORG_ARG },
       additionalProperties: false,
     },
-    execute: async (args, ctx) => listPayrollRuns(await resolveOrg(args, ctx), optNumber(args, "limit") ?? 50),
+    outputSchema: listSchema(PAYROLL_RUN_ROW),
+    execute: async (args, ctx) =>
+      listResult(await listPayrollRuns(await resolveOrg(args, ctx), optNumber(args, "limit") ?? 50)),
   },
 
   list_payslips: {
-    description: "List payslips with employee, period, pay date, and totals.",
+    description: "List recorded payslips with employee, period, pay date, and totals.",
     inputSchema: {
       type: "object",
       properties: { limit: { type: "number", description: "Default 200." }, ...ORG_ARG },
       additionalProperties: false,
     },
-    execute: async (args, ctx) => listPayslipRecords(await resolveOrg(args, ctx), optNumber(args, "limit") ?? 200),
+    outputSchema: listSchema(PAYSLIP_ROW),
+    execute: async (args, ctx) =>
+      listResult(
+        await listPayslipRecords(await resolveOrg(args, ctx), optNumber(args, "limit") ?? 200),
+      ),
   },
 
   list_salary_status: {
     description:
-      "Per-employee salary status for a month: who has been paid, on what date, and the net amount. Defaults to the current month. Answers 'did everyone get paid this month, and when'.",
+      "Per-employee salary status for a month, read from the recorded payslips: who is booked as paid, on what date, and the net amount. Defaults to the current month. Answers 'is everyone's salary recorded for this month, and when was it paid'.",
     inputSchema: {
       type: "object",
       properties: {
@@ -571,15 +656,18 @@ export const hrTools: Record<string, ToolDef> = {
 
   pay_employee_salary: {
     description:
-      "Record a salary payment for one employee for a month. Creates the payslip AND posts a salary-expense transaction to the ledger (same as the app). One payment per employee per month — re-paying an already-paid month is rejected. Find ids via list_employees / list_bank_accounts. Amounts are TWD.",
+      "Book one employee's salary for a month: writes the payslip and the matching salary-expense entry in this organization's ledger, exactly as the web app does. Bookkeeping only — it does not pay anyone, initiate a bank transfer, or move money in any way; the salary is paid through the company's own bank and recorded here afterwards. One payslip per employee per month; booking a month that is already booked is rejected. Find ids via list_employees / list_bank_accounts. Amounts are TWD.",
     inputSchema: {
       type: "object",
       properties: {
         employeeId: { type: "number" },
         periodYear: { type: "number" },
         periodMonth: { type: "number", description: "1-12." },
-        payDate: { type: "string", description: "Pay date, YYYY-MM-DD." },
-        fromAccountId: { type: "number", description: "Account the salary is paid from." },
+        payDate: { type: "string", description: "The date the salary was paid, YYYY-MM-DD." },
+        fromAccountId: {
+          type: "number",
+          description: "Ledger account the salary expense is booked against.",
+        },
         book: {
           type: "string",
           enum: ["both", "internal", "external"],
@@ -795,7 +883,11 @@ export const hrTools: Record<string, ToolDef> = {
       properties: { limit: { type: "number", description: "Default 100." }, ...ORG_ARG },
       additionalProperties: false,
     },
-    execute: async (args, ctx) => listReconciliations(await resolveOrg(args, ctx), optNumber(args, "limit") ?? 100),
+    outputSchema: listSchema(RECONCILIATION_LIST_ROW),
+    execute: async (args, ctx) =>
+      listResult(
+        await listReconciliations(await resolveOrg(args, ctx), optNumber(args, "limit") ?? 100),
+      ),
   },
 
   create_reconciliation: {
@@ -916,7 +1008,9 @@ export const hrTools: Record<string, ToolDef> = {
   list_accountant_notices: {
     description: "Paper invoices (其他發票) that need to be / have been flagged to the accountant.",
     inputSchema: { type: "object", properties: { ...ORG_ARG }, additionalProperties: false },
-    execute: async (args, ctx) => listAccountantNotices(await resolveOrg(args, ctx)),
+    outputSchema: listSchema(ACCOUNTANT_NOTICE_ROW),
+    execute: async (args, ctx) =>
+      listResult(await listAccountantNotices(await resolveOrg(args, ctx))),
   },
 
   mark_accountant_notified: {

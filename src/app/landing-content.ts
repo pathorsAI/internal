@@ -22,7 +22,13 @@
 //      React 元件：語言切換器與依登入狀態變化的按鈕。class 與 id="nav" 都原樣保留。
 //      wordmark 順帶從 Pathors Internal 縮成 Internal（頁尾同步）。
 
-/** docs/index.html <style> 的內容，一字未改。 */
+import { LOCALE_SWITCHER_CSS } from "./public-locale-switcher-css";
+
+/**
+ * docs/index.html <style> 的內容，一字未改，後面接上語言切換器的樣式 ——
+ * 那塊是站內限定的（docs/index.html 沒有），而且法律文件也要用，所以住在
+ * ./public-locale-switcher-css.ts。
+ */
 export const LANDING_CSS = `:root{
   --bg:#FBFAFA; --surface:#FFFFFF; --surface-2:#F4F3F1; --surface-3:#EDECE9;
   --ink:#141318; --ink-2:#55525E; --ink-3:#8A8794;
@@ -386,40 +392,7 @@ footer .sp{margin-left:auto}
   .rv{opacity:1; transform:none}
 }
 
-/* ---------- language switch (站內限定，docs/index.html 沒有這塊) ----------
-   GitHub Pages 那份維持英文，只有 app 裡的 landing 要切語言。刻意不搬 shadcn 的
-   DropdownMenu 過來：那會把 Radix 的樣式脈絡帶進這頁自成一格的 CSS。dropdown 手刻，
-   卡片語彙（--surface / --line / --sh-2 / --r-s）沿用上面的 .card。
-   注意這顆沒有 .hide-s：窄螢幕藏掉的是導覽連結，切語言不該只有桌機有。 */
-.langsw{position:relative; flex:none; display:flex; align-items:center}
-.langsw-trigger{
-  display:grid; place-items:center; width:34px; height:34px; padding:0;
-  border:1px solid transparent; border-radius:999px; background:transparent;
-  color:var(--ink-2); cursor:pointer;
-  transition:color .16s ease, background .16s ease, border-color .16s ease;
-}
-.langsw-trigger svg{width:18px; height:18px}
-.langsw-trigger:hover,
-.langsw-trigger[aria-expanded="true"]{color:var(--ink); background:var(--surface-2); border-color:var(--line)}
-.langsw[data-pending]{opacity:.55; pointer-events:none}
-.langsw-menu{
-  position:absolute; top:calc(100% + .55rem); right:0; z-index:70; min-width:11rem;
-  display:flex; flex-direction:column; gap:2px; padding:.3rem;
-  background:var(--surface); border:1px solid var(--line); border-radius:var(--r-s);
-  box-shadow:var(--sh-2);
-}
-.langsw-item{
-  display:flex; align-items:center; gap:.5rem; width:100%; text-align:left;
-  font-family:var(--sans); font-size:.9rem; font-weight:500; letter-spacing:-.01em; line-height:1.4;
-  padding:.42rem .55rem; border:0; border-radius:calc(var(--r-s) - 4px);
-  background:transparent; color:var(--ink-2); cursor:pointer;
-  transition:color .14s ease, background .14s ease;
-}
-.langsw-item:hover{color:var(--ink); background:var(--surface-2)}
-.langsw-item[aria-checked="true"]{color:var(--ink)}
-.langsw-item svg{width:15px; height:15px; flex:none; opacity:0}
-.langsw-item[aria-checked="true"] svg{opacity:1; color:var(--brand)}
-`;
+` + LOCALE_SWITCHER_CSS;
 
 /**
  * docs/index.html <body> 的內容（不含 <header> 與 <script>），改動見檔頭。

@@ -87,7 +87,9 @@ same ideas — it is [`docs/index.html`](docs/index.html), published with GitHub
   against it. See [`docs/mcp.md`](docs/mcp.md).
 - **Bilingual UI** — English and Traditional Chinese, switched per user without
   reloading or changing URLs. See [Internationalization](#internationalization).
-- **Auth** — Google OAuth via better-auth, invite-based member management, org settings.
+- **Auth** — Google OAuth, enterprise SSO (any OIDC provider, routed by email domain) and
+  email + password, all via better-auth; invite-based member management, org settings.
+  See [`docs/sso.md`](docs/sso.md).
 
 ## Tech stack
 
@@ -127,6 +129,28 @@ an authorized redirect URI (add your production URL before deploying).
 The first user to sign in lands on `/onboarding`. To make someone the owner of an existing
 organization, edit `v_email` in [`scripts/bootstrap-owner.sql`](scripts/bootstrap-owner.sql)
 and run it against your database.
+
+### Signing in without Google
+
+Google is the primary method, but it is not the only one.
+
+**Email + password.** Useful if you self-host and do not want to wire up Google at all.
+Public password *signup* is deliberately off: better-auth links accounts by email
+address, and an unverified self-registered password account on someone else's email
+would let an attacker sit and wait for the real owner to arrive via Google. So accounts
+are created server-side instead:
+
+```bash
+bun scripts/create-user.ts --email you@example.com \
+  --password 'a-long-passphrase' --name 'Your Name' --org your-org-slug
+```
+
+Minimum password length is 12. Pass the password via `CREATE_USER_PASSWORD` instead of
+`--password` to keep it out of your shell history.
+
+**Enterprise SSO.** Any OIDC provider, routed by the email's domain — the user types
+their address and gets handed to the right IdP. Registration is likewise server-side
+only. See [`docs/sso.md`](docs/sso.md).
 
 ## Configuration
 
@@ -220,8 +244,8 @@ src/
   i18n/           # locale config and bilingual message catalogue
   lib/            # auth (better-auth), session helpers, object storage, utils
 migrations/       # plain forward-only SQL migrations
-scripts/          # one-off operational SQL (e.g. bootstrap-owner)
-docs/             # landing page (GitHub Pages root), deployment guide, MCP docs, assets
+scripts/          # one-off operational scripts (bootstrap-owner, create-user, register-sso-provider)
+docs/             # landing page (GitHub Pages root), deployment guide, MCP + SSO docs, assets
 Dockerfile        # vendor-neutral self-host image
 docker-compose.yml
 ```

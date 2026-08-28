@@ -5,8 +5,8 @@ and the built-worker preview uses a copy of production:
 
 | Command | Reads | Database |
 | --- | --- | --- |
-| `bun dev` (next dev) | `.env.local` | Neon **dev** branch (`br-bold-wildflower-a1fce385`) |
-| `bun run cf:preview` (built worker) | `.dev.vars` | Neon **local-preview** branch (`br-raspy-lab-a10s90pg`, a copy of production) |
+| `bun dev` (next dev) | `.env.local` | Neon **dev** branch (`<dev-branch-id>`) |
+| `bun run cf:preview` (built worker) | `.dev.vars` | Neon **local-preview** branch (`<local-preview-branch-id>`, a copy of production) |
 
 `next dev` reads `process.env` from `.env*`; the OpenNext/`wrangler dev` preview
 reads `process.env` from `.dev.vars`. That's why each can point at a different DB.

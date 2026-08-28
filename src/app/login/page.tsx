@@ -4,9 +4,12 @@ import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { signIn } from "@/lib/auth-client";
+import { KeyRound } from "lucide-react";
+import { authClient, signIn } from "@/lib/auth-client";
 import { LogoMark } from "@/components/logo";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Card,
   CardContent,
@@ -48,10 +51,16 @@ function mcpAuthorizeCallback(params: URLSearchParams): string | null {
   return `/api/auth/mcp/authorize?${params.toString()}`;
 }
 
-function LoginButton() {
+/** 展開中的第二種登入方式。一次只開一個，避免整張卡片變成一堆表單。 */
+type Method = "none" | "sso" | "password";
+
+function SignInMethods() {
   const t = useTranslations("auth.login");
   const params = useSearchParams();
+  // ⚠️ 三種登入方式共用同一個 redirectTo。MCP 的 authorize query 只要有一條路徑
+  // 沒接上，ChatGPT / Claude / Codex 的 OAuth 流程就會在登入後斷在這裡。
   const redirectTo = mcpAuthorizeCallback(params) || params.get("redirect") || "/dashboard";
+  const [method, setMethod] = useState<Method>("none");
   const [pending, setPending] = useState(false);
 
   async function onGoogle() {
@@ -67,17 +76,156 @@ function LoginButton() {
     // On success the browser is redirected to Google, so no need to reset.
   }
 
+  async function onSso(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    const emailEntry = form.get("ssoEmail");
+    const email = typeof emailEntry === "string" ? emailEntry.trim() : "";
+    setPending(true);
+    const { error } = await authClient.signIn.sso({ email, callbackURL: redirectTo });
+    if (error) {
+      setPending(false);
+      // plugin 對「這個網域沒有註冊 IdP」回的是 404 "No provider found for the
+      // issuer" —— 直接顯示那句話對使用者毫無意義，換成看得懂的說法。
+      toast.error(
+        error.status === 404 ? t("toast.ssoNotConfigured") : error.message || t("toast.failed"),
+      );
+    }
+    // 成功時 better-auth 的 client 會自己導去 IdP，不必重設 pending。
+  }
+
+  async function onPassword(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    const emailEntry = form.get("email");
+    const passwordEntry = form.get("password");
+    const email = typeof emailEntry === "string" ? emailEntry.trim() : "";
+    const password = typeof passwordEntry === "string" ? passwordEntry : "";
+    setPending(true);
+    const { error } = await signIn.email({ email, password, callbackURL: redirectTo });
+    if (error) {
+      setPending(false);
+      // 401 一律講「email 或密碼不正確」，不區分哪一個錯 —— 分開講就成了帳號探測。
+      toast.error(
+        error.status === 401 ? t("toast.badCredentials") : error.message || t("toast.failed"),
+      );
+    }
+    // 成功時 client 依 callbackURL 自行導頁。
+  }
+
   return (
-    <Button
-      type="button"
-      variant="outline"
-      className="w-full"
-      onClick={onGoogle}
-      disabled={pending}
-    >
-      <GoogleIcon />
-      {pending ? t("redirecting") : t("signInWithGoogle")}
-    </Button>
+    <div className="space-y-4">
+      <Button
+        type="button"
+        variant="outline"
+        className="w-full"
+        onClick={onGoogle}
+        disabled={pending}
+      >
+        <GoogleIcon />
+        {pending && method === "none" ? t("redirecting") : t("signInWithGoogle")}
+      </Button>
+
+      <div className="flex items-center gap-3">
+        <span className="h-px flex-1 bg-border" />
+        <span className="text-xs text-muted-foreground">{t("or")}</span>
+        <span className="h-px flex-1 bg-border" />
+      </div>
+
+      {method === "sso" ? (
+        <form onSubmit={onSso} className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="ssoEmail">{t("sso.emailLabel")}</Label>
+            <Input
+              id="ssoEmail"
+              name="ssoEmail"
+              type="email"
+              autoComplete="email"
+              required
+              autoFocus
+              placeholder={t("sso.emailPlaceholder")}
+            />
+          </div>
+          <Button type="submit" className="w-full" disabled={pending}>
+            {pending ? t("sso.submitting") : t("sso.submit")}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="w-full"
+            onClick={() => setMethod("none")}
+            disabled={pending}
+          >
+            {t("sso.cancel")}
+          </Button>
+        </form>
+      ) : null}
+
+      {method === "password" ? (
+        <form onSubmit={onPassword} className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="email">{t("password.emailLabel")}</Label>
+            <Input
+              id="email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              required
+              autoFocus
+              placeholder={t("password.emailPlaceholder")}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="password">{t("password.passwordLabel")}</Label>
+            <Input
+              id="password"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              required
+            />
+          </div>
+          <Button type="submit" className="w-full" disabled={pending}>
+            {pending ? t("password.submitting") : t("password.submit")}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="w-full"
+            onClick={() => setMethod("none")}
+            disabled={pending}
+          >
+            {t("password.cancel")}
+          </Button>
+        </form>
+      ) : null}
+
+      {method === "none" ? (
+        <div className="space-y-3">
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            onClick={() => setMethod("sso")}
+            disabled={pending}
+          >
+            <KeyRound className="size-4" />
+            {t("sso.button")}
+          </Button>
+          {/* 帳密是給目錄審核帳號與自架者的退路，刻意做成不顯眼的文字連結。 */}
+          <button
+            type="button"
+            onClick={() => setMethod("password")}
+            disabled={pending}
+            className="w-full text-center text-xs text-muted-foreground underline-offset-4 hover:underline disabled:opacity-50"
+          >
+            {t("password.toggle")}
+          </button>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -93,7 +241,7 @@ export default function LoginPage() {
         </CardHeader>
         <CardContent>
           <Suspense fallback={null}>
-            <LoginButton />
+            <SignInMethods />
           </Suspense>
         </CardContent>
       </Card>

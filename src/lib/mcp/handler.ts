@@ -40,7 +40,7 @@ function deriveMcpAudit(
 
 /** Bump on every published change to tools, schemas or instructions. Clients
  *  (and OpenAI's plugin "Scan Tools") key their cached snapshot off this. */
-export const SERVER_VERSION = "1.1.0";
+export const SERVER_VERSION = "1.2.0";
 
 /** Public base URL of this deployment; doubles as the OAuth issuer.
  *  Keep in sync with the `resource` passed to `mcp()` in src/lib/auth.ts. */
@@ -75,9 +75,10 @@ const LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0];
 // before doing org-scoped work — important because the signed-in account may
 // belong to multiple organizations and we never guess.
 const INSTRUCTIONS = [
-  "This server is the operational surface for one organization's bookkeeping: ledger transactions (內外帳), parties, categories, bank accounts, invoices, projects, subscriptions, contracts, employees, payroll (read-only), and reconciliations.",
+  "This server is the operational surface for one organization's bookkeeping: ledger transactions (內外帳), parties, categories, bank accounts, invoices, projects, subscriptions, contracts, employees, payroll records, and reconciliations.",
+  "It is a bookkeeping system and nothing else. Every write creates or edits a record in this organization's own books. No tool moves money: none of them initiates, authorizes or executes a payment, transfer, payout or trade, and the server is not connected to any bank, card or payment provider. Words like pay, payment, transfer, salary, reimbursement and advance always describe an entry being recorded, never money being sent.",
   "The signed-in account may belong to multiple organizations.",
-  "At the START of each session, before calling any org-scoped tool, call list_organizations and ask the user which organization to work in.",
+  "At the start of each session, before calling any org-scoped tool, call list_organizations and ask the user which organization to work in.",
   "Then pass that value as organizationId on every subsequent tool call. Never guess the organization.",
   "If a tool reports that the organization is ambiguous, stop and ask the user, then retry with organizationId.",
   "Before creating or editing a record that references another entity (categoryId, accountId, partyName/Id, projectId, contractId, subscriptionId), look the id up first with the relevant list_* tool (list_categories, list_bank_accounts, list_parties, list_projects, …) — never invent ids. Valid values for fixed fields are listed as enums in each tool's input schema.",
@@ -218,6 +219,7 @@ function toolAnnotations(name: string, explicit?: ToolAnnotations): ToolAnnotati
     openWorldHint: false,
     ...OPENWORLD_OVERRIDES[name],
     ...DESTRUCTIVE_OVERRIDES[name],
+    ...IDEMPOTENT_OVERRIDES[name],
     ...explicit,
   };
 }
@@ -228,10 +230,20 @@ const OPENWORLD_OVERRIDES: Record<string, Partial<ToolAnnotations>> = {
 };
 
 // Writes that are irreversible from MCP even though the verb isn't "delete".
+// (Irreversible as a *bookkeeping entry* — no tool here moves real money.)
 const DESTRUCTIVE_OVERRIDES: Record<string, Partial<ToolAnnotations>> = {
-  // Records the payslip AND posts the salary expense; the month can't be re-paid
-  // and there is no "unpay" tool.
+  // Writes the payslip AND the matching salary-expense ledger entry; the month
+  // cannot be recorded twice and there is no tool that reverses the entry.
   pay_employee_salary: { destructiveHint: true },
+};
+
+// Writes that are safe to repeat with the same arguments, but whose verb isn't
+// caught by the update_/delete_ prefix rule above.
+const IDEMPOTENT_OVERRIDES: Record<string, Partial<ToolAnnotations>> = {
+  // Upsert: same subscription + period + amount always lands the same row.
+  set_subscription_period: { idempotentHint: true },
+  // Clears a flag to null; running it twice changes nothing the second time.
+  unmark_accountant_notified: { idempotentHint: true },
 };
 
 // Human-readable tool titles (MCP `BaseMetadata.title`; required for the OpenAI
@@ -240,9 +252,14 @@ const DESTRUCTIVE_OVERRIDES: Record<string, Partial<ToolAnnotations>> = {
 //
 // NOTE: titles are derived here on purpose. Do not push them down into
 // src/lib/mcp/tools-*.ts.
+//
+// Titles for anything payroll- or payment-shaped must read as bookkeeping, not
+// as moving money: this server only writes ledger rows in the workspace's own
+// books and has no payment rail of any kind.
 const TITLE_OVERRIDES: Record<string, string> = {
   bulk_create_transactions: "Create transactions in bulk",
-  create_reimbursement: "Reimburse an advance",
+  create_invoice: "Record an invoice",
+  create_reimbursement: "Record an advance reimbursement",
   get_financial_overview: "Financial overview",
   get_subscription_schedule: "Subscription schedule",
   list_accountant_notices: "Notices for the accountant",
@@ -253,7 +270,7 @@ const TITLE_OVERRIDES: Record<string, string> = {
   list_salary_status: "Salary status by month",
   list_upcoming_billing: "Upcoming billing",
   mark_accountant_notified: "Mark as sent to the accountant",
-  pay_employee_salary: "Pay an employee's salary",
+  pay_employee_salary: "Record a salary payslip",
   sync_billing_calendar: "Sync the billing calendar",
   unmark_accountant_notified: "Unmark as sent to the accountant",
 };

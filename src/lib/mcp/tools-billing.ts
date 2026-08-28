@@ -9,6 +9,8 @@ import {
 } from "@/db/queries";
 import {
   assertInOrg,
+  listResult,
+  listSchema,
   normalizeCurrency,
   optBoolean,
   optDecimal,
@@ -19,6 +21,7 @@ import {
   requireNumber,
   requireString,
   resolveOrg,
+  rowSchema,
   type ToolDef,
 } from "./shared";
 
@@ -80,6 +83,46 @@ const BILLING_ITEM_PROPS = {
 // 整列回傳，欄位一定到齊（值可能是 null）。
 const BILLING_ITEM_REQUIRED = Object.keys(BILLING_ITEM_PROPS);
 
+// 看板的一列 = db/queries.ts 的 BillingRow。expected/paid 已經在那裡轉成 number；
+// 一次性項目沒有 subscriptionId/periodStart，訂閱期別沒有 billingItemId/rawStatus，
+// 所以幾乎每個欄位都可能是 null。
+const BILLING_BOARD_ROW = rowSchema({
+  key: {
+    type: "string",
+    description: "Stable row key: `bi:<id>` for a one-off charge, `sub:<id>:<periodStart>` for a subscription period.",
+  },
+  source: { type: "string", enum: ["billing_item", "subscription"] },
+  billingItemId: { type: ["number", "null"] },
+  subscriptionId: { type: ["number", "null"] },
+  periodStart: { type: ["string", "null"], description: "YYYY-MM-DD; subscription rows only." },
+  customerPartyId: { type: ["number", "null"] },
+  customerName: { type: ["string", "null"] },
+  customerTaxId: { type: ["string", "null"] },
+  title: { type: "string" },
+  contractId: { type: ["number", "null"] },
+  contractTitle: { type: ["string", "null"] },
+  projectId: { type: ["number", "null"] },
+  projectName: { type: ["string", "null"] },
+  dueDate: { type: ["string", "null"], description: "應請款日, YYYY-MM-DD." },
+  deadline: {
+    type: ["string", "null"],
+    description: "When the money is due: 實際請款日 + 月結天數, falling back to dueDate.",
+  },
+  billedOn: { type: ["string", "null"], description: "YYYY-MM-DD." },
+  paidOn: { type: ["string", "null"], description: "YYYY-MM-DD (human annotation only)." },
+  invoicedOn: { type: ["string", "null"], description: "YYYY-MM-DD." },
+  needsInvoice: { type: "boolean", description: "該開發票卻還沒開." },
+  expected: { type: "number", description: "應收." },
+  paid: { type: "number", description: "已收, computed from linked ledger transactions." },
+  currency: { type: "string", description: "3-letter code." },
+  status: { type: "string", enum: [...BOARD_STATUS] },
+  note: { type: ["string", "null"] },
+  rawStatus: {
+    type: ["string", "null"],
+    description: "The stored billing_items status; null for subscription periods, which have no row.",
+  },
+});
+
 /** update_billing_item 的欄位搬運：只有真的帶進來的欄位才會進 patch。 */
 function buildBillingItemPatch(
   args: Record<string, unknown>,
@@ -128,6 +171,7 @@ export const billingItemTools: Record<string, ToolDef> = {
       },
       additionalProperties: false,
     },
+    outputSchema: listSchema(BILLING_BOARD_ROW),
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       const rows = await listBillingBoard(orgId, {
@@ -136,18 +180,20 @@ export const billingItemTools: Record<string, ToolDef> = {
       const wanted = Array.isArray(args.status) ? (args.status as string[]) : null;
       const customerPartyId = optNumber(args, "customerPartyId");
       const invoiceOnly = optBoolean(args, "needsInvoiceOnly") ?? false;
-      return rows.filter(
-        (r) =>
-          (!wanted || wanted.includes(r.status)) &&
-          (customerPartyId === undefined || r.customerPartyId === customerPartyId) &&
-          (!invoiceOnly || r.needsInvoice),
+      return listResult(
+        rows.filter(
+          (r) =>
+            (!wanted || wanted.includes(r.status)) &&
+            (customerPartyId === undefined || r.customerPartyId === customerPartyId) &&
+            (!invoiceOnly || r.needsInvoice),
+        ),
       );
     },
   },
 
   create_billing_item: {
     description:
-      "[write] Schedule one charge for a client — a contract instalment (簽約金/期中款/尾款), a project milestone, or a one-off. Recurring monthly/annual fees do NOT belong here: use create_subscription, whose periods show up on the billing board automatically.",
+      "[write] Add one planned charge to the internal billing board — a contract instalment (簽約金/期中款/尾款), a project milestone, or a one-off. This is a bookkeeping entry: nothing is charged, collected or sent to the customer, and no invoice is issued. Recurring monthly/annual fees do not belong here: use create_subscription, whose periods show up on the board automatically.",
     inputSchema: {
       type: "object",
       properties: {
@@ -218,7 +264,7 @@ export const billingItemTools: Record<string, ToolDef> = {
 
   update_billing_item: {
     description:
-      "[write] Update a scheduled charge (only provided fields). Use this to record 「已請款」(billedOn), 「已收款」(paidOn) or 「已開發票」(invoicedOn). Actual money received is computed from ledger transactions bound to this item, not from paidOn.",
+      "[write] Update a planned charge (only provided fields). Use this to note 「已請款」(billedOn), 「已收款」(paidOn) or 「已開發票」(invoicedOn) after they happened elsewhere — the dates are annotations in the books and do not collect or send anything. Money actually received is computed from ledger transactions bound to this item, not from paidOn.",
     inputSchema: {
       type: "object",
       properties: {
@@ -313,7 +359,7 @@ export const billingItemTools: Record<string, ToolDef> = {
   },
 
   delete_billing_item: {
-    description: "[delete] Soft-delete a scheduled charge. Its calendar reminder is removed on the next sync.",
+    description: "[delete] Soft-delete a planned charge from the billing board. Its calendar reminder is removed on the next sync.",
     inputSchema: {
       type: "object",
       properties: { id: { type: "number" }, ...ORG_ARG },
