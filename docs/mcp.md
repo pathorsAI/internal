@@ -108,8 +108,7 @@ rest is worthwhile (OpenAI's guidance is to declare one for every tool that
 returns structured data), but the schema is a promise: `structuredContent` must
 validate against it, and tools that return a bare array must not declare one.
 
-**Discovery** — `list_organizations` (call first), `create_organization` (spin up a
-new org, makes you its owner), `get_financial_overview`.
+**Discovery** — `list_organizations` (call first), `get_financial_overview`.
 
 **Billing** — `list_billing_status` is the main one: the whole billing board in a
 single call, merging one-off charges (contract instalments / project milestones)
