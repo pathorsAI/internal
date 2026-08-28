@@ -172,6 +172,10 @@ body{
 ` + LOCALE_SWITCHER_CSS;
 
 /** 兩份文件互指用的路由。 */
+// t.rich 的 <b> 渲染器。放在模組層而不是 render 裡，元件每次 render 才不會產生
+// 一個新的「元件」定義（sonar S6478）。
+const renderBold = (chunks: React.ReactNode) => <strong>{chunks}</strong>;
+
 const OTHER_DOC = {
   privacy: { doc: "terms", href: "/terms" },
   terms: { doc: "privacy", href: "/privacy" },
@@ -221,9 +225,7 @@ export async function LegalDoc({ doc, children }: LegalDocProps) {
               <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
             </svg>
             <p>
-              {t.rich("chrome.draftNotice", {
-                b: (chunks) => <strong>{chunks}</strong>,
-              })}
+              {t.rich("chrome.draftNotice", { b: renderBold })}
             </p>
           </div>
 

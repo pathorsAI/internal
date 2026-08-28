@@ -79,7 +79,8 @@ function SignInMethods() {
   async function onSso(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
-    const email = String(form.get("ssoEmail") ?? "").trim();
+    const emailEntry = form.get("ssoEmail");
+    const email = typeof emailEntry === "string" ? emailEntry.trim() : "";
     setPending(true);
     const { error } = await authClient.signIn.sso({ email, callbackURL: redirectTo });
     if (error) {
@@ -89,7 +90,6 @@ function SignInMethods() {
       toast.error(
         error.status === 404 ? t("toast.ssoNotConfigured") : error.message || t("toast.failed"),
       );
-      return;
     }
     // 成功時 better-auth 的 client 會自己導去 IdP，不必重設 pending。
   }
@@ -97,8 +97,10 @@ function SignInMethods() {
   async function onPassword(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
-    const email = String(form.get("email") ?? "").trim();
-    const password = String(form.get("password") ?? "");
+    const emailEntry = form.get("email");
+    const passwordEntry = form.get("password");
+    const email = typeof emailEntry === "string" ? emailEntry.trim() : "";
+    const password = typeof passwordEntry === "string" ? passwordEntry : "";
     setPending(true);
     const { error } = await signIn.email({ email, password, callbackURL: redirectTo });
     if (error) {
@@ -107,7 +109,6 @@ function SignInMethods() {
       toast.error(
         error.status === 401 ? t("toast.badCredentials") : error.message || t("toast.failed"),
       );
-      return;
     }
     // 成功時 client 依 callbackURL 自行導頁。
   }

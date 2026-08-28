@@ -117,7 +117,8 @@ const monthDay = (k: number, d: number) => iso(addDays(startOfMonth(addMonths(TO
 const pastMonthDay = (k: number, d: number) => {
   const target = monthDay(k, d);
   const today = iso(TODAY);
-  return target > today ? today : target;
+  if (target > today) return today;
+  return target;
 };
 /** 日期字串 + n 天 */
 const plus = (base: string, n: number) => iso(addDays(new Date(`${base}T00:00:00`), n));
@@ -1134,7 +1135,9 @@ const totalTxns = bulkTxnCount + trackedTxns.length + reimbursementCount;
 
 console.log(`✓ seeded demo organization "${org.name}"`);
 console.log(`  organizationId : ${ORG}`);
-console.log(`  slug           : ${slug}${slug === requestedSlug ? "" : `  (requested "${requestedSlug}" was taken; --force picked this)`}`);
+const slugNote =
+  slug === requestedSlug ? "" : `  (requested "${requestedSlug}" was taken; --force picked this)`;
+console.log(`  slug           : ${slug}${slugNote}`);
 console.log(`  owner          : ${ownerUser.email} (${ownerUser.id})`);
 console.log("");
 console.log("  categories           " + CATEGORY_DEFS.length);

@@ -281,8 +281,8 @@ export function PrivacyEn() {
           </p>
           <h3>How to revoke</h3>
           <p>
-            Revoke it on the system&rsquo;s Settings → MCP page (
-            <code>/dashboard/settings/mcp</code>). That page lists only the clients{" "}
+            Revoke it on the system&rsquo;s Settings → MCP page
+            (<code>/dashboard/settings/mcp</code>). That page lists only the clients{" "}
             <strong>you yourself have authorized</strong>, and revoking deletes only{" "}
             <strong>your own</strong>{" "}
             tokens and consent records; the client immediately loses
@@ -317,8 +317,7 @@ export function PrivacyEn() {
           <li>
             <strong>
               Files uploaded to R2 are not removed when the supporting-document record is deleted
-            </strong>
-            ; the object stays in the bucket.
+            </strong>; the object stays in the bucket.
           </li>
           <li>
             <strong>There is no automatic cleanup of audit records</strong>: they do not

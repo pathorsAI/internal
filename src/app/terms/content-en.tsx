@@ -37,8 +37,8 @@ export function TermsEn() {
         </p>
         <p>
           The source code of the Service is published under the Apache 2.0 license.{" "}
-          <strong>These terms govern the hosted service we operate</strong> (
-          <code>internal.pathors.com</code>), not the source code license itself; an environment
+          <strong>These terms govern the hosted service we operate</strong>
+          (<code>internal.pathors.com</code>), not the source code license itself; an environment
           you set up yourself from the source code is not subject to these terms, and we are not
           responsible for it.
         </p>
