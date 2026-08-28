@@ -1,6 +1,6 @@
 import { getTranslations } from "next-intl/server";
 
-import { LandingLocaleSwitcher } from "./landing-locale-switcher";
+import { PublicLocaleSwitcher } from "./public-locale-switcher";
 
 /**
  * Landing 的導覽列。整頁只有這一塊是 JSX，其餘仍是 LANDING_HTML 的字串模板 ——
@@ -38,7 +38,7 @@ export async function LandingNav({ signedIn }: { readonly signedIn: boolean }) {
           <a href="https://github.com/pathorsAI/internal" className="hide-s">
             GitHub
           </a>
-          <LandingLocaleSwitcher />
+          <PublicLocaleSwitcher />
           <a className="btn primary sm" href={signedIn ? "/dashboard" : "/login"}>
             {signedIn ? t("cta.openApp") : t("cta.login")}
           </a>

@@ -1,6 +1,9 @@
 import Link from "next/link";
+import { getTranslations } from "next-intl/server";
 
 import "./landing-fonts.css";
+import { LOCALE_SWITCHER_CSS } from "./public-locale-switcher-css";
+import { PublicLocaleSwitcher } from "./public-locale-switcher";
 
 /**
  * 法律文件（/privacy、/terms）共用的排版外殼。
@@ -10,6 +13,7 @@ import "./landing-fonts.css";
  * 刻意「不」整包 import LANDING_CSS —— 那是 400 行的行銷版面樣式，法律文件只需要
  * token 加一份長文排版，所以這裡只重述 token 的值（與 landing-content.ts 的
  * :root 相同），其餘是本檔自己的內文樣式。landing 的色票若有調整，這裡要一起改。
+ * 例外是語言切換器的 .langsw*：那塊 landing 也在用，所以共用一份常數併進來。
  *
  * <style> 跟 landing 一樣寫在 body 裡而不是靠 React 的 hoisting：這樣它在文件
  * 順序上必定晚於 head 的 globals.css，Tailwind preflight 打平的 body/h1/p 樣式
@@ -164,21 +168,26 @@ body{
 
 @media (prefers-reduced-motion:reduce){
   .legal *{transition-duration:.001ms !important}
-}`;
+}
+` + LOCALE_SWITCHER_CSS;
+
+/** 兩份文件互指用的路由。 */
+const OTHER_DOC = {
+  privacy: { doc: "terms", href: "/terms" },
+  terms: { doc: "privacy", href: "/privacy" },
+} as const;
 
 type LegalDocProps = Readonly<{
-  /** 文件標題（h1）。 */
-  title: string;
-  /** 標題上方的 mono 小標。 */
-  eyebrow: string;
-  /** 標題下方的一段導言。 */
-  lede: string;
-  /** 另一份法律文件的連結，放在導覽列與頁尾。 */
-  otherDoc: { href: string; label: string };
+  /** 哪一份文件。標題、導言與另一份文件的連結都由它從 legal 字典取出。 */
+  doc: "privacy" | "terms";
   children: React.ReactNode;
 }>;
 
-export function LegalDoc({ title, eyebrow, lede, otherDoc, children }: LegalDocProps) {
+export async function LegalDoc({ doc, children }: LegalDocProps) {
+  const t = await getTranslations("legal");
+  const other = OTHER_DOC[doc];
+  const otherLabel = t(`${other.doc}.title`);
+
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: LEGAL_CSS }} />
@@ -192,17 +201,18 @@ export function LegalDoc({ title, eyebrow, lede, otherDoc, children }: LegalDocP
                 </svg>
               </span>Internal
             </Link>
-            <Link className="alt" href={otherDoc.href}>
-              {otherDoc.label}
+            <Link className="alt" href={other.href}>
+              {otherLabel}
             </Link>
+            <PublicLocaleSwitcher />
           </div>
         </header>
 
         <main className="doc">
-          <p className="eyebrow">{eyebrow}</p>
-          <h1>{title}</h1>
-          <p className="lede">{lede}</p>
-          <p className="updated">最後更新日期：{LEGAL_UPDATED_AT}</p>
+          <p className="eyebrow">{t(`${doc}.eyebrow`)}</p>
+          <h1>{t(`${doc}.title`)}</h1>
+          <p className="lede">{t(`${doc}.lede`)}</p>
+          <p className="updated">{t("chrome.updated", { date: LEGAL_UPDATED_AT })}</p>
 
           <div className="notice">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -211,17 +221,18 @@ export function LegalDoc({ title, eyebrow, lede, otherDoc, children }: LegalDocP
               <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
             </svg>
             <p>
-              <strong>本文件尚未經律師審閱。</strong>內容是依系統實際行為逐條寫成的，力求準確，但用字未必符合法律文書慣例。
-              正式版本會在律師檢視後更新於本頁。
+              {t.rich("chrome.draftNotice", {
+                b: (chunks) => <strong>{chunks}</strong>,
+              })}
             </p>
           </div>
 
           {children}
 
           <div className="foot">
-            <span>派斯科技股份有限公司</span>
-            <Link href="/">回首頁</Link>
-            <Link href={otherDoc.href}>{otherDoc.label}</Link>
+            <span>{t("chrome.company")}</span>
+            <Link href="/">{t("chrome.home")}</Link>
+            <Link href={other.href}>{otherLabel}</Link>
             <span className="sp">
               <a href="mailto:contact@pathors.com">contact@pathors.com</a>
             </span>

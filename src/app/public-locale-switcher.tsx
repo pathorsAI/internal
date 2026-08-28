@@ -9,17 +9,19 @@ import { setUserLocale } from "@/i18n/actions";
 import { locales, localeLabels, type Locale } from "@/i18n/config";
 
 /**
- * Landing 專用的語言切換器：一顆圖示按鈕，按下展開一個小選單。
+ * 公開頁面（landing 與 /privacy、/terms）共用的語言切換器：一顆圖示按鈕，按下展開一個
+ * 小選單。這幾頁都不需要登入，語系一律走 cookie，切換的行為完全一樣。
  *
  * 為什麼不直接用 src/components/locale-switcher.tsx：那支是側邊欄專用的（SidebarMenu +
- * shadcn 的 DropdownMenu），把 Radix 搬進 landing 會讓兩套樣式脈絡打架 —— landing 有
- * 自己一整套 CSS 變數與元件語彙，不吃 Tailwind。所以這裡只用 landing 自己的 class
- * （.langsw*，定義在 LANDING_CSS 末尾），dropdown 手刻。
+ * shadcn 的 DropdownMenu），把 Radix 搬進公開頁會讓兩套樣式脈絡打架 —— landing 與法律
+ * 文件有自己一整套 CSS 變數與元件語彙，不吃 Tailwind。所以這裡只用 .langsw* 這組 class
+ * （定義在 ./public-locale-switcher-css.ts，由 LANDING_CSS 與 LEGAL_CSS 各自併進去），
+ * dropdown 手刻。
  *
  * 行為與側邊欄那支一致：setUserLocale() 之後一定要 router.refresh() —— 翻譯後的 markup
  * 是 server component 產生的，不從 server 重新渲染的話畫面不會變。
  */
-export function LandingLocaleSwitcher() {
+export function PublicLocaleSwitcher() {
   const t = useTranslations("common.locale");
   const active = useLocale() as Locale;
   const router = useRouter();

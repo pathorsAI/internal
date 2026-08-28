@@ -24,6 +24,7 @@ import auth from "./auth";
 import errors from "./errors";
 import lib from "./lib";
 import landing from "./landing";
+import legal from "./legal";
 
 /** 全部 namespace 的雙語字典。zh-TW 與 en 都在同一個 key 上。 */
 const catalogue = {
@@ -51,6 +52,7 @@ const catalogue = {
   errors,
   lib,
   landing,
+  legal,
 };
 
 export type Messages = Localized<typeof catalogue>;

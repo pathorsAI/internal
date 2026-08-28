@@ -246,7 +246,10 @@ things that don't live in this repo:
   completed **individual or business identity verification** — publishing under
   an unverified name is an automatic rejection;
 - public listing URLs: website, support, **privacy policy**, **terms**; plus a
-  name, logo, short/long description and category;
+  name, logo, short/long description and category. `/privacy` and `/terms` are
+  served bilingually (en / zh-TW) and default to English for any browser that
+  does not ask for Chinese, so a reviewer can read them without switching
+  anything; the language switcher in the header is there if they want to;
 - **domain verification**: set `OPENAI_APPS_CHALLENGE_TOKEN` to the token the
   portal generates and redeploy, so `/.well-known/openai-apps-challenge` returns
   it as bare text;
