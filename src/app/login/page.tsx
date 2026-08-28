@@ -118,7 +118,7 @@ function SignInMethods() {
       return;
     }
     // session 已建立，整頁導去 redirectTo（可能是 MCP authorize，會再 302 去 claude.ai）。
-    window.location.href = redirectTo;
+    globalThis.location.href = redirectTo;
   }
 
   return (
