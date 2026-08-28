@@ -186,7 +186,13 @@ export const auth = betterAuth({
     //
     // 刻意不設 organizationProvisioning：第一次 SSO 登入會自動建 user
     // （implicit signup，這是我們要的），但要進哪個組織仍走既有的邀請流程。
-    sso({ providersLimit: 0 }),
+    // domainVerification 是 OIDC callback 的信任開關：開了之後 plugin 會讀
+    // sso_provider.domain_verified，「已驗證網域的 provider + email 網域相符」
+    // 才算 trusted provider，better-auth 才肯把 SSO 登入 link 到既有的同 email
+    // user（例如先用 Google 登入過的員工）。不開的話 link 一律被拒，走 SSO 的
+    // 老用戶會拿到 ?error=UNKNOWN（2026-08-28 實際發生過）。我們不用它附帶的
+    // DNS TXT 驗證流程 —— 註冊走腳本、domain_verified 由腳本直接寫 true。
+    sso({ providersLimit: 0, domainVerification: { enabled: true } }),
     // OAuth 2.0 / OIDC provider for MCP clients. Adds /api/auth/mcp/* endpoints
     // (authorize, token, register, get-session) + OAuth discovery. Unauthenticated
     // authorize requests are sent to loginPage, which redirects back after sign-in.

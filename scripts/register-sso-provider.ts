@@ -171,6 +171,10 @@ await ctx.adapter.create({
     samlConfig: null,
     userId,
     organizationId,
+    // 管理者用腳本註冊即視為已驗證網域（我們不用 plugin 的 DNS TXT 流程）。
+    // 這是 OIDC callback 肯把 SSO 登入 link 到既有同 email user 的前提，
+    // 見 migrations/0021_sso_domain_verified.sql。
+    domainVerified: true,
   },
 });
 
