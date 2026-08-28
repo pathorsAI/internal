@@ -254,10 +254,59 @@ things that don't live in this repo:
   portal generates and redeploy, so `/.well-known/openai-apps-challenge` returns
   it as bare text;
 - **reviewer demo credentials** that work without MFA, SMS, email confirmation
-  or VPN — today this server signs in with Google only, which is a problem
-  worth solving before submitting;
+  or VPN, backed by a fully populated workspace — see
+  [Reviewer demo account](#reviewer-demo-account) below;
 - five positive and three negative test cases, starter prompts, country
   availability, and release notes.
+
+## Reviewer demo account
+
+Both directories ask for the same thing in different words — OpenAI wants
+"test credentials for a fully populated account", Anthropic wants a "fully
+featured demo account with sample data". An empty workspace fails review: most
+of the 68 tools would answer with an empty array and the reviewer has no way to
+tell what the connector does.
+
+Two commands produce that account. Run them against the environment you are
+submitting (`bun` picks up `.env.local`; use `bun --env-file=… ` for another):
+
+```sh
+# 1. the sign-in credentials themselves (email + password, server-side only —
+#    HTTP sign-up is disabled on purpose).
+bun scripts/create-user.ts \
+  --email reviewer@example.com \
+  --password '<a long passphrase>' \
+  --name 'Directory Reviewer'
+
+# 2. the workspace behind them: a demo org owned by that user, populated across
+#    every tool domain.
+bun scripts/seed-demo-org.ts --owner-email reviewer@example.com --org-slug demo
+```
+
+`seed-demo-org.ts` creates one organization ("Meridian Software Ltd. (Demo)" by
+default, `--org-name` to change it) and fills it with plainly fictional data:
+categories, TWD/USD bank accounts, customers and vendors, six months of
+transactions across the internal and external books, projects, contracts with
+instalment schedules, subscriptions with period overrides, billing rows in every
+board state (due / billed / partial / overdue / paid / upcoming), invoices in
+several issue states, employees with payroll runs and payslips, an outstanding
+advance plus a settled reimbursement, bank reconciliations, accountant notices,
+and activity-log entries. It prints a summary of what it wrote.
+
+Safety properties worth keeping:
+
+- it only ever **inserts**, and every row carries the organization it just
+  created — nothing outside that org is touched;
+- it **refuses to run** when the target slug already exists, rather than pouring
+  a second copy into the existing demo org (which would double every board row).
+  `--force` creates a fresh org under a suffixed slug (`demo-2`, `demo-3`, …)
+  and still leaves the existing one alone;
+- there is no interactive transaction on neon-http, so a mid-run failure leaves
+  a half-built org. The error names the section that failed and the summary
+  prints the org id — delete that org and re-run.
+
+Give the reviewer the email, the password, and `organizationId: "demo"` (tools
+accept the slug as well as the id).
 
 Sources: [Build an MCP server](https://developers.openai.com/plugins/build/mcp-server),
 [Authentication](https://developers.openai.com/plugins/build/auth),
