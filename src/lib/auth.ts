@@ -1,6 +1,7 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { genericOAuth, mcp, organization } from "better-auth/plugins";
+import { sso } from "@better-auth/sso";
 import { nextCookies } from "better-auth/next-js";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -77,7 +78,27 @@ export const auth = betterAuth({
     // neon-http has no interactive transactions; run ops sequentially.
     transaction: false,
   }),
-  emailAndPassword: { enabled: false },
+  // ---------------------------------------------------------------------
+  // Email + password
+  // ---------------------------------------------------------------------
+  // 開著是為了兩種人：目錄審核用的測試帳號（審核者沒有我們的 Google 網域），
+  // 以及自架這套系統、不想接 Google 的人。
+  //
+  // ⚠️ disableSignUp 必須維持 true。公開的密碼註冊會開出一條帳號預劫持
+  // （account pre-hijacking）的路：better-auth 的帳號連結是以 email 為鍵，
+  // 而密碼註冊的 email **沒有任何人驗證過**。攻擊者可以先用 victim@company.com
+  // 註冊一組密碼帳號，等真正的擁有者之後用 Google 登入時，那個 provider 已驗證
+  // 的身分就被連到攻擊者早就建好的 user 上，攻擊者的密碼從此能登進對方的帳號。
+  // Google 登入本來就會自動建 user（email 由 provider 驗證過），所以我們不需要
+  // 公開註冊；密碼帳號一律由伺服器端開（scripts/create-user.ts）。
+  //
+  // minPasswordLength 拉到 12：這些帳號是人工發的、數量少，沒有「使用者嫌長」
+  // 的問題，而 better-auth 的預設 8 對一個能看到全部帳務的後台太短。
+  emailAndPassword: {
+    enabled: true,
+    disableSignUp: true,
+    minPasswordLength: 12,
+  },
   socialProviders: {
     google: {
       clientId: process.env.GOOGLE_CLIENT_ID as string,
@@ -155,6 +176,17 @@ export const auth = betterAuth({
         },
       ],
     }),
+    // 企業 SSO（OIDC）。登入頁做的是 home realm discovery：使用者只填 email，
+    // plugin 用 email 的網域去對 sso_provider.domain，找到就導去該 IdP。
+    // 沒有任何網域寫死在程式裡 —— 要支援哪個客戶／哪個 IdP 全看 DB 裡註冊了什麼。
+    //
+    // providersLimit: 0 是 plugin 內建的關閉開關（見 @better-auth/sso 的
+    // registerSSOProvider：limit 為 0 時直接 403）。它與下面的 disabledPaths
+    // 是兩層互相獨立的防線，理由見 disabledPaths 的註解。
+    //
+    // 刻意不設 organizationProvisioning：第一次 SSO 登入會自動建 user
+    // （implicit signup，這是我們要的），但要進哪個組織仍走既有的邀請流程。
+    sso({ providersLimit: 0 }),
     // OAuth 2.0 / OIDC provider for MCP clients. Adds /api/auth/mcp/* endpoints
     // (authorize, token, register, get-session) + OAuth discovery. Unauthenticated
     // authorize requests are sent to loginPage, which redirects back after sign-in.
@@ -170,4 +202,25 @@ export const auth = betterAuth({
     }),
     nextCookies(),
   ],
+  // ---------------------------------------------------------------------
+  // SSO provider 註冊：從 HTTP 一律封死
+  // ---------------------------------------------------------------------
+  // @better-auth/sso 的 /sso/register 只掛了 sessionMiddleware —— 也就是說
+  // **任何一個登入中的一般使用者**都能註冊一個 IdP。那等於把「誰可以簽發本站身分」
+  // 的權力交給每個員工：註冊一個自己控制的 IdP、宣告 domain 是某個還沒有人用過的
+  // 網域，就能用它變出新帳號。organizationId 那段的 owner/admin 檢查只在有帶
+  // organizationId 時才跑，不帶就完全繞過。
+  //
+  // disabledPaths 在 router 的 onRequest 生效（better-auth/dist/api：命中就直接
+  // 回 404），**只擋 HTTP**；伺服器端直接呼叫 endpoint 函式不經過 router，所以
+  // 這不影響部署流程。註冊一律走 scripts/register-sso-provider.ts，那支只有能拿到
+  // DATABASE_URL 的人跑得動。
+  //
+  // 為什麼與 sso({ providersLimit: 0 }) 兩層都要：providersLimit 擋的是 handler
+  // 內部（連伺服器端呼叫也一起擋），disabledPaths 擋的是路由層。任何一邊被未來的
+  // 版本改掉或不小心拿掉，另一邊還在。
+  //
+  // update / delete 沒有列進來：那兩支走 checkProviderAccess，只有 provider 的
+  // 擁有者（或該組織的 owner/admin）過得去，而擁有者只可能由上面那支腳本產生。
+  disabledPaths: ["/sso/register"],
 });

@@ -138,3 +138,30 @@ export const oauthConsent = pgTable("oauth_consent", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+
+// ---- @better-auth/sso plugin (enterprise SSO / home-realm discovery) ----
+// 欄位表照抄 plugin 自己的 schema 宣告（`sso()` 回傳值的
+// schema.ssoProvider.fields）：issuer / oidcConfig / samlConfig / userId /
+// providerId / organizationId / domain。plugin 沒有為這個 model 宣告
+// createdAt / updatedAt，所以這裡也沒有。
+//
+// `domainVerified` 只在 plugin 開了 `domainVerification` 時才會出現在 schema 裡，
+// 本專案沒開，所以不放。adapter 是照 schema 的欄位逐一取值（@better-auth/core
+// 的 adapter factory：`for (const field in fields)`），schema 裡沒有的輸入欄位
+// 會被忽略而不是報錯，所以少這一欄不會炸。
+//
+// export 名稱必須正好是 `ssoProvider`：drizzle adapter 用 model 名稱去 schema
+// 物件上取表。DB 表名照本專案慣例用 snake_case，見 migrations/0020_sso_provider.sql。
+export const ssoProvider = pgTable("sso_provider", {
+  id: text("id").primaryKey(),
+  issuer: text("issuer").notNull(),
+  // 整包 OIDC 設定（含 clientSecret）序列化成 JSON 字串塞一欄 —— 這是 plugin 的
+  // 形狀，不是我們的選擇。
+  oidcConfig: text("oidc_config"),
+  samlConfig: text("saml_config"),
+  userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+  providerId: text("provider_id").notNull().unique(),
+  organizationId: text("organization_id"),
+  // home realm discovery 的鍵：登入時拿 email 的網域來比對這一欄。
+  domain: text("domain").notNull(),
+});
