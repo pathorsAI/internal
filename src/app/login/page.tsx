@@ -51,16 +51,15 @@ function mcpAuthorizeCallback(params: URLSearchParams): string | null {
   return `/api/auth/mcp/authorize?${params.toString()}`;
 }
 
-/** 展開中的第二種登入方式。一次只開一個，避免整張卡片變成一堆表單。 */
-type Method = "none" | "sso" | "password";
-
 function SignInMethods() {
   const t = useTranslations("auth.login");
   const params = useSearchParams();
   // ⚠️ 三種登入方式共用同一個 redirectTo。MCP 的 authorize query 只要有一條路徑
   // 沒接上，ChatGPT / Claude / Codex 的 OAuth 流程就會在登入後斷在這裡。
   const redirectTo = mcpAuthorizeCallback(params) || params.get("redirect") || "/dashboard";
-  const [method, setMethod] = useState<Method>("none");
+  // 帳密表單常駐在最上面（目錄審核帳號與自架者的主要入口，打開就能填）；
+  // SSO 要另外收一個公司 email，所以維持「點了才展開」，展開時把 email 欄叫出來。
+  const [ssoOpen, setSsoOpen] = useState(false);
   const [pending, setPending] = useState(false);
 
   async function onGoogle() {
@@ -115,16 +114,33 @@ function SignInMethods() {
 
   return (
     <div className="space-y-4">
-      <Button
-        type="button"
-        variant="outline"
-        className="w-full"
-        onClick={onGoogle}
-        disabled={pending}
-      >
-        <GoogleIcon />
-        {pending && method === "none" ? t("redirecting") : t("signInWithGoogle")}
-      </Button>
+      {/* 主要入口：email + 密碼，常駐可見，打開即可填。 */}
+      <form onSubmit={onPassword} className="space-y-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="email">{t("password.emailLabel")}</Label>
+          <Input
+            id="email"
+            name="email"
+            type="email"
+            autoComplete="email"
+            required
+            placeholder={t("password.emailPlaceholder")}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="password">{t("password.passwordLabel")}</Label>
+          <Input
+            id="password"
+            name="password"
+            type="password"
+            autoComplete="current-password"
+            required
+          />
+        </div>
+        <Button type="submit" className="w-full" disabled={pending}>
+          {pending ? t("password.submitting") : t("password.submit")}
+        </Button>
+      </form>
 
       <div className="flex items-center gap-3">
         <span className="h-px flex-1 bg-border" />
@@ -132,99 +148,60 @@ function SignInMethods() {
         <span className="h-px flex-1 bg-border" />
       </div>
 
-      {method === "sso" ? (
-        <form onSubmit={onSso} className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="ssoEmail">{t("sso.emailLabel")}</Label>
-            <Input
-              id="ssoEmail"
-              name="ssoEmail"
-              type="email"
-              autoComplete="email"
-              required
-              autoFocus
-              placeholder={t("sso.emailPlaceholder")}
-            />
-          </div>
-          <Button type="submit" className="w-full" disabled={pending}>
-            {pending ? t("sso.submitting") : t("sso.submit")}
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="w-full"
-            onClick={() => setMethod("none")}
-            disabled={pending}
-          >
-            {t("sso.cancel")}
-          </Button>
-        </form>
-      ) : null}
+      {/* 次要方式：Google 與 SSO。 */}
+      <div className="space-y-3">
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full"
+          onClick={onGoogle}
+          disabled={pending}
+        >
+          <GoogleIcon />
+          {t("signInWithGoogle")}
+        </Button>
 
-      {method === "password" ? (
-        <form onSubmit={onPassword} className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="email">{t("password.emailLabel")}</Label>
-            <Input
-              id="email"
-              name="email"
-              type="email"
-              autoComplete="email"
-              required
-              autoFocus
-              placeholder={t("password.emailPlaceholder")}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="password">{t("password.passwordLabel")}</Label>
-            <Input
-              id="password"
-              name="password"
-              type="password"
-              autoComplete="current-password"
-              required
-            />
-          </div>
-          <Button type="submit" className="w-full" disabled={pending}>
-            {pending ? t("password.submitting") : t("password.submit")}
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="w-full"
-            onClick={() => setMethod("none")}
-            disabled={pending}
-          >
-            {t("password.cancel")}
-          </Button>
-        </form>
-      ) : null}
-
-      {method === "none" ? (
-        <div className="space-y-3">
+        {ssoOpen ? (
+          <form onSubmit={onSso} className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="ssoEmail">{t("sso.emailLabel")}</Label>
+              <Input
+                id="ssoEmail"
+                name="ssoEmail"
+                type="email"
+                autoComplete="email"
+                required
+                autoFocus
+                placeholder={t("sso.emailPlaceholder")}
+              />
+            </div>
+            <Button type="submit" className="w-full" disabled={pending}>
+              {pending ? t("sso.submitting") : t("sso.submit")}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="w-full"
+              onClick={() => setSsoOpen(false)}
+              disabled={pending}
+            >
+              {t("sso.cancel")}
+            </Button>
+          </form>
+        ) : (
           <Button
             type="button"
             variant="outline"
             className="w-full"
-            onClick={() => setMethod("sso")}
+            onClick={() => setSsoOpen(true)}
             disabled={pending}
           >
             <KeyRound className="size-4" />
             {t("sso.button")}
           </Button>
-          {/* 帳密是給目錄審核帳號與自架者的退路，刻意做成不顯眼的文字連結。 */}
-          <button
-            type="button"
-            onClick={() => setMethod("password")}
-            disabled={pending}
-            className="w-full text-center text-xs text-muted-foreground underline-offset-4 hover:underline disabled:opacity-50"
-          >
-            {t("password.toggle")}
-          </button>
-        </div>
-      ) : null}
+        )}
+      </div>
     </div>
   );
 }
