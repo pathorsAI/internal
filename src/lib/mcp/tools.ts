@@ -19,6 +19,10 @@ import {
   requireNumber,
   resolveOrg,
   todayStr,
+  listResult,
+  listSchema,
+  rowSchema,
+  type JsonSchemaObject,
   type ToolDef,
 } from "./shared";
 import { accountingTools } from "./tools-accounting";
@@ -29,12 +33,75 @@ import { billingItemTools } from "./tools-billing";
 
 export type { ToolContext, ToolDef } from "./shared";
 
+// ---- outputSchema 素材 ----
+// 這幾支是自己組 select 的清單工具，形狀就是 select 裡列的欄位：drizzle 的 numeric
+// 讀回來是字串、date 是 YYYY-MM-DD 字串、leftJoin 帶出來的欄位可能是 null。
+
+const SUBSCRIPTION_LIST_ROW: JsonSchemaObject = rowSchema({
+  id: { type: "number" },
+  name: { type: "string" },
+  amount: { type: "string", description: "Decimal as a string." },
+  currency: { type: "string", description: "3-letter code." },
+  intervalMonths: { type: "number" },
+  startDate: { type: "string", description: "YYYY-MM-DD." },
+  endDate: { type: ["string", "null"], description: "YYYY-MM-DD." },
+  status: { type: "string", enum: ["active", "paused", "ended"] },
+  customer: { type: ["string", "null"], description: "Customer party name." },
+  nextChargeDate: {
+    type: ["string", "null"],
+    description: "YYYY-MM-DD; null unless the subscription is active and still running.",
+  },
+});
+
+const CONTRACT_LIST_ROW: JsonSchemaObject = rowSchema({
+  id: { type: "number" },
+  title: { type: "string" },
+  amount: { type: ["string", "null"], description: "Decimal as a string; null when not agreed." },
+  currency: { type: "string", description: "3-letter code." },
+  startDate: { type: ["string", "null"], description: "YYYY-MM-DD." },
+  endDate: { type: ["string", "null"], description: "YYYY-MM-DD." },
+  status: { type: "string", enum: ["draft", "active", "completed", "cancelled"] },
+  fileUrl: { type: ["string", "null"] },
+  customer: { type: ["string", "null"], description: "Customer party name." },
+  received: { type: "number", description: "已收: linked income in the contract currency." },
+  cost: { type: "number", description: "Linked expense/advance; reference only." },
+  remaining: { type: ["number", "null"], description: "未收 = amount − received; null when amount is unset." },
+});
+
+const PROJECT_LIST_ROW: JsonSchemaObject = rowSchema({
+  id: { type: "number" },
+  name: { type: "string" },
+  status: { type: "string", enum: ["active", "archived"] },
+  description: { type: ["string", "null"] },
+  client: { type: ["string", "null"], description: "Owning customer party name." },
+});
+
+const CUSTOMER_LIST_ROW: JsonSchemaObject = rowSchema({
+  id: { type: "number", description: "Pass this back as customerPartyId." },
+  name: { type: "string" },
+  taxId: { type: ["string", "null"] },
+  defaultCurrency: { type: ["string", "null"], description: "3-letter code." },
+  contact: { type: ["string", "null"] },
+});
+
+const ACTIVITY_ROW: JsonSchemaObject = rowSchema({
+  id: { type: "number" },
+  actorName: { type: ["string", "null"] },
+  actorEmail: { type: ["string", "null"] },
+  channel: { type: "string", enum: ["web", "mcp"] },
+  action: { type: "string", enum: ["create", "update", "delete", "read"] },
+  entityType: { type: "string" },
+  entityId: { type: ["number", "null"] },
+  summary: { type: ["string", "null"] },
+  createdAt: { type: "string", description: "ISO 8601 timestamp." },
+});
+
 // Discovery + the recurring-billing tools. Domain CRUD lives in the tools-*.ts
 // modules and is merged into `tools` at the bottom.
 const billingTools: Record<string, ToolDef> = {
   list_organizations: {
     description:
-      "List the organizations the signed-in user can access. Call this FIRST in a session, show the user the options, and ask which organization to work in — then pass the chosen value as `organizationId` to every other tool. Required when the account belongs to more than one organization.",
+      "List the organizations the signed-in user can access. Call this first in a session, show the user the options, and ask which organization to work in — then pass the chosen value as `organizationId` to every other tool. Required when the account belongs to more than one organization.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -43,8 +110,8 @@ const billingTools: Record<string, ToolDef> = {
     // Reference implementation of an `outputSchema` (see ToolDef in shared.ts).
     // Declaring one makes the handler also return the result as MCP
     // `structuredContent`, which ChatGPT/Codex prefer over parsing the JSON text
-    // block. Worth adding to the other tools whose return shape is stable and
-    // object-valued — tools that return a bare array must NOT declare one.
+    // block. Every tool here declares one; the schema is a promise, so derive it
+    // from what `execute` really returns, nullable fields included.
     outputSchema: {
       type: "object",
       properties: {
@@ -88,7 +155,7 @@ const billingTools: Record<string, ToolDef> = {
 
   list_upcoming_billing: {
     description:
-      "Upcoming charges within the next N days, from BOTH active recurring subscriptions (next charge computed from start_date + interval_months) and scheduled one-off billing items (contract instalments / project milestones). Use this to answer 'who do I need to bill, and when'. For the full picture including overdue and unpaid items, use list_billing_status.",
+      "Charges coming due within the next N days, projected from the organization's own records: both active recurring subscriptions (next charge computed from start_date + interval_months) and planned one-off billing items (contract instalments / project milestones). A reminder view — it bills nobody and collects nothing. Use it to answer 'who do I need to bill, and when'. For the full picture including overdue and unpaid items, use list_billing_status.",
     inputSchema: {
       type: "object",
       properties: {
@@ -254,6 +321,7 @@ const billingTools: Record<string, ToolDef> = {
       },
       additionalProperties: false,
     },
+    outputSchema: listSchema(SUBSCRIPTION_LIST_ROW),
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       const status = optString(args, "status");
@@ -282,13 +350,15 @@ const billingTools: Record<string, ToolDef> = {
         .leftJoin(parties, eq(subscriptions.customerPartyId, parties.id))
         .where(where)
         .orderBy(asc(subscriptions.startDate));
-      return rows.map((s) => ({
-        ...s,
-        nextChargeDate:
-          s.status === "active"
-            ? nextChargeDate(s.startDate, s.intervalMonths, today, s.endDate)
-            : null,
-      }));
+      return listResult(
+        rows.map((s) => ({
+          ...s,
+          nextChargeDate:
+            s.status === "active"
+              ? nextChargeDate(s.startDate, s.intervalMonths, today, s.endDate)
+              : null,
+        })),
+      );
     },
   },
 
@@ -475,6 +545,7 @@ const billingTools: Record<string, ToolDef> = {
       },
       additionalProperties: false,
     },
+    outputSchema: listSchema(CONTRACT_LIST_ROW),
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       const status = optString(args, "status");
@@ -516,11 +587,13 @@ const billingTools: Record<string, ToolDef> = {
         .where(where)
         .groupBy(contracts.id, parties.name)
         .orderBy(desc(contracts.id));
-      return rows.map((r) => {
-        const received = Number(r.received);
-        const remaining = r.amount == null ? null : Number(r.amount) - received;
-        return { ...r, received, cost: Number(r.cost), remaining };
-      });
+      return listResult(
+        rows.map((r) => {
+          const received = Number(r.received);
+          const remaining = r.amount == null ? null : Number(r.amount) - received;
+          return { ...r, received, cost: Number(r.cost), remaining };
+        }),
+      );
     },
   },
 
@@ -538,6 +611,7 @@ const billingTools: Record<string, ToolDef> = {
       },
       additionalProperties: false,
     },
+    outputSchema: listSchema(PROJECT_LIST_ROW),
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       const status = optString(args, "status");
@@ -549,7 +623,7 @@ const billingTools: Record<string, ToolDef> = {
             isNull(projects.deletedAt),
           )
         : and(eq(projects.organizationId, orgId), isNull(projects.deletedAt));
-      return db
+      const rows = await db
         .select({
           id: projects.id,
           name: projects.name,
@@ -561,6 +635,7 @@ const billingTools: Record<string, ToolDef> = {
         .leftJoin(parties, eq(projects.clientPartyId, parties.id))
         .where(where)
         .orderBy(asc(projects.name));
+      return listResult(rows);
     },
   },
 
@@ -572,10 +647,11 @@ const billingTools: Record<string, ToolDef> = {
       properties: { ...ORG_ARG },
       additionalProperties: false,
     },
+    outputSchema: listSchema(CUSTOMER_LIST_ROW),
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       const db = getDb();
-      return db
+      const rows = await db
         .select({
           id: parties.id,
           name: parties.name,
@@ -593,6 +669,7 @@ const billingTools: Record<string, ToolDef> = {
           ),
         )
         .orderBy(asc(parties.name));
+      return listResult(rows);
     },
   },
 
@@ -609,13 +686,16 @@ const billingTools: Record<string, ToolDef> = {
       },
       additionalProperties: false,
     },
+    outputSchema: listSchema(ACTIVITY_ROW),
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
-      return listActivity(orgId, {
-        entityType: optString(args, "entityType"),
-        action: optString(args, "action"),
-        limit: optNumber(args, "limit"),
-      });
+      return listResult(
+        await listActivity(orgId, {
+          entityType: optString(args, "entityType"),
+          action: optString(args, "action"),
+          limit: optNumber(args, "limit"),
+        }),
+      );
     },
   },
 

@@ -3,12 +3,24 @@
 This app exposes a [Model Context Protocol](https://modelcontextprotocol.io) server
 so an MCP client (Claude, etc.) can run essentially the whole app in natural
 language — the ledger (內外帳), parties, categories, bank accounts, invoices,
-projects, recurring subscriptions, contracts, employees, payroll
-(read), and reconciliations.
+projects, recurring subscriptions, contracts, employees, payroll records, and
+reconciliations.
 
 A headline use: **never forget when to bill a client for recurring work.**
 `list_upcoming_billing` projects the next charge of every active subscription from
 `interval_months` + `start_date`. One-off collection is tracked on contracts (已收/未收).
+
+> **Bookkeeping only — this server moves no money.** Every write creates or edits
+> a row in the organization's own books. Nothing here initiates, authorizes or
+> executes a payment, transfer, payout or trade, and the server has no connection
+> to a bank, card network or payment provider. `pay_employee_salary` writes a
+> payslip plus the matching salary-expense ledger entry; `create_reimbursement`
+> books a repaid advance; a `transfer` transaction is a book entry between two of
+> the organization's own ledger accounts; `create_billing_item` adds a reminder to
+> an internal board and bills nobody; `create_invoice` records an invoice, it does
+> not issue one. Tool titles and descriptions are worded to say so explicitly —
+> keep them that way, both directories reject anything that reads like a payment
+> rail.
 
 Design: read tools reuse the app's own query layer; writes are org-scoped and
 validate every referenced id against your org. Fixed value sets are exposed as
@@ -84,14 +96,19 @@ Every tool carries, all derived centrally in `src/lib/mcp/handler.ts` (never in
 the `tools-*.ts` modules):
 
 - a human-readable `title` — de-snake-cased from the tool name, with a small
-  override table for names that don't read well;
+  override table for names that don't read well, plus the ones whose default
+  title would read like moving money (`pay_employee_salary` → "Record a salary
+  payslip", `create_reimbursement` → "Record an advance reimbursement",
+  `create_invoice` → "Record an invoice");
 - MCP `annotations`: `readOnlyHint` / `destructiveHint` / `idempotentHint`
   derived from the verb, plus `openWorldHint`, which is `false` for everything
   except `sync_billing_calendar` (the only tool that writes to a third-party
-  system). Two overrides correct the verb heuristic: `sync_billing_calendar`
-  gets `openWorldHint: true`, and `pay_employee_salary` gets
-  `destructiveHint: true` — it posts a salary expense to the ledger and the
-  month can't be re-paid, with no "unpay" tool to undo it;
+  system). Four overrides correct the verb heuristic: `sync_billing_calendar`
+  gets `openWorldHint: true`; `pay_employee_salary` gets `destructiveHint: true`
+  — it writes the payslip plus the salary-expense ledger entry, the month can't
+  be booked twice and no tool reverses it; and `set_subscription_period`
+  (an upsert) and `unmark_accountant_notified` (clears a flag to null) get
+  `idempotentHint: true`, which the `update_`/`delete_` prefix rule misses;
 - a `[read]` / `[write]` / `[delete]` tag prefixed to the description, so
   clients can group read vs write at a glance;
 - `securitySchemes: [{ type: "oauth2", scopes: [...] }]` (mirrored under `_meta`
@@ -100,15 +117,34 @@ the `tools-*.ts` modules):
 - `_meta["openai/toolInvocation/invoking" | "invoked"]`, the status line ChatGPT
   shows while a call is in flight.
 
-**Output schemas.** A tool may declare an `outputSchema`; when it does, the
-handler additionally returns the result as MCP `structuredContent` (the JSON
-text block stays, per MCP's back-compat recommendation). Only `list_organizations`
-declares one today — it's the reference implementation. Adding schemas to the
-rest is worthwhile (OpenAI's guidance is to declare one for every tool that
-returns structured data), but the schema is a promise: `structuredContent` must
-validate against it, and tools that return a bare array must not declare one.
+**Output schemas.** Every tool declares an `outputSchema` — all 68 of them, as of
+server version 1.2.0. When a tool declares one the handler additionally returns
+the result as MCP `structuredContent` (the JSON text block stays, per MCP's
+back-compat recommendation), which is what ChatGPT and Codex prefer over parsing
+JSON out of text. `list_organizations` remains the reference implementation.
+
+The schema is a **promise**: MCP requires `structuredContent` to validate against
+it, so each one is derived from what that tool's `execute` actually returns —
+drizzle `numeric` columns come back as strings, `date` columns as `YYYY-MM-DD`
+strings, and every nullable field is declared as `["string", "null"]` rather than
+quietly typed as non-null. Schemas over whole `.returning()` rows deliberately
+leave `additionalProperties` open, so a future migration that adds a column
+doesn't silently invalidate them; hand-built fixed shapes are closed.
+
+Only an object-rooted result can carry a schema, because MCP will not mirror a
+bare array into `structuredContent`. Every tool that used to answer with a bare
+array — the `list_*` tools plus `get_financial_overview` — therefore returns
+`{ items, count }`, built by the `listResult` / `listSchema` helpers in
+`src/lib/mcp/shared.ts`. That wrapper is what makes 100% coverage possible. Two
+tools predate the convention and keep their own named roots:
+`list_organizations` returns `{ organizations, hint }` and
+`list_upcoming_billing` returns `{ today, windowDays, upcomingCount, upcoming,
+note }`. A new tool whose return shape isn't stable and object-rooted may still
+omit `outputSchema`; it just keeps the JSON-in-a-text-block result shape. Do not
+declare a schema you cannot guarantee.
 
 **Discovery** — `list_organizations` (call first), `get_financial_overview`.
+Organizations are created in the web app, not over MCP.
 
 **Billing** — `list_billing_status` is the main one: the whole billing board in a
 single call, merging one-off charges (contract instalments / project milestones)
@@ -129,7 +165,7 @@ board automatically. `sync_billing_calendar` pushes the board to Google Calendar
 **Ledger (內外帳)** — `list_transactions`, `get_transaction`,
 `list_outstanding_advances`, `create_transaction` (expense/income/advance/transfer),
 `update_transaction` (date/amount/category/project/…), `delete_transaction`,
-`create_reimbursement` (settle an advance).
+`create_reimbursement` (book an advance as repaid).
 
 **Accounting master data** — parties: `list_parties`/`get_party`/`create_party`/
 `update_party`/`delete_party`; categories: `list_categories`/`create_category`/
@@ -158,17 +194,19 @@ handled conservatively over MCP: national ID and salary account come back
 **masked** (full values are web-app only), and every employee read is written
 to the activity log as a `read` entry — so who pulled contact data, and when,
 is always answerable. Payroll:
-`list_payroll_runs`, `list_payslips`, `list_salary_status` (who's paid for a month
-+ when), `pay_employee_salary` (records the payslip **and** posts the salary
-expense to the ledger); reconciliations: `list_reconciliations` +
+`list_payroll_runs`, `list_payslips`, `list_salary_status` (whose salary is
+booked for a month + when), `pay_employee_salary` (writes the payslip **and** the
+matching salary-expense ledger entry — bookkeeping only, it pays nobody);
+reconciliations: `list_reconciliations` +
 `create`/`update`/`delete`; accountant notices: `list_accountant_notices`,
 `mark_accountant_notified`, `unmark_accountant_notified`.
 
-**Not exposed (do in the app):** uploading invoice/receipt **files** (R2),
-multi-currency FX entry, and *connecting* Google Calendar (the OAuth consent needs
-a browser — do it once in 組織設定, after which `sync_billing_calendar` works over
-MCP). These need file handling or extra UI. Deletes that would
-break references return a clear error suggesting deactivation/archiving instead.
+**Not exposed (do in the app):** creating an organization, uploading
+invoice/receipt **files** (R2), multi-currency FX entry, and *connecting* Google
+Calendar (the OAuth consent needs a browser — do it once in 組織設定, after which
+`sync_billing_calendar` works over MCP). These need file handling or extra UI.
+Deletes that would break references return a clear error suggesting
+deactivation/archiving instead.
 
 ## Setup
 

@@ -14,6 +14,8 @@ import {
   assertInOrg,
   fkError,
   type JsonSchemaObject,
+  listResult,
+  listSchema,
   normalizeCurrency,
   optBoolean,
   optDecimal,
@@ -23,6 +25,7 @@ import {
   requireNumber,
   requireString,
   resolveOrg,
+  rowSchema,
   type ToolDef,
 } from "./shared";
 
@@ -161,6 +164,38 @@ function orNotFound(row: JsonSchemaObject): JsonSchemaObject {
   };
 }
 
+// list_parties 是自己組的 select（不是整列）：多了 accountName / txnCount / totals，
+// 少了 deletedAt / organizationId / createdAt。
+const PARTY_LIST_ROW: JsonSchemaObject = rowSchema({
+  id: { type: "number" },
+  name: { type: "string" },
+  label: { type: "string", enum: [...PARTY_LABELS] },
+  taxId: { type: ["string", "null"] },
+  defaultCurrency: { type: ["string", "null"], description: "3-letter code." },
+  defaultAccountId: { type: ["number", "null"] },
+  typicalAmount: { type: ["string", "null"], description: "Decimal as a string." },
+  contact: { type: ["string", "null"] },
+  note: { type: ["string", "null"] },
+  isActive: { type: "boolean" },
+  accountName: { type: ["string", "null"], description: "Name of defaultAccountId, when set." },
+  txnCount: { type: "number" },
+  totals: {
+    type: "array",
+    description: "Running totals per currency; empty when nothing has been booked against this party.",
+    items: rowSchema({
+      currency: { type: "string" },
+      received: { type: "number", description: "Income booked from this party." },
+      paid: { type: "number", description: "Expense/advance booked to this party." },
+    }),
+  },
+});
+
+const CATEGORY_LIST_ROW: JsonSchemaObject = rowSchema({
+  id: { type: "number" },
+  name: { type: "string" },
+  kind: { type: "string", enum: [...CATEGORY_KINDS] },
+});
+
 function optLabel(args: Record<string, unknown>): string | undefined {
   const v = optString(args, "label");
   if (v && !PARTY_LABELS.includes(v as (typeof PARTY_LABELS)[number])) {
@@ -182,11 +217,12 @@ export const accountingTools: Record<string, ToolDef> = {
       },
       additionalProperties: false,
     },
+    outputSchema: listSchema(PARTY_LIST_ROW),
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       const label = optLabel(args);
       const rows = await listParties(orgId);
-      return label ? rows.filter((p) => p.label === label) : rows;
+      return listResult(label ? rows.filter((p) => p.label === label) : rows);
     },
   },
 
@@ -341,7 +377,8 @@ export const accountingTools: Record<string, ToolDef> = {
     description:
       "List active accounting categories (income/cogs/expense/etc.). Use to resolve categoryId for transactions.",
     inputSchema: { type: "object", properties: { ...ORG_ARG }, additionalProperties: false },
-    execute: async (args, ctx) => listCategories(await resolveOrg(args, ctx)),
+    outputSchema: listSchema(CATEGORY_LIST_ROW),
+    execute: async (args, ctx) => listResult(await listCategories(await resolveOrg(args, ctx))),
   },
 
   create_category: {
@@ -417,9 +454,10 @@ export const accountingTools: Record<string, ToolDef> = {
   // ---- bank accounts ----
   list_bank_accounts: {
     description:
-      "List cash/bank accounts. Use to resolve fromAccountId/toAccountId/accountId for transactions.",
+      "List the cash/bank accounts defined in these books. They are ledger buckets the user set up by hand, not linked bank accounts — nothing here talks to a bank. Use to resolve fromAccountId/toAccountId/accountId for transactions.",
     inputSchema: { type: "object", properties: { ...ORG_ARG }, additionalProperties: false },
-    execute: async (args, ctx) => listBankAccounts(await resolveOrg(args, ctx)),
+    outputSchema: listSchema(BANK_ACCOUNT_ROW),
+    execute: async (args, ctx) => listResult(await listBankAccounts(await resolveOrg(args, ctx))),
   },
 
   get_bank_account: {
@@ -438,7 +476,8 @@ export const accountingTools: Record<string, ToolDef> = {
   },
 
   create_bank_account: {
-    description: "Create a cash/bank account.",
+    description:
+      "Create a cash/bank account in the books — a named bucket the ledger posts against. It is not linked to a real bank and opening it moves no money.",
     inputSchema: {
       type: "object",
       properties: {
@@ -537,8 +576,9 @@ export const accountingTools: Record<string, ToolDef> = {
       properties: { limit: { type: "number", description: "Default 100." }, ...ORG_ARG },
       additionalProperties: false,
     },
+    outputSchema: listSchema(INVOICE_ROW),
     execute: async (args, ctx) =>
-      listInvoices(await resolveOrg(args, ctx), optNumber(args, "limit") ?? 100),
+      listResult(await listInvoices(await resolveOrg(args, ctx), optNumber(args, "limit") ?? 100)),
   },
 
   get_invoice: {
@@ -558,7 +598,7 @@ export const accountingTools: Record<string, ToolDef> = {
 
   create_invoice: {
     description:
-      "Create an invoice record (AR/AP tracking). Bind it to a client with partyId, and to a scheduled charge with billingItemId — doing so fills that charge's 開發票日 automatically, which clears it from the 「待開發票」 list (see list_billing_status).",
+      "Record an invoice in the books (AR/AP tracking). This writes a bookkeeping record only — it does not issue, send or file an invoice anywhere; actual issuing happens in the external invoicing system. Bind it to a client with partyId, and to a planned charge with billingItemId — doing so fills that charge's 開發票日 automatically, which clears it from the 「待開發票」 list (see list_billing_status).",
     inputSchema: {
       type: "object",
       properties: {
@@ -577,7 +617,7 @@ export const accountingTools: Record<string, ToolDef> = {
         contractId: { type: "number" },
         billingItemId: {
           type: "number",
-          description: "Scheduled charge this invoice covers; see list_billing_status.",
+          description: "Planned charge this invoice covers; see list_billing_status.",
         },
         ...ORG_ARG,
       },

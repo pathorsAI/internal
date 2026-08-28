@@ -21,6 +21,8 @@ import {
 import {
   assertInOrg,
   getContractProgress,
+  listResult,
+  listSchema,
   normalizeCurrency,
   optBoolean,
   optDate,
@@ -32,6 +34,7 @@ import {
   requireNumber,
   requireString,
   resolveOrg,
+  rowSchema,
   type ToolDef,
 } from "./shared";
 import {
@@ -109,6 +112,56 @@ const CONTRACT_PROGRESS_SCHEMA = {
     "fullyCollected",
   ],
 };
+
+// list_transactions 回的是 db/queries.ts listTransactions 的投影（不是整列）：
+// 交易本身的欄位加上 join 出來的分類 / 帳戶 / 對象 / 員工 / 專案名稱。
+const TXN_LIST_ROW = rowSchema({
+  id: { type: "number" },
+  txnDate: { type: "string", description: "YYYY-MM-DD." },
+  description: { type: ["string", "null"] },
+  amount: { type: "string", description: "Decimal as a string." },
+  currency: { type: "string", description: "3-letter code." },
+  amountTwd: { type: ["string", "null"] },
+  book: { type: "string", enum: [...BOOKS] },
+  type: { type: "string", description: "expense | income | advance | transfer | reimbursement" },
+  createdAt: { type: "string", description: "ISO 8601 timestamp." },
+  updatedAt: { type: "string", description: "ISO 8601 timestamp." },
+  categoryId: { type: ["number", "null"] },
+  billedToCompanyTaxId: { type: "boolean" },
+  categoryName: { type: ["string", "null"] },
+  categoryKind: { type: ["string", "null"] },
+  fromAccountId: { type: ["number", "null"] },
+  toAccountId: { type: ["number", "null"] },
+  partyId: { type: ["number", "null"] },
+  settleEmployeeId: { type: ["number", "null"] },
+  projectId: { type: ["number", "null"] },
+  projectName: { type: ["string", "null"] },
+  contractId: { type: ["number", "null"] },
+  fromAccount: { type: ["string", "null"], description: "Name of fromAccountId." },
+  toAccount: { type: ["string", "null"], description: "Name of toAccountId." },
+  partyName: { type: ["string", "null"] },
+  settleName: { type: ["string", "null"], description: "Employee who fronted an advance." },
+});
+
+// getOverview 已經把聚合結果轉成 number。
+const OVERVIEW_ROW = rowSchema({
+  currency: { type: "string", description: "3-letter code." },
+  income: { type: "number" },
+  expense: { type: "number", description: "expense + advance." },
+  net: { type: "number", description: "income − expense." },
+});
+
+const ADVANCE_ROW = rowSchema({
+  id: { type: "number", description: "Pass this back as advanceId to create_reimbursement." },
+  txnDate: { type: "string", description: "YYYY-MM-DD." },
+  amount: { type: "string", description: "Decimal as a string." },
+  amountTwd: { type: ["string", "null"] },
+  currency: { type: "string", description: "3-letter code." },
+  description: { type: ["string", "null"] },
+  vendorName: { type: ["string", "null"], description: "Who the employee paid." },
+  settleName: { type: ["string", "null"], description: "Employee owed the money back." },
+  categoryName: { type: ["string", "null"] },
+});
 
 type Db = ReturnType<typeof getDb>;
 
@@ -534,6 +587,7 @@ export const transactionTools: Record<string, ToolDef> = {
       },
       additionalProperties: false,
     },
+    outputSchema: listSchema(TXN_LIST_ROW),
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       const filters = {
@@ -550,7 +604,7 @@ export const transactionTools: Record<string, ToolDef> = {
         await assertInOrg(db, bankAccounts, filters.accountId, orgId, "Account");
       if (filters.projectId !== undefined)
         await assertInOrg(db, projects, filters.projectId, orgId, "Project");
-      return listTransactions(orgId, filters, optNumber(args, "limit") ?? 100);
+      return listResult(await listTransactions(orgId, filters, optNumber(args, "limit") ?? 100));
     },
   },
 
@@ -578,20 +632,25 @@ export const transactionTools: Record<string, ToolDef> = {
   },
 
   get_financial_overview: {
-    description: "Income/expense/net totals grouped by currency for the organization.",
+    description:
+      "Income/expense/net totals grouped by currency, computed from the recorded ledger. One row per currency; currencies are never mixed.",
     inputSchema: { type: "object", properties: { ...ORG_ARG }, additionalProperties: false },
-    execute: async (args, ctx) => getOverview(await resolveOrg(args, ctx)),
+    outputSchema: listSchema(OVERVIEW_ROW),
+    execute: async (args, ctx) => listResult(await getOverview(await resolveOrg(args, ctx))),
   },
 
   list_outstanding_advances: {
-    description: "Employee cash advances (代墊) not yet reimbursed. Settle with create_reimbursement.",
+    description:
+      "Employee cash advances (代墊) that have no reimbursement entry booked against them yet. Once the company has repaid the employee, record it with create_reimbursement.",
     inputSchema: { type: "object", properties: { ...ORG_ARG }, additionalProperties: false },
-    execute: async (args, ctx) => listOutstandingAdvances(await resolveOrg(args, ctx)),
+    outputSchema: listSchema(ADVANCE_ROW),
+    execute: async (args, ctx) =>
+      listResult(await listOutstandingAdvances(await resolveOrg(args, ctx))),
   },
 
   create_transaction: {
     description:
-      "Record a ledger transaction. Required per type — expense/income: accountId + partyName; advance: partyName + settleEmployeeName (no account); transfer: fromAccountId + toAccountId. categoryId is OPTIONAL — omit it to leave the txn 未分類 (unclassified; no need for a separate holding account). Resolve ids with list_bank_accounts / list_categories / list_parties first. 'reported' (報稅/上外帳) sets the book to 'both', otherwise 'internal' (transfers are always 'both'). Set billedToCompanyTaxId=true to mark 有報公司統編 (the invoice attachment itself is done in the app). To reimburse an advance use create_reimbursement. When contractId is set, the result carries `contractProgress` (amount/received/remaining/fullyCollected) — if `fullyCollected` is true while the contract is still draft/active, TELL THE USER the contract is now fully collected and ASK whether to set it to completed (已完成); on a yes, call update_contract with status='completed'. Never flip the status without asking.",
+      "Write one bookkeeping entry into the ledger for money that has already moved elsewhere. This records history; it never sends, collects or transfers anything, and 'transfer' here means a book entry between two of the organization's own ledger accounts. Required per type — expense/income: accountId + partyName; advance: partyName + settleEmployeeName (no account); transfer: fromAccountId + toAccountId. categoryId is optional — omit it to leave the entry 未分類 (unclassified; no need for a separate holding account). Resolve ids with list_bank_accounts / list_categories / list_parties first. 'reported' (報稅/上外帳) sets the book to 'both', otherwise 'internal' (transfers are always 'both'). Set billedToCompanyTaxId=true to mark 有報公司統編 (the invoice attachment itself is done in the app). To book a repaid advance use create_reimbursement. When contractId is set, the result carries `contractProgress` (amount/received/remaining/fullyCollected) — if `fullyCollected` is true while the contract is still draft/active, tell the user the contract is now fully collected and ask whether to set it to completed (已完成); on a yes, call update_contract with status='completed'. Never flip the status without asking.",
     inputSchema: {
       type: "object",
       properties: {
@@ -698,7 +757,7 @@ export const transactionTools: Record<string, ToolDef> = {
 
   bulk_create_transactions: {
     description:
-      "Insert MANY ledger transactions in ONE call — use this instead of calling create_transaction in a loop. Pass `items`: an array where each element mirrors create_transaction's arguments (type, txnDate, amount, currency?, description?, reported?, accountId?, partyName?, categoryId?, settleEmployeeName?, fromAccountId?, toAccountId?, projectId?, contractId?, subscriptionId?, subscriptionPeriod?). Per-type requirements match create_transaction (expense/income: accountId+partyName; advance: partyName+settleEmployeeName; transfer: fromAccountId+toAccountId); categoryId is optional (omit → 未分類, unclassified). Account/category/project/contract/subscription ids are validated against your org; party/employee names are created on demand and deduped within the batch. subscriptionPeriod (YYYY-MM-DD) is required on any item that sets subscriptionId. All rows are written in a single INSERT. Returns the created count, the ids, and — for every contract any item linked to — `contractProgress` (amount/received/remaining/fullyCollected). For each entry with `fullyCollected` true while the contract is still draft/active, TELL THE USER that contract is now fully collected and ASK whether to set it to completed (已完成); on a yes, call update_contract with status='completed'. Never flip the status without asking. Max 1000 items per call.",
+      "Write many ledger entries in one call — use this instead of calling create_transaction in a loop. Like create_transaction, this only records entries in the organization's own books; no money is moved. Pass `items`: an array where each element mirrors create_transaction's arguments (type, txnDate, amount, currency?, description?, reported?, accountId?, partyName?, categoryId?, settleEmployeeName?, fromAccountId?, toAccountId?, projectId?, contractId?, subscriptionId?, subscriptionPeriod?). Per-type requirements match create_transaction (expense/income: accountId+partyName; advance: partyName+settleEmployeeName; transfer: fromAccountId+toAccountId); categoryId is optional (omit → 未分類, unclassified). Account/category/project/contract/subscription ids are validated against your org; party/employee names are created on demand and deduped within the batch. subscriptionPeriod (YYYY-MM-DD) is required on any item that sets subscriptionId. All rows are written in a single database insert. Returns the created count, the ids, and — for every contract any item linked to — `contractProgress` (amount/received/remaining/fullyCollected). For each entry with `fullyCollected` true while the contract is still draft/active, tell the user that contract is now fully collected and ask whether to set it to completed (已完成); on a yes, call update_contract with status='completed'. Never flip the status without asking. Max 1000 items per call.",
     inputSchema: {
       type: "object",
       properties: {
@@ -985,12 +1044,12 @@ export const transactionTools: Record<string, ToolDef> = {
 
   create_reimbursement: {
     description:
-      "Pay back an employee advance: creates a reimbursement transaction linked to the advance. Find the advance via list_outstanding_advances.",
+      "Record that an employee advance (代墊) has been repaid: writes a reimbursement entry in the ledger linked to the original advance. Bookkeeping only — it does not send the employee any money; do that through your bank and record it here. Find the advance via list_outstanding_advances.",
     inputSchema: {
       type: "object",
       properties: {
         advanceId: { type: "number", description: "The advance transaction id." },
-        fromAccountId: { type: "number", description: "Account paying the employee." },
+        fromAccountId: { type: "number", description: "Ledger account the repayment is booked against." },
         payDate: { type: "string", description: "YYYY-MM-DD." },
         amount: { type: "number" },
         ...ORG_ARG,

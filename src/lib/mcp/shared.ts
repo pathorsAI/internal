@@ -34,17 +34,56 @@ export type ToolDef = {
     required?: string[];
     additionalProperties: boolean;
   };
-  // Optional JSON Schema for the tool's return value. When present the handler
-  // advertises it on tools/list AND mirrors the result into `structuredContent`
-  // (MCP requires structuredContent to validate against the declared schema, so
-  // only declare it when the shape really is stable and object-valued — tools
-  // that return a bare array must not declare one). Tools without it keep the
-  // JSON-in-a-text-block result shape.
+  // JSON Schema for the tool's return value. The handler advertises it on
+  // tools/list AND mirrors the result into `structuredContent`, which MCP
+  // requires to validate against it — so the schema is a promise, and it must
+  // be derived from what `execute` actually returns (optional and nullable
+  // fields included). Only object-rooted results can carry one; list tools get
+  // there via `listResult` / `listSchema`. Every tool on this server declares
+  // one; a new tool without a stable object-rooted shape may omit it and will
+  // simply keep the JSON-in-a-text-block result shape.
   outputSchema?: JsonSchemaObject;
   // Optional override; otherwise derived from the tool's verb in the handler.
   annotations?: ToolAnnotations;
   execute: (args: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;
 };
+
+// ---- list results ----
+
+/**
+ * The object root every list_* tool returns.
+ *
+ * MCP only mirrors a result into `structuredContent` when it is an object, so a
+ * tool that answered with a bare array could never declare an `outputSchema`.
+ * Wrapping the rows in `{ items, count }` is what lets every tool on this
+ * server publish one. Pair it with `listSchema(itemSchema)`.
+ */
+export function listResult<T>(items: T[]): { items: T[]; count: number } {
+  return { items, count: items.length };
+}
+
+/** The `outputSchema` matching `listResult`, given the schema of one row. */
+export function listSchema(item: Record<string, unknown>): JsonSchemaObject {
+  return {
+    type: "object",
+    properties: {
+      items: { type: "array", items: item },
+      count: { type: "number", description: "Number of rows in `items`." },
+    },
+    required: ["items", "count"],
+    additionalProperties: false,
+  };
+}
+
+/** A closed object schema whose every declared property is always present. */
+export function rowSchema(properties: Record<string, unknown>): JsonSchemaObject {
+  return {
+    type: "object",
+    properties,
+    required: Object.keys(properties),
+    additionalProperties: false,
+  };
+}
 
 // ---- arg helpers (lightweight validation, no extra deps) ----
 
