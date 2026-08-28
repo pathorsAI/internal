@@ -145,10 +145,12 @@ export const oauthConsent = pgTable("oauth_consent", {
 // providerId / organizationId / domain。plugin 沒有為這個 model 宣告
 // createdAt / updatedAt，所以這裡也沒有。
 //
-// `domainVerified` 只在 plugin 開了 `domainVerification` 時才會出現在 schema 裡，
-// 本專案沒開，所以不放。adapter 是照 schema 的欄位逐一取值（@better-auth/core
-// 的 adapter factory：`for (const field in fields)`），schema 裡沒有的輸入欄位
-// 會被忽略而不是報錯，所以少這一欄不會炸。
+// `domainVerified` 隨 plugin 的 `domainVerification` 選項存在（auth.ts 有開）。
+// 它是 OIDC callback 信任判斷的唯一依據：provider.domainVerified === true 且
+// email 網域與 provider.domain 相符，才允許把這次 SSO 登入 link 到既有的同
+// email user（better-auth link-account 的 isTrustedProvider）。少了它，已用
+// Google 登入過的人走 SSO 會被拒絕連結，整個 callback 以 ?error=UNKNOWN 收場
+// —— 2026-08-28 上線當天就踩到。
 //
 // export 名稱必須正好是 `ssoProvider`：drizzle adapter 用 model 名稱去 schema
 // 物件上取表。DB 表名照本專案慣例用 snake_case，見 migrations/0020_sso_provider.sql。
@@ -164,4 +166,8 @@ export const ssoProvider = pgTable("sso_provider", {
   organizationId: text("organization_id"),
   // home realm discovery 的鍵：登入時拿 email 的網域來比對這一欄。
   domain: text("domain").notNull(),
+  // 我們沒有走 plugin 的 DNS TXT 驗證流程（HTTP 註冊整條封死了）；這欄由
+  // scripts/register-sso-provider.ts 在註冊時直接寫 true —— 管理者用腳本註冊
+  // 就是驗證。migration: 0021_sso_domain_verified.sql。
+  domainVerified: boolean("domain_verified").notNull().default(false),
 });
