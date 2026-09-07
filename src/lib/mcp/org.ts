@@ -52,7 +52,9 @@ export async function resolveOrgId(
     .where(eq(member.userId, userId))
     .orderBy(asc(member.createdAt));
   if (rows.length === 0) {
-    throw new Error("No organization is associated with your account.");
+    throw new Error(
+      "No organization is associated with your account. Call list_my_invitations — if an organization has invited you, accept it with accept_invitation; otherwise ask an organization admin to invite you from the web app.",
+    );
   }
   if (rows.length === 1) {
     return rows[0].organizationId;

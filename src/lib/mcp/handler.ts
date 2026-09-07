@@ -3,30 +3,62 @@ import { type ToolAnnotations, type ToolDef, resolveOrg } from "./shared";
 import { logMcp, type ActivityAction } from "@/db/activity";
 import { publicBaseUrl } from "@/lib/base-url";
 
-// Derive an audit-log entry from a tool name + its result. Returns null for
-// most read-only tools (list_/get_/...) so only writes get logged — except
-// employee reads, which carry PII (email/phone + masked national id/account)
-// and are logged as "read". Entity types match the web side.
-function deriveMcpAudit(
-  name: string,
-  out: unknown,
-): { action: ActivityAction; entityType: string; entityId: number | null } | null {
-  let entityId: number | null = null;
-  if (out && typeof out === "object") {
-    const o = out as Record<string, unknown>;
-    if (typeof o.id === "number") entityId = o.id;
-    else if (Array.isArray(o.ids) && typeof o.ids[0] === "number") entityId = o.ids[0];
-  }
-  if (name.startsWith("create_")) return { action: "create", entityType: name.slice(7), entityId };
-  if (name.startsWith("update_")) return { action: "update", entityType: name.slice(7), entityId };
-  if (name.startsWith("delete_")) return { action: "delete", entityType: name.slice(7), entityId };
-  if (name === "bulk_create_transactions") return { action: "create", entityType: "transaction", entityId };
-  if (name === "pay_employee_salary") return { action: "create", entityType: "payslip", entityId };
-  if (name === "mark_accountant_notified" || name === "unmark_accountant_notified")
-    return { action: "update", entityType: "transaction", entityId };
-  if (name === "list_employees" || name === "get_employee")
-    return { action: "read", entityType: "employee", entityId };
+type McpAudit = {
+  action: ActivityAction;
+  entityType: string;
+  entityId: number | null;
+  // Org to log under when it can't be derived from the call's args — e.g.
+  // accept_invitation, where the org only becomes the user's *after* the call.
+  organizationId?: string;
+};
+
+// Verb prefixes whose entity type is simply the rest of the tool name.
+const AUDIT_VERB_PREFIXES: ReadonlyArray<[prefix: string, action: ActivityAction]> = [
+  ["create_", "create"],
+  ["update_", "update"],
+  ["delete_", "delete"],
+];
+
+// Tools whose name doesn't follow the verb_entity convention. Read tools are
+// normally not logged — except employee reads, which carry PII (email/phone +
+// masked national id/account) and are logged as "read".
+const AUDIT_BY_NAME: Record<string, Pick<McpAudit, "action" | "entityType">> = {
+  bulk_create_transactions: { action: "create", entityType: "transaction" },
+  pay_employee_salary: { action: "create", entityType: "payslip" },
+  mark_accountant_notified: { action: "update", entityType: "transaction" },
+  unmark_accountant_notified: { action: "update", entityType: "transaction" },
+  list_employees: { action: "read", entityType: "employee" },
+  get_employee: { action: "read", entityType: "employee" },
+  accept_invitation: { action: "create", entityType: "member" },
+};
+
+/** The numeric entity id a tool result names, if any (`id`, else first of `ids`). */
+function auditEntityId(out: unknown): number | null {
+  if (!out || typeof out !== "object") return null;
+  const o = out as Record<string, unknown>;
+  if (typeof o.id === "number") return o.id;
+  if (Array.isArray(o.ids) && typeof o.ids[0] === "number") return o.ids[0];
   return null;
+}
+
+// Derive an audit-log entry from a tool name + its result. Returns null for
+// most read-only tools (list_/get_/...) so only writes get logged. Entity
+// types match the web side.
+function deriveMcpAudit(name: string, out: unknown): McpAudit | null {
+  const entityId = auditEntityId(out);
+  const byPrefix = AUDIT_VERB_PREFIXES.find(([prefix]) => name.startsWith(prefix));
+  if (byPrefix) {
+    const [prefix, action] = byPrefix;
+    return { action, entityType: name.slice(prefix.length), entityId };
+  }
+  const byName = AUDIT_BY_NAME[name];
+  if (!byName) return null;
+  const audit: McpAudit = { ...byName, entityId };
+  if (name === "accept_invitation") {
+    const orgId = (out as { organizationId?: unknown } | null)?.organizationId;
+    if (typeof orgId === "string") audit.organizationId = orgId;
+  }
+  return audit;
 }
 
 // Minimal MCP server over JSON-RPC 2.0 (Streamable HTTP, stateless). No SDK
@@ -40,7 +72,7 @@ function deriveMcpAudit(
 
 /** Bump on every published change to tools, schemas or instructions. Clients
  *  (and OpenAI's plugin "Scan Tools") key their cached snapshot off this. */
-export const SERVER_VERSION = "1.2.0";
+export const SERVER_VERSION = "1.3.0";
 
 /** Public base URL of this deployment; doubles as the OAuth issuer.
  *  Keep in sync with the `resource` passed to `mcp()` in src/lib/auth.ts. */
@@ -79,6 +111,7 @@ const INSTRUCTIONS = [
   "It is a bookkeeping system and nothing else. Every write creates or edits a record in this organization's own books. No tool moves money: none of them initiates, authorizes or executes a payment, transfer, payout or trade, and the server is not connected to any bank, card or payment provider. Words like pay, payment, transfer, salary, reimbursement and advance always describe an entry being recorded, never money being sent.",
   "The signed-in account may belong to multiple organizations.",
   "At the start of each session, before calling any org-scoped tool, call list_organizations and ask the user which organization to work in.",
+  "If list_organizations is empty, or the user says they were invited to an organization, call list_my_invitations and offer to accept the right one with accept_invitation after the user confirms — invitations are sent from the web app, and this is the only way to join an organization over MCP.",
   "Then pass that value as organizationId on every subsequent tool call. Never guess the organization.",
   "If a tool reports that the organization is ambiguous, stop and ask the user, then retry with organizationId.",
   "Before creating or editing a record that references another entity (categoryId, accountId, partyName/Id, projectId, contractId, subscriptionId), look the id up first with the relevant list_* tool (list_categories, list_bank_accounts, list_parties, list_projects, …) — never invent ids. Valid values for fixed fields are listed as enums in each tool's input schema.",
@@ -257,6 +290,7 @@ const IDEMPOTENT_OVERRIDES: Record<string, Partial<ToolAnnotations>> = {
 // as moving money: this server only writes ledger rows in the workspace's own
 // books and has no payment rail of any kind.
 const TITLE_OVERRIDES: Record<string, string> = {
+  accept_invitation: "Accept an organization invitation",
   bulk_create_transactions: "Create transactions in bulk",
   create_invoice: "Record an invoice",
   create_reimbursement: "Record an advance reimbursement",
@@ -264,6 +298,7 @@ const TITLE_OVERRIDES: Record<string, string> = {
   get_subscription_schedule: "Subscription schedule",
   list_accountant_notices: "Notices for the accountant",
   list_billing_status: "Billing board",
+  list_my_invitations: "My pending invitations",
   list_org_members: "List organization members",
   list_outstanding_advances: "Outstanding advances",
   list_payroll_runs: "Payroll runs",
@@ -347,7 +382,10 @@ async function handleToolCall(
     const audit = name ? deriveMcpAudit(name, out) : null;
     if (audit) {
       try {
-        const orgId = await resolveOrg(args, ctx);
+        const orgId = await resolveOrg(
+          audit.organizationId ? { organizationId: audit.organizationId } : args,
+          ctx,
+        );
         await logMcp(orgId, ctx.userId, audit.action, audit.entityType, audit.entityId, name);
       } catch {
         // ignore audit failures
