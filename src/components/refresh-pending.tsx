@@ -13,7 +13,9 @@ type RefreshPendingValue = {
 // 預設值是直接執行、永不 pending，所以就算元件被放在 Provider 外面也不會爆。
 const RefreshPendingContext = createContext<RefreshPendingValue>({
   pending: false,
-  startPending: (task) => void task(),
+  startPending: (task) => {
+    Promise.resolve(task()).catch(() => {});
+  },
 });
 
 /**
@@ -48,6 +50,10 @@ export function useRefreshPending() {
 /**
  * 主內容區的外框：pending 時壓暗並擋掉點擊，同時在最上緣顯示一條不定量進度條。
  * 直接算成 <main>，這樣 layout 原本的 flex 版面不會多包一層而跑掉。
+ *
+ * 那條進度條純粹是裝飾（aria-hidden）：它沒有進度數值可報，硬掛 progressbar role 只會
+ * 讓螢幕閱讀器唸出一個沒有 aria-valuenow 的空殼。真正要傳達的「內容正在更新」由主內容
+ * 區自己的 aria-busy 負責。
  */
 export function RefreshPendingOverlay({
   className,
@@ -58,14 +64,14 @@ export function RefreshPendingOverlay({
     <>
       {pending ? (
         <div
-          role="progressbar"
-          aria-busy="true"
+          aria-hidden
           className="pointer-events-none fixed inset-x-0 top-0 z-50 h-0.5 overflow-hidden bg-primary/20"
         >
           <div className="h-full w-1/3 animate-[refresh-bar_1.1s_ease-in-out_infinite] rounded-full bg-primary" />
         </div>
       ) : null}
       <main
+        aria-busy={pending}
         className={cn(
           className,
           "transition-opacity duration-200",
