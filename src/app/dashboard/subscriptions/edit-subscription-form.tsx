@@ -15,11 +15,13 @@ export function EditSubscriptionForm({
   subscription,
   parties,
   projects,
+  contracts,
   footer,
 }: Readonly<{
   subscription: Subscription;
   parties: Option[];
   projects: Option[];
+  contracts: Option[];
   footer?: React.ReactNode;
 }>) {
   const t = useTranslations("subscriptions");
@@ -34,7 +36,12 @@ export function EditSubscriptionForm({
       footer={footer}
     >
       <input type="hidden" name="id" value={subscription.id} />
-      <SubscriptionFields parties={parties} projects={projects} values={subscription} />
+      <SubscriptionFields
+        parties={parties}
+        projects={projects}
+        contracts={contracts}
+        values={subscription}
+      />
     </EditForm>
   );
 }

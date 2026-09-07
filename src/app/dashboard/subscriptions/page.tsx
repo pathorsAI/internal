@@ -19,6 +19,7 @@ import {
   listSubscriptions,
   listParties,
   listProjects,
+  listContracts,
   getSubscriptionSchedule,
   type SubscriptionSchedule,
 } from "@/db/queries";
@@ -117,13 +118,19 @@ function intervalLabel(t: Translator, months: number) {
 export default async function SubscriptionsPage() {
   const { orgId } = await requireOrg();
   const t = await getTranslations("subscriptions");
-  const [rows, parties, projects] = await Promise.all([
+  const [rows, parties, projects, contracts] = await Promise.all([
     listSubscriptions(orgId),
     listParties(orgId),
     listProjects(orgId),
+    listContracts(orgId),
   ]);
   const partyOptions = parties.map((p) => ({ id: p.id, name: p.name }));
   const projectOptions = projects.map((p) => ({ id: p.id, name: p.name }));
+  // 合約標題常常重複（同一客戶多張約），帶上客戶名才分得出是誰的合約。
+  const contractOptions = contracts.map((c) => ({
+    id: c.id,
+    name: c.customerName ? `${c.title} — ${c.customerName}` : c.title,
+  }));
   // 訂閱不多，逐筆抓各期收款狀態即可（一次平行抓完）。
   const schedules = await Promise.all(rows.map((s) => getSubscriptionSchedule(orgId, s.id)));
   const scheduleById = new Map(schedules.filter((s) => s != null).map((s) => [s.id, s]));
@@ -142,7 +149,11 @@ export default async function SubscriptionsPage() {
   return (
     <>
       <PageHeader title={t("list.title")} description={t("list.description")}>
-        <NewSubscriptionDialog parties={partyOptions} projects={projectOptions} />
+        <NewSubscriptionDialog
+          parties={partyOptions}
+          projects={projectOptions}
+          contracts={contractOptions}
+        />
       </PageHeader>
 
       <TableCard>
@@ -152,6 +163,7 @@ export default async function SubscriptionsPage() {
               <TableHead>{t("list.columns.plan")}</TableHead>
               <TableHead>{t("list.columns.customer")}</TableHead>
               <TableHead>{t("list.columns.project")}</TableHead>
+              <TableHead>{t("list.columns.contract")}</TableHead>
               <TableHead className="text-right">{t("list.columns.amount")}</TableHead>
               <TableHead>{t("list.columns.frequency")}</TableHead>
               <TableHead>{t("list.columns.status")}</TableHead>
@@ -159,7 +171,7 @@ export default async function SubscriptionsPage() {
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <EmptyRow colSpan={6} message={t("list.empty")} />
+              <EmptyRow colSpan={7} message={t("list.empty")} />
             ) : (
               rows.map((s) => (
                 <RowDialog
@@ -171,6 +183,9 @@ export default async function SubscriptionsPage() {
                       <TableCell className="font-medium">{s.name}</TableCell>
                       <TableCell>{s.customerName ?? "—"}</TableCell>
                       <TableCell className="text-muted-foreground">{s.projectName ?? "—"}</TableCell>
+                      <TableCell className="max-w-[22ch] truncate text-muted-foreground" title={s.contractTitle ?? undefined}>
+                        {s.contractTitle ?? "—"}
+                      </TableCell>
                       <TableCell className="text-right font-medium tabular-nums">
                         {formatCurrency(s.amount, s.currency)}
                       </TableCell>
@@ -191,6 +206,7 @@ export default async function SubscriptionsPage() {
                       customerPartyId: s.customerPartyId,
                       customerName: s.customerName,
                       projectId: s.projectId,
+                      contractId: s.contractId,
                       name: s.name,
                       amount: s.amount,
                       currency: s.currency,
@@ -202,6 +218,7 @@ export default async function SubscriptionsPage() {
                     }}
                     parties={partyOptions}
                     projects={projectOptions}
+                    contracts={contractOptions}
                     footer={<DeleteButton action={deleteSubscription} id={s.id} />}
                   />
                   <PeriodScheduleTable

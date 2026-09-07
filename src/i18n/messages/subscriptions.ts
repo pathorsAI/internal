@@ -27,6 +27,7 @@ const subscriptions = {
       plan: { "zh-TW": "方案", en: "Plan" },
       customer: { "zh-TW": "客戶", en: "Client" },
       project: { "zh-TW": "專案", en: "Project" },
+      contract: { "zh-TW": "合約", en: "Contract" },
       amount: { "zh-TW": "金額", en: "Amount" },
       frequency: { "zh-TW": "頻率", en: "Frequency" },
       status: { "zh-TW": "狀態", en: "Status" },
@@ -51,6 +52,10 @@ const subscriptions = {
     project: {
       label: { "zh-TW": "專案", en: "Project" },
       placeholder: { "zh-TW": "— 未指定 —", en: "— None —" },
+    },
+    contract: {
+      label: { "zh-TW": "合約", en: "Contract" },
+      placeholder: { "zh-TW": "不綁定合約", en: "No contract" },
     },
     name: {
       label: { "zh-TW": "方案名稱", en: "Plan name" },

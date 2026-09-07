@@ -382,6 +382,10 @@ export const subscriptions = pgTable("subscriptions", {
 	organizationId: text("organization_id"),
 	customerPartyId: bigint("customer_party_id", { mode: "number" }).notNull(),
 	projectId: bigint("project_id", { mode: "number" }),
+	// 合約綁定（選填）：合約裡談好的週期性費用要能追回是哪張合約。一次性分期走
+	// billing_items.contract_id，週期性月費走這裡。
+	// FK 在 DB 端（migrations/0022）建立，這裡只放欄位避免與 contracts 的宣告順序衝突。
+	contractId: bigint("contract_id", { mode: "number" }),
 	name: text().notNull(),
 	amount: numeric({ precision: 18, scale: 2 }).notNull(),
 	currency: char({ length: 3 }).default('TWD').notNull(),

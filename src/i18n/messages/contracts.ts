@@ -101,6 +101,21 @@ const contracts = {
     noDueDate: { "zh-TW": "未設應請款日", en: "No due date set" },
     manageLink: { "zh-TW": "到請款看板管理", en: "Manage on the billing board" },
   },
+  linkedSubscriptions: {
+    heading: { "zh-TW": "綁定的訂閱", en: "Linked subscriptions" },
+    manageLink: { "zh-TW": "到訂閱 / 月費管理", en: "Manage on the subscriptions page" },
+    interval: {
+      monthly: { "zh-TW": "每月", en: "Monthly" },
+      quarterly: { "zh-TW": "每季", en: "Quarterly" },
+      yearly: { "zh-TW": "每年", en: "Yearly" },
+      everyNMonths: { "zh-TW": "每 {months} 個月", en: "Every {months} months" },
+    },
+    status: {
+      active: { "zh-TW": "進行中", en: "Active" },
+      paused: { "zh-TW": "暫停", en: "Paused" },
+      ended: { "zh-TW": "結束", en: "Ended" },
+    },
+  },
   billingPlan: {
     plan: {
       single: { "zh-TW": "一次付清", en: "Single payment" },

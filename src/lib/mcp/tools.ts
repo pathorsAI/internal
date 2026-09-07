@@ -47,6 +47,8 @@ const SUBSCRIPTION_LIST_ROW: JsonSchemaObject = rowSchema({
   endDate: { type: ["string", "null"], description: "YYYY-MM-DD." },
   status: { type: "string", enum: ["active", "paused", "ended"] },
   customer: { type: ["string", "null"], description: "Customer party name." },
+  contractId: { type: ["number", "null"], description: "Linked contract; see list_contracts." },
+  contractTitle: { type: ["string", "null"] },
   nextChargeDate: {
     type: ["string", "null"],
     description: "YYYY-MM-DD; null unless the subscription is active and still running.",
@@ -345,9 +347,12 @@ const billingTools: Record<string, ToolDef> = {
           endDate: subscriptions.endDate,
           status: subscriptions.status,
           customer: parties.name,
+          contractId: subscriptions.contractId,
+          contractTitle: contracts.title,
         })
         .from(subscriptions)
         .leftJoin(parties, eq(subscriptions.customerPartyId, parties.id))
+        .leftJoin(contracts, eq(subscriptions.contractId, contracts.id))
         .where(where)
         .orderBy(asc(subscriptions.startDate));
       return listResult(

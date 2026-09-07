@@ -179,7 +179,10 @@ the 待開發票 list.
 **Client ops** — projects/subscriptions/contracts each have `list_*` +
 `create_*`/`update_*`/`delete_*` (`list_customers` is a convenience filter of
 `list_parties`). A contract carries a `fileUrl` — the link to the signed contract
-file (e.g. a Google Drive link). Contract status is stored, not derived: linking
+file (e.g. a Google Drive link). A subscription carries an optional `contractId`
+(`create_subscription` / `update_subscription`; pass `null` on update to unlink)
+so a recurring fee quoted in a contract stays traceable — `list_subscriptions`
+returns it as `contractId` / `contractTitle`. Contract status is stored, not derived: linking
 an income transaction that fills the contract does **not** move it to
 `completed` on its own. So `create_transaction` / `bulk_create_transactions` /
 `update_transaction` return `contractProgress` (amount / received / remaining /

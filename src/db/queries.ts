@@ -1,5 +1,5 @@
 import { addDays, addMonths, format, isAfter, parseISO } from "date-fns";
-import { sql, eq, desc, and, or, lte, inArray, isNull, aliasedTable } from "drizzle-orm";
+import { sql, eq, desc, and, or, lte, inArray, isNull, isNotNull, aliasedTable } from "drizzle-orm";
 import { getDb } from "./index";
 import { nextChargeDate, todayStr } from "@/lib/mcp/shared";
 import {
@@ -929,6 +929,8 @@ export async function listSubscriptions(orgId: string) {
       customerName: parties.name,
       projectId: subscriptions.projectId,
       projectName: projects.name,
+      contractId: subscriptions.contractId,
+      contractTitle: contracts.title,
       name: subscriptions.name,
       amount: subscriptions.amount,
       currency: subscriptions.currency,
@@ -941,8 +943,55 @@ export async function listSubscriptions(orgId: string) {
     .from(subscriptions)
     .leftJoin(parties, eq(parties.id, subscriptions.customerPartyId))
     .leftJoin(projects, eq(projects.id, subscriptions.projectId))
+    .leftJoin(contracts, eq(contracts.id, subscriptions.contractId))
     .where(and(eq(subscriptions.organizationId, orgId), isNull(subscriptions.deletedAt)))
     .orderBy(desc(subscriptions.createdAt));
+}
+
+export type ContractSubscription = {
+  id: number;
+  name: string;
+  amount: string;
+  currency: string;
+  intervalMonths: number;
+  status: string;
+};
+
+/**
+ * 各合約底下綁的訂閱，一次查完再分組（合約頁每張合約各查一次就是 N+1）。
+ * 比照 listContracts 只回顯示需要的欄位。
+ */
+export async function listSubscriptionsByContract(
+  orgId: string,
+): Promise<Map<number, ContractSubscription[]>> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      contractId: subscriptions.contractId,
+      id: subscriptions.id,
+      name: subscriptions.name,
+      amount: subscriptions.amount,
+      currency: subscriptions.currency,
+      intervalMonths: subscriptions.intervalMonths,
+      status: subscriptions.status,
+    })
+    .from(subscriptions)
+    .where(
+      and(
+        eq(subscriptions.organizationId, orgId),
+        isNotNull(subscriptions.contractId),
+        isNull(subscriptions.deletedAt),
+      ),
+    )
+    .orderBy(desc(subscriptions.createdAt));
+  const out = new Map<number, ContractSubscription[]>();
+  for (const { contractId, ...sub } of rows) {
+    if (contractId == null) continue;
+    const list = out.get(contractId) ?? [];
+    list.push(sub);
+    out.set(contractId, list);
+  }
+  return out;
 }
 
 export async function getSubscription(orgId: string, id: number) {
@@ -953,6 +1002,8 @@ export async function getSubscription(orgId: string, id: number) {
       customerPartyId: subscriptions.customerPartyId,
       customerName: parties.name,
       projectId: subscriptions.projectId,
+      contractId: subscriptions.contractId,
+      contractTitle: contracts.title,
       name: subscriptions.name,
       amount: subscriptions.amount,
       currency: subscriptions.currency,
@@ -963,6 +1014,7 @@ export async function getSubscription(orgId: string, id: number) {
     })
     .from(subscriptions)
     .leftJoin(parties, eq(parties.id, subscriptions.customerPartyId))
+    .leftJoin(contracts, eq(contracts.id, subscriptions.contractId))
     .where(and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, id), isNull(subscriptions.deletedAt)))
     .limit(1);
   return row ?? null;
@@ -1592,6 +1644,8 @@ export async function listBillingBoard(
         customerTaxId: parties.taxId,
         projectId: subscriptions.projectId,
         projectName: projects.name,
+        contractId: subscriptions.contractId,
+        contractTitle: contracts.title,
         amount: subscriptions.amount,
         currency: subscriptions.currency,
         intervalMonths: subscriptions.intervalMonths,
@@ -1602,6 +1656,7 @@ export async function listBillingBoard(
       .from(subscriptions)
       .leftJoin(parties, eq(parties.id, subscriptions.customerPartyId))
       .leftJoin(projects, eq(projects.id, subscriptions.projectId))
+      .leftJoin(contracts, eq(contracts.id, subscriptions.contractId))
       .where(and(eq(subscriptions.organizationId, orgId), isNull(subscriptions.deletedAt))),
     subscriptionPaidByPeriodAll(orgId),
     subscriptionPeriodsAll(orgId),
@@ -1687,8 +1742,8 @@ export async function listBillingBoard(
         customerName: sub.customerName,
         customerTaxId: sub.customerTaxId,
         title: `${sub.name} (${p.periodLabel})`,
-        contractId: null,
-        contractTitle: null,
+        contractId: sub.contractId,
+        contractTitle: sub.contractTitle,
         projectId: sub.projectId,
         projectName: sub.projectName,
         dueDate,

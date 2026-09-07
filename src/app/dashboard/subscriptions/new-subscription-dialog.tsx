@@ -8,9 +8,11 @@ import { SubscriptionFields, type Option } from "./subscription-fields";
 export function NewSubscriptionDialog({
   parties,
   projects,
+  contracts,
 }: Readonly<{
   parties: Option[];
   projects: Option[];
+  contracts: Option[];
 }>) {
   const t = useTranslations("subscriptions");
 
@@ -25,7 +27,7 @@ export function NewSubscriptionDialog({
       submittingLabel={t("newDialog.submitting")}
       className="sm:max-w-lg max-h-[85vh] overflow-y-auto"
     >
-      <SubscriptionFields parties={parties} projects={projects} />
+      <SubscriptionFields parties={parties} projects={projects} contracts={contracts} />
     </CreateDialog>
   );
 }

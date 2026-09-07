@@ -21,6 +21,7 @@ import {
   listContracts,
   listParties,
   listProjects,
+  listSubscriptionsByContract,
 } from "@/db/queries";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -28,6 +29,7 @@ import { NewContractDialog } from "./new-contract-dialog";
 import { ContractFileLink } from "./contract-file-link";
 import { requireOrg } from "@/lib/session";
 import { ContractBillingItems } from "./contract-billing-items";
+import { ContractSubscriptions } from "./contract-subscriptions";
 
 export const dynamic = "force-dynamic";
 
@@ -101,11 +103,12 @@ function CollectionCell({
 export default async function ContractsPage() {
   const { orgId } = await requireOrg();
   const t = await getTranslations("contracts");
-  const [rows, parties, projects, board] = await Promise.all([
+  const [rows, parties, projects, board, subsByContract] = await Promise.all([
     listContracts(orgId),
     listParties(orgId),
     listProjects(orgId),
     listBillingBoard(orgId, { includeAllHistory: true }),
+    listSubscriptionsByContract(orgId),
   ]);
   const partyOptions = parties.map((p) => ({ id: p.id, name: p.name }));
   const projectOptions = projects.map((p) => ({ id: p.id, name: p.name }));
@@ -221,12 +224,15 @@ export default async function ContractsPage() {
                       (billingByContract.get(c.id) ?? []).filter(isLockedScheduleRow).length
                     }
                     extra={
-                      <ContractBillingItems
-                        contractId={c.id}
-                        rows={billingByContract.get(c.id) ?? []}
-                        parties={partyOptions}
-                        projects={projectOptions}
-                      />
+                      <>
+                        <ContractBillingItems
+                          contractId={c.id}
+                          rows={billingByContract.get(c.id) ?? []}
+                          parties={partyOptions}
+                          projects={projectOptions}
+                        />
+                        <ContractSubscriptions rows={subsByContract.get(c.id) ?? []} />
+                      </>
                     }
                     footer={<DeleteButton action={deleteContract} id={c.id} />}
                   />
