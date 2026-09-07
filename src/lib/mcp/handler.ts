@@ -3,46 +3,62 @@ import { type ToolAnnotations, type ToolDef, resolveOrg } from "./shared";
 import { logMcp, type ActivityAction } from "@/db/activity";
 import { publicBaseUrl } from "@/lib/base-url";
 
-// Derive an audit-log entry from a tool name + its result. Returns null for
-// most read-only tools (list_/get_/...) so only writes get logged — except
-// employee reads, which carry PII (email/phone + masked national id/account)
-// and are logged as "read". Entity types match the web side.
-function deriveMcpAudit(
-  name: string,
-  out: unknown,
-): {
+type McpAudit = {
   action: ActivityAction;
   entityType: string;
   entityId: number | null;
   // Org to log under when it can't be derived from the call's args — e.g.
   // accept_invitation, where the org only becomes the user's *after* the call.
   organizationId?: string;
-} | null {
-  let entityId: number | null = null;
-  if (out && typeof out === "object") {
-    const o = out as Record<string, unknown>;
-    if (typeof o.id === "number") entityId = o.id;
-    else if (Array.isArray(o.ids) && typeof o.ids[0] === "number") entityId = o.ids[0];
-  }
-  if (name.startsWith("create_")) return { action: "create", entityType: name.slice(7), entityId };
-  if (name.startsWith("update_")) return { action: "update", entityType: name.slice(7), entityId };
-  if (name.startsWith("delete_")) return { action: "delete", entityType: name.slice(7), entityId };
-  if (name === "bulk_create_transactions") return { action: "create", entityType: "transaction", entityId };
-  if (name === "pay_employee_salary") return { action: "create", entityType: "payslip", entityId };
-  if (name === "mark_accountant_notified" || name === "unmark_accountant_notified")
-    return { action: "update", entityType: "transaction", entityId };
-  if (name === "list_employees" || name === "get_employee")
-    return { action: "read", entityType: "employee", entityId };
-  if (name === "accept_invitation") {
-    const o = out as { organizationId?: unknown } | null;
-    return {
-      action: "create",
-      entityType: "member",
-      entityId,
-      organizationId: typeof o?.organizationId === "string" ? o.organizationId : undefined,
-    };
-  }
+};
+
+// Verb prefixes whose entity type is simply the rest of the tool name.
+const AUDIT_VERB_PREFIXES: ReadonlyArray<[prefix: string, action: ActivityAction]> = [
+  ["create_", "create"],
+  ["update_", "update"],
+  ["delete_", "delete"],
+];
+
+// Tools whose name doesn't follow the verb_entity convention. Read tools are
+// normally not logged — except employee reads, which carry PII (email/phone +
+// masked national id/account) and are logged as "read".
+const AUDIT_BY_NAME: Record<string, Pick<McpAudit, "action" | "entityType">> = {
+  bulk_create_transactions: { action: "create", entityType: "transaction" },
+  pay_employee_salary: { action: "create", entityType: "payslip" },
+  mark_accountant_notified: { action: "update", entityType: "transaction" },
+  unmark_accountant_notified: { action: "update", entityType: "transaction" },
+  list_employees: { action: "read", entityType: "employee" },
+  get_employee: { action: "read", entityType: "employee" },
+  accept_invitation: { action: "create", entityType: "member" },
+};
+
+/** The numeric entity id a tool result names, if any (`id`, else first of `ids`). */
+function auditEntityId(out: unknown): number | null {
+  if (!out || typeof out !== "object") return null;
+  const o = out as Record<string, unknown>;
+  if (typeof o.id === "number") return o.id;
+  if (Array.isArray(o.ids) && typeof o.ids[0] === "number") return o.ids[0];
   return null;
+}
+
+// Derive an audit-log entry from a tool name + its result. Returns null for
+// most read-only tools (list_/get_/...) so only writes get logged. Entity
+// types match the web side.
+function deriveMcpAudit(name: string, out: unknown): McpAudit | null {
+  const entityId = auditEntityId(out);
+  const byPrefix = AUDIT_VERB_PREFIXES.find(([prefix]) => name.startsWith(prefix));
+  if (byPrefix) {
+    const [prefix, action] = byPrefix;
+    return { action, entityType: name.slice(prefix.length), entityId };
+  }
+  const byName = AUDIT_BY_NAME[name];
+  if (!byName) return null;
+  const audit: McpAudit = { ...byName, entityId };
+  if (name === "accept_invitation") {
+    const orgId = (out as { organizationId?: unknown } | null)?.organizationId;
+    if (typeof orgId === "string") audit.organizationId = orgId;
+  }
+  return audit;
 }
 
 // Minimal MCP server over JSON-RPC 2.0 (Streamable HTTP, stateless). No SDK
