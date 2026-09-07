@@ -217,3 +217,13 @@
     @apply font-sans;
   }
 }
+
+/* 組織切換等待 server 重新渲染時，主內容區頂端那條不定量進度條。 */
+@keyframes refresh-bar {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}

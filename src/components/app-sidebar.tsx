@@ -38,7 +38,7 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import { OrgSwitcher } from "@/components/org-switcher";
+import { OrgSwitcher, type OrgOption } from "@/components/org-switcher";
 import { UserMenu } from "@/components/user-menu";
 import { LocaleSwitcher } from "@/components/locale-switcher";
 import { Logo } from "@/components/logo";
@@ -113,7 +113,17 @@ const groups = [
   { label: "org", items: org },
 ] as const;
 
-export function AppSidebar() {
+/**
+ * initialOrganizations / initialActiveOrgId 由 dashboard 的 server layout 撈好傳進來，
+ * 讓組織切換器第一次繪製就有東西可顯示（純 client fetch 的話會先閃一格空白的下拉）。
+ */
+export function AppSidebar({
+  initialOrganizations,
+  initialActiveOrgId,
+}: Readonly<{
+  initialOrganizations: OrgOption[];
+  initialActiveOrgId: string | null;
+}>) {
   const t = useTranslations("common");
   const pathname = usePathname();
 
@@ -129,7 +139,10 @@ export function AppSidebar() {
     <Sidebar>
       <SidebarHeader>
         <Logo className="px-1 py-1.5" />
-        <OrgSwitcher />
+        <OrgSwitcher
+          initialOrganizations={initialOrganizations}
+          initialActiveOrgId={initialActiveOrgId}
+        />
       </SidebarHeader>
 
       <SidebarContent>
