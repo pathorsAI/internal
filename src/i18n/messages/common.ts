@@ -105,6 +105,13 @@ const common = {
   userMenu: {
     signOut: { "zh-TW": "登出", en: "Sign out" },
     notSignedIn: { "zh-TW": "未登入", en: "Not signed in" },
+    currentOrg: { "zh-TW": "組織：{name}", en: "Organization: {name}" },
+    invitations: { "zh-TW": "邀請", en: "Invitations" },
+    invitationsTitle: { "zh-TW": "你收到的邀請", en: "Your invitations" },
+    invitationsDescription: {
+      "zh-TW": "接受後會直接切換到該組織",
+      en: "Accepting switches you to that organization",
+    },
   },
 } satisfies Dictionary;
 
