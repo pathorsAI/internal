@@ -97,6 +97,7 @@ function TransactionRow({
   return (
     <RowDialog
       variant="sheet"
+      rowId={t.id}
       title={editDialogTitle}
       description={editDialogDescription}
       cells={

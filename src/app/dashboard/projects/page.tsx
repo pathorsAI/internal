@@ -64,6 +64,7 @@ export default async function ProjectsPage() {
               rows.map((p) => (
                 <RowDialog
                   key={p.id}
+                  rowId={p.id}
                   title={p.name}
                   description={t("list.rowDescription")}
                   cells={

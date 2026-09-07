@@ -110,6 +110,36 @@ function InvoiceCell({ row, t }: Readonly<{ row: BillingRow; t: T }>) {
  * 開發票走預填草稿，只有 billing_items 有實體列可綁；訂閱期別沒有 id 可綁，
  * 退回單純的日期標記，發票本身到發票頁建立。
  */
+/**
+ * 項目底下那行來源說明：訂閱期別連回訂閱、掛了合約的一次性項目連回合約，
+ * 其餘（只有專案或什麼都沒綁）維持純文字。
+ */
+function SourceLine({ row, t }: Readonly<{ row: BillingRow; t: T }>) {
+  if (row.source === "subscription") {
+    const label = t("table.subscriptionSource");
+    if (row.subscriptionId == null) return <>{label}</>;
+    return (
+      <Link
+        href={`/dashboard/subscriptions?open=${row.subscriptionId}`}
+        className="text-primary hover:underline"
+      >
+        {label}
+      </Link>
+    );
+  }
+  if (row.contractId != null && row.contractTitle) {
+    return (
+      <Link
+        href={`/dashboard/contracts?open=${row.contractId}`}
+        className="text-primary hover:underline"
+      >
+        {row.contractTitle}
+      </Link>
+    );
+  }
+  return <>{row.projectName ?? t("table.oneTimeSource")}</>;
+}
+
 function RowActions({ row }: Readonly<{ row: BillingRow }>) {
   const itemId = row.source === "billing_item" ? row.billingItemId : null;
   const outstanding = row.expected - row.paid;
@@ -235,9 +265,7 @@ export default async function BillingPage({
                         {row.title}
                       </div>
                       <div className="truncate text-xs text-muted-foreground">
-                        {row.source === "subscription"
-                          ? t("table.subscriptionSource")
-                          : (row.contractTitle ?? row.projectName ?? t("table.oneTimeSource"))}
+                        <SourceLine row={row} t={t} />
                       </div>
                     </TableCell>
                     <TableCell

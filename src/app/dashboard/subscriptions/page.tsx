@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { RowDialog } from "@/components/row-dialog";
 import { DeleteButton } from "@/components/delete-button";
@@ -176,6 +177,7 @@ export default async function SubscriptionsPage() {
               rows.map((s) => (
                 <RowDialog
                   key={s.id}
+                  rowId={s.id}
                   title={s.name}
                   description={t("list.rowDescription")}
                   cells={
@@ -183,8 +185,18 @@ export default async function SubscriptionsPage() {
                       <TableCell className="font-medium">{s.name}</TableCell>
                       <TableCell>{s.customerName ?? "—"}</TableCell>
                       <TableCell className="text-muted-foreground">{s.projectName ?? "—"}</TableCell>
-                      <TableCell className="max-w-[22ch] truncate text-muted-foreground" title={s.contractTitle ?? undefined}>
-                        {s.contractTitle ?? "—"}
+                      <TableCell className="max-w-[22ch] text-muted-foreground">
+                        {s.contractId != null && s.contractTitle ? (
+                          <Link
+                            href={`/dashboard/contracts?open=${s.contractId}`}
+                            title={s.contractTitle}
+                            className="block truncate text-primary hover:underline"
+                          >
+                            {s.contractTitle}
+                          </Link>
+                        ) : (
+                          <span className="block truncate">{s.contractTitle ?? "—"}</span>
+                        )}
                       </TableCell>
                       <TableCell className="text-right font-medium tabular-nums">
                         {formatCurrency(s.amount, s.currency)}
@@ -200,6 +212,17 @@ export default async function SubscriptionsPage() {
                     </>
                   }
                 >
+                  {s.contractId != null && s.contractTitle ? (
+                    <p className="mb-3 text-sm">
+                      <span className="text-muted-foreground">{t("list.contractLinkLabel")}</span>
+                      <Link
+                        href={`/dashboard/contracts?open=${s.contractId}`}
+                        className="text-primary hover:underline"
+                      >
+                        {s.contractTitle} →
+                      </Link>
+                    </p>
+                  ) : null}
                   <EditSubscriptionForm
                     subscription={{
                       id: s.id,

@@ -156,6 +156,7 @@ export default async function ContractsPage() {
               rows.map((c) => (
                 <RowDialog
                   key={c.id}
+                  rowId={c.id}
                   title={c.title}
                   description={t("list.rowDescription")}
                   cells={
