@@ -920,13 +920,18 @@ export async function getProject(orgId: string, id: number) {
   return row ?? null;
 }
 
-export async function listSubscriptions(orgId: string) {
-  const db = getDb();
+/**
+ * 訂閱的讀取路徑有三條（清單 / 單筆 / 請款看板），欄位與 join 一模一樣。
+ * 收成一個 builder，往後加欄位只要改這裡，三邊不會漂移。
+ */
+function subscriptionRows(db: ReturnType<typeof getDb>) {
   return db
     .select({
       id: subscriptions.id,
       customerPartyId: subscriptions.customerPartyId,
       customerName: parties.name,
+      /** 開發票草稿要預填的統編 */
+      customerTaxId: parties.taxId,
       projectId: subscriptions.projectId,
       projectName: projects.name,
       contractId: subscriptions.contractId,
@@ -943,7 +948,11 @@ export async function listSubscriptions(orgId: string) {
     .from(subscriptions)
     .leftJoin(parties, eq(parties.id, subscriptions.customerPartyId))
     .leftJoin(projects, eq(projects.id, subscriptions.projectId))
-    .leftJoin(contracts, eq(contracts.id, subscriptions.contractId))
+    .leftJoin(contracts, eq(contracts.id, subscriptions.contractId));
+}
+
+export async function listSubscriptions(orgId: string) {
+  return subscriptionRows(getDb())
     .where(and(eq(subscriptions.organizationId, orgId), isNull(subscriptions.deletedAt)))
     .orderBy(desc(subscriptions.createdAt));
 }
@@ -995,26 +1004,7 @@ export async function listSubscriptionsByContract(
 }
 
 export async function getSubscription(orgId: string, id: number) {
-  const db = getDb();
-  const [row] = await db
-    .select({
-      id: subscriptions.id,
-      customerPartyId: subscriptions.customerPartyId,
-      customerName: parties.name,
-      projectId: subscriptions.projectId,
-      contractId: subscriptions.contractId,
-      contractTitle: contracts.title,
-      name: subscriptions.name,
-      amount: subscriptions.amount,
-      currency: subscriptions.currency,
-      intervalMonths: subscriptions.intervalMonths,
-      startDate: subscriptions.startDate,
-      endDate: subscriptions.endDate,
-      status: subscriptions.status,
-    })
-    .from(subscriptions)
-    .leftJoin(parties, eq(parties.id, subscriptions.customerPartyId))
-    .leftJoin(contracts, eq(contracts.id, subscriptions.contractId))
+  const [row] = await subscriptionRows(getDb())
     .where(and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, id), isNull(subscriptions.deletedAt)))
     .limit(1);
   return row ?? null;
@@ -1635,29 +1625,9 @@ export async function listBillingBoard(
       .where(and(eq(billingItems.organizationId, orgId), isNull(billingItems.deletedAt)))
       .orderBy(billingItems.dueDate),
     billingItemPaidById(orgId),
-    db
-      .select({
-        id: subscriptions.id,
-        name: subscriptions.name,
-        customerPartyId: subscriptions.customerPartyId,
-        customerName: parties.name,
-        customerTaxId: parties.taxId,
-        projectId: subscriptions.projectId,
-        projectName: projects.name,
-        contractId: subscriptions.contractId,
-        contractTitle: contracts.title,
-        amount: subscriptions.amount,
-        currency: subscriptions.currency,
-        intervalMonths: subscriptions.intervalMonths,
-        startDate: subscriptions.startDate,
-        endDate: subscriptions.endDate,
-        status: subscriptions.status,
-      })
-      .from(subscriptions)
-      .leftJoin(parties, eq(parties.id, subscriptions.customerPartyId))
-      .leftJoin(projects, eq(projects.id, subscriptions.projectId))
-      .leftJoin(contracts, eq(contracts.id, subscriptions.contractId))
-      .where(and(eq(subscriptions.organizationId, orgId), isNull(subscriptions.deletedAt))),
+    subscriptionRows(db).where(
+      and(eq(subscriptions.organizationId, orgId), isNull(subscriptions.deletedAt)),
+    ),
     subscriptionPaidByPeriodAll(orgId),
     subscriptionPeriodsAll(orgId),
   ]);
