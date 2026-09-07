@@ -60,7 +60,6 @@ const SUBSCRIPTION_ROW_PROPS = {
   organizationId: { type: ["string", "null"] },
   customerPartyId: { type: "number" },
   projectId: { type: ["number", "null"] },
-  contractId: { type: ["number", "null"] },
   name: { type: "string" },
   amount: { type: "string", description: "Decimal as a string." },
   currency: { type: "string", description: "3-letter code." },
@@ -69,6 +68,7 @@ const SUBSCRIPTION_ROW_PROPS = {
   endDate: { type: ["string", "null"], description: "YYYY-MM-DD." },
   status: { type: "string", enum: [...SUB_STATUS] },
   note: { type: ["string", "null"] },
+  contractId: { type: ["number", "null"] },
   createdAt: { type: "string" },
 } as const;
 
@@ -122,6 +122,55 @@ function checkEnum(v: string | undefined, allowed: readonly string[], field: str
   if (v !== undefined && !allowed.includes(v)) {
     throw new Error(`"${field}" must be one of: ${allowed.join(", ")}.`);
   }
+}
+
+/**
+ * 訂閱／合約共用的外鍵歸屬檢查。四支 create_/update_ 原本各自抄同一組
+ * 「有帶才驗」的判斷；別的 org 的 id 一樣是合法的 FK 值，這裡是唯一的攔截點。
+ */
+async function assertClientRefs(
+  db: ReturnType<typeof getDb>,
+  orgId: string,
+  refs: Readonly<{ customerPartyId?: number; projectId?: number; contractId?: number }>,
+) {
+  if (refs.customerPartyId !== undefined)
+    await assertInOrg(db, parties, refs.customerPartyId, orgId, "Customer");
+  if (refs.projectId !== undefined)
+    await assertInOrg(db, projects, refs.projectId, orgId, "Project");
+  if (refs.contractId !== undefined)
+    await assertInOrg(db, contracts, refs.contractId, orgId, "Contract");
+}
+
+/**
+ * update_subscription 的欄位組裝：只把「有帶」的欄位寫進 patch。
+ *
+ * 抽成獨立的純函式而不是留在 execute 裡：十幾個 if 疊在同一個函式本體，
+ * 認知複雜度會超過門檻（S3776）。判斷「有沒有帶」的邏輯收在 put 裡只寫一次。
+ */
+function subscriptionPatch(args: Record<string, unknown>): Record<string, unknown> {
+  const patch: Record<string, unknown> = {};
+  const put = (key: string, provided: unknown, value: () => unknown) => {
+    if (provided !== undefined) patch[key] = value();
+  };
+  put("customerPartyId", optNumber(args, "customerPartyId"), () =>
+    requireNumber(args, "customerPartyId"),
+  );
+  put("projectId", optNumber(args, "projectId"), () => requireNumber(args, "projectId"));
+  // 明確傳 null = 解除綁定；完全沒帶這個 key = 不動它。optNumber 會把兩者都收斂成
+  // undefined，分不開，所以 null 要自己先攔一次。
+  if (args.contractId === null) patch.contractId = null;
+  else put("contractId", optNumber(args, "contractId"), () => requireNumber(args, "contractId"));
+  put("name", optString(args, "name"), () => requireString(args, "name"));
+  put("amount", optNumber(args, "amount"), () => requireAmount(args, "amount"));
+  put("currency", optString(args, "currency"), () => normalizeCurrency(args, "currency"));
+  put("intervalMonths", optNumber(args, "intervalMonths"), () =>
+    requireNumber(args, "intervalMonths"),
+  );
+  put("startDate", optString(args, "startDate"), () => requireDate(args, "startDate"));
+  put("endDate", optString(args, "endDate"), () => optString(args, "endDate"));
+  put("status", optString(args, "status"), () => optString(args, "status"));
+  put("note", optString(args, "note"), () => optString(args, "note"));
+  return patch;
 }
 
 export const clientTools: Record<string, ToolDef> = {
@@ -251,11 +300,9 @@ export const clientTools: Record<string, ToolDef> = {
       const orgId = await resolveOrg(args, ctx);
       const db = getDb();
       const customerPartyId = requireNumber(args, "customerPartyId");
-      await assertInOrg(db, parties, customerPartyId, orgId, "Customer");
       const projectId = optNumber(args, "projectId");
-      if (projectId !== undefined) await assertInOrg(db, projects, projectId, orgId, "Project");
       const contractId = optNumber(args, "contractId");
-      if (contractId !== undefined) await assertInOrg(db, contracts, contractId, orgId, "Contract");
+      await assertClientRefs(db, orgId, { customerPartyId, projectId, contractId });
       checkEnum(optString(args, "status"), SUB_STATUS, "status");
       const [row] = await db
         .insert(subscriptions)
@@ -308,30 +355,13 @@ export const clientTools: Record<string, ToolDef> = {
       const id = requireNumber(args, "id");
       const orgId = await resolveOrg(args, ctx);
       const db = getDb();
-      const customerPartyId = optNumber(args, "customerPartyId");
-      if (customerPartyId !== undefined) await assertInOrg(db, parties, customerPartyId, orgId, "Customer");
-      const projectId = optNumber(args, "projectId");
-      if (projectId !== undefined) await assertInOrg(db, projects, projectId, orgId, "Project");
-      // 解除綁定要能表達，所以明確傳 null 與「沒帶這個欄位」必須分得開
-      // （optNumber 兩者都回 undefined）。
-      const unlinkContract = args.contractId === null;
-      const contractId = optNumber(args, "contractId");
-      if (contractId !== undefined) await assertInOrg(db, contracts, contractId, orgId, "Contract");
+      await assertClientRefs(db, orgId, {
+        customerPartyId: optNumber(args, "customerPartyId"),
+        projectId: optNumber(args, "projectId"),
+        contractId: optNumber(args, "contractId"),
+      });
       checkEnum(optString(args, "status"), SUB_STATUS, "status");
-      const patch: Record<string, unknown> = {};
-      if (customerPartyId !== undefined) patch.customerPartyId = customerPartyId;
-      if (projectId !== undefined) patch.projectId = projectId;
-      if (unlinkContract) patch.contractId = null;
-      else if (contractId !== undefined) patch.contractId = contractId;
-      if (optString(args, "name") !== undefined) patch.name = requireString(args, "name");
-      if (optNumber(args, "amount") !== undefined) patch.amount = requireAmount(args, "amount");
-      if (optString(args, "currency") !== undefined) patch.currency = normalizeCurrency(args, "currency");
-      if (optNumber(args, "intervalMonths") !== undefined)
-        patch.intervalMonths = requireNumber(args, "intervalMonths");
-      if (optString(args, "startDate") !== undefined) patch.startDate = requireDate(args, "startDate");
-      if (optString(args, "endDate") !== undefined) patch.endDate = optString(args, "endDate");
-      if (optString(args, "status") !== undefined) patch.status = optString(args, "status");
-      if (optString(args, "note") !== undefined) patch.note = optString(args, "note");
+      const patch = subscriptionPatch(args);
       if (Object.keys(patch).length === 0) throw new Error("Nothing to update.");
       const [row] = await db
         .update(subscriptions)
@@ -396,9 +426,8 @@ export const clientTools: Record<string, ToolDef> = {
       const orgId = await resolveOrg(args, ctx);
       const db = getDb();
       const customerPartyId = requireNumber(args, "customerPartyId");
-      await assertInOrg(db, parties, customerPartyId, orgId, "Customer");
       const projectId = optNumber(args, "projectId");
-      if (projectId !== undefined) await assertInOrg(db, projects, projectId, orgId, "Project");
+      await assertClientRefs(db, orgId, { customerPartyId, projectId });
       checkEnum(optString(args, "status"), CONTRACT_STATUS, "status");
       const [row] = await db
         .insert(contracts)
@@ -452,9 +481,8 @@ export const clientTools: Record<string, ToolDef> = {
       const orgId = await resolveOrg(args, ctx);
       const db = getDb();
       const customerPartyId = optNumber(args, "customerPartyId");
-      if (customerPartyId !== undefined) await assertInOrg(db, parties, customerPartyId, orgId, "Customer");
       const projectId = optNumber(args, "projectId");
-      if (projectId !== undefined) await assertInOrg(db, projects, projectId, orgId, "Project");
+      await assertClientRefs(db, orgId, { customerPartyId, projectId });
       checkEnum(optString(args, "status"), CONTRACT_STATUS, "status");
       const patch: Record<string, unknown> = {};
       if (customerPartyId !== undefined) patch.customerPartyId = customerPartyId;
