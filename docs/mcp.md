@@ -117,8 +117,8 @@ the `tools-*.ts` modules):
 - `_meta["openai/toolInvocation/invoking" | "invoked"]`, the status line ChatGPT
   shows while a call is in flight.
 
-**Output schemas.** Every tool declares an `outputSchema` — all 68 of them, as of
-server version 1.2.0. When a tool declares one the handler additionally returns
+**Output schemas.** Every tool declares an `outputSchema` — all 70 of them, as of
+server version 1.3.0. When a tool declares one the handler additionally returns
 the result as MCP `structuredContent` (the JSON text block stays, per MCP's
 back-compat recommendation), which is what ChatGPT and Codex prefer over parsing
 JSON out of text. `list_organizations` remains the reference implementation.
@@ -145,6 +145,21 @@ declare a schema you cannot guarantee.
 
 **Discovery** — `list_organizations` (call first), `get_financial_overview`.
 Organizations are created in the web app, not over MCP.
+
+**Invitations** — `list_my_invitations` / `accept_invitation`. Invitations are
+*sent* from the web app (members page), but the invitee can accept one without
+leaving the chat: `list_my_invitations` returns the pending invitations addressed
+to the signed-in user's email (with an `expired` flag — better-auth never flips
+an expired row's status, so "pending but expired" is a normal state), and
+`accept_invitation` takes an `invitationId` (or an `organizationId` when there
+is exactly one live invitation to that org), re-runs the same checks better-auth's
+own accept route does (pending, unexpired, email matches, membership limit),
+inserts the `member` row and marks the invitation `accepted`. The server's
+`instructions` point the model here when `list_organizations` comes back empty.
+It can't go through `auth.api.acceptInvitation` because that endpoint needs a
+session cookie, and an MCP bearer token only carries a userId. The web session's
+`activeOrganizationId` is not touched; `src/lib/session.ts` already falls back to
+the first membership when it is empty.
 
 **Billing** — `list_billing_status` is the main one: the whole billing board in a
 single call, merging one-off charges (contract instalments / project milestones)
@@ -264,7 +279,7 @@ things that don't live in this repo:
 Both directories ask for the same thing in different words — OpenAI wants
 "test credentials for a fully populated account", Anthropic wants a "fully
 featured demo account with sample data". An empty workspace fails review: most
-of the 68 tools would answer with an empty array and the reviewer has no way to
+of the 70 tools would answer with an empty array and the reviewer has no way to
 tell what the connector does.
 
 Two commands produce that account. Run them against the environment you are

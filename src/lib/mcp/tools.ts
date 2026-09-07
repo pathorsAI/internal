@@ -30,6 +30,7 @@ import { transactionTools } from "./tools-transactions";
 import { clientTools } from "./tools-client";
 import { hrTools } from "./tools-hr";
 import { billingItemTools } from "./tools-billing";
+import { orgTools } from "./tools-org";
 
 export type { ToolContext, ToolDef } from "./shared";
 
@@ -703,6 +704,7 @@ const billingTools: Record<string, ToolDef> = {
 
 export const tools: Record<string, ToolDef> = {
   ...billingTools,
+  ...orgTools,
   ...billingItemTools,
   ...accountingTools,
   ...transactionTools,
