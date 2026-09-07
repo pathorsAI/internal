@@ -14,6 +14,7 @@ export type SubscriptionFormValues = {
   /** 目前綁定的客戶名稱，給 PartyCombobox 預填 */
   customerName: string | null;
   projectId: number | null;
+  contractId: number | null;
   name: string;
   amount: string;
   currency: string;
@@ -33,10 +34,12 @@ export type SubscriptionFormValues = {
 export function SubscriptionFields({
   parties,
   projects,
+  contracts,
   values,
 }: Readonly<{
   parties: Option[];
   projects: Option[];
+  contracts: Option[];
   values?: SubscriptionFormValues;
 }>) {
   const t = useTranslations("subscriptions");
@@ -58,6 +61,20 @@ export function SubscriptionFields({
         {projects.map((p) => (
           <SelectItem key={p.id} value={String(p.id)}>
             {p.name}
+          </SelectItem>
+        ))}
+      </SelectField>
+      <SelectField
+        name="contractId"
+        label={t("newDialog.contract.label")}
+        placeholder={t("newDialog.contract.placeholder")}
+        defaultValue={values?.contractId == null ? "none" : String(values.contractId)}
+      >
+        {/* 選填：Radix Select 不接受空字串，「不綁定」用 "none"（mutations 那側轉回 null）。 */}
+        <SelectItem value="none">{t("newDialog.contract.placeholder")}</SelectItem>
+        {contracts.map((c) => (
+          <SelectItem key={c.id} value={String(c.id)}>
+            {c.name}
           </SelectItem>
         ))}
       </SelectField>

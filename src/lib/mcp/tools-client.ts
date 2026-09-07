@@ -60,6 +60,7 @@ const SUBSCRIPTION_ROW_PROPS = {
   organizationId: { type: ["string", "null"] },
   customerPartyId: { type: "number" },
   projectId: { type: ["number", "null"] },
+  contractId: { type: ["number", "null"] },
   name: { type: "string" },
   amount: { type: "string", description: "Decimal as a string." },
   currency: { type: "string", description: "3-letter code." },
@@ -231,6 +232,7 @@ export const clientTools: Record<string, ToolDef> = {
       properties: {
         customerPartyId: { type: "number", description: "See list_parties (label=customer)." },
         projectId: { type: "number" },
+        contractId: { type: "number", description: "See list_contracts." },
         name: { type: "string" },
         amount: { type: "number" },
         currency: { type: "string", description: "3-letter; default TWD." },
@@ -252,6 +254,8 @@ export const clientTools: Record<string, ToolDef> = {
       await assertInOrg(db, parties, customerPartyId, orgId, "Customer");
       const projectId = optNumber(args, "projectId");
       if (projectId !== undefined) await assertInOrg(db, projects, projectId, orgId, "Project");
+      const contractId = optNumber(args, "contractId");
+      if (contractId !== undefined) await assertInOrg(db, contracts, contractId, orgId, "Contract");
       checkEnum(optString(args, "status"), SUB_STATUS, "status");
       const [row] = await db
         .insert(subscriptions)
@@ -259,6 +263,7 @@ export const clientTools: Record<string, ToolDef> = {
           organizationId: orgId,
           customerPartyId,
           projectId: projectId ?? null,
+          contractId: contractId ?? null,
           name: requireString(args, "name"),
           amount: requireAmount(args, "amount"),
           currency: normalizeCurrency(args, "currency"),
@@ -281,6 +286,10 @@ export const clientTools: Record<string, ToolDef> = {
         id: { type: "number" },
         customerPartyId: { type: "number" },
         projectId: { type: "number" },
+        contractId: {
+          type: ["number", "null"],
+          description: "See list_contracts. Pass null to unlink.",
+        },
         name: { type: "string" },
         amount: { type: "number" },
         currency: { type: "string" },
@@ -303,10 +312,17 @@ export const clientTools: Record<string, ToolDef> = {
       if (customerPartyId !== undefined) await assertInOrg(db, parties, customerPartyId, orgId, "Customer");
       const projectId = optNumber(args, "projectId");
       if (projectId !== undefined) await assertInOrg(db, projects, projectId, orgId, "Project");
+      // 解除綁定要能表達，所以明確傳 null 與「沒帶這個欄位」必須分得開
+      // （optNumber 兩者都回 undefined）。
+      const unlinkContract = args.contractId === null;
+      const contractId = optNumber(args, "contractId");
+      if (contractId !== undefined) await assertInOrg(db, contracts, contractId, orgId, "Contract");
       checkEnum(optString(args, "status"), SUB_STATUS, "status");
       const patch: Record<string, unknown> = {};
       if (customerPartyId !== undefined) patch.customerPartyId = customerPartyId;
       if (projectId !== undefined) patch.projectId = projectId;
+      if (unlinkContract) patch.contractId = null;
+      else if (contractId !== undefined) patch.contractId = contractId;
       if (optString(args, "name") !== undefined) patch.name = requireString(args, "name");
       if (optNumber(args, "amount") !== undefined) patch.amount = requireAmount(args, "amount");
       if (optString(args, "currency") !== undefined) patch.currency = normalizeCurrency(args, "currency");

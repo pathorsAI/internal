@@ -50,6 +50,14 @@ function num(v: FormDataEntryValue | null) {
   const s = str(v);
   return s === null ? null : Number(s);
 }
+/**
+ * 選填外鍵下拉：Radix Select 不接受空字串當值，「不綁定」那一項送的是 "none"
+ * （比照 employees 的 userId），照 num() 解會變成 NaN。
+ */
+function optRefNum(v: FormDataEntryValue | null) {
+  const s = str(v);
+  return s === null || s === "none" ? null : Number(s);
+}
 
 // ---- 外鍵歸屬驗證 ----
 
@@ -1795,6 +1803,7 @@ function subscriptionValues(formData: FormData) {
   return {
     customerPartyName: str(formData.get("customerPartyName")),
     projectId: num(formData.get("projectId")),
+    contractId: optRefNum(formData.get("contractId")),
     name: str(formData.get("name")),
     amount: str(formData.get("amount")),
     currency: str(formData.get("currency")) ?? "TWD",
@@ -1833,6 +1842,7 @@ function subscriptionColumns(
     ...required,
     customerPartyId,
     projectId: v.projectId,
+    contractId: v.contractId,
     currency: v.currency,
     intervalMonths: v.intervalMonths,
     endDate: v.endDate,
@@ -1852,7 +1862,10 @@ export async function createSubscription(
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
-    const refError = await unownedRefError(db, orgId, [[projects, [v.projectId]]]);
+    const refError = await unownedRefError(db, orgId, [
+      [projects, [v.projectId]],
+      [contracts, [v.contractId]],
+    ]);
     if (refError) return { ok: false, error: refError };
     const customer = await requireCustomer(db, orgId, v.customerPartyName);
     if ("error" in customer) return { ok: false, error: customer.error };
@@ -1882,7 +1895,10 @@ export async function updateSubscription(
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
-    const refError = await unownedRefError(db, orgId, [[projects, [v.projectId]]]);
+    const refError = await unownedRefError(db, orgId, [
+      [projects, [v.projectId]],
+      [contracts, [v.contractId]],
+    ]);
     if (refError) return { ok: false, error: refError };
     const customer = await requireCustomer(db, orgId, v.customerPartyName);
     if ("error" in customer) return { ok: false, error: customer.error };
