@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { TableRow } from "@/components/ui/table";
 import {
   Dialog,
@@ -42,12 +43,68 @@ export function useRowDialogClose() {
   return React.useContext(CloseCtx);
 }
 
+/** 把 ?open=<id> 從網址上拿掉，其餘 query 原樣保留 */
+function urlWithout(params: URLSearchParams, pathname: string, key: string) {
+  const next = new URLSearchParams(params);
+  next.delete(key);
+  const query = next.toString();
+  return query ? `${pathname}?${query}` : pathname;
+}
+
+/**
+ * 深連結：網址帶 `?open=<rowId>` 時自動打開這一列的編輯視窗。
+ * 本身不畫任何東西，只負責讀網址、開視窗、關掉後把參數清掉。
+ *
+ * `useSearchParams` 必須包在 Suspense 裡（見下方呼叫端），所以獨立成一個小元件。
+ */
+function RowDeepLink({
+  rowId,
+  openParam,
+  open,
+  setOpen,
+  rowRef,
+}: Readonly<{
+  rowId: number | string;
+  openParam: string;
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  rowRef: React.RefObject<HTMLTableRowElement | null>;
+}>) {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const matched = searchParams.get(openParam) === String(rowId);
+  // 只有「被打開過又關掉」才需要清網址；避免掛載當下就把參數清掉。
+  const wasOpen = React.useRef(false);
+
+  // 用 effect 而不是 initial state，server / client 首次 render 才會一致。
+  React.useEffect(() => {
+    if (matched) setOpen(true);
+  }, [matched, setOpen]);
+
+  React.useEffect(() => {
+    if (open) {
+      wasOpen.current = true;
+      // 關掉視窗後看得到自己剛剛點的是哪一列
+      if (matched) rowRef.current?.scrollIntoView({ block: "center" });
+      return;
+    }
+    if (!wasOpen.current || !matched) return;
+    wasOpen.current = false;
+    router.replace(urlWithout(searchParams, pathname, openParam), { scroll: false });
+  }, [open, matched, openParam, pathname, router, searchParams, rowRef]);
+
+  return null;
+}
+
 export function RowDialog({
   cells,
   title,
   description,
   children,
   variant = "dialog",
+  rowId,
+  openParam = "open",
 }: Readonly<{
   /** <TableCell> 們 */
   cells: React.ReactNode;
@@ -57,9 +114,14 @@ export function RowDialog({
   children: React.ReactNode;
   /** "dialog" 置中彈窗（預設）；"sheet" 從右側滑出 */
   variant?: "dialog" | "sheet";
+  /** 給了就支援 `?open=<rowId>` 深連結 */
+  rowId?: number | string;
+  /** 深連結用的 query 參數名，預設 `open` */
+  openParam?: string;
 }>) {
   const [open, setOpen] = React.useState(false);
   const close = React.useCallback(() => setOpen(false), []);
+  const rowRef = React.useRef<HTMLTableRowElement | null>(null);
 
   function onRowClick(e: React.MouseEvent<HTMLTableRowElement>) {
     if (shouldOpen(e.target)) setOpen(true);
@@ -75,6 +137,7 @@ export function RowDialog({
 
   const row = (
     <TableRow
+      ref={rowRef}
       role="button"
       tabIndex={0}
       aria-haspopup="dialog"
@@ -86,10 +149,24 @@ export function RowDialog({
     </TableRow>
   );
 
+  const deepLink =
+    rowId == null ? null : (
+      <React.Suspense fallback={null}>
+        <RowDeepLink
+          rowId={rowId}
+          openParam={openParam}
+          open={open}
+          setOpen={setOpen}
+          rowRef={rowRef}
+        />
+      </React.Suspense>
+    );
+
   if (variant === "sheet") {
     return (
       <>
         {row}
+        {deepLink}
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetContent className="data-[side=right]:sm:max-w-xl">
             <SheetHeader className="shrink-0">
@@ -109,6 +186,7 @@ export function RowDialog({
   return (
     <>
       {row}
+      {deepLink}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
           <DialogHeader className="shrink-0 px-4 pt-4 pb-3">

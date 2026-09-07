@@ -135,6 +135,7 @@ export default async function InvoicesPage({
               rows.map((inv) => (
                 <RowDialog
                   key={inv.id}
+                  rowId={inv.id}
                   title={inv.invoiceNumber ?? t("defaultTitle")}
                   description={inv.displayName ?? undefined}
                   cells={

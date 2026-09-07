@@ -41,7 +41,12 @@ export async function ContractSubscriptions({
         {rows.map((s) => (
           <li key={s.id} className="flex items-center justify-between gap-2 py-2 text-sm">
             <div className="min-w-0">
-              <div className="truncate font-medium">{s.name}</div>
+              <Link
+                href={`/dashboard/subscriptions?open=${s.id}`}
+                className="block truncate font-medium text-primary hover:underline"
+              >
+                {s.name}
+              </Link>
               <div className="text-xs text-muted-foreground tabular-nums">
                 {formatCurrency(s.amount, s.currency)} · {intervalLabel(t, s.intervalMonths)}
               </div>

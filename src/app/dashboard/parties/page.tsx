@@ -83,6 +83,7 @@ export default async function PartiesPage() {
               rows.map((s) => (
                 <RowDialog
                   key={s.id}
+                  rowId={s.id}
                   title={s.name}
                   description={t("rowDialogDescription")}
                   cells={
