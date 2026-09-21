@@ -2,11 +2,12 @@
 
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Languages } from "lucide-react";
+import { Check } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { setUserLocale } from "@/i18n/actions";
-import { locales, localeLabels, type Locale } from "@/i18n/config";
+import { LocaleFlag } from "@/components/locale-flag";
+import { LOCALES, locales, type Locale } from "@/i18n/config";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -45,8 +46,11 @@ export function LocaleSwitcher() {
               title={t("label")}
               className={cn(pending && "opacity-60")}
             >
-              <Languages className="size-4 text-muted-foreground" />
-              <span>{localeLabels[active]}</span>
+              <LocaleFlag
+                locale={active}
+                className="size-4 shrink-0"
+              />
+              <span>{LOCALES[active].label}</span>
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" side="top" className="min-w-40">
@@ -58,7 +62,11 @@ export function LocaleSwitcher() {
                     locale === active ? "opacity-100" : "opacity-0",
                   )}
                 />
-                {localeLabels[locale]}
+                <LocaleFlag
+                  locale={locale}
+                  className="size-4 shrink-0"
+                />
+                {LOCALES[locale].label}
               </DropdownMenuItem>
             ))}
           </DropdownMenuContent>

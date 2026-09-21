@@ -6,7 +6,8 @@ import { Check, Languages } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { setUserLocale } from "@/i18n/actions";
-import { locales, localeLabels, type Locale } from "@/i18n/config";
+import { LOCALES, locales, type Locale } from "@/i18n/config";
+import { LocaleFlag } from "@/components/locale-flag";
 
 /**
  * 公開頁面（landing 與 /privacy、/terms）共用的語言切換器：一顆圖示按鈕，按下展開一個
@@ -87,7 +88,8 @@ export function PublicLocaleSwitcher() {
               onClick={() => select(locale)}
             >
               <Check aria-hidden="true" />
-              <span>{localeLabels[locale]}</span>
+              <LocaleFlag locale={locale} className="langsw-flag" />
+              <span>{LOCALES[locale].label}</span>
             </button>
           ))}
         </div>
