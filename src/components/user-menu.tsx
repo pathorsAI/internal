@@ -9,6 +9,11 @@ import {
   PendingInvitations,
   useUserInvitations,
 } from "@/components/pending-invitations";
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+} from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -65,8 +70,19 @@ export function UserMenu() {
         >
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton size="lg">
-              <div className="relative bg-muted flex aspect-square size-8 items-center justify-center rounded-lg text-xs font-medium">
-                {user?.name?.[0]?.toUpperCase() ?? "?"}
+              {/* 待處理邀請的紅點刻意留在 Avatar 外面：Avatar 本身是
+                  overflow-hidden，擺進去會被裁掉一角。 */}
+              <div className="relative shrink-0">
+                <Avatar className="rounded-lg">
+                  <AvatarImage
+                    src={user?.image ?? undefined}
+                    alt=""
+                    className="rounded-lg object-cover"
+                  />
+                  <AvatarFallback className="rounded-lg text-xs font-medium text-inherit">
+                    {user?.name?.[0]?.toUpperCase() ?? "?"}
+                  </AvatarFallback>
+                </Avatar>
                 {pendingCount > 0 ? (
                   <span
                     aria-hidden

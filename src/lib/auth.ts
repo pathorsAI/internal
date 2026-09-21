@@ -106,6 +106,23 @@ export const auth = betterAuth({
       // Always show Google's account chooser instead of silently reusing the
       // browser's only signed-in session — users may have multiple accounts.
       prompt: "select_account",
+      // 每次登入都把 Google 的 name / image 寫回 user 表。
+      //
+      // 不開的話，better-auth 只在「這筆 user 是 Google 建的」那一刻寫過一次
+      // profile：先用密碼帳號（scripts/create-user.ts）開出來、之後才接上 Google
+      // 的人，user.image 會永遠是 null——側邊欄因此只剩名字首字母，看起來像頭像
+      // 壞掉。開了之後那些帳號會在下一次登入自動補上，換過大頭貼的人也跟著更新。
+      //
+      // 覆蓋的範圍只有 provider 回傳的欄位：email 是配對用的鍵、不會被改寫，
+      // emailVerified 只會從 false 升成 true（better-auth oauth2/link-account）。
+      // name 一定有值（登入用的 scope 本來就含 profile），而站內沒有任何地方能改
+      // 自己的 name / image，所以這裡不會蓋掉使用者自己設定過的東西。
+      //
+      // 刻意只對 Google 開：SSO 那邊的同一個開關是存在 sso_provider 的 oidc_config
+      // 裡（plugin 的 defaultOverrideUserInfo 只在註冊當下生效，動不到已註冊的
+      // provider），而且任意 IdP 少給 name 時 better-auth 會用空字串覆蓋，
+      // 反而會把名字洗掉。要對某個 SSO provider 開，改那筆 provider 的設定。
+      overrideUserInfoOnSignIn: true,
     },
   },
   databaseHooks: {
