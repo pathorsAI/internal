@@ -4,7 +4,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getTranslations } from "next-intl/server";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
-import { htmlLang, type Locale } from "@/i18n/config";
+import { LOCALES, type Locale } from "@/i18n/config";
 
 const openSans = Open_Sans({
   variable: "--font-sans",
@@ -33,7 +33,7 @@ export default async function RootLayout({
 
   return (
     <html
-      lang={htmlLang[locale]}
+      lang={LOCALES[locale].htmlLang}
       className={`${openSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">

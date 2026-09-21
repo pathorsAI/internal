@@ -31,8 +31,13 @@ export function proxy(request: NextRequest) {
 // /privacy and /terms must stay public: they are linked from the landing page
 // and published as `resource_policy_uri` / `resource_tos_uri` in the RFC 9728
 // metadata, where OpenAI's plugin review fetches them without any session.
+//
+// /flags 是 public/flags 那套國旗圖示（幣別與語系切換器都吃它）。正式環境其實碰不到
+// 這裡 —— Cloudflare 的 assets binding 會在 Worker 之前就把 public/ 的檔案送出去 ——
+// 但 `next dev` 沒有那一層，於是同一張圖在本機會被導去 /login，公開頁面的語系切換器
+// 在開發時就少了旗子。列進來讓本機跟線上看到的是同一件事。
 export const config = {
   matcher: [
-    "/((?!login|signup|landing|privacy|terms|api/auth|mcp|.well-known|_next/static|_next/image|favicon.ico).*)",
+    "/((?!login|signup|landing|privacy|terms|flags|api/auth|mcp|.well-known|_next/static|_next/image|favicon.ico).*)",
   ],
 };

@@ -108,9 +108,12 @@ const CSP_REPORT_ONLY = [
   "script-src 'self'",
   // 見上面 (c)：這條的 'unsafe-inline' 是預期會長期存在的例外。
   "style-src 'self' 'unsafe-inline'",
-  // 站內圖片都在 /landing/images/ 與 /api/documents/*，沒有外部圖床；
-  // data: 給內嵌的小圖示，blob: 給前端產生的預覽。
-  "img-src 'self' data: blob:",
+  // 站內圖片都在 /landing/images/ 與 /api/documents/*；data: 給內嵌的小圖示，
+  // blob: 給前端產生的預覽。唯一的外部來源是 Google 帳號的大頭貼——登入時由
+  // better-auth 從 provider 存進 user.image，側邊欄的 UserMenu 直接吃那個 URL。
+  // 其他 OIDC IdP 的大頭貼網域沒有放行：那是註冊誰就多一個網域，等於把 img-src
+  // 開成萬用字元；那些人看到的是名字首字母的 fallback。
+  "img-src 'self' data: blob: https://*.googleusercontent.com",
   // .woff2 仍然直接串 fonts.gstatic.com（src/app/landing-fonts.css 的說明）。
   // Google Fonts 的 CSS 本身已經 vendored 進 repo，所以不需要 style-src 放行網域。
   "font-src 'self' https://fonts.gstatic.com",

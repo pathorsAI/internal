@@ -40,4 +40,6 @@ export const LOCALE_SWITCHER_CSS = `
 .langsw-item[aria-checked="true"]{color:var(--ink)}
 .langsw-item svg{width:15px; height:15px; flex:none; opacity:0}
 .langsw-item[aria-checked="true"] svg{opacity:1; color:var(--brand)}
+/* public/flags/*.svg 是圓形徽章，所以不加圓角也不加外框——那會在圓的外面畫出方框。 */
+.langsw-flag{width:15px; height:15px; flex:none}
 `;
