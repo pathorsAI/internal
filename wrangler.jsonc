@@ -22,6 +22,13 @@
   "r2_buckets": [
     { "binding": "STORAGE", "bucket_name": "pathors-internal-storage" }
   ],
+  // Worker 固定在 Neon 的同一個 AWS 區域執行（ap-southeast-1，prod DB 在 team
+  // 專案的 ep-dawn-star）。沒設的話 Worker 跑在「離使用者最近」的機房，而 HiNet
+  // 的流量常被 Cloudflare 分到美西 SJC / 美東 IAD：一次登入要打好幾次 Neon，
+  // 從那裡連新加坡的查詢會卡 15–120 秒後失敗，Google 登入因此時好時壞
+  // （2026-09-23：SIN 162 筆 0 筆逾時，SJC 33 筆 14 筆逾時）。
+  // 固定區域之後，使用者端只多一段 CF 骨幹轉送，DB 來回都在同一個區域。
+  "placement": { "region": "aws:ap-southeast-1" },
   "observability": {
     "logs": {
       "enabled": true,
