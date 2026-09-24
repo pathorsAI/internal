@@ -359,9 +359,8 @@ function AccountForm({
 
   return (
     // 攔 Enter：這塊在員工表單裡面，按 Enter 會把整張員工表單送出去。
-    // 這個 div 本身不可互動，只是接住內層輸入框冒泡上來的 keydown（事件委派），
-    // 所以標 role="presentation"（jsx-a11y 對「接冒泡事件的容器」建議的做法）。
-    <div role="presentation" className="space-y-3 rounded-md border bg-muted/30 p-3" onKeyDown={swallowEnter}>
+    // 用 fieldset 當群組容器（語意上就是「表單裡的一組欄位」），接住內層輸入框冒泡上來的 keydown。
+    <fieldset className="min-w-0 space-y-3 rounded-md border bg-muted/30 p-3" onKeyDown={swallowEnter}>
       <div className="text-sm font-medium">{draft.id ? t("form.editTitle") : t("form.addTitle")}</div>
       <div className="grid gap-3 sm:grid-cols-2">
         <FormRow label={t("form.kind")}>
@@ -470,7 +469,7 @@ function AccountForm({
           {pending ? t("form.saving") : t("form.save")}
         </Button>
       </div>
-    </div>
+    </fieldset>
   );
 }
 

@@ -217,7 +217,9 @@ type AccountPatch = Partial<typeof employeeBankAccounts.$inferInsert>;
 
 /** 更新時沒帶的欄位（undefined）沿用既有值；null 表示明確清空，照用。 */
 function orExisting<T>(next: T | undefined, existing: T): T {
-  return next === undefined ? existing : next;
+  // 刻意不用 ??：null（明確清空）必須保留，只有 undefined 才沿用既有值。
+  if (next === undefined) return existing;
+  return next;
 }
 
 /** 新帳號 → 加密 + 末五碼；沒帶新帳號就不動（但改成銀行帳戶時必須重填）。 */
