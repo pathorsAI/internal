@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 import { Eye, EyeOff, Pencil, Plus, Trash2 } from "lucide-react";
@@ -106,8 +106,8 @@ function parseBankInput(v: string): { bankCode: string; bankName: string } {
 }
 
 /** 在帳戶輸入框按 Enter 不要送出外層的員工表單。 */
-function swallowEnter(e: React.KeyboardEvent) {
-  if (e.key === "Enter" && (e.target as HTMLElement).tagName === "INPUT") e.preventDefault();
+function swallowEnter(e: KeyboardEvent) {
+  if (e.key === "Enter" && (e.target as HTMLElement | null)?.tagName === "INPUT") e.preventDefault();
 }
 
 export function EmployeeAccountsSection({
@@ -357,10 +357,19 @@ function AccountForm({
     return codes.includes(draft.currency) ? codes : [draft.currency, ...codes];
   }, [draft.currency]);
 
+  const groupRef = useRef<HTMLFieldSetElement>(null);
+  useEffect(() => {
+    const el = groupRef.current;
+    if (!el) return;
+    el.addEventListener("keydown", swallowEnter);
+    return () => el.removeEventListener("keydown", swallowEnter);
+  }, []);
+
   return (
     // 攔 Enter：這塊在員工表單裡面，按 Enter 會把整張員工表單送出去。
-    // 用 fieldset 當群組容器（語意上就是「表單裡的一組欄位」），接住內層輸入框冒泡上來的 keydown。
-    <fieldset className="min-w-0 space-y-3 rounded-md border bg-muted/30 p-3" onKeyDown={swallowEnter}>
+    // fieldset 當群組容器（語意上就是「表單裡的一組欄位」）；keydown 以原生 listener 做事件委派
+    // （見上方 useEffect），接住內層輸入框（含 Combobox 內部 input）冒泡上來的 Enter。
+    <fieldset ref={groupRef} className="min-w-0 space-y-3 rounded-md border bg-muted/30 p-3">
       <div className="text-sm font-medium">{draft.id ? t("form.editTitle") : t("form.addTitle")}</div>
       <div className="grid gap-3 sm:grid-cols-2">
         <FormRow label={t("form.kind")}>
