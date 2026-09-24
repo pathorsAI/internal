@@ -1,7 +1,8 @@
 import type { IntegrationProvider, IntegrationProviderId } from "./types";
+import { simpanyProvider } from "./simpany";
 
 /**
- * 已實作的整合。目前是空的：框架先上，Simpany / Wise 的實作各自接上來。
+ * 已實作的整合。Simpany 已接上（src/lib/integrations/simpany.ts）。
  *
  * ── 如何新增一個整合的實作 ──────────────────────────────────────────────
  * 1. 在 src/lib/integrations/<id>.ts 寫一個 IntegrationProvider：
@@ -28,7 +29,9 @@ import type { IntegrationProvider, IntegrationProviderId } from "./types";
  * 顯示用的資料（名稱、欄位、logo）不在這裡，在 catalog.ts 與 i18n。
  * ─────────────────────────────────────────────────────────────────────
  */
-const PROVIDERS: Partial<Record<IntegrationProviderId, IntegrationProvider>> = {};
+const PROVIDERS: Partial<Record<IntegrationProviderId, IntegrationProvider>> = {
+  simpany: simpanyProvider,
+};
 
 /** 取實作；還沒實作的回 null（設定頁據此停用「連接」）。 */
 export function getProvider(id: IntegrationProviderId): IntegrationProvider | null {
