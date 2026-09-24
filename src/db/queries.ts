@@ -143,6 +143,7 @@ export async function listTransactions(
       needsReview: transactions.needsReview,
       externalSource: transactions.externalSource,
       externalRef: transactions.externalRef,
+      externalMeta: transactions.externalMeta,
     })
     .from(transactions)
     .leftJoin(categories, eq(categories.id, transactions.categoryId))

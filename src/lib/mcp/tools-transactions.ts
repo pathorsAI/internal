@@ -37,6 +37,7 @@ import {
   rowSchema,
   type ToolDef,
 } from "./shared";
+import { externalSingleLegSide } from "@/lib/external-transfer";
 import {
   assertAccountCurrency,
   findMismatchInMap,
@@ -163,6 +164,10 @@ const TXN_LIST_ROW = rowSchema({
   },
   externalSource: { type: ["string", "null"], description: "e.g. 'wise'; null when entered by hand." },
   externalRef: { type: ["string", "null"], description: "Source reference, e.g. Wise referenceNumber." },
+  externalMeta: {
+    type: ["object", "null"],
+    description: "Raw details from the source (merchant, original amount, rate, fees; for a Wise conversion leg: conversion.counterCurrency).",
+  },
 });
 
 // getOverview 已經把聚合結果轉成 number。
@@ -576,6 +581,7 @@ function applyTxnAmountPatch(
   patch: Record<string, unknown>,
   args: Record<string, unknown>,
   existing: { type: string; amount: string; currency: string },
+  singleLeg = false,
 ) {
   const amountProvided = optNumber(args, "amount") !== undefined;
   const currencyProvided = optString(args, "currency") !== undefined;
@@ -587,8 +593,11 @@ function applyTxnAmountPatch(
     patch.amountTwd = currency === "TWD" ? amount : null;
   }
   if (optBoolean(args, "reported") !== undefined) {
+    // 外部同步的單腳轉帳（Wise 換匯）不套「轉帳固定 both」，照 reported 決定。
     patch.book =
-      existing.type === "transfer" || optBoolean(args, "reported") ? "both" : "internal";
+      (existing.type === "transfer" && !singleLeg) || optBoolean(args, "reported")
+        ? "both"
+        : "internal";
   }
 }
 
@@ -930,7 +939,7 @@ export const transactionTools: Record<string, ToolDef> = {
 
   update_transaction: {
     description:
-      "Edit a transaction's date, amount, currency, description, category (categoryId 0 clears it → 未分類; setting a category also clears needsReview on imported rows), needsReview (待確認 flag on rows imported by e.g. the Wise sync; pass false to confirm a row without choosing a category), project, contract, subscription, subscription period, reported flag, or billedToCompanyTaxId (有報公司統編) — only provided fields change. To change the account or counterparty, delete and recreate, or use the app. If the edit touches a contract-linked transaction, the result carries `contractProgress` for the contracts involved — when an entry is `fullyCollected` while the contract is still draft/active, tell the user and ask whether to set that contract to completed (已完成) via update_contract; never flip the status without asking.",
+      "Edit a transaction's date, amount, currency, description, category (categoryId 0 clears it → 未分類; setting a category also clears needsReview on imported rows), needsReview (待確認 flag on rows imported by e.g. the Wise sync; pass false to confirm a row without choosing a category; a synced Wise currency conversion is a transfer with only one account set — that is expected and it can be edited like any other row), project, contract, subscription, subscription period, reported flag, or billedToCompanyTaxId (有報公司統編) — only provided fields change. To change the account or counterparty, delete and recreate, or use the app. If the edit touches a contract-linked transaction, the result carries `contractProgress` for the contracts involved — when an entry is `fullyCollected` while the contract is still draft/active, tell the user and ask whether to set that contract to completed (已完成) via update_contract; never flip the status without asking.",
     inputSchema: {
       type: "object",
       properties: {
@@ -984,11 +993,13 @@ export const transactionTools: Record<string, ToolDef> = {
           contractId: transactions.contractId,
           fromAccountId: transactions.fromAccountId,
           toAccountId: transactions.toAccountId,
+          externalSource: transactions.externalSource,
         })
         .from(transactions)
         .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)))
         .limit(1);
       if (!existing) throw new Error(`Transaction ${id} not found in your organization.`);
+      const singleLeg = externalSingleLegSide(existing) !== null;
 
       const patch: Record<string, unknown> = { updatedAt: new Date().toISOString() };
       if (optDate(args, "txnDate") !== undefined) patch.txnDate = optDate(args, "txnDate");
@@ -1003,7 +1014,7 @@ export const transactionTools: Record<string, ToolDef> = {
       if (optBoolean(args, "needsReview") !== undefined) {
         patch.needsReview = optBoolean(args, "needsReview");
       }
-      applyTxnAmountPatch(patch, args, existing);
+      applyTxnAmountPatch(patch, args, existing, singleLeg);
       // 這支工具改不了帳戶，但改得了幣別 —— 改完仍要跟原本綁的帳戶對得起來。
       if (typeof patch.currency === "string") {
         await assertAccountCurrency(db, orgId, patch.currency, [

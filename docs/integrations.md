@@ -202,7 +202,10 @@ Wise 是**唯讀**整合：只把 Wise 對帳單的交易匯入本組織的帳�
   不進損益、兩邊帳戶餘額都正確，`needs_review = false`。
 - 另一腳**沒有對應**時，退回 income / expense（對象「Wise 換匯」）並標 `needs_review`。
 - 兩腳共用同一個 referenceNumber，所以 `external_ref` 加幣別後綴（`BALANCE-123:USD`）。
-- 單腳轉帳在 web 的編輯表單存檔時會被「轉帳需要兩個帳戶」擋下；要改請先刪掉再手動記。
+- 單腳轉帳可以照常編輯（web 表單只顯示原本那一腳的帳戶；MCP `update_transaction` 不動帳戶）：
+  `src/lib/external-transfer.ts` 的 `externalSingleLegSide()` 只對「有 external_source、type = transfer、
+  只有一邊帳戶」的列放寬，一般手動轉帳仍需兩個帳戶。編輯時保留原本的 book（不套「轉帳固定 both」）。
+  交易列表的類型標籤依 `external_meta` 顯示成「換匯 USD → THB」。
 
 **去重**：`(organization_id, external_source, external_ref)` 有部分唯一索引（migration 0026），寫入用
 `ON CONFLICT DO NOTHING`。已存在的列（包括已軟刪除的）永遠不改、不重寫 —— 刪掉一筆同步進來的交易，

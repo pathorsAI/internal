@@ -40,6 +40,7 @@ import { RowDialog } from "@/components/row-dialog";
 import { EditTransactionForm } from "./edit-transaction-form";
 import { TransactionFilters } from "./transaction-filters";
 import { txnTypeColor } from "@/components/amount";
+import { conversionCurrencies, externalSingleLegSide } from "@/lib/external-transfer";
 import { requireOrg } from "@/lib/session";
 import { getTranslations } from "next-intl/server";
 
@@ -72,6 +73,7 @@ function TransactionRow({
   uncategorizedLabel,
   needsReviewLabel,
   needsReviewHint,
+  conversionLabel,
   categories,
   parties,
   employees,
@@ -89,6 +91,8 @@ function TransactionRow({
   needsReviewLabel: string;
   /** 待確認 chip 的說明；{source} 會換成來源（wise）。 */
   needsReviewHint: (source: string) => string;
+  /** 外部同步的單腳轉帳（Wise 換匯）的類型標籤，例如「換匯 USD → THB」。 */
+  conversionLabel: (c: { from: string; to: string } | null) => string;
   categories: Opt[];
   parties: Opt[];
   employees: Opt[];
@@ -100,6 +104,10 @@ function TransactionRow({
 }>) {
   // 表格上「最後更新」的操作人：改過就顯示最後修改人，沒改過就顯示建立人
   const updater = audit?.updatedBy ?? audit?.createdBy ?? null;
+  const singleLeg = externalSingleLegSide(t) !== null;
+  const typeText = singleLeg
+    ? conversionLabel(conversionCurrencies(t.externalMeta, t.currency))
+    : (typeLabel[t.type] ?? t.type);
   return (
     <RowDialog
       variant="sheet"
@@ -116,7 +124,7 @@ function TransactionRow({
               <span className="truncate">{t.partyName ?? t.settleName ?? "—"}</span>
               <div className="flex flex-wrap gap-1">
                 <Badge variant="secondary" className="w-fit font-normal">
-                  {typeLabel[t.type] ?? t.type}
+                  {typeText}
                 </Badge>
                 {t.needsReview ? (
                   <Badge
@@ -169,6 +177,8 @@ function TransactionRow({
           settleName: t.settleName,
           fromAccountId: t.fromAccountId,
           toAccountId: t.toAccountId,
+          externalSource: t.externalSource,
+          conversionText: singleLeg ? typeText : null,
           projectId: t.projectId,
           contractId: t.contractId,
         }}
@@ -350,6 +360,9 @@ export default async function TransactionsPage({
                       uncategorizedLabel={tr("table.uncategorized")}
                       needsReviewLabel={tr("table.needsReview")}
                       needsReviewHint={(source) => tr("table.needsReviewHint", { source })}
+                      conversionLabel={(c) =>
+                        c ? tr("type.conversion", c) : tr("type.conversionPlain")
+                      }
                       categories={categories}
                       parties={partyOpts}
                       employees={employeeOpts}

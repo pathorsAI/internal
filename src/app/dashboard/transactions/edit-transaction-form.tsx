@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { toast } from "sonner";
 import { Paperclip } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { externalSingleLegSide } from "@/lib/external-transfer";
 import { updateTransaction, deleteTransactionDocument, type ActionState } from "@/db/mutations";
 import type { TxnDocument, AuditMeta as AuditMetaData } from "@/db/queries";
 import { AuditMeta } from "@/components/audit-meta";
@@ -66,6 +67,10 @@ type Txn = {
   settleName: string | null;
   fromAccountId: number | null;
   toAccountId: number | null;
+  /** 外部同步來源（wise…）；手動輸入為 null。 */
+  externalSource?: string | null;
+  /** 外部同步的單腳換匯的顯示字串（「換匯 USD → THB」）；其他交易為 null。 */
+  conversionText?: string | null;
   projectId: number | null;
   contractId: number | null;
 };
@@ -121,12 +126,20 @@ export function EditTransactionForm({
   );
 
   const isTransfer = txn.type === "transfer";
+  // 外部同步的單腳轉帳（Wise 換匯）：只有原本那一腳的帳戶可選，另一腳固定空白。
+  const singleLeg = externalSingleLegSide({
+    type: txn.type,
+    externalSource: txn.externalSource ?? null,
+    fromAccountId: txn.fromAccountId,
+    toAccountId: txn.toAccountId,
+  });
   const isIncome = txn.type === "income";
   const isAdvance = txn.type === "advance";
   const fromCurrency = accountCurrency(accounts, fromAccountId);
   const toCurrency = accountCurrency(accounts, toAccountId);
   // 代墊沒有帳戶（是員工先墊的），所以只有它還能自由選幣別。
-  const lockedCurrency = isTransfer ? fromCurrency : accountCurrency(accounts, accountId);
+  let lockedCurrency = isTransfer ? fromCurrency : accountCurrency(accounts, accountId);
+  if (singleLeg === "to") lockedCurrency = toCurrency;
   const defaultCategoryName = categories.find((c) => c.id === txn.categoryId)?.name ?? "";
   const typeLabel: Record<string, string> = Object.fromEntries(
     TYPE_KEYS.map((k) => [k, t(`type.${k}`)]),
@@ -195,7 +208,21 @@ export function EditTransactionForm({
           <LockedCurrencyField currency={lockedCurrency} original={txn.currency} />
         )}
 
-        {isTransfer ? (
+        {singleLeg ? (
+          <>
+            <AccountSelectField
+              name={singleLeg === "from" ? "fromAccountId" : "toAccountId"}
+              label={singleLeg === "from" ? t("form.fromAccount") : t("form.toAccount")}
+              accounts={accounts}
+              value={singleLeg === "from" ? fromAccountId : toAccountId}
+              onChange={singleLeg === "from" ? setFromAccountId : setToAccountId}
+            />
+            <p className="self-end text-xs text-muted-foreground sm:pb-2">
+              {txn.conversionText ? `${txn.conversionText} · ` : null}
+              {t("table.conversionLegHint")}
+            </p>
+          </>
+        ) : isTransfer ? (
           <>
             <AccountSelectField
               name="fromAccountId"

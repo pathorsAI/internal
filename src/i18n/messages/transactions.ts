@@ -20,6 +20,10 @@ const transactions = {
     rowsCount: { "zh-TW": "{count} 筆", en: "{count} entries" },
     uncategorized: { "zh-TW": "未分類", en: "Uncategorized" },
     needsReview: { "zh-TW": "待確認", en: "To review" },
+    conversionLegHint: {
+      "zh-TW": "外部同步的換匯（單邊）：另一腳在另一個幣別的帳戶，各記一列。",
+      en: "Synced currency conversion (one leg): the other leg is booked on the other currency's account.",
+    },
     needsReviewHint: {
       "zh-TW": "自動匯入（{source}），還沒有人確認。指定分類後會清掉。",
       en: "Imported automatically ({source}) and not yet reviewed. Choosing a category clears it.",
@@ -44,6 +48,8 @@ const transactions = {
     advance: { "zh-TW": "員工代墊", en: "Employee advance" },
     reimbursement: { "zh-TW": "撥款", en: "Reimbursement" },
     transfer: { "zh-TW": "轉帳", en: "Transfer" },
+    conversion: { "zh-TW": "換匯 {from} → {to}", en: "FX {from} → {to}" },
+    conversionPlain: { "zh-TW": "換匯", en: "FX conversion" },
   },
   filters: {
     book: {

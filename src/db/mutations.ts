@@ -39,6 +39,7 @@ import {
   type ScheduleInput,
 } from "@/lib/billing-schedule";
 import { findAccountCurrencyMismatches } from "@/lib/account-currency";
+import { externalSingleLegSide, type SingleLegSide } from "@/lib/external-transfer";
 
 export type ActionState = { ok: boolean; error?: string };
 
@@ -425,6 +426,32 @@ async function resolveTransfer(
   ]);
   if (refError) return { error: refError };
   return { fields: { ...blankFields, fromAccountId, toAccountId } };
+}
+
+/**
+ * 外部同步的單腳轉帳（Wise 換匯的一腳）：只有原本那一腳的帳戶，另一腳固定留空。
+ * 只在編輯既有的外部同步列時使用 —— 一般轉帳照 resolveTransfer 要求兩個帳戶。
+ */
+async function resolveSingleLegTransfer(
+  db: ReturnType<typeof getDb>,
+  orgId: string,
+  side: SingleLegSide,
+  formData: FormData,
+): Promise<TxnResult> {
+  const accountId = num(formData.get(side === "from" ? "fromAccountId" : "toAccountId"));
+  if (!accountId) {
+    const t = await getTranslations("errors");
+    return { error: t("required.transferAccounts") };
+  }
+  const refError = await unownedRefError(db, orgId, [[bankAccounts, [accountId]]]);
+  if (refError) return { error: refError };
+  return {
+    fields: {
+      ...blankFields,
+      fromAccountId: side === "from" ? accountId : null,
+      toAccountId: side === "to" ? accountId : null,
+    },
+  };
 }
 
 // 依情境（type）解析交易要寫的欄位，順便驗證；回傳欄位或錯誤訊息。
@@ -1132,12 +1159,28 @@ export async function updateTransaction(
     // join（queries.ts listAccountantNotices）是純用 id 對的，會把對方的金額、
     // 對象名稱與分類一起顯示出來。
     const [owned] = await db
-      .select({ id: transactions.id })
+      .select({
+        id: transactions.id,
+        type: transactions.type,
+        book: transactions.book,
+        externalSource: transactions.externalSource,
+        fromAccountId: transactions.fromAccountId,
+        toAccountId: transactions.toAccountId,
+      })
       .from(transactions)
       .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)))
       .limit(1);
     if (!owned) return { ok: false, error: t("notFound.transaction") };
-    const resolved = await resolveTxnFields(db, orgId, header.type, formData);
+    // 外部同步的單腳轉帳（Wise 換匯）：只驗原本那一腳，且保留原本的 book（同步進來是 internal，
+    // 一般轉帳「固定 both」的規則不套用）。type 以 DB 為準，不聽表單。
+    const singleLeg = externalSingleLegSide(owned);
+    if (singleLeg) {
+      header.type = owned.type;
+      header.book = owned.book === "internal" ? "internal" : "both";
+    }
+    const resolved = singleLeg
+      ? await resolveSingleLegTransfer(db, orgId, singleLeg, formData)
+      : await resolveTxnFields(db, orgId, header.type, formData);
     if ("error" in resolved) return { ok: false, error: resolved.error };
     const f = resolved.fields;
     const linkError = await transactionLinkError(db, orgId, formData);
