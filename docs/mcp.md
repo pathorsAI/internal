@@ -342,7 +342,7 @@ things that don't live in this repo:
 Both directories ask for the same thing in different words — OpenAI wants
 "test credentials for a fully populated account", Anthropic wants a "fully
 featured demo account with sample data". An empty workspace fails review: most
-of the 74 tools would answer with an empty array and the reviewer has no way to
+of the 85 tools would answer with an empty array and the reviewer has no way to
 tell what the connector does.
 
 Two commands produce that account. Run them against the environment you are
