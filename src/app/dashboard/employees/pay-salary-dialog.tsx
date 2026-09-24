@@ -29,6 +29,7 @@ import { formatCurrency } from "@/lib/format";
 import { signColor } from "@/components/amount";
 import { submitAction } from "@/lib/form-action";
 import { cn } from "@/lib/utils";
+import { formatAccountShort, type MaskedEmployeeAccount } from "@/lib/employee-accounts";
 
 const initial: ActionState = { ok: false };
 const months = Array.from({ length: 12 }, (_, i) => i + 1);
@@ -58,10 +59,13 @@ export function PaySalaryDialog({
   employee,
   itemTypes,
   accounts,
+  employeeAccounts,
 }: Readonly<{
   employee: Employee;
   itemTypes: ItemType[];
   accounts: Account[];
+  /** 這位員工啟用中的收款帳戶（遮罩後），選「匯入帳戶」用 */
+  employeeAccounts: MaskedEmployeeAccount[];
 }>) {
   const t = useTranslations("employees");
   const [open, setOpen] = useState(false);
@@ -212,6 +216,24 @@ export function PaySalaryDialog({
                   </SelectItem>
                 ))}
               </SelectField>
+              {employeeAccounts.length > 0 ? (
+                <SelectField
+                  name="toEmployeeAccountId"
+                  label={t("paySalary.toAccountLabel")}
+                  wide
+                  defaultValue={String(
+                    employeeAccounts.find((a) => a.defaultForSalary)?.id ?? "none",
+                  )}
+                >
+                  <SelectItem value="none">{t("paySalary.toAccountNone")}</SelectItem>
+                  {employeeAccounts.map((a) => (
+                    <SelectItem key={a.id} value={String(a.id)}>
+                      {formatAccountShort(a)}
+                      {a.currency === "TWD" ? "" : ` · ${a.currency}`}
+                    </SelectItem>
+                  ))}
+                </SelectField>
+              ) : null}
               <SelectField name="book" label={t("paySalary.bookLabel")} defaultValue="both">
                 {bookKinds.map((k) => (
                   <SelectItem key={k} value={k}>
