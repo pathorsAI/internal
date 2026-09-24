@@ -55,6 +55,24 @@ export const invoices = pgTable("invoices", {
 	// 來源，本系統只負責「該開什麼」與「開了沒」，差異用對帳頁呈現而非硬要同步。
 	externalStatus: text("external_status").default('pending').notNull(),
 	externalRef: text("external_ref"),
+	// Simpany API 同步 / 開立（migrations/0025）。external_ref 仍是發票號碼；external_id 是
+	// Simpany 的 R… id（取明細、作廢要用）。amount_gross 是發票上的台幣金額，外幣收款的
+	// 換算依據另存 foreign_* 與 exchange_rate（水單匯率）。
+	taxTreatment: text("tax_treatment").default('taxable').notNull(),
+	zeroRateReason: text("zero_rate_reason"),
+	exchangeRate: numeric("exchange_rate", { precision: 12, scale: 6 }),
+	foreignCurrency: text("foreign_currency"),
+	foreignAmount: numeric("foreign_amount", { precision: 14, scale: 2 }),
+	invoiceType: text("invoice_type"),
+	externalId: text("external_id"),
+	voidedAt: timestamp("voided_at", { withTimezone: true, mode: 'string' }),
+	voidReason: text("void_reason"),
+	buyerEmails: text("buyer_emails").array(),
+	// 訂閱期別綁定（期別不物化，同 transactions.subscription_id / subscription_period）。
+	// FK 在 DB 端建立，這裡只放欄位避免與 subscriptions 的宣告順序衝突。
+	subscriptionId: bigint("subscription_id", { mode: "number" }),
+	subscriptionPeriod: date("subscription_period"),
+	externalSyncedAt: timestamp("external_synced_at", { withTimezone: true, mode: 'string' }),
 }, (table) => [
 	index("idx_invoice_party").using("btree", table.partyId.asc().nullsLast().op("int8_ops")),
 	index("idx_invoice_billing_item").using("btree", table.billingItemId.asc().nullsLast().op("int8_ops")),
@@ -62,6 +80,10 @@ export const invoices = pgTable("invoices", {
 	check("chk_invoice_direction", sql`direction = ANY (ARRAY['issued'::text, 'received'::text])`),
 	check("chk_invoice_status", sql`status = ANY (ARRAY['valid'::text, 'void'::text, 'allowance'::text])`),
 	check("chk_invoice_external_status", sql`external_status = ANY (ARRAY['pending'::text, 'issued'::text, 'void'::text, 'n_a'::text])`),
+	check("chk_invoice_tax_treatment", sql`tax_treatment = ANY (ARRAY['taxable'::text, 'zero_rated'::text, 'exempt'::text])`),
+	check("chk_invoice_type", sql`invoice_type IS NULL OR invoice_type = ANY (ARRAY['B2B'::text, 'B2C'::text])`),
+	uniqueIndex("uq_invoice_external_id").on(table.organizationId, table.externalId).where(sql`external_id IS NOT NULL`),
+	index("idx_invoice_subscription").using("btree", table.subscriptionId.asc().nullsLast().op("int8_ops"), table.subscriptionPeriod.asc().nullsLast().op("date_ops")).where(sql`subscription_id IS NOT NULL`),
 ]);
 
 export const employees = pgTable("employees", {
@@ -618,4 +640,27 @@ export const orgIntegrations = pgTable("org_integrations", {
 	unique("uq_org_integration").on(table.organizationId, table.provider),
 	check("chk_org_integration_provider", sql`provider = ANY (ARRAY['simpany'::text, 'wise'::text])`),
 	check("chk_org_integration_status", sql`status = ANY (ARRAY['connected'::text, 'needs_reauth'::text, 'error'::text])`),
+]);
+
+// ---- Simpany 開立前的預覽草稿（migrations/0025）。preview 寫一列，issue 只收 draft id，
+// 確保「使用者看過的」就是「送出去的」。2 小時過期。----
+export const invoiceDrafts = pgTable("invoice_drafts", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "invoice_drafts_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id").notNull(),
+	createdByUserId: text("created_by_user_id"),
+	payload: jsonb().$type<Record<string, unknown>>().notNull(),
+	summary: jsonb().$type<Record<string, unknown>>().default({}).notNull(),
+	links: jsonb().$type<Record<string, unknown>>().default({}).notNull(),
+	status: text().default('pending').notNull(),
+	issuedInvoiceId: bigint("issued_invoice_id", { mode: "number" }),
+	expiresAt: timestamp("expires_at", { withTimezone: true, mode: 'string' }).default(sql`(now() + '02:00:00'::interval)`).notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_invoice_draft_org").using("btree", table.organizationId.asc().nullsLast().op("text_ops"), table.createdAt.desc().nullsFirst().op("timestamptz_ops")),
+	foreignKey({
+			columns: [table.issuedInvoiceId],
+			foreignColumns: [invoices.id],
+			name: "invoice_drafts_issued_invoice_id_fkey"
+		}),
+	check("chk_invoice_draft_status", sql`status = ANY (ARRAY['pending'::text, 'issued'::text, 'cancelled'::text, 'expired'::text])`),
 ]);
