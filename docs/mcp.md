@@ -117,8 +117,8 @@ the `tools-*.ts` modules):
 - `_meta["openai/toolInvocation/invoking" | "invoked"]`, the status line ChatGPT
   shows while a call is in flight.
 
-**Output schemas.** Every tool declares an `outputSchema` — all 70 of them, as of
-server version 1.3.0. When a tool declares one the handler additionally returns
+**Output schemas.** Every tool declares an `outputSchema` — all 71 of them, as of
+server version 1.4.0. When a tool declares one the handler additionally returns
 the result as MCP `structuredContent` (the JSON text block stays, per MCP's
 back-compat recommendation), which is what ChatGPT and Codex prefer over parsing
 JSON out of text. `list_organizations` remains the reference implementation.
@@ -219,10 +219,23 @@ reconciliations: `list_reconciliations` +
 `create`/`update`/`delete`; accountant notices: `list_accountant_notices`,
 `mark_accountant_notified`, `unmark_accountant_notified`.
 
+**Integrations** — `list_integrations` shows, per external integration
+(Simpany e-invoice, Wise), whether it is available on this server, connected,
+switched on, and healthy (`status`, `lastError`, `lastSyncedAt`,
+`tokenExpiresAt`) plus its non-secret `config`. It never returns credentials.
+Integration business tools live in their own `tools-<provider>.ts` and stay in
+`tools/list` whether or not the org has connected the integration; at call time
+they go through `requireIntegrationForTool()` and fail with a clear zh-TW message
+telling an owner/admin to fix it in 設定 › 整合. Every call to the external
+service is logged with `auditIntegrationCall()`. See
+[`integrations.md`](integrations.md).
+
 **Not exposed (do in the app):** creating an organization, uploading
 invoice/receipt **files** (R2), multi-currency FX entry, and *connecting* Google
-Calendar (the OAuth consent needs a browser — do it once in 組織設定, after which
-`sync_billing_calendar` works over MCP). These need file handling or extra UI.
+Calendar (the OAuth consent needs a browser — do it once in 設定 › 整合, after which
+`sync_billing_calendar` works over MCP), and connecting / switching / disconnecting
+integrations (credentials must not pass through an AI conversation). These need
+file handling or extra UI.
 Deletes that would break references return a clear error suggesting
 deactivation/archiving instead.
 
