@@ -19,7 +19,14 @@ import { listEmployees, listPayrollItemTypes, listBankAccounts, listOrgMembers }
 import { formatCurrency, formatDate } from "@/lib/format";
 import { NewEmployeeDialog } from "./new-employee-dialog";
 import { PaySalaryDialog } from "./pay-salary-dialog";
-import { requireOrg } from "@/lib/session";
+import { canManageOrg, requireOrgWithRole } from "@/lib/session";
+import {
+  groupAccountsByEmployee,
+  listEmployeeAccounts,
+  readMaskedNationalId,
+  readNationalId,
+} from "@/db/employee-accounts";
+import { maskBankAccount } from "@/lib/pii";
 
 export const dynamic = "force-dynamic";
 
@@ -64,6 +71,20 @@ function insuranceCell(e: EmployeeRow, labels: InsuranceLabels) {
   );
 }
 
+async function nationalIdView(
+  e: EmployeeRow,
+  canManage: boolean,
+): Promise<{ value: string | null; masked: boolean }> {
+  if (canManage) {
+    try {
+      return { value: await readNationalId(e), masked: false };
+    } catch {
+      // fall through to the masked view
+    }
+  }
+  return { value: await readMaskedNationalId(e), masked: true };
+}
+
 export default async function EmployeesPage() {
   const t = await getTranslations("employees");
   const empType: Record<string, string> = {
@@ -72,13 +93,22 @@ export default async function EmployeesPage() {
     freelancer: t("type.freelancer"),
     contractor: t("type.contractor"),
   };
-  const { orgId } = await requireOrg();
-  const [rows, itemTypes, accounts, members] = await Promise.all([
+  const { orgId, role } = await requireOrgWithRole();
+  const canManage = canManageOrg(role);
+  const [rows, itemTypes, accounts, members, employeeAccounts] = await Promise.all([
     listEmployees(orgId),
     listPayrollItemTypes(orgId),
     listBankAccounts(orgId),
     listOrgMembers(orgId),
+    listEmployeeAccounts(orgId),
   ]);
+  const accountsByEmployee = groupAccountsByEmployee(employeeAccounts);
+  // 身分證字號：owner / admin 拿到解密後的完整值（可編輯）；成員只拿到遮罩值。
+  // 明文只在 server 端出現，成員的 RSC payload 裡不會有完整值。解不開（金鑰缺失）
+  // 時連 owner / admin 也退回遮罩且不可編輯，免得把遮罩值存回去蓋掉原值。
+  const nationalIds = new Map(
+    await Promise.all(rows.map(async (e) => [e.id, await nationalIdView(e, canManage)] as const)),
+  );
   const accountList = accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }));
   const memberByUserId = new Map(members.map((m) => [m.userId, m]));
   const insuranceLabels: InsuranceLabels = {
@@ -90,7 +120,7 @@ export default async function EmployeesPage() {
   return (
     <>
       <PageHeader title={t("title")} description={t("description")}>
-        <NewEmployeeDialog members={members} />
+        {canManage ? <NewEmployeeDialog members={members} /> : null}
       </PageHeader>
       <TableCard title={t("table.title")}>
         <Table>
@@ -112,6 +142,8 @@ export default async function EmployeesPage() {
               rows.map((e) => (
                 <RowDialog
                   key={e.id}
+                  variant="sheet"
+                  rowId={e.id}
                   title={e.name}
                   description={t("dialog.recordLabel")}
                   cells={
@@ -149,13 +181,13 @@ export default async function EmployeesPage() {
                     employee={{
                       id: e.id,
                       name: e.name,
-                      nationalId: e.nationalId,
+                      nationalId: nationalIds.get(e.id)?.value ?? null,
+                      nationalIdMasked: nationalIds.get(e.id)?.masked ?? true,
                       employmentType: e.employmentType,
                       hasPension: e.hasPension,
                       baseSalary: e.baseSalary,
                       laborInsuredSalary: e.laborInsuredSalary,
                       healthInsuredSalary: e.healthInsuredSalary,
-                      salaryAccount: e.salaryAccount,
                       startDate: e.startDate,
                       endDate: e.endDate,
                       workEmail: e.workEmail,
@@ -166,6 +198,9 @@ export default async function EmployeesPage() {
                       isActive: e.isActive,
                     }}
                     members={members}
+                    accounts={accountsByEmployee.get(e.id) ?? []}
+                    legacySalaryAccount={maskBankAccount(e.salaryAccount)}
+                    canManage={canManage}
                     footer={
                       <div className="flex items-center gap-1">
                         {e.isActive ? (
@@ -173,9 +208,10 @@ export default async function EmployeesPage() {
                             employee={{ id: e.id, name: e.name, baseSalary: e.baseSalary }}
                             itemTypes={itemTypes}
                             accounts={accountList}
+                            employeeAccounts={(accountsByEmployee.get(e.id) ?? []).filter((a) => a.isActive)}
                           />
                         ) : null}
-                        <DeleteButton action={deleteEmployee} id={e.id} />
+                        {canManage ? <DeleteButton action={deleteEmployee} id={e.id} /> : null}
                       </div>
                     }
                   />

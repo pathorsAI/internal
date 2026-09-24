@@ -20,6 +20,7 @@ import {
   contracts,
   billingItems,
   activityLog,
+  employeeBankAccounts,
 } from "./schema";
 import {
   oauthApplication,
@@ -109,6 +110,8 @@ export async function listTransactions(
   const db = getDb();
   const fromAcct = aliasedTable(bankAccounts, "from_acct");
   const toAcct = aliasedTable(bankAccounts, "to_acct");
+  // 撥款 / 薪資匯入的員工帳戶：只取遮罩後能顯示的欄位（沒有帳號密文）
+  const settleTo = aliasedTable(employeeBankAccounts, "settle_to_acct");
 
   const rows = await db
     .select({
@@ -137,6 +140,9 @@ export async function listTransactions(
       toAccount: toAcct.name,
       partyName: parties.name,
       settleName: employees.name,
+      settleToAccountId: transactions.settleToAccountId,
+      settleToBankName: sql<string | null>`coalesce(${settleTo.bankName}, ${settleTo.label}, ${settleTo.bankCode})`,
+      settleToAccountLast5: settleTo.accountLast5,
     })
     .from(transactions)
     .leftJoin(categories, eq(categories.id, transactions.categoryId))
@@ -144,6 +150,7 @@ export async function listTransactions(
     .leftJoin(toAcct, eq(toAcct.id, transactions.toAccountId))
     .leftJoin(parties, eq(parties.id, transactions.partyId))
     .leftJoin(employees, eq(employees.id, transactions.settleEmployeeId))
+    .leftJoin(settleTo, eq(settleTo.id, transactions.settleToAccountId))
     .leftJoin(projects, eq(projects.id, transactions.projectId))
     .where(txnWhere(orgId, filters))
     .orderBy(desc(transactions.txnDate), desc(transactions.id))
@@ -387,6 +394,7 @@ export async function listOutstandingAdvances(orgId: string) {
       currency: transactions.currency,
       description: transactions.description,
       vendorName: vendor.name,
+      settleEmployeeId: transactions.settleEmployeeId,
       settleName: employees.name,
       categoryName: categories.name,
     })
@@ -864,10 +872,14 @@ export async function listPayslipRecords(orgId: string, limit = 200) {
       deductionTotal: payslips.deductionTotal,
       netPay: payslips.netPay,
       paidTransactionId: payslips.paidTransactionId,
+      paidToAccountId: payslips.paidToAccountId,
+      paidToBankName: sql<string | null>`coalesce(${employeeBankAccounts.bankName}, ${employeeBankAccounts.label}, ${employeeBankAccounts.bankCode})`,
+      paidToAccountLast5: employeeBankAccounts.accountLast5,
     })
     .from(payslips)
     .innerJoin(payrollRuns, eq(payrollRuns.id, payslips.payrollRunId))
     .leftJoin(employees, eq(employees.id, payslips.employeeId))
+    .leftJoin(employeeBankAccounts, eq(employeeBankAccounts.id, payslips.paidToAccountId))
     .where(and(eq(payrollRuns.organizationId, orgId), isNull(payslips.deletedAt)))
     .orderBy(desc(payrollRuns.periodYear), desc(payrollRuns.periodMonth), employees.name)
     .limit(limit);

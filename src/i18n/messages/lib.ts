@@ -12,6 +12,7 @@ const lib = {
     calendarDisconnected: { "zh-TW": "中斷 Google 日曆連結", en: "Google Calendar disconnected" },
     advanceReimbursed: { "zh-TW": "員工代墊撥款", en: "Employee advance reimbursed" },
     salaryPaid: { "zh-TW": "發放薪資", en: "Salary paid" },
+    accountRevealed: { "zh-TW": "顯示完整帳號：{account}", en: "Revealed full account number: {account}" },
     paymentMatched: { "zh-TW": "收款配對 #{id}", en: "Payment matched #{id}" },
     paymentMatchedPeriod: { "zh-TW": "{period} 收款配對 #{id}", en: "{period} payment matched #{id}" },
   },

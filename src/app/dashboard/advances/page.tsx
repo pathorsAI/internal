@@ -28,6 +28,7 @@ import { listOutstandingAdvances, listBankAccounts } from "@/db/queries";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { RecordReimbursementDialog } from "./record-reimbursement-dialog";
 import { requireOrg } from "@/lib/session";
+import { groupAccountsByEmployee, listEmployeeAccounts } from "@/db/employee-accounts";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,9 @@ export default async function AdvancesPage() {
     listOutstandingAdvances(orgId),
     listBankAccounts(orgId),
   ]);
+  // 只撈有未還代墊的員工的帳戶（遮罩後），給「匯入帳戶」下拉用
+  const settleIds = [...new Set(rows.map((r) => r.settleEmployeeId).filter((id): id is number => id != null))];
+  const accountsByEmployee = groupAccountsByEmployee(await listEmployeeAccounts(orgId, settleIds));
   const total = rows.reduce((s, r) => s + Number(r.amountTwd ?? r.amount ?? 0), 0);
   const accountOpts = accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }));
 
@@ -111,6 +115,10 @@ export default async function AdvancesPage() {
                           vendorName: r.vendorName ?? "",
                         }}
                         accounts={accountOpts}
+                        employeeAccounts={(r.settleEmployeeId == null
+                          ? []
+                          : (accountsByEmployee.get(r.settleEmployeeId) ?? [])
+                        ).filter((a) => a.isActive)}
                       />
                     </TableCell>
                   </TableRow>

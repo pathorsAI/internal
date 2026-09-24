@@ -70,7 +70,10 @@ export const employees = pgTable("employees", {
 	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
 	organizationId: text("organization_id"),
 	name: text().notNull(),
+	// 已淘汰：明文身分證字號。新寫入一律改存 nationalIdEnc 並清空這欄（migrations/0024）。
 	nationalId: text("national_id"),
+	// 身分證字號密文（src/lib/crypto.ts encryptField）。讀取走 src/db/employee-accounts.ts 的 readNationalId。
+	nationalIdEnc: text("national_id_enc"),
 	employmentType: text("employment_type").default('full_time').notNull(),
 	hasLaborInsurance: boolean("has_labor_insurance").default(true).notNull(),
 	hasHealthInsurance: boolean("has_health_insurance").default(true).notNull(),
@@ -79,6 +82,7 @@ export const employees = pgTable("employees", {
 	// 勞健保投保薪資（記錄保多少，先不試算保費）；是否有勞退看 hasPension
 	laborInsuredSalary: numeric("labor_insured_salary", { precision: 18, scale: 2 }),
 	healthInsuredSalary: numeric("health_insured_salary", { precision: 18, scale: 2 }),
+	// 已淘汰：單一自由文字的薪轉帳戶，改用 employee_bank_accounts（migrations/0024）。
 	salaryAccount: text("salary_account"),
 	startDate: date("start_date"),
 	endDate: date("end_date"),
@@ -94,6 +98,46 @@ export const employees = pgTable("employees", {
 	userId: text("user_id"),
 }, () => [
 	check("chk_emp_type", sql`employment_type = ANY (ARRAY['full_time'::text, 'part_time'::text, 'freelancer'::text, 'contractor'::text])`),
+]);
+
+// ---- 員工收款帳戶（migrations/0024）：薪轉 / 報銷撥款匯入的帳戶，一位員工可有多個。
+// 帳號只存密文（accountNumberEnc），列表一律用末 5 碼；完整帳號只在 owner/admin
+// 明確「顯示完整帳號」時於 server 端解密，並寫入 activity_log。----
+export const employeeBankAccounts = pgTable("employee_bank_accounts", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "employee_bank_accounts_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id"),
+	employeeId: bigint("employee_id", { mode: "number" }).notNull(),
+	kind: text().default('bank').notNull(),
+	bankCode: text("bank_code"),
+	branchCode: text("branch_code"),
+	bankName: text("bank_name"),
+	accountHolder: text("account_holder"),
+	accountNumberEnc: text("account_number_enc").notNull(),
+	accountLast5: text("account_last5").notNull(),
+	currency: text().default('TWD').notNull(),
+	label: text(),
+	defaultForSalary: boolean("default_for_salary").default(false).notNull(),
+	defaultForReimbursement: boolean("default_for_reimbursement").default(false).notNull(),
+	isActive: boolean("is_active").default(true).notNull(),
+	note: text(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+	foreignKey({
+			columns: [table.employeeId],
+			foreignColumns: [employees.id],
+			name: "employee_bank_accounts_employee_id_fkey"
+		}),
+	index("idx_emp_acct_employee").using("btree", table.employeeId.asc().nullsLast().op("int8_ops")).where(sql`deleted_at IS NULL`),
+	index("idx_emp_acct_org").using("btree", table.organizationId.asc().nullsLast().op("text_ops")).where(sql`deleted_at IS NULL`),
+	uniqueIndex("uq_emp_acct_default_salary").using("btree", table.employeeId.asc().nullsLast().op("int8_ops")).where(sql`default_for_salary AND deleted_at IS NULL`),
+	uniqueIndex("uq_emp_acct_default_reimbursement").using("btree", table.employeeId.asc().nullsLast().op("int8_ops")).where(sql`default_for_reimbursement AND deleted_at IS NULL`),
+	check("chk_emp_acct_kind", sql`kind = ANY (ARRAY['bank'::text, 'wise'::text, 'other'::text])`),
+	check("chk_emp_acct_bank_code", sql`((kind <> 'bank'::text) OR (bank_code IS NOT NULL)) AND ((bank_code IS NULL) OR (bank_code ~ '^[0-9]{3}$'::text))`),
+	check("chk_emp_acct_branch_code", sql`(branch_code IS NULL) OR (branch_code ~ '^[0-9]{4}$'::text)`),
+	check("chk_emp_acct_last5", sql`(char_length(account_last5) >= 1) AND (char_length(account_last5) <= 5)`),
+	check("chk_emp_acct_currency", sql`currency ~ '^[A-Z]{3}$'::text`),
 ]);
 
 export const payrollRuns = pgTable("payroll_runs", {
@@ -127,7 +171,15 @@ export const payslips = pgTable("payslips", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	paidTransactionId: bigint("paid_transaction_id", { mode: "number" }),
 	note: text(),
+	// 薪資匯入的員工帳戶（migrations/0024），選填
+	paidToAccountId: bigint("paid_to_account_id", { mode: "number" }),
 }, (table) => [
+	index("idx_payslip_paid_to").using("btree", table.paidToAccountId.asc().nullsLast().op("int8_ops")),
+	foreignKey({
+			columns: [table.paidToAccountId],
+			foreignColumns: [employeeBankAccounts.id],
+			name: "payslips_paid_to_account_id_fkey"
+		}),
 	foreignKey({
 			columns: [table.payrollRunId],
 			foreignColumns: [payrollRuns.id],
@@ -251,7 +303,15 @@ export const transactions = pgTable("transactions", {
 	// 請款項目綁定（選填）：把 income 交易掛到某一筆 billing_items，讓該期「已收多少」
 	// 自動算出來。FK 在 DB 端（migrations/0017）建立，這裡只放欄位避免宣告順序衝突。
 	billingItemId: bigint("billing_item_id", { mode: "number" }),
+	// 撥款 / 薪資匯入的員工帳戶（migrations/0024），選填。與 fromAccountId（公司帳本帳戶）無關。
+	settleToAccountId: bigint("settle_to_account_id", { mode: "number" }),
 }, (table) => [
+	index("idx_txn_settle_to").using("btree", table.settleToAccountId.asc().nullsLast().op("int8_ops")),
+	foreignKey({
+			columns: [table.settleToAccountId],
+			foreignColumns: [employeeBankAccounts.id],
+			name: "transactions_settle_to_account_id_fkey"
+		}),
 	index("idx_txn_book").using("btree", table.book.asc().nullsLast().op("text_ops")),
 	index("idx_txn_category").using("btree", table.categoryId.asc().nullsLast().op("int8_ops")),
 	index("idx_txn_date").using("btree", table.txnDate.asc().nullsLast().op("date_ops")),

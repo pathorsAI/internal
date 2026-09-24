@@ -20,12 +20,16 @@ export type MemberOption = { userId: string; name: string; email: string };
 export type EmployeeFormValues = {
   name: string;
   nationalId: string | null;
+  /**
+   * true = nationalId 是遮罩後的值（沒有權限看完整值的成員）。遮罩值絕不能被送回
+   * server 當成新的身分證字號，所以這時輸入框不帶 name、而且停用。
+   */
+  nationalIdMasked?: boolean;
   employmentType: string;
   hasPension: boolean;
   baseSalary: string | null;
   laborInsuredSalary: string | null;
   healthInsuredSalary: string | null;
-  salaryAccount: string | null;
   startDate: string | null;
   endDate: string | null;
   workEmail: string | null;
@@ -40,9 +44,12 @@ export type EmployeeFormValues = {
 export function EmployeeFields({
   members,
   values,
+  accountsSection,
 }: Readonly<{
   members: MemberOption[];
   values?: EmployeeFormValues;
+  /** 編輯模式才有的「帳戶」區塊（薪轉 / 報銷帳戶改由 employee_bank_accounts 管理）。 */
+  accountsSection?: React.ReactNode;
 }>) {
   const t = useTranslations("employees");
 
@@ -55,12 +62,19 @@ export function EmployeeFields({
         placeholder={t("form.namePlaceholder")}
         defaultValue={values?.name}
       />
-      <TextField
-        name="nationalId"
-        label={t("form.nationalIdLabel")}
-        placeholder={t("form.optional")}
-        defaultValue={values?.nationalId ?? ""}
-      />
+      {values?.nationalIdMasked ? (
+        <Field label={t("form.nationalIdLabel")} htmlFor="nationalIdMasked">
+          <Input id="nationalIdMasked" value={values.nationalId ?? ""} disabled readOnly />
+        </Field>
+      ) : (
+        <TextField
+          name="nationalId"
+          label={t("form.nationalIdLabel")}
+          placeholder={t("form.optional")}
+          autoComplete="off"
+          defaultValue={values?.nationalId ?? ""}
+        />
+      )}
       <SelectField
         name="employmentType"
         label={t("form.employmentTypeLabel")}
@@ -80,13 +94,7 @@ export function EmployeeFields({
         placeholder={t("form.optional")}
         defaultValue={values?.baseSalary ?? ""}
       />
-      <TextField
-        name="salaryAccount"
-        label={t("form.salaryAccountLabel")}
-        wide
-        placeholder={t("form.salaryAccountPlaceholder")}
-        defaultValue={values?.salaryAccount ?? ""}
-      />
+      {accountsSection}
 
       <div className="space-y-3 rounded-lg border p-3 sm:col-span-2">
         <div className="text-sm font-medium">{t("form.contactSection")}</div>

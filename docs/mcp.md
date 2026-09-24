@@ -117,7 +117,7 @@ the `tools-*.ts` modules):
 - `_meta["openai/toolInvocation/invoking" | "invoked"]`, the status line ChatGPT
   shows while a call is in flight.
 
-**Output schemas.** Every tool declares an `outputSchema` — all 71 of them, as of
+**Output schemas.** Every tool declares an `outputSchema` — all 74 of them, as of
 server version 1.4.0. When a tool declares one the handler additionally returns
 the result as MCP `structuredContent` (the JSON text block stays, per MCP's
 back-compat recommendation), which is what ChatGPT and Codex prefer over parsing
@@ -207,14 +207,26 @@ ask the user before calling `update_contract` with `status='completed'`. Status
 is never flipped automatically.
 
 **HR / payroll / recon** — employees: `list_employees`/`get_employee`/
-`create_employee`/`update_employee`/`delete_employee`. Employee PII is
-handled conservatively over MCP: national ID and salary account come back
-**masked** (full values are web-app only), and every employee read is written
-to the activity log as a `read` entry — so who pulled contact data, and when,
-is always answerable. Payroll:
+`create_employee`/`update_employee`/`delete_employee`; employee bank accounts
+(an employee can have several): `list_employee_bank_accounts` +
+`create_employee_bank_account`/`update_employee_bank_account`/`delete_employee_bank_account`.
+Employee PII is handled conservatively over MCP: national IDs and account
+numbers are stored encrypted, and come back **masked** — account numbers as
+their last 5 characters only. There is no way to reveal a full account number
+over MCP; that is a web-app action for owners/admins, and each reveal is
+audit-logged. Writes accept the full number but never echo it. Employee and
+employee-account writes are owner/admin only. Every employee and
+employee-account read is written to the activity log as a `read` entry — so
+who pulled contact data, and when, is always answerable. `list_employees` /
+`get_employee` include each employee's masked `bankAccounts`; the old
+`salaryAccount` field is deprecated (on write it now creates a salary-default
+account). Payroll:
 `list_payroll_runs`, `list_payslips`, `list_salary_status` (whose salary is
 booked for a month + when), `pay_employee_salary` (writes the payslip **and** the
-matching salary-expense ledger entry — bookkeeping only, it pays nobody);
+matching salary-expense ledger entry — bookkeeping only, it pays nobody; optional
+`toEmployeeAccountId` records which employee account it went into, defaulting to
+the salary-default account). `create_reimbursement` takes the same optional
+`toEmployeeAccountId` (defaulting to the reimbursement-default account);
 reconciliations: `list_reconciliations` +
 `create`/`update`/`delete`; accountant notices: `list_accountant_notices`,
 `mark_accountant_notified`, `unmark_accountant_notified`.
@@ -295,7 +307,7 @@ things that don't live in this repo:
 Both directories ask for the same thing in different words — OpenAI wants
 "test credentials for a fully populated account", Anthropic wants a "fully
 featured demo account with sample data". An empty workspace fails review: most
-of the 70 tools would answer with an empty array and the reviewer has no way to
+of the 74 tools would answer with an empty array and the reviewer has no way to
 tell what the connector does.
 
 Two commands produce that account. Run them against the environment you are

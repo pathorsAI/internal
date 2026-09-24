@@ -18,6 +18,7 @@ import { formatCurrency, formatYearMonth } from "@/lib/format";
 import { DeleteButton } from "@/components/delete-button";
 import { deletePayslip } from "@/db/mutations";
 import { requireOrg } from "@/lib/session";
+import { formatAccountShort } from "@/lib/employee-accounts";
 
 export const dynamic = "force-dynamic";
 
@@ -61,7 +62,20 @@ export default async function PayrollPage() {
                   <TableCell className="whitespace-nowrap text-muted-foreground">
                     {formatYearMonth(r.periodYear, r.periodMonth)}
                   </TableCell>
-                  <TableCell className="font-medium">{r.employeeName ?? "—"}</TableCell>
+                  <TableCell>
+                    <div className="font-medium">{r.employeeName ?? "—"}</div>
+                    {r.paidToAccountLast5 ? (
+                      <div className="text-xs text-muted-foreground">
+                        →{" "}
+                        {formatAccountShort({
+                          bankName: r.paidToBankName,
+                          label: null,
+                          bankCode: null,
+                          accountLast5: r.paidToAccountLast5,
+                        })}
+                      </div>
+                    ) : null}
+                  </TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">
                     {formatCurrency(r.taxableTotal)}
                   </TableCell>

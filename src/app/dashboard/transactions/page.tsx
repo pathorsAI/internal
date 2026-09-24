@@ -40,6 +40,7 @@ import { EditTransactionForm } from "./edit-transaction-form";
 import { TransactionFilters } from "./transaction-filters";
 import { txnTypeColor } from "@/components/amount";
 import { requireOrg } from "@/lib/session";
+import { formatAccountShort } from "@/lib/employee-accounts";
 import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
@@ -108,6 +109,17 @@ function TransactionRow({
           <TableCell>
             <div className="flex min-w-0 flex-col gap-1">
               <span className="truncate">{t.partyName ?? t.settleName ?? "—"}</span>
+              {t.settleToAccountLast5 ? (
+                <span className="truncate text-xs text-muted-foreground">
+                  →{" "}
+                  {formatAccountShort({
+                    bankName: t.settleToBankName,
+                    label: null,
+                    bankCode: null,
+                    accountLast5: t.settleToAccountLast5,
+                  })}
+                </span>
+              ) : null}
               <Badge variant="secondary" className="w-fit font-normal">
                 {typeLabel[t.type] ?? t.type}
               </Badge>

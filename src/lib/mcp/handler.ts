@@ -21,7 +21,9 @@ const AUDIT_VERB_PREFIXES: ReadonlyArray<[prefix: string, action: ActivityAction
 
 // Tools whose name doesn't follow the verb_entity convention. Read tools are
 // normally not logged — except employee reads, which carry PII (email/phone +
-// masked national id/account) and are logged as "read".
+// masked national id/account) and are logged as "read". Employee bank-account
+// writes (create_/update_/delete_employee_bank_account) are covered by the verb
+// prefixes above with entityType "employee_bank_account", same as the web side.
 const AUDIT_BY_NAME: Record<string, Pick<McpAudit, "action" | "entityType">> = {
   bulk_create_transactions: { action: "create", entityType: "transaction" },
   pay_employee_salary: { action: "create", entityType: "payslip" },
@@ -29,6 +31,7 @@ const AUDIT_BY_NAME: Record<string, Pick<McpAudit, "action" | "entityType">> = {
   unmark_accountant_notified: { action: "update", entityType: "transaction" },
   list_employees: { action: "read", entityType: "employee" },
   get_employee: { action: "read", entityType: "employee" },
+  list_employee_bank_accounts: { action: "read", entityType: "employee_bank_account" },
   accept_invitation: { action: "create", entityType: "member" },
 };
 

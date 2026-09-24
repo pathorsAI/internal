@@ -29,6 +29,7 @@ import { accountingTools } from "./tools-accounting";
 import { transactionTools } from "./tools-transactions";
 import { clientTools } from "./tools-client";
 import { hrTools } from "./tools-hr";
+import { employeeAccountTools } from "./tools-employee-accounts";
 import { billingItemTools } from "./tools-billing";
 import { orgTools } from "./tools-org";
 import { integrationTools } from "./tools-integrations";
@@ -717,4 +718,5 @@ export const tools: Record<string, ToolDef> = {
   ...clientTools,
   ...hrTools,
   ...integrationTools,
+  ...employeeAccountTools,
 };
