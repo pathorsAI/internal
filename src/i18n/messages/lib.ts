@@ -25,7 +25,7 @@ const lib = {
   },
   calendar: {
     notConnected: { "zh-TW": "尚未連結 Google 日曆", en: "Google Calendar is not connected" },
-    grantExpired: { "zh-TW": "Google 日曆授權已失效，請到組織設定重新連結", en: "The Google Calendar authorization has expired. Reconnect it in organization settings." },
+    grantExpired: { "zh-TW": "Google 日曆授權已失效，請到 設定 › 整合 重新連結", en: "The Google Calendar authorization has expired. Reconnect it under Settings › Integrations." },
     title: { "zh-TW": "請款提醒 · {org}", en: "Billing reminders · {org}" },
     client: { "zh-TW": "客戶", en: "client" },
     link: { "zh-TW": "請款看板：/billing", en: "Billing board: /billing" },

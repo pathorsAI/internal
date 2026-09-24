@@ -61,7 +61,7 @@ export async function connectCalendar(): Promise<CalendarActionState> {
     await setCalendarOwner(orgId, userId);
     const result = await syncBillingCalendar(orgId, await activeOrgName(orgId));
     await logWeb(orgId, "update", "calendar", null, tRec("activity.calendarConnected"));
-    revalidatePath("/dashboard/settings");
+    revalidatePath("/dashboard/settings/integrations");
     revalidatePath("/dashboard/billing");
     return { ok: true, result };
   } catch (e) {
@@ -100,7 +100,7 @@ export async function disconnectCalendarAction(): Promise<CalendarActionState> {
 
     const { calendarRemoved } = await disconnectCalendar(orgId);
     await logWeb(orgId, "update", "calendar", null, tRec("activity.calendarDisconnected"));
-    revalidatePath("/dashboard/settings");
+    revalidatePath("/dashboard/settings/integrations");
     revalidatePath("/dashboard/billing");
     return {
       ok: true,
@@ -122,7 +122,7 @@ export async function updateReminderDays(days: number): Promise<CalendarActionSt
     await setReminderDays(orgId, days);
     // 提醒時間變了，既有事件要重推一次才會生效。
     const result = await syncBillingCalendar(orgId, await activeOrgName(orgId));
-    revalidatePath("/dashboard/settings");
+    revalidatePath("/dashboard/settings/integrations");
     return { ok: true, result };
   } catch (e) {
     if (e instanceof CalendarNotConnectedError) return { ok: false, error: e.message };
