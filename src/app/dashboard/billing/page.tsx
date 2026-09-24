@@ -26,7 +26,8 @@ import {
 } from "@/db/queries";
 import { deleteBillingItem } from "@/db/mutations";
 import { formatCurrency, formatDate } from "@/lib/format";
-import { requireOrg } from "@/lib/session";
+import { canManageOrg, requireOrgWithRole } from "@/lib/session";
+import { getIntegration } from "@/lib/integrations/store";
 import { getCalendarSettings } from "@/lib/google-calendar";
 import { cn } from "@/lib/utils";
 import { BillingStatusBadge } from "./billing-status";
@@ -37,6 +38,7 @@ import { QuickMark } from "./quick-actions";
 import { IssueInvoiceDialog } from "./issue-invoice-dialog";
 import { RecordPaymentDialog } from "./record-payment-dialog";
 import { SyncCalendarButton } from "./sync-calendar-button";
+import { SimpanyIssueSheet } from "../invoices/simpany-issue-sheet";
 
 export const dynamic = "force-dynamic";
 
@@ -107,8 +109,9 @@ function InvoiceCell({ row, t }: Readonly<{ row: BillingRow; t: T }>) {
  *   還沒請款 → 標記已請款
  *   已請款   → 登記收款（有缺口時）＋ 開發票（該開未開時）
  *
- * 開發票走預填草稿，只有 billing_items 有實體列可綁；訂閱期別沒有 id 可綁，
- * 退回單純的日期標記，發票本身到發票頁建立。
+ * 開發票：Simpany 整合開啟時（owner / admin），請款項目與訂閱期別都走「在 Simpany 開立」
+ * （預覽 → 確認 → 開立，並回填開發票日）；否則請款項目走預填草稿、訂閱期別退回單純的
+ * 日期標記，發票本身到 Simpany 手開。
  */
 /**
  * 項目底下那行來源說明：訂閱期別連回訂閱、掛了合約的一次性項目連回合約，
@@ -140,8 +143,46 @@ function SourceLine({ row, t }: Readonly<{ row: BillingRow; t: T }>) {
   return <>{row.projectName ?? t("table.oneTimeSource")}</>;
 }
 
-function RowActions({ row }: Readonly<{ row: BillingRow }>) {
+/** 這一列「開發票」要用哪個流程：Simpany 直接開立，或本系統記錄 + 人去 Simpany 開。 */
+function InvoiceAction({ row, simpany }: Readonly<{ row: BillingRow; simpany: boolean }>) {
   const itemId = row.source === "billing_item" ? row.billingItemId : null;
+  if (simpany) {
+    const source =
+      itemId != null
+        ? ({ kind: "billing_item", billingItemId: itemId } as const)
+        : row.subscriptionId != null && row.periodStart
+          ? ({ kind: "subscription", subscriptionId: row.subscriptionId, periodStart: row.periodStart } as const)
+          : null;
+    if (source) {
+      return (
+        <SimpanyIssueSheet
+          source={source}
+          customerName={row.customerName}
+          customerTaxId={row.customerTaxId}
+          title={row.title}
+          expected={row.expected}
+          currency={row.currency}
+        />
+      );
+    }
+  }
+  if (itemId == null) {
+    return <QuickMark rowKey={row.key} field="invoicedOn" value={row.invoicedOn} />;
+  }
+  return (
+    <IssueInvoiceDialog
+      billingItemId={itemId}
+      contractId={row.contractId}
+      customerName={row.customerName}
+      customerTaxId={row.customerTaxId}
+      title={row.title}
+      expected={row.expected}
+      currency={row.currency}
+    />
+  );
+}
+
+function RowActions({ row, simpany }: Readonly<{ row: BillingRow; simpany: boolean }>) {
   const outstanding = row.expected - row.paid;
 
   if (!row.billedOn) {
@@ -160,20 +201,7 @@ function RowActions({ row }: Readonly<{ row: BillingRow }>) {
           customerName={row.customerName}
         />
       )}
-      {row.needsInvoice &&
-        (itemId == null ? (
-          <QuickMark rowKey={row.key} field="invoicedOn" value={row.invoicedOn} />
-        ) : (
-          <IssueInvoiceDialog
-            billingItemId={itemId}
-            contractId={row.contractId}
-            customerName={row.customerName}
-            customerTaxId={row.customerTaxId}
-            title={row.title}
-            expected={row.expected}
-            currency={row.currency}
-          />
-        ))}
+      {row.needsInvoice && <InvoiceAction row={row} simpany={simpany} />}
       <QuickMark rowKey={row.key} field="billedOn" value={row.billedOn} />
     </>
   );
@@ -182,19 +210,24 @@ function RowActions({ row }: Readonly<{ row: BillingRow }>) {
 export default async function BillingPage({
   searchParams,
 }: Readonly<{ searchParams: Promise<{ filter?: string }> }>) {
-  const { orgId } = await requireOrg();
+  const { orgId, role } = await requireOrgWithRole();
   const t = await getTranslations("billing");
   const { filter: rawFilter } = await searchParams;
   const filter =
     rawFilter && FILTERS.has(rawFilter as BoardFilter) ? (rawFilter as BoardFilter) : null;
 
-  const [rows, parties, projects, contracts, calendar] = await Promise.all([
+  const [rows, parties, projects, contracts, calendar, simpanyIntegration] = await Promise.all([
     listBillingBoard(orgId),
     listParties(orgId),
     listProjects(orgId),
     listContracts(orgId),
     getCalendarSettings(orgId),
+    getIntegration(orgId, "simpany"),
   ]);
+  // 「在 Simpany 開立」只給 owner / admin，且整合要已開啟；其餘沿用手動流程。
+  const simpany =
+    canManageOrg(role) &&
+    Boolean(simpanyIntegration?.enabled && simpanyIntegration.status === "connected");
 
   // 摘要一律用全部資料算，篩選只影響下方表格 —— 否則點了卡片其他數字會跟著歸零。
   const summary = summarizeBilling(rows);
@@ -296,7 +329,7 @@ export default async function BillingPage({
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
-                        <RowActions row={row} />
+                        <RowActions row={row} simpany={simpany} />
                       </div>
                     </TableCell>
                   </>
