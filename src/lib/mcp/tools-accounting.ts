@@ -140,6 +140,24 @@ const INVOICE_ROW_PROPS = {
     description: "Issuing state in Simpany, the external invoicing system.",
   },
   externalRef: { type: ["string", "null"] },
+  // Simpany API sync / issue (migrations/0025).
+  taxTreatment: {
+    type: "string",
+    enum: ["taxable", "zero_rated", "exempt"],
+    description: "應稅 / 零稅率 / 免稅.",
+  },
+  zeroRateReason: { type: ["string", "null"], description: "Simpany zero-rate reason code, e.g. 72 外銷勞務." },
+  exchangeRate: { type: ["string", "null"], description: "Decimal as a string; FX rate from the bank remittance slip." },
+  foreignCurrency: { type: ["string", "null"] },
+  foreignAmount: { type: ["string", "null"], description: "Decimal as a string." },
+  invoiceType: { type: ["string", "null"], enum: ["B2B", "B2C", null] },
+  externalId: { type: ["string", "null"], description: "Simpany receipt id (R…)." },
+  voidedAt: { type: ["string", "null"] },
+  voidReason: { type: ["string", "null"] },
+  buyerEmails: { type: ["array", "null"], items: { type: "string" } },
+  subscriptionId: { type: ["number", "null"] },
+  subscriptionPeriod: { type: ["string", "null"], description: "YYYY-MM-DD." },
+  externalSyncedAt: { type: ["string", "null"], description: "Last synced from Simpany." },
 } as const;
 
 const INVOICE_ROW: JsonSchemaObject = {

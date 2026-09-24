@@ -72,7 +72,7 @@ function deriveMcpAudit(name: string, out: unknown): McpAudit | null {
 
 /** Bump on every published change to tools, schemas or instructions. Clients
  *  (and OpenAI's plugin "Scan Tools") key their cached snapshot off this. */
-export const SERVER_VERSION = "1.4.0";
+export const SERVER_VERSION = "1.5.0";
 
 /** Public base URL of this deployment; doubles as the OAuth issuer.
  *  Keep in sync with the `resource` passed to `mcp()` in src/lib/auth.ts. */
@@ -260,11 +260,22 @@ function toolAnnotations(name: string, explicit?: ToolAnnotations): ToolAnnotati
 // Reaches outside our own database, so it cannot claim a closed world.
 const OPENWORLD_OVERRIDES: Record<string, Partial<ToolAnnotations>> = {
   sync_billing_calendar: { openWorldHint: true },
+  // Simpany e-invoice (src/lib/mcp/tools-simpany.ts): every tool calls Simpany's
+  // API; issue/void create or cancel legal e-invoices and email the buyer.
+  simpany_list_invoices: { openWorldHint: true },
+  simpany_get_invoice: { openWorldHint: true },
+  simpany_sync_invoices: { openWorldHint: true },
+  simpany_preview_invoice: { openWorldHint: true },
+  simpany_issue_invoice: { openWorldHint: true },
+  simpany_void_invoice: { openWorldHint: true },
+  simpany_list_zero_rate_reasons: { openWorldHint: true },
 };
 
 // Writes that are irreversible from MCP even though the verb isn't "delete".
 // (Irreversible as a *bookkeeping entry* — no tool here moves real money.)
 const DESTRUCTIVE_OVERRIDES: Record<string, Partial<ToolAnnotations>> = {
+  // Voids a legal e-invoice at the Ministry of Finance; cannot be undone.
+  simpany_void_invoice: { destructiveHint: true },
   // Writes the payslip AND the matching salary-expense ledger entry; the month
   // cannot be recorded twice and there is no tool that reverses the entry.
   pay_employee_salary: { destructiveHint: true },
@@ -307,6 +318,13 @@ const TITLE_OVERRIDES: Record<string, string> = {
   mark_accountant_notified: "Mark as sent to the accountant",
   pay_employee_salary: "Record a salary payslip",
   sync_billing_calendar: "Sync the billing calendar",
+  simpany_get_invoice: "Simpany e-invoice detail",
+  simpany_issue_invoice: "Issue a Simpany e-invoice",
+  simpany_list_invoices: "List Simpany e-invoices",
+  simpany_list_zero_rate_reasons: "Simpany zero-rate reasons",
+  simpany_preview_invoice: "Preview a Simpany e-invoice",
+  simpany_sync_invoices: "Sync invoices from Simpany",
+  simpany_void_invoice: "Void a Simpany e-invoice",
   unmark_accountant_notified: "Unmark as sent to the accountant",
 };
 
