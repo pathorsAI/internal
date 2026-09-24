@@ -75,6 +75,13 @@ function num(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
+/** 字串 / 數字 / 布林轉成文字；其他（物件、null…）用 fallback，避免變成 "[object Object]"。 */
+function text(v: unknown, fallback: string): string {
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  return fallback;
+}
+
 /** 從 org_integrations.config 讀出 Wise 設定；形狀不對的項目直接略過。 */
 export function parseWiseConfig(config: IntegrationConfig | null | undefined): WiseConfig {
   const c = config ?? {};
@@ -84,7 +91,7 @@ export function parseWiseConfig(config: IntegrationConfig | null | undefined): W
         const id = num(o?.id);
         return id === null
           ? []
-          : [{ id, type: String(o.type ?? ""), name: String(o.name ?? id) }];
+          : [{ id, type: text(o.type, ""), name: text(o.name, String(id)) }];
       })
     : [];
   const balances = Array.isArray(c.balances)
@@ -252,62 +259,95 @@ export async function saveWiseMappings(
   const integ = await getIntegration(orgId, "wise");
   if (!integ) return { error: "Wise 尚未連接" };
   const cfg = parseWiseConfig(integ.config);
-  const db = getDb();
   const accountIds = input.map((m) => m.bankAccountId).filter((x): x is number => x !== null);
-  const accounts = accountIds.length
-    ? await db
-        .select({ id: bankAccounts.id, name: bankAccounts.name, currency: bankAccounts.currency })
-        .from(bankAccounts)
-        .where(
-          and(
-            eq(bankAccounts.organizationId, orgId),
-            inArray(bankAccounts.id, accountIds),
-            isNull(bankAccounts.deletedAt),
-          ),
-        )
-    : [];
+  const accounts = await loadOrgAccounts(getDb(), orgId, accountIds);
   const byId = new Map(accounts.map((a) => [a.id, a]));
   const seenAccounts = new Set<number>();
-  const needSuggestion: number[] = [];
   const out: WiseAccountMapping[] = [];
   for (const m of input) {
-    const bal = cfg.balances.find((b) => b.balanceId === m.balanceId && b.profileId === m.profileId);
-    if (!bal) return { error: `找不到 Wise 餘額 #${m.balanceId}，請先重新整理餘額` };
-    if (m.syncFrom !== null && !isIsoDate(m.syncFrom)) {
-      return { error: `切換日格式錯誤：${m.syncFrom}（應為 YYYY-MM-DD）` };
-    }
-    if (m.bankAccountId !== null) {
-      const acct = byId.get(m.bankAccountId);
-      if (!acct) return { error: `找不到帳本帳戶 #${m.bankAccountId}` };
-      if (acct.currency.trim().toUpperCase() !== bal.currency) {
-        return {
-          error: `「${acct.name}」是 ${acct.currency.trim()} 帳戶，不能對應 Wise 的 ${bal.currency} 餘額`,
-        };
-      }
-      if (seenAccounts.has(acct.id)) {
-        return { error: `「${acct.name}」被對應到兩個 Wise 餘額，一個帳本帳戶只能對應一個` };
-      }
-      seenAccounts.add(acct.id);
-      if (m.syncFrom === null) needSuggestion.push(acct.id);
-    }
-    out.push({
+    const checked = validateMapping(m, cfg, byId, seenAccounts);
+    if ("error" in checked) return checked;
+    out.push(checked.mapping);
+  }
+  await fillSuggestedSyncFrom(orgId, out);
+  await updateConfig(orgId, "wise", { accountMappings: out });
+  return { mappings: out };
+}
+
+type AccountRow = { id: number; name: string; currency: string };
+
+/** 讀本組織、未刪除的帳本帳戶（只取 id / 名稱 / 幣別）。 */
+async function loadOrgAccounts(db: Db, orgId: string, ids: number[]): Promise<AccountRow[]> {
+  if (ids.length === 0) return [];
+  return db
+    .select({ id: bankAccounts.id, name: bankAccounts.name, currency: bankAccounts.currency })
+    .from(bankAccounts)
+    .where(
+      and(
+        eq(bankAccounts.organizationId, orgId),
+        inArray(bankAccounts.id, ids),
+        isNull(bankAccounts.deletedAt),
+      ),
+    );
+}
+
+/** 驗證單一對應；通過就回傳要存的對應（syncFrom 可能仍是 null，稍後補建議值）。 */
+function validateMapping(
+  m: MappingInput,
+  cfg: WiseConfig,
+  byId: Map<number, AccountRow>,
+  seenAccounts: Set<number>,
+): { error: string } | { mapping: WiseAccountMapping } {
+  const bal = cfg.balances.find((b) => b.balanceId === m.balanceId && b.profileId === m.profileId);
+  if (!bal) return { error: `找不到 Wise 餘額 #${m.balanceId}，請先重新整理餘額` };
+  if (m.syncFrom !== null && !isIsoDate(m.syncFrom)) {
+    return { error: `切換日格式錯誤：${m.syncFrom}（應為 YYYY-MM-DD）` };
+  }
+  if (m.bankAccountId !== null) {
+    const error = checkMappedAccount(byId.get(m.bankAccountId), m.bankAccountId, bal.currency, seenAccounts);
+    if (error) return { error };
+  }
+  return {
+    mapping: {
       profileId: bal.profileId,
       balanceId: bal.balanceId,
       currency: bal.currency,
       bankAccountId: m.bankAccountId,
       syncFrom: m.syncFrom,
-    });
+    },
+  };
+}
+
+/** 帳本帳戶存在、幣別相符、且沒被重複對應；通過時記進 seenAccounts。 */
+function checkMappedAccount(
+  acct: AccountRow | undefined,
+  bankAccountId: number,
+  currency: string,
+  seenAccounts: Set<number>,
+): string | null {
+  if (!acct) return `找不到帳本帳戶 #${bankAccountId}`;
+  if (acct.currency.trim().toUpperCase() !== currency) {
+    return `「${acct.name}」是 ${acct.currency.trim()} 帳戶，不能對應 Wise 的 ${currency} 餘額`;
   }
-  if (needSuggestion.length) {
-    const suggested = await suggestSyncFrom(orgId, needSuggestion);
-    for (const m of out) {
-      if (m.bankAccountId !== null && m.syncFrom === null) {
-        m.syncFrom = suggested.get(m.bankAccountId) ?? null;
-      }
+  if (seenAccounts.has(acct.id)) {
+    return `「${acct.name}」被對應到兩個 Wise 餘額，一個帳本帳戶只能對應一個`;
+  }
+  seenAccounts.add(acct.id);
+  return null;
+}
+
+/** 有對應帳戶但沒填 syncFrom 的，補上建議切換日（就地修改）。 */
+async function fillSuggestedSyncFrom(orgId: string, mappings: WiseAccountMapping[]): Promise<void> {
+  const needSuggestion = mappings
+    .filter((m) => m.bankAccountId !== null && m.syncFrom === null)
+    .map((m) => m.bankAccountId as number);
+  if (needSuggestion.length === 0) return;
+  const suggested = await suggestSyncFrom(orgId, needSuggestion);
+  for (const m of mappings) {
+    if (m.bankAccountId !== null && m.syncFrom === null) {
+      m.syncFrom = suggested.get(m.bankAccountId) ?? null;
     }
   }
-  await updateConfig(orgId, "wise", { accountMappings: out });
-  return { mappings: out };
 }
 
 /** 重新向 Wise 抓 profile 與餘額（唯讀），寫回 config。整合必須已開啟。 */
@@ -338,8 +378,15 @@ export type PlannedRow = {
 
 type ResolvedMapping = WiseAccountMapping & { bankAccountId: number };
 
+type WiseDetails = NonNullable<WiseStatementTransaction["details"]>;
+type WiseMoney = WiseStatementTransaction["amount"];
+
 function fmtAmount(v: number): string {
   return Math.abs(v).toFixed(2);
+}
+
+function feeLabel(fee: WiseMoney): string {
+  return `fee ${fmtAmount(fee.value)} ${fee.currency}`;
 }
 
 function recipientName(r: unknown): string | null {
@@ -364,21 +411,34 @@ function counterCurrencyOf(tx: WiseStatementTransaction, ownCurrency: string): s
   return null;
 }
 
-/** 一筆 Wise 對帳單交易 → 一列帳本交易（尚未寫入）。 */
-export function mapWiseTransaction(
-  tx: WiseStatementTransaction,
-  m: ResolvedMapping,
-  all: readonly WiseAccountMapping[],
-): PlannedRow {
-  const d = tx.details ?? {};
-  const dtype = (d.type ?? "UNKNOWN").toUpperCase();
-  const isCredit = tx.type === "CREDIT";
-  const currency = m.currency;
-  const amount = fmtAmount(tx.amount.value);
-  const fee = tx.totalFees && tx.totalFees.value ? tx.totalFees : null;
-  const orig = d.amount && d.amount.currency && d.amount.currency.toUpperCase() !== currency ? d.amount : null;
-  const rate = tx.exchangeDetails?.rate ?? d.rate ?? null;
+/** CREDIT 進帳記在 to，DEBIT 出帳記在 from。 */
+function accountSides(
+  isCredit: boolean,
+  bankAccountId: number,
+): { fromAccountId: number | null; toAccountId: number | null } {
+  return isCredit
+    ? { fromAccountId: null, toAccountId: bankAccountId }
+    : { fromAccountId: bankAccountId, toAccountId: null };
+}
 
+function merchantMeta(merchant: NonNullable<WiseDetails["merchant"]>): Record<string, unknown> {
+  return {
+    name: merchant.name ?? null,
+    city: merchant.city ?? null,
+    country: merchant.country ?? null,
+    category: merchant.category ?? null,
+  };
+}
+
+/** 寫進 external_meta 的原始資訊。 */
+function buildMeta(
+  tx: WiseStatementTransaction,
+  d: WiseDetails,
+  dtype: string,
+  m: ResolvedMapping,
+  rate: number | null,
+  fee: WiseMoney | null,
+): Record<string, unknown> {
   const meta: Record<string, unknown> = {
     referenceNumber: tx.referenceNumber,
     wiseType: tx.type,
@@ -388,93 +448,120 @@ export function mapWiseTransaction(
     balanceId: m.balanceId,
   };
   if (d.category) meta.category = d.category;
-  if (d.merchant) {
-    meta.merchant = {
-      name: d.merchant.name ?? null,
-      city: d.merchant.city ?? null,
-      country: d.merchant.country ?? null,
-      category: d.merchant.category ?? null,
-    };
-  }
+  if (d.merchant) meta.merchant = merchantMeta(d.merchant);
   if (d.amount) meta.originalAmount = { value: d.amount.value, currency: d.amount.currency };
   if (rate !== null) meta.exchangeRate = rate;
   if (fee) meta.fees = { value: fee.value, currency: fee.currency };
   if (d.cardLastFourDigits) meta.cardLastFour = d.cardLastFourDigits;
   if (d.cardHolderFullName) meta.cardHolder = d.cardHolderFullName;
   if (tx.runningBalance) meta.runningBalance = tx.runningBalance.value;
+  return meta;
+}
 
-  const suffix: string[] = [];
-  if (orig) suffix.push(`${orig.currency} ${Math.abs(orig.value)}`);
-  if (fee) suffix.push(`fee ${fmtAmount(fee.value)} ${fee.currency}`);
-
-  if (dtype === "CONVERSION") {
-    const counter = counterCurrencyOf(tx, currency);
-    const counterMapping = counter
-      ? all.find((x) => x.profileId === m.profileId && x.currency === counter && x.bankAccountId !== null)
-      : undefined;
-    const from = tx.exchangeDetails?.fromAmount;
-    const to = tx.exchangeDetails?.toAmount;
-    const desc = [
-      from && to
-        ? `Wise 換匯 ${from.currency} ${Math.abs(from.value)} → ${to.currency} ${Math.abs(to.value)}${rate ? ` @ ${rate}` : ""}`
-        : `Wise 換匯 ${d.description ?? ""}`.trim(),
-      fee ? `fee ${fmtAmount(fee.value)} ${fee.currency}` : null,
-    ]
-      .filter(Boolean)
-      .join(" · ");
-    meta.conversion = {
-      counterCurrency: counter,
-      counterBankAccountId: counterMapping?.bankAccountId ?? null,
-    };
-    const base = {
-      bankAccountId: m.bankAccountId,
-      txnDate: taipeiDate(tx.date),
-      amount,
-      currency,
-      description: desc,
-      externalRef: `${tx.referenceNumber}:${currency}`,
-      externalMeta: meta,
-    };
-    if (counterMapping) {
-      return {
-        ...base,
-        type: "transfer",
-        partyName: null,
-        needsReview: false,
-        fromAccountId: isCredit ? null : m.bankAccountId,
-        toAccountId: isCredit ? m.bankAccountId : null,
-      };
-    }
-    return {
-      ...base,
-      type: isCredit ? "income" : "expense",
-      partyName: CONVERSION_PARTY,
-      needsReview: true,
-      fromAccountId: isCredit ? null : m.bankAccountId,
-      toAccountId: isCredit ? m.bankAccountId : null,
-    };
+function conversionDescription(
+  tx: WiseStatementTransaction,
+  d: WiseDetails,
+  rate: number | null,
+  fee: WiseMoney | null,
+): string {
+  const from = tx.exchangeDetails?.fromAmount;
+  const to = tx.exchangeDetails?.toAmount;
+  let main: string;
+  if (from && to) {
+    const rateText = rate ? ` @ ${rate}` : "";
+    main = `Wise 換匯 ${from.currency} ${Math.abs(from.value)} → ${to.currency} ${Math.abs(to.value)}${rateText}`;
+  } else {
+    main = `Wise 換匯 ${d.description ?? ""}`.trim();
   }
+  return [main, fee ? feeLabel(fee) : null].filter(Boolean).join(" · ");
+}
 
-  const partyName =
+/**
+ * 換匯的其中一腳：另一腳的餘額有對應 → 單腳轉帳；沒有 → 退回 income / expense 並標 needs_review。
+ */
+function mapConversion(
+  tx: WiseStatementTransaction,
+  d: WiseDetails,
+  m: ResolvedMapping,
+  all: readonly WiseAccountMapping[],
+  meta: Record<string, unknown>,
+  rate: number | null,
+  fee: WiseMoney | null,
+): PlannedRow {
+  const isCredit = tx.type === "CREDIT";
+  const currency = m.currency;
+  const counter = counterCurrencyOf(tx, currency);
+  const counterMapping = counter
+    ? all.find((x) => x.profileId === m.profileId && x.currency === counter && x.bankAccountId !== null)
+    : undefined;
+  meta.conversion = {
+    counterCurrency: counter,
+    counterBankAccountId: counterMapping?.bankAccountId ?? null,
+  };
+  const base = {
+    bankAccountId: m.bankAccountId,
+    txnDate: taipeiDate(tx.date),
+    amount: fmtAmount(tx.amount.value),
+    currency,
+    description: conversionDescription(tx, d, rate, fee),
+    externalRef: `${tx.referenceNumber}:${currency}`,
+    externalMeta: meta,
+    ...accountSides(isCredit, m.bankAccountId),
+  };
+  if (counterMapping) {
+    return { ...base, type: "transfer", partyName: null, needsReview: false };
+  }
+  return {
+    ...base,
+    type: isCredit ? "income" : "expense",
+    partyName: CONVERSION_PARTY,
+    needsReview: true,
+  };
+}
+
+function partyNameOf(d: WiseDetails): string {
+  return (
     d.merchant?.name?.trim() ||
     d.senderName?.trim() ||
     recipientName(d.recipient) ||
     d.description?.trim() ||
-    "Wise";
+    "Wise"
+  );
+}
+
+/** 一筆 Wise 對帳單交易 → 一列帳本交易（尚未寫入）。 */
+export function mapWiseTransaction(
+  tx: WiseStatementTransaction,
+  m: ResolvedMapping,
+  all: readonly WiseAccountMapping[],
+): PlannedRow {
+  const d: WiseDetails = tx.details ?? {};
+  const dtype = (d.type ?? "UNKNOWN").toUpperCase();
+  const isCredit = tx.type === "CREDIT";
+  const currency = m.currency;
+  const fee = tx.totalFees?.value ? tx.totalFees : null;
+  const orig = d.amount?.currency && d.amount.currency.toUpperCase() !== currency ? d.amount : null;
+  const rate = tx.exchangeDetails?.rate ?? d.rate ?? null;
+  const meta = buildMeta(tx, d, dtype, m, rate, fee);
+
+  if (dtype === "CONVERSION") return mapConversion(tx, d, m, all, meta, rate, fee);
+
+  const suffix: string[] = [];
+  if (orig) suffix.push(`${orig.currency} ${Math.abs(orig.value)}`);
+  if (fee) suffix.push(feeLabel(fee));
   const description = [d.description?.trim() || dtype, ...suffix].join(" · ");
   return {
     bankAccountId: m.bankAccountId,
     type: isCredit ? "income" : "expense",
     txnDate: taipeiDate(tx.date),
-    amount,
+    amount: fmtAmount(tx.amount.value),
     currency,
-    partyName: partyName.slice(0, 200),
+    partyName: partyNameOf(d).slice(0, 200),
     description,
     externalRef: tx.referenceNumber,
     externalMeta: meta,
     needsReview: true,
-    fromAccountId: isCredit ? null : m.bankAccountId,
-    toAccountId: isCredit ? m.bankAccountId : null,
+    ...accountSides(isCredit, m.bankAccountId),
   };
 }
 
@@ -607,6 +694,252 @@ async function fetchStatementRange(
   return out;
 }
 
+function compareStr(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
+type ProfileNameFn = (id: number) => string;
+
+function skippedEntry(
+  b: { profileId: number; balanceId: number; currency: string },
+  profileName: ProfileNameFn,
+  reason: SkippedBalance["reason"],
+): SkippedBalance {
+  return {
+    profileId: b.profileId,
+    profileName: profileName(b.profileId),
+    balanceId: b.balanceId,
+    currency: b.currency,
+    reason,
+  };
+}
+
+/** config 裡發現過、但沒有對應到帳本帳戶的 Wise 餘額。 */
+function unmappedBalances(cfg: WiseConfig, profileName: ProfileNameFn): SkippedBalance[] {
+  return cfg.balances
+    .filter((b) => {
+      const m = cfg.accountMappings.find((x) => x.balanceId === b.balanceId);
+      return (m?.bankAccountId ?? null) === null;
+    })
+    .map((b) => skippedEntry(b, profileName, "unmapped"));
+}
+
+/** 要同步的對應（有帳本帳戶的；指定 accountId 時只取那一個）。沒有就丟錯。 */
+function selectMappings(cfg: WiseConfig, accountId: number | undefined): ResolvedMapping[] {
+  let mapped = cfg.accountMappings.filter((m): m is ResolvedMapping => m.bankAccountId !== null);
+  if (accountId !== undefined) {
+    mapped = mapped.filter((m) => m.bankAccountId === accountId);
+    if (mapped.length === 0) {
+      throw new Error(
+        `帳本帳戶 #${accountId} 沒有對應到任何 Wise 餘額，請先到 設定 › 整合 › Wise 設定帳戶對應`,
+      );
+    }
+  }
+  if (mapped.length === 0) {
+    throw new Error("還沒有任何 Wise 餘額對應到帳本帳戶，請先到 設定 › 整合 › Wise 設定帳戶對應");
+  }
+  return mapped;
+}
+
+type Eligibility =
+  | { ok: true; acct: AccountRow; syncFrom: string }
+  | { ok: false; reason: SkippedBalance["reason"] };
+
+/** 帳本帳戶存在、幣別相符、有切換日，才能同步。 */
+function checkEligible(
+  acct: AccountRow | undefined,
+  m: ResolvedMapping,
+  globalSyncFrom: string | null,
+): Eligibility {
+  if (!acct) return { ok: false, reason: "account_missing" };
+  if (acct.currency.trim().toUpperCase() !== m.currency) {
+    return { ok: false, reason: "currency_mismatch" };
+  }
+  const syncFrom = m.syncFrom ?? globalSyncFrom;
+  if (!syncFrom) return { ok: false, reason: "no_sync_from" };
+  return { ok: true, acct, syncFrom };
+}
+
+type PlanContext = {
+  db: Db;
+  orgId: string;
+  client: WiseClient;
+  cfg: WiseConfig;
+  profileName: ProfileNameFn;
+  now: Date;
+  today: string;
+  startDate: string | undefined;
+  /** 跨帳戶共用：同一次抓回來的資料裡看過的鍵。 */
+  seenRefs: Set<string>;
+  duplicateRefs: string[];
+};
+
+/**
+ * 這個帳戶從哪天開始抓：有指定 startDate 就用它（不得早於切換日）；
+ * 否則 max(切換日, 最後一筆 Wise 交易日 − OVERLAP_DAYS)。
+ */
+async function resolveStart(
+  ctx: PlanContext,
+  m: ResolvedMapping,
+  acctName: string,
+  syncFrom: string,
+): Promise<string> {
+  if (ctx.startDate === undefined) {
+    const last = await lastWiseDate(ctx.db, ctx.orgId, m.bankAccountId);
+    const overlap = last ? addDaysStr(last, -OVERLAP_DAYS) : null;
+    return overlap && overlap > syncFrom ? overlap : syncFrom;
+  }
+  if (ctx.startDate < syncFrom) {
+    throw new Error(
+      `起始日 ${ctx.startDate} 早於「${acctName}」的切換日 ${syncFrom}。切換日之前的 Wise 交易已以手動彙總入帳，不能再同步；真的要回補請先到 設定 › 整合 › Wise 調整切換日`,
+    );
+  }
+  return ctx.startDate;
+}
+
+/** 把抓回來的交易轉成帳本列，濾掉切換日 / 起始日之前的、以及同批重複的鍵。 */
+function planRows(
+  ctx: PlanContext,
+  txns: WiseStatementTransaction[],
+  m: ResolvedMapping,
+  syncFrom: string,
+  start: string,
+): { rows: PlannedRow[]; beforeCutover: number } {
+  let beforeCutover = 0;
+  const rows: PlannedRow[] = [];
+  for (const tx of txns) {
+    if (!tx?.referenceNumber || !tx.amount) continue;
+    const r = mapWiseTransaction(tx, m, ctx.cfg.accountMappings);
+    if (r.txnDate < syncFrom || r.txnDate < start) {
+      beforeCutover++;
+      continue;
+    }
+    if (ctx.seenRefs.has(r.externalRef)) {
+      ctx.duplicateRefs.push(r.externalRef);
+      continue;
+    }
+    ctx.seenRefs.add(r.externalRef);
+    rows.push(r);
+  }
+  return { rows, beforeCutover };
+}
+
+/** 抓一個帳戶的對帳單並規劃要寫的列；created / alreadySynced 之後再填。 */
+async function planAccount(
+  ctx: PlanContext,
+  m: ResolvedMapping,
+  acct: AccountRow,
+  syncFrom: string,
+): Promise<{ result: SyncAccountResult; rows: PlannedRow[] }> {
+  const start = await resolveStart(ctx, m, acct.name, syncFrom);
+  const txns = start <= ctx.today ? await fetchStatementRange(ctx.client, m, start, ctx.now) : [];
+  const { rows, beforeCutover } = planRows(ctx, txns, m, syncFrom, start);
+  return {
+    rows,
+    result: {
+      bankAccountId: m.bankAccountId,
+      bankAccountName: acct.name,
+      profileId: m.profileId,
+      profileName: ctx.profileName(m.profileId),
+      balanceId: m.balanceId,
+      currency: m.currency,
+      syncFrom,
+      rangeStart: start,
+      rangeEnd: ctx.today,
+      fetched: txns.length,
+      beforeCutover,
+      alreadySynced: 0,
+      created: 0,
+      needsReview: 0,
+    },
+  };
+}
+
+function toInsertRow(
+  orgId: string,
+  p: PlannedRow,
+  partyIds: Map<string, number>,
+): typeof transactions.$inferInsert {
+  return {
+    organizationId: orgId,
+    type: p.type,
+    txnDate: p.txnDate,
+    description: p.description,
+    categoryId: null,
+    partyId: p.partyName ? (partyIds.get(p.partyName) ?? null) : null,
+    amount: p.amount,
+    currency: p.currency,
+    // 與 create_transaction 相同：只有 TWD 才填 amount_twd，外幣不換算。
+    amountTwd: p.currency === "TWD" ? p.amount : null,
+    fromAccountId: p.fromAccountId,
+    toAccountId: p.toAccountId,
+    book: "internal",
+    billedToCompanyTaxId: false,
+    externalSource: SOURCE,
+    externalRef: p.externalRef,
+    externalMeta: p.externalMeta,
+    needsReview: p.needsReview,
+  };
+}
+
+/** 寫入帳本（ON CONFLICT DO NOTHING），回傳實際寫進去的 external_ref。 */
+async function insertPlanned(db: Db, orgId: string, toCreate: PlannedRow[]): Promise<Set<string>> {
+  const labelByName = new Map<string, string>();
+  for (const p of toCreate) {
+    if (p.partyName && !labelByName.has(p.partyName)) {
+      labelByName.set(p.partyName, p.type === "income" ? "customer" : "vendor");
+    }
+  }
+  const partyIds = await resolveParties(db, orgId, labelByName);
+  const createdRefs = new Set<string>();
+  for (let i = 0; i < toCreate.length; i += INSERT_CHUNK) {
+    const chunk = toCreate.slice(i, i + INSERT_CHUNK);
+    const inserted = await db
+      .insert(transactions)
+      .values(chunk.map((p) => toInsertRow(orgId, p, partyIds)))
+      .onConflictDoNothing()
+      .returning({ ref: transactions.externalRef });
+    for (const r of inserted) if (r.ref) createdRefs.add(r.ref);
+  }
+  return createdRefs;
+}
+
+/** 把已同步 / 新增 / 待審的數字填回每個帳戶的結果。 */
+function tallyResults(
+  results: SyncAccountResult[],
+  planned: PlannedRow[],
+  existing: Set<string>,
+  toCreate: PlannedRow[],
+  createdRefs: Set<string>,
+  dryRun: boolean,
+): void {
+  for (const r of results) {
+    const mine = planned.filter((p) => p.bankAccountId === r.bankAccountId);
+    r.alreadySynced = mine.filter((p) => existing.has(p.externalRef)).length;
+    const toCreateMine = toCreate.filter((p) => p.bankAccountId === r.bankAccountId);
+    const created = toCreateMine.filter((p) => createdRefs.has(p.externalRef));
+    r.created = created.length;
+    r.needsReview = created.filter((p) => p.needsReview).length;
+    // 寫入時被 ON CONFLICT 擋下的（同時有另一個同步在跑）算已同步。
+    if (!dryRun) r.alreadySynced += toCreateMine.length - created.length;
+  }
+}
+
+function toSample(p: PlannedRow): SyncResult["sample"][number] {
+  return {
+    bankAccountId: p.bankAccountId,
+    txnDate: p.txnDate,
+    type: p.type,
+    amount: p.amount,
+    currency: p.currency,
+    partyName: p.partyName,
+    description: p.description,
+    externalRef: p.externalRef,
+    needsReview: p.needsReview,
+  };
+}
+
 /**
  * 同步（或試算）Wise 交易到帳本。整合必須已連接且開啟。
  * 錯誤（未對應、起始日早於切換日…）以 Error 丟出，訊息給人看。
@@ -620,191 +953,49 @@ export async function syncWiseTransactions(orgId: string, opts: SyncOptions): Pr
     const cfg = parseWiseConfig(row.config);
     const profileName = (id: number) => cfg.profiles.find((p) => p.id === id)?.name ?? String(id);
 
-    const skippedBalances: SkippedBalance[] = [];
-    for (const b of cfg.balances) {
-      const m = cfg.accountMappings.find((x) => x.balanceId === b.balanceId);
-      if (!m || m.bankAccountId === null) {
-        skippedBalances.push({
-          profileId: b.profileId,
-          profileName: profileName(b.profileId),
-          balanceId: b.balanceId,
-          currency: b.currency,
-          reason: "unmapped",
-        });
-      }
-    }
-
-    let mapped = cfg.accountMappings.filter(
-      (m): m is ResolvedMapping => m.bankAccountId !== null,
-    );
-    if (opts.accountId !== undefined) {
-      mapped = mapped.filter((m) => m.bankAccountId === opts.accountId);
-      if (mapped.length === 0) {
-        throw new Error(
-          `帳本帳戶 #${opts.accountId} 沒有對應到任何 Wise 餘額，請先到 設定 › 整合 › Wise 設定帳戶對應`,
-        );
-      }
-    }
-    if (mapped.length === 0) {
-      throw new Error("還沒有任何 Wise 餘額對應到帳本帳戶，請先到 設定 › 整合 › Wise 設定帳戶對應");
-    }
-
-    const accountIds = mapped.map((m) => m.bankAccountId);
-    const accounts = await db
-      .select({ id: bankAccounts.id, name: bankAccounts.name, currency: bankAccounts.currency })
-      .from(bankAccounts)
-      .where(
-        and(
-          eq(bankAccounts.organizationId, orgId),
-          inArray(bankAccounts.id, accountIds),
-          isNull(bankAccounts.deletedAt),
-        ),
-      );
+    const skippedBalances = unmappedBalances(cfg, profileName);
+    const mapped = selectMappings(cfg, opts.accountId);
+    const accounts = await loadOrgAccounts(db, orgId, mapped.map((m) => m.bankAccountId));
     const acctById = new Map(accounts.map((a) => [a.id, a]));
 
     const now = new Date();
-    const today = taipeiDate(now);
+    const ctx: PlanContext = {
+      db,
+      orgId,
+      client,
+      cfg,
+      profileName,
+      now,
+      today: taipeiDate(now),
+      startDate: opts.startDate,
+      seenRefs: new Set<string>(),
+      duplicateRefs: [],
+    };
     const results: SyncAccountResult[] = [];
     const planned: PlannedRow[] = [];
-    const duplicateRefs: string[] = [];
-    const seenRefs = new Set<string>();
 
     for (const m of mapped) {
-      const acct = acctById.get(m.bankAccountId);
-      const skip = (reason: SkippedBalance["reason"]) =>
-        skippedBalances.push({
-          profileId: m.profileId,
-          profileName: profileName(m.profileId),
-          balanceId: m.balanceId,
-          currency: m.currency,
-          reason,
-        });
-      if (!acct) {
-        skip("account_missing");
+      const check = checkEligible(acctById.get(m.bankAccountId), m, cfg.syncFrom);
+      if (!check.ok) {
+        skippedBalances.push(skippedEntry(m, profileName, check.reason));
         continue;
       }
-      if (acct.currency.trim().toUpperCase() !== m.currency) {
-        skip("currency_mismatch");
-        continue;
-      }
-      const syncFrom = m.syncFrom ?? cfg.syncFrom;
-      if (!syncFrom) {
-        skip("no_sync_from");
-        continue;
-      }
-      let start: string;
-      if (opts.startDate !== undefined) {
-        if (opts.startDate < syncFrom) {
-          throw new Error(
-            `起始日 ${opts.startDate} 早於「${acct.name}」的切換日 ${syncFrom}。切換日之前的 Wise 交易已以手動彙總入帳，不能再同步；真的要回補請先到 設定 › 整合 › Wise 調整切換日`,
-          );
-        }
-        start = opts.startDate;
-      } else {
-        const last = await lastWiseDate(db, orgId, m.bankAccountId);
-        const overlap = last ? addDaysStr(last, -OVERLAP_DAYS) : null;
-        start = overlap && overlap > syncFrom ? overlap : syncFrom;
-      }
-
-      const txns = start <= today ? await fetchStatementRange(client, m, start, now) : [];
-      let beforeCutover = 0;
-      const rowsForAccount: PlannedRow[] = [];
-      for (const tx of txns) {
-        if (!tx?.referenceNumber || !tx.amount) continue;
-        const r = mapWiseTransaction(tx, m, cfg.accountMappings);
-        if (r.txnDate < syncFrom || r.txnDate < start) {
-          beforeCutover++;
-          continue;
-        }
-        if (seenRefs.has(r.externalRef)) {
-          duplicateRefs.push(r.externalRef);
-          continue;
-        }
-        seenRefs.add(r.externalRef);
-        rowsForAccount.push(r);
-      }
-      planned.push(...rowsForAccount);
-      results.push({
-        bankAccountId: m.bankAccountId,
-        bankAccountName: acct.name,
-        profileId: m.profileId,
-        profileName: profileName(m.profileId),
-        balanceId: m.balanceId,
-        currency: m.currency,
-        syncFrom,
-        rangeStart: start,
-        rangeEnd: today,
-        fetched: txns.length,
-        beforeCutover,
-        alreadySynced: 0,
-        created: 0,
-        needsReview: 0,
-      });
+      const { result, rows } = await planAccount(ctx, m, check.acct, check.syncFrom);
+      planned.push(...rows);
+      results.push(result);
     }
 
     const existing = await existingRefs(db, orgId, planned.map((p) => p.externalRef));
     const toCreate = planned
       .filter((p) => !existing.has(p.externalRef))
-      .sort((a, b) => (a.txnDate === b.txnDate ? 0 : a.txnDate < b.txnDate ? -1 : 1));
-    for (const r of results) {
-      const mine = planned.filter((p) => p.bankAccountId === r.bankAccountId);
-      r.alreadySynced = mine.filter((p) => existing.has(p.externalRef)).length;
-    }
+      .sort((a, b) => compareStr(a.txnDate, b.txnDate));
 
-    let createdRefs = new Set<string>(toCreate.map((p) => p.externalRef));
-    if (!opts.dryRun && toCreate.length > 0) {
-      const labelByName = new Map<string, string>();
-      for (const p of toCreate) {
-        if (p.partyName && !labelByName.has(p.partyName)) {
-          labelByName.set(p.partyName, p.type === "income" ? "customer" : "vendor");
-        }
-      }
-      const partyIds = await resolveParties(db, orgId, labelByName);
-      createdRefs = new Set();
-      for (let i = 0; i < toCreate.length; i += INSERT_CHUNK) {
-        const chunk = toCreate.slice(i, i + INSERT_CHUNK);
-        const inserted = await db
-          .insert(transactions)
-          .values(
-            chunk.map((p) => ({
-              organizationId: orgId,
-              type: p.type,
-              txnDate: p.txnDate,
-              description: p.description,
-              categoryId: null,
-              partyId: p.partyName ? (partyIds.get(p.partyName) ?? null) : null,
-              amount: p.amount,
-              currency: p.currency,
-              // 與 create_transaction 相同：只有 TWD 才填 amount_twd，外幣不換算。
-              amountTwd: p.currency === "TWD" ? p.amount : null,
-              fromAccountId: p.fromAccountId,
-              toAccountId: p.toAccountId,
-              book: "internal",
-              billedToCompanyTaxId: false,
-              externalSource: SOURCE,
-              externalRef: p.externalRef,
-              externalMeta: p.externalMeta,
-              needsReview: p.needsReview,
-            })),
-          )
-          .onConflictDoNothing()
-          .returning({ ref: transactions.externalRef });
-        for (const r of inserted) if (r.ref) createdRefs.add(r.ref);
-      }
-    }
+    const createdRefs =
+      opts.dryRun || toCreate.length === 0
+        ? new Set<string>(toCreate.map((p) => p.externalRef))
+        : await insertPlanned(db, orgId, toCreate);
 
-    for (const r of results) {
-      const mine = toCreate.filter(
-        (p) => p.bankAccountId === r.bankAccountId && createdRefs.has(p.externalRef),
-      );
-      r.created = mine.length;
-      r.needsReview = mine.filter((p) => p.needsReview).length;
-      // 寫入時被 ON CONFLICT 擋下的（同時有另一個同步在跑）算已同步。
-      if (!opts.dryRun) {
-        r.alreadySynced +=
-          toCreate.filter((p) => p.bankAccountId === r.bankAccountId).length - mine.length;
-      }
-    }
+    tallyResults(results, planned, existing, toCreate, createdRefs, opts.dryRun);
 
     return {
       dryRun: opts.dryRun,
@@ -815,21 +1006,11 @@ export async function syncWiseTransactions(orgId: string, opts: SyncOptions): Pr
         alreadySynced: results.reduce((s, r) => s + r.alreadySynced, 0),
         beforeCutover: results.reduce((s, r) => s + r.beforeCutover, 0),
       },
-      duplicateRefs,
+      duplicateRefs: ctx.duplicateRefs,
       sample: toCreate
         .filter((p) => createdRefs.has(p.externalRef))
         .slice(0, SAMPLE_LIMIT)
-        .map((p) => ({
-          bankAccountId: p.bankAccountId,
-          txnDate: p.txnDate,
-          type: p.type,
-          amount: p.amount,
-          currency: p.currency,
-          partyName: p.partyName,
-          description: p.description,
-          externalRef: p.externalRef,
-          needsReview: p.needsReview,
-        })),
+        .map(toSample),
     };
   });
 }
@@ -891,6 +1072,6 @@ export async function getWiseStatement(
       .filter((t) => t?.referenceNumber && t.amount)
       .map(compactWiseTxn)
       .filter((t) => t.date >= startDate && t.date <= endDate)
-      .sort((a, b) => (a.dateTime < b.dateTime ? -1 : a.dateTime > b.dateTime ? 1 : 0));
+      .sort((a, b) => compareStr(a.dateTime, b.dateTime));
   });
 }

@@ -122,8 +122,7 @@ export type EmployeeAccountInput = {
 };
 
 function textOrNull(v: string | null | undefined): string | null {
-  const s = v?.trim();
-  return s ? s : null;
+  return v?.trim() || null;
 }
 
 function resolveKind(v: string | null | undefined, fallback: EmployeeAccountKind): EmployeeAccountKind {
@@ -214,6 +213,40 @@ export async function createEmployeeAccount(
   return row;
 }
 
+type AccountPatch = Partial<typeof employeeBankAccounts.$inferInsert>;
+
+/** 更新時沒帶的欄位（undefined）沿用既有值；null 表示明確清空，照用。 */
+function orExisting<T>(next: T | undefined, existing: T): T {
+  return next === undefined ? existing : next;
+}
+
+/** 新帳號 → 加密 + 末五碼；沒帶新帳號就不動（但改成銀行帳戶時必須重填）。 */
+async function accountNumberPatch(
+  kind: EmployeeAccountKind,
+  existingKind: string,
+  rawNumber: string | null | undefined,
+): Promise<AccountPatch> {
+  const newNumber = textOrNull(rawNumber);
+  if (!newNumber) {
+    // 改成銀行帳戶時，舊帳號可能不是純數字（例如舊資料的 other）→ 要求重新輸入。
+    if (kind === "bank" && existingKind !== "bank") throw new EmployeeAccountError("numberDigits");
+    return {};
+  }
+  const n = checkAccountNumber(kind, newNumber);
+  return { accountNumberEnc: await encryptField(n), accountLast5: accountLast5(n) };
+}
+
+/** 銀行名稱：有帶就用（空白則依代碼帶預設）；只改代碼時跟著代碼換；都沒動回 undefined。 */
+function bankNamePatch(
+  input: EmployeeAccountInput,
+  bankCode: string | null,
+  existingBankCode: string | null,
+): string | null | undefined {
+  if (input.bankName !== undefined) return textOrNull(input.bankName) ?? bankNameForCode(bankCode);
+  if (input.bankCode !== undefined && bankCode !== existingBankCode) return bankNameForCode(bankCode);
+  return undefined;
+}
+
 /** 更新帳戶（只改有帶的欄位）。accountNumber 省略 / 空白 = 不改帳號。 */
 export async function updateEmployeeAccount(
   orgId: string,
@@ -227,30 +260,19 @@ export async function updateEmployeeAccount(
   const kind = input.kind === undefined ? resolveKind(existing.kind, "other") : resolveKind(input.kind, "bank");
   const codes = checkAccountCodes({
     kind,
-    bankCode: input.bankCode === undefined ? existing.bankCode : input.bankCode,
-    branchCode: input.branchCode === undefined ? existing.branchCode : input.branchCode,
-    currency: input.currency === undefined ? existing.currency : input.currency,
+    bankCode: orExisting(input.bankCode, existing.bankCode),
+    branchCode: orExisting(input.branchCode, existing.branchCode),
+    currency: orExisting(input.currency, existing.currency),
   });
 
-  const patch: Partial<typeof employeeBankAccounts.$inferInsert> = {
+  const patch: AccountPatch = {
     kind,
     ...codes,
+    ...(await accountNumberPatch(kind, existing.kind, input.accountNumber)),
     updatedAt: new Date().toISOString(),
   };
-  const newNumber = textOrNull(input.accountNumber);
-  if (newNumber) {
-    const n = checkAccountNumber(kind, newNumber);
-    patch.accountNumberEnc = await encryptField(n);
-    patch.accountLast5 = accountLast5(n);
-  } else if (kind === "bank" && existing.kind !== "bank") {
-    // 改成銀行帳戶時，舊帳號可能不是純數字（例如舊資料的 other）→ 要求重新輸入。
-    throw new EmployeeAccountError("numberDigits");
-  }
-  if (input.bankName !== undefined) {
-    patch.bankName = textOrNull(input.bankName) ?? bankNameForCode(codes.bankCode);
-  } else if (input.bankCode !== undefined && codes.bankCode !== existing.bankCode) {
-    patch.bankName = bankNameForCode(codes.bankCode);
-  }
+  const bankName = bankNamePatch(input, codes.bankCode, existing.bankCode);
+  if (bankName !== undefined) patch.bankName = bankName;
   if (input.accountHolder !== undefined) patch.accountHolder = textOrNull(input.accountHolder);
   if (input.label !== undefined) patch.label = textOrNull(input.label);
   if (input.note !== undefined) patch.note = textOrNull(input.note);

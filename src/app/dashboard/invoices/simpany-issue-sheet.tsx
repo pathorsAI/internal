@@ -47,6 +47,77 @@ type Step =
 
 const AUTO = "auto";
 
+/** 預設的零稅率原因（Simpany 清單還沒載入或載入失敗時用）。 */
+const FALLBACK_ZERO_TAX_REASONS: SimpanyZeroTaxReason[] = [
+  { code: "71", name: "外銷貨物" },
+  { code: "72", name: "外銷勞務" },
+];
+
+/** 表單目前的值（字串原樣）加上已算好的外幣換算。 */
+type IssueFormValues = {
+  type: string;
+  vat: string;
+  name: string;
+  address: string;
+  emails: string;
+  taxTreatment: string;
+  zeroRateReason: string;
+  itemName: string;
+  amount: string;
+  basis: "gross" | "net";
+  remark: string;
+  currency: string;
+  foreignAmount: number;
+  rate: number;
+  twd: number | null;
+};
+
+function parseEmailList(emails: string): string[] {
+  return emails
+    .split(/[,，;\s]+/)
+    .map((e) => e.trim())
+    .filter(Boolean);
+}
+
+/** 品項：台幣直接用輸入金額；外幣要有匯率算出台幣才送，否則交給 server 端處理。 */
+function buildItems(f: IssueFormValues, isForeign: boolean): SimpanyPreviewFormInput["items"] {
+  if (!isForeign) return [{ name: f.itemName, quantity: 1, price: Number(f.amount) || 0 }];
+  if (f.twd == null) return undefined;
+  return [{ name: f.itemName, quantity: 1, price: f.twd }];
+}
+
+function buildPreviewInput(source: SimpanyIssueSource, f: IssueFormValues): SimpanyPreviewFormInput {
+  const isForeign = f.currency.toUpperCase() !== "TWD";
+  const emailList = parseEmailList(f.emails);
+  const base: SimpanyPreviewFormInput =
+    source.kind === "billing_item"
+      ? { billingItemId: source.billingItemId }
+      : { subscriptionId: source.subscriptionId, subscriptionPeriod: source.periodStart };
+  const tt = f.taxTreatment === AUTO ? undefined : (f.taxTreatment as InvoicePreview["taxTreatment"]);
+  return {
+    ...base,
+    type: f.type === AUTO ? undefined : (f.type as "B2B" | "B2C"),
+    buyer: {
+      vat: f.vat.trim() || null,
+      name: f.name.trim() || undefined,
+      address: f.address.trim() || undefined,
+      emails: emailList.length ? emailList : undefined,
+    },
+    taxTreatment: tt,
+    zeroRateReason: tt === "zero_rated" ? f.zeroRateReason : undefined,
+    items: buildItems(f, isForeign),
+    isTaxIncluded: isForeign ? undefined : f.basis === "gross",
+    remark: f.remark.trim() || undefined,
+    ...(isForeign
+      ? {
+          foreignCurrency: f.currency.toUpperCase(),
+          foreignAmount: f.foreignAmount,
+          exchangeRate: f.rate > 0 ? f.rate : undefined,
+        }
+      : {}),
+  };
+}
+
 /**
  * 看板上的「在 Simpany 開立」：表單 → 預覽（server 端算好金額、檢查重複、存成草稿）→
  * 勾選確認 + 按「確認開立」才真的開。開立與 MCP 共用同一套 preview / issue 程式碼。
@@ -101,49 +172,29 @@ export function SimpanyIssueSheet({
     loadZeroTaxReasonsAction().then(setReasons, () => setReasons([]));
   }
 
-  function buildInput(): SimpanyPreviewFormInput {
-    const emailList = emails
-      .split(/[,，;\s]+/)
-      .map((e) => e.trim())
-      .filter(Boolean);
-    const base: SimpanyPreviewFormInput =
-      source.kind === "billing_item"
-        ? { billingItemId: source.billingItemId }
-        : { subscriptionId: source.subscriptionId, subscriptionPeriod: source.periodStart };
-    const tt = taxTreatment === AUTO ? undefined : (taxTreatment as InvoicePreview["taxTreatment"]);
-    return {
-      ...base,
-      type: type === AUTO ? undefined : (type as "B2B" | "B2C"),
-      buyer: {
-        vat: vat.trim() || null,
-        name: name.trim() || undefined,
-        address: address.trim() || undefined,
-        emails: emailList.length ? emailList : undefined,
-      },
-      taxTreatment: tt,
-      zeroRateReason: tt === "zero_rated" ? zeroRateReason : undefined,
-      items: isForeign
-        ? twd != null
-          ? [{ name: itemName, quantity: 1, price: twd }]
-          : undefined
-        : [{ name: itemName, quantity: 1, price: Number(amount) || 0 }],
-      isTaxIncluded: isForeign ? undefined : basis === "gross",
-      remark: remark.trim() || undefined,
-      ...(isForeign
-        ? {
-            foreignCurrency: currency.toUpperCase(),
-            foreignAmount,
-            exchangeRate: rate > 0 ? rate : undefined,
-          }
-        : {}),
-    };
-  }
-
   function preview(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     run(async () => {
-      const res = await previewSimpanyAction(buildInput());
+      const res = await previewSimpanyAction(
+        buildPreviewInput(source, {
+          type,
+          vat,
+          name,
+          address,
+          emails,
+          taxTreatment,
+          zeroRateReason,
+          itemName,
+          amount,
+          basis,
+          remark,
+          currency,
+          foreignAmount,
+          rate,
+          twd,
+        }),
+      );
       if (!res.ok) {
         setError(res.error);
         return;
@@ -260,13 +311,11 @@ export function SimpanyIssueSheet({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {(reasons && reasons.length ? reasons : [{ code: "71", name: "外銷貨物" }, { code: "72", name: "外銷勞務" }]).map(
-                        (r) => (
-                          <SelectItem key={r.code} value={r.code}>
-                            {r.code} {r.name}
-                          </SelectItem>
-                        ),
-                      )}
+                      {(reasons?.length ? reasons : FALLBACK_ZERO_TAX_REASONS).map((r) => (
+                        <SelectItem key={r.code} value={r.code}>
+                          {r.code} {r.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </Field>
@@ -278,57 +327,17 @@ export function SimpanyIssueSheet({
                 <Input id="sp-item" value={itemName} onChange={(e) => setItemName(e.target.value)} required />
               </Field>
 
-              {isForeign ? (
-                <>
-                  <Field label={t("fields.foreignAmount", { currency })} htmlFor="sp-famount" required>
-                    <Input
-                      id="sp-famount"
-                      type="number"
-                      step="0.01"
-                      value={amount}
-                      onChange={(e) => setAmount(e.target.value)}
-                      required
-                    />
-                  </Field>
-                  <Field label={t("fields.exchangeRate")} htmlFor="sp-rate" required>
-                    <Input
-                      id="sp-rate"
-                      type="number"
-                      step="0.000001"
-                      value={exchangeRate}
-                      onChange={(e) => setExchangeRate(e.target.value)}
-                      required
-                    />
-                  </Field>
-                  <p className="text-xs text-muted-foreground sm:col-span-2">
-                    {t("fields.exchangeRateHint", { twd: twd == null ? "—" : formatCurrency(twd, "TWD") })}
-                  </p>
-                </>
-              ) : (
-                <>
-                  <Field label={t("fields.amount")} htmlFor="sp-amount" required>
-                    <Input
-                      id="sp-amount"
-                      type="number"
-                      step="1"
-                      value={amount}
-                      onChange={(e) => setAmount(e.target.value)}
-                      required
-                    />
-                  </Field>
-                  <Field label={t("fields.basis")}>
-                    <Select value={basis} onValueChange={(v) => setBasis(v as "gross" | "net")}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="gross">{t("fields.basisGross")}</SelectItem>
-                        <SelectItem value="net">{t("fields.basisNet")}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                </>
-              )}
+              <AmountFields
+                isForeign={isForeign}
+                currency={currency}
+                amount={amount}
+                onAmountChange={setAmount}
+                exchangeRate={exchangeRate}
+                onExchangeRateChange={setExchangeRate}
+                twd={twd}
+                basis={basis}
+                onBasisChange={setBasis}
+              />
 
               <Field label={t("fields.remark")} htmlFor="sp-remark" wide>
                 <Input
@@ -350,61 +359,167 @@ export function SimpanyIssueSheet({
         ) : null}
 
         {step.name === "preview" ? (
-          <div className="flex min-h-0 flex-1 flex-col">
-            <div className="flex-1 space-y-4 overflow-y-auto px-4">
-              <PreviewCard preview={step.preview} />
-              {error ? <ErrorBox message={error} /> : null}
-              <label className="flex items-start gap-2 rounded-md border p-3 text-sm">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 size-4"
-                  checked={confirmed}
-                  onChange={(e) => setConfirmed(e.target.checked)}
-                  disabled={pending}
-                />
-                <span>{t("confirmCheck")}</span>
-              </label>
-            </div>
-            <SheetFooter className="flex-row justify-end">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => backToForm(step.preview.draftId)}
-                disabled={pending}
-              >
-                {t("back")}
-              </Button>
-              <Button
-                type="button"
-                onClick={() => issue(step.preview.draftId)}
-                disabled={pending || !confirmed}
-              >
-                {pending ? t("issuing") : t("confirm")}
-              </Button>
-            </SheetFooter>
-          </div>
+          <PreviewStep
+            preview={step.preview}
+            error={error}
+            pending={pending}
+            confirmed={confirmed}
+            onConfirmedChange={setConfirmed}
+            onBack={() => backToForm(step.preview.draftId)}
+            onIssue={() => issue(step.preview.draftId)}
+          />
         ) : null}
 
-        {step.name === "done" ? (
-          <div className="flex min-h-0 flex-1 flex-col">
-            <div className="flex-1 space-y-2 px-4">
-              <p className="flex items-center gap-2 text-base font-medium">
-                <CheckCircle2 className="size-5 text-income" />
-                {t("done", { number: step.result.invoiceNumber ?? step.result.externalId })}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {t("doneDetail", { total: step.result.total.toLocaleString("zh-TW") })}
-              </p>
-            </div>
-            <SheetFooter className="flex-row justify-end">
-              <Button type="button" onClick={() => onOpenChange(false)}>
-                {t("close")}
-              </Button>
-            </SheetFooter>
-          </div>
-        ) : null}
+        {step.name === "done" ? <DoneStep result={step.result} onClose={() => onOpenChange(false)} /> : null}
       </SheetContent>
     </Sheet>
+  );
+}
+
+/** 金額欄位：外幣要填原幣金額 + 匯率（顯示換算台幣），台幣填金額 + 含稅／未稅。 */
+function AmountFields({
+  isForeign,
+  currency,
+  amount,
+  onAmountChange,
+  exchangeRate,
+  onExchangeRateChange,
+  twd,
+  basis,
+  onBasisChange,
+}: Readonly<{
+  isForeign: boolean;
+  currency: string;
+  amount: string;
+  onAmountChange: (v: string) => void;
+  exchangeRate: string;
+  onExchangeRateChange: (v: string) => void;
+  twd: number | null;
+  basis: "gross" | "net";
+  onBasisChange: (v: "gross" | "net") => void;
+}>) {
+  const t = useTranslations("invoices.simpany.issue");
+  if (isForeign) {
+    return (
+      <>
+        <Field label={t("fields.foreignAmount", { currency })} htmlFor="sp-famount" required>
+          <Input
+            id="sp-famount"
+            type="number"
+            step="0.01"
+            value={amount}
+            onChange={(e) => onAmountChange(e.target.value)}
+            required
+          />
+        </Field>
+        <Field label={t("fields.exchangeRate")} htmlFor="sp-rate" required>
+          <Input
+            id="sp-rate"
+            type="number"
+            step="0.000001"
+            value={exchangeRate}
+            onChange={(e) => onExchangeRateChange(e.target.value)}
+            required
+          />
+        </Field>
+        <p className="text-xs text-muted-foreground sm:col-span-2">
+          {t("fields.exchangeRateHint", { twd: twd == null ? "—" : formatCurrency(twd, "TWD") })}
+        </p>
+      </>
+    );
+  }
+  return (
+    <>
+      <Field label={t("fields.amount")} htmlFor="sp-amount" required>
+        <Input
+          id="sp-amount"
+          type="number"
+          step="1"
+          value={amount}
+          onChange={(e) => onAmountChange(e.target.value)}
+          required
+        />
+      </Field>
+      <Field label={t("fields.basis")}>
+        <Select value={basis} onValueChange={(v) => onBasisChange(v as "gross" | "net")}>
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="gross">{t("fields.basisGross")}</SelectItem>
+            <SelectItem value="net">{t("fields.basisNet")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+    </>
+  );
+}
+
+function PreviewStep({
+  preview,
+  error,
+  pending,
+  confirmed,
+  onConfirmedChange,
+  onBack,
+  onIssue,
+}: Readonly<{
+  preview: InvoicePreview;
+  error: string | null;
+  pending: boolean;
+  confirmed: boolean;
+  onConfirmedChange: (v: boolean) => void;
+  onBack: () => void;
+  onIssue: () => void;
+}>) {
+  const t = useTranslations("invoices.simpany.issue");
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex-1 space-y-4 overflow-y-auto px-4">
+        <PreviewCard preview={preview} />
+        {error ? <ErrorBox message={error} /> : null}
+        <label className="flex items-start gap-2 rounded-md border p-3 text-sm">
+          <input
+            type="checkbox"
+            className="mt-0.5 size-4"
+            checked={confirmed}
+            onChange={(e) => onConfirmedChange(e.target.checked)}
+            disabled={pending}
+          />
+          <span>{t("confirmCheck")}</span>
+        </label>
+      </div>
+      <SheetFooter className="flex-row justify-end">
+        <Button type="button" variant="outline" onClick={onBack} disabled={pending}>
+          {t("back")}
+        </Button>
+        <Button type="button" onClick={onIssue} disabled={pending || !confirmed}>
+          {pending ? t("issuing") : t("confirm")}
+        </Button>
+      </SheetFooter>
+    </div>
+  );
+}
+
+function DoneStep({ result, onClose }: Readonly<{ result: IssueResult; onClose: () => void }>) {
+  const t = useTranslations("invoices.simpany.issue");
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex-1 space-y-2 px-4">
+        <p className="flex items-center gap-2 text-base font-medium">
+          <CheckCircle2 className="size-5 text-income" />
+          {t("done", { number: result.invoiceNumber ?? result.externalId })}
+        </p>
+        <p className="text-sm text-muted-foreground">
+          {t("doneDetail", { total: result.total.toLocaleString("zh-TW") })}
+        </p>
+      </div>
+      <SheetFooter className="flex-row justify-end">
+        <Button type="button" onClick={onClose}>
+          {t("close")}
+        </Button>
+      </SheetFooter>
+    </div>
   );
 }
 
@@ -423,6 +538,19 @@ function Row({ label, children }: Readonly<{ label: string; children: React.Reac
       <span className="min-w-0 text-right font-medium">{children}</span>
     </div>
   );
+}
+
+/** 預覽品項沒有 id：用內容當 key，完全相同的品項再加上第幾次出現，確保唯一且穩定。 */
+function withItemKeys<T extends { name: string; quantity: number; price: number }>(
+  items: T[],
+): { key: string; item: T }[] {
+  const seen = new Map<string, number>();
+  return items.map((item) => {
+    const base = `${item.name}|${item.quantity}|${item.price}`;
+    const n = seen.get(base) ?? 0;
+    seen.set(base, n + 1);
+    return { key: `${base}|${n}`, item };
+  });
 }
 
 function PreviewCard({ preview: p }: Readonly<{ preview: InvoicePreview }>) {
@@ -454,8 +582,8 @@ function PreviewCard({ preview: p }: Readonly<{ preview: InvoicePreview }>) {
       <div className="space-y-1 text-sm">
         <Label className="text-xs text-muted-foreground">{t("summary.items")}</Label>
         <ul className="divide-y rounded-lg border">
-          {p.items.map((it, i) => (
-            <li key={i} className="flex justify-between gap-3 px-3 py-2">
+          {withItemKeys(p.items).map(({ key, item: it }) => (
+            <li key={key} className="flex justify-between gap-3 px-3 py-2">
               <span className="min-w-0">
                 {it.name}
                 {it.quantity === 1 ? "" : ` × ${it.quantity}`}

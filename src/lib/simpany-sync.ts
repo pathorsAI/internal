@@ -179,6 +179,62 @@ export type UpsertOutcome = {
   hasBillingLink: boolean;
 };
 
+/** upsertSimpanyReceipt 的既有列查找（順序見下方說明）；找不到回 existing = null。 */
+async function findExistingForReceipt(
+  orgId: string,
+  d: SimpanyReceiptDetail,
+  partyId: number | null,
+  invoiceDate: string | null,
+  known: ExistingInvoice | null | undefined,
+): Promise<{ existing: ExistingInvoice | null; action: UpsertOutcome["action"] }> {
+  const db = getDb();
+  let existing: ExistingInvoice | null | undefined = known;
+  if (existing === undefined) {
+    [existing] = await db
+      .select(existingColumns)
+      .from(invoices)
+      .where(and(eq(invoices.organizationId, orgId), eq(invoices.externalId, d.id)))
+      .limit(1);
+  }
+  if (existing) return { existing, action: "updated" };
+  if (d.invoiceNumber) {
+    const [byNumber] = await db
+      .select(existingColumns)
+      .from(invoices)
+      .where(
+        and(
+          eq(invoices.organizationId, orgId),
+          eq(invoices.direction, "issued"),
+          isNull(invoices.externalId),
+          isNull(invoices.deletedAt),
+          or(eq(invoices.externalRef, d.invoiceNumber), eq(invoices.invoiceNumber, d.invoiceNumber)),
+        ),
+      )
+      .limit(1);
+    if (byNumber) return { existing: byNumber, action: "adopted" };
+  }
+  if (partyId != null && invoiceDate) {
+    const pending = await db
+      .select(existingColumns)
+      .from(invoices)
+      .where(
+        and(
+          eq(invoices.organizationId, orgId),
+          eq(invoices.direction, "issued"),
+          eq(invoices.partyId, partyId),
+          eq(invoices.externalStatus, "pending"),
+          isNull(invoices.externalId),
+          isNull(invoices.deletedAt),
+        ),
+      );
+    const hits = pending.filter(
+      (p) => sameMoney(p.amountGross, d.totalAmount) && withinWindow(p.invoiceDate, invoiceDate),
+    );
+    if (hits.length === 1) return { existing: hits[0], action: "adopted" };
+  }
+  return { existing: null, action: "updated" };
+}
+
 /**
  * 把一張 Simpany 發票寫進 invoices。找既有列的順序：
  *   1. 同 external_id
@@ -198,56 +254,7 @@ export async function upsertSimpanyReceipt(
   const invoiceDate = dateOfIssued(d.issuedAt);
   const partyId = matchPartyId(allParties, d.buyerVat, d.buyerName);
 
-  let existing: ExistingInvoice | null | undefined = ctx.existing;
-  let action: UpsertOutcome["action"] = "updated";
-  if (existing === undefined) {
-    [existing] = await db
-      .select(existingColumns)
-      .from(invoices)
-      .where(and(eq(invoices.organizationId, orgId), eq(invoices.externalId, d.id)))
-      .limit(1);
-  }
-  if (!existing && d.invoiceNumber) {
-    const [byNumber] = await db
-      .select(existingColumns)
-      .from(invoices)
-      .where(
-        and(
-          eq(invoices.organizationId, orgId),
-          eq(invoices.direction, "issued"),
-          isNull(invoices.externalId),
-          isNull(invoices.deletedAt),
-          or(eq(invoices.externalRef, d.invoiceNumber), eq(invoices.invoiceNumber, d.invoiceNumber)),
-        ),
-      )
-      .limit(1);
-    if (byNumber) {
-      existing = byNumber;
-      action = "adopted";
-    }
-  }
-  if (!existing && partyId != null && invoiceDate) {
-    const pending = await db
-      .select(existingColumns)
-      .from(invoices)
-      .where(
-        and(
-          eq(invoices.organizationId, orgId),
-          eq(invoices.direction, "issued"),
-          eq(invoices.partyId, partyId),
-          eq(invoices.externalStatus, "pending"),
-          isNull(invoices.externalId),
-          isNull(invoices.deletedAt),
-        ),
-      );
-    const hits = pending.filter(
-      (p) => sameMoney(p.amountGross, d.totalAmount) && withinWindow(p.invoiceDate, invoiceDate),
-    );
-    if (hits.length === 1) {
-      existing = hits[0];
-      action = "adopted";
-    }
-  }
+  const { existing, action } = await findExistingForReceipt(orgId, d, partyId, invoiceDate, ctx.existing);
 
   const facts = {
     direction: "issued",
@@ -750,6 +757,58 @@ export type SyncResult = {
   incomplete: boolean;
 };
 
+type TouchedInvoice = UpsertOutcome & { invoiceNumber: string | null; buyer: string | null };
+
+/** 已同步過、狀態 / 號碼 / 金額都沒變 → 不用重抓明細。 */
+function isUnchangedReceipt(existing: ExistingInvoice, item: SimpanyReceiptListItem): boolean {
+  const statusNow = isVoid(item.status) ? "void" : "valid";
+  return (
+    Boolean(existing.externalSyncedAt) &&
+    existing.status === statusNow &&
+    existing.invoiceNumber === item.invoiceNumber &&
+    sameMoney(existing.amountGross, item.totalAmount)
+  );
+}
+
+/** 沒變的有效發票仍要參加自動綁定（可能之前沒綁上）；作廢或沒日期的不參加。 */
+function touchedFromUnchanged(existing: ExistingInvoice, item: SimpanyReceiptListItem): TouchedInvoice | null {
+  if (isVoid(item.status) || !existing.invoiceDate) return null;
+  return {
+    invoiceId: existing.id,
+    action: "updated",
+    becameVoid: false,
+    partyId: existing.partyId,
+    invoiceDate: existing.invoiceDate,
+    amountGross: item.totalAmount,
+    hasBillingLink: existing.billingItemId != null || existing.subscriptionId != null,
+    invoiceNumber: existing.invoiceNumber,
+    buyer: item.buyerName,
+  };
+}
+
+/** 抓一張的明細並寫入，更新計數；新作廢的清掉綁定。回傳要參加自動綁定的發票（作廢的不參加）。 */
+async function syncReceiptDetail(
+  orgId: string,
+  simpany: SimpanyClient,
+  receiptId: string,
+  existing: ExistingInvoice | null,
+  allParties: PartyLite[],
+  result: SyncResult,
+): Promise<TouchedInvoice | null> {
+  const detail = await simpany.getReceipt(receiptId);
+  const outcome = await upsertSimpanyReceipt(orgId, detail, { parties: allParties, existing });
+  if (outcome.action === "created") result.created++;
+  else result.updated++;
+  if (outcome.becameVoid) {
+    result.voided++;
+    if (outcome.action !== "created") {
+      result.voidCleanups.push(await clearLinksForVoidedInvoice(orgId, outcome.invoiceId));
+    }
+  }
+  if (isVoid(detail.status)) return null;
+  return { ...outcome, invoiceNumber: detail.invoiceNumber, buyer: detail.buyerName };
+}
+
 /**
  * 同步一段日期區間的 Simpany 發票進 invoices，並嘗試自動綁定。冪等：同一張發票重跑只會更新。
  * 已同步過、狀態沒變的發票不會重抓明細。
@@ -803,31 +862,14 @@ export async function syncSimpanyInvoices(
   ]);
   const existingById = new Map(existingRows.map((r) => [r.externalId as string, r]));
 
-  const touched: (UpsertOutcome & { invoiceNumber: string | null; buyer: string | null })[] = [];
+  const touched: TouchedInvoice[] = [];
   let fetched = 0;
   for (const item of list) {
     const existing = existingById.get(item.id) ?? null;
-    const statusNow = isVoid(item.status) ? "void" : "valid";
-    if (
-      existing?.externalSyncedAt &&
-      existing.status === statusNow &&
-      existing.invoiceNumber === item.invoiceNumber &&
-      sameMoney(existing.amountGross, item.totalAmount)
-    ) {
+    if (existing && isUnchangedReceipt(existing, item)) {
       result.unchanged++;
-      if (statusNow === "valid" && existing.invoiceDate) {
-        touched.push({
-          invoiceId: existing.id,
-          action: "updated",
-          becameVoid: false,
-          partyId: existing.partyId,
-          invoiceDate: existing.invoiceDate,
-          amountGross: item.totalAmount,
-          hasBillingLink: existing.billingItemId != null || existing.subscriptionId != null,
-          invoiceNumber: existing.invoiceNumber,
-          buyer: item.buyerName,
-        });
-      }
+      const touch = touchedFromUnchanged(existing, item);
+      if (touch) touched.push(touch);
       continue;
     }
     if (fetched >= MAX_DETAIL_FETCHES) {
@@ -835,58 +877,39 @@ export async function syncSimpanyInvoices(
       continue;
     }
     fetched++;
-    const detail = await simpany.getReceipt(item.id);
-    const outcome = await upsertSimpanyReceipt(orgId, detail, { parties: allParties, existing });
-    if (outcome.action === "created") result.created++;
-    else result.updated++;
-    if (outcome.becameVoid) {
-      result.voided++;
-      if (outcome.action !== "created") {
-        result.voidCleanups.push(await clearLinksForVoidedInvoice(orgId, outcome.invoiceId));
-      }
-    }
-    if (!isVoid(detail.status)) {
-      touched.push({ ...outcome, invoiceNumber: detail.invoiceNumber, buyer: detail.buyerName });
-    }
+    const touch = await syncReceiptDetail(orgId, simpany, item.id, existing, allParties, result);
+    if (touch) touched.push(touch);
   }
 
   await autoLink(orgId, range, touched, result);
   return result;
 }
 
-async function autoLink(
-  orgId: string,
-  range: { startDate: string; endDate: string },
-  touched: (UpsertOutcome & { invoiceNumber: string | null; buyer: string | null })[],
-  result: SyncResult,
-): Promise<void> {
-  if (touched.length === 0) return;
-  const db = getDb();
-  const linkedTxn = new Set(
-    (
-      await db
-        .select({ invoiceId: transactions.invoiceId })
-        .from(transactions)
-        .where(
-          and(
-            eq(transactions.organizationId, orgId),
-            isNull(transactions.deletedAt),
-            inArray(
-              transactions.invoiceId,
-              touched.map((t) => t.invoiceId),
-            ),
-          ),
-        )
-    ).map((r) => r.invoiceId),
-  );
-  const pools = await loadCandidatePools(orgId, range.startDate, range.endDate);
+type LinkPlan = { t: TouchedInvoice; txn: Candidate[]; billing: Candidate[] };
 
-  // 第一輪：每張發票各自的候選。
-  const plans: {
-    t: (typeof touched)[number];
-    txn: Candidate[];
-    billing: Candidate[];
-  }[] = [];
+/** 已經有交易綁著的發票 id（這些不用再找收款交易）。 */
+async function invoiceIdsWithLinkedTxn(orgId: string, invoiceIds: number[]): Promise<Set<number | null>> {
+  const rows = await getDb()
+    .select({ invoiceId: transactions.invoiceId })
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.organizationId, orgId),
+        isNull(transactions.deletedAt),
+        inArray(transactions.invoiceId, invoiceIds),
+      ),
+    );
+  return new Set(rows.map((r) => r.invoiceId));
+}
+
+/** 第一輪：每張發票各自的候選。對不上客戶的新發票直接列入待確認。 */
+function planAutoLinks(
+  touched: TouchedInvoice[],
+  linkedTxn: Set<number | null>,
+  pools: CandidatePools,
+  result: SyncResult,
+): LinkPlan[] {
+  const plans: LinkPlan[] = [];
   for (const t of touched) {
     const wantTxn = !linkedTxn.has(t.invoiceId);
     const wantBilling = !t.hasBillingLink;
@@ -911,8 +934,11 @@ async function autoLink(
     );
     plans.push({ t, ...c });
   }
+  return plans;
+}
 
-  // 第二輪：同一個候選若是多張發票的唯一候選，也算模稜兩可。
+/** 第二輪：每個候選是幾張發票的「唯一候選」。大於 1 就是模稜兩可。 */
+function countSoleClaims(plans: LinkPlan[]): Map<string, number> {
   const soleClaims = new Map<string, number>();
   for (const p of plans) {
     for (const list of [p.txn, p.billing]) {
@@ -922,62 +948,104 @@ async function autoLink(
       }
     }
   }
+  return soleClaims;
+}
 
-  for (const { t, txn, billing } of plans) {
-    const linkedTo: string[] = [];
-    const links: InvoiceLinks = {};
-    const review = (reason: string, cands: Candidate[]) =>
-      result.needsReview.push({
-        invoiceId: t.invoiceId,
-        invoiceNumber: t.invoiceNumber,
-        buyer: t.buyer,
-        amount: t.amountGross,
-        reason,
-        candidates: cands.map((c) => ({
-          kind: c.kind,
-          id: c.id,
-          ...(c.kind === "subscription_period" ? { periodStart: c.periodStart } : {}),
-          label: c.label,
-        })),
-      });
+/** 只有一個候選、而且它沒有被別張發票當成唯一候選，才能自動綁。 */
+function uniqueUnclaimed(cands: Candidate[], soleClaims: Map<string, number>): Candidate | null {
+  const only = cands[0];
+  if (cands.length !== 1 || !only) return null;
+  return (soleClaims.get(candidateKey(only)) ?? 0) === 1 ? only : null;
+}
 
-    if (txn.length === 1 && (soleClaims.get(candidateKey(txn[0])) ?? 0) === 1) {
-      links.transactionIds = [txn[0].id];
-      linkedTo.push(`交易 #${txn[0].id}`);
-    } else if (txn.length > 0) {
-      review(
-        txn.length > 1
-          ? "有多筆可能對應的收入交易，未自動綁定"
-          : "對應的收入交易同時也可能屬於另一張發票，未自動綁定",
-        txn,
-      );
-    }
+/** 把請款項目 / 訂閱期別候選寫進 links；回傳給人看的描述（交易候選不會走到這裡）。 */
+function applyBillingCandidate(b: Candidate, links: InvoiceLinks): string | null {
+  if (b.kind === "billing_item") {
+    links.billingItemId = b.id;
+    links.contractId = b.contractId;
+    return `請款項目 #${b.id}`;
+  }
+  if (b.kind === "subscription_period") {
+    links.subscriptionId = b.id;
+    links.subscriptionPeriod = b.periodStart;
+    links.contractId = b.contractId;
+    return `訂閱 #${b.id} ${b.periodStart} 期`;
+  }
+  return null;
+}
 
-    const b = billing[0];
-    if (billing.length === 1 && b && (soleClaims.get(candidateKey(b)) ?? 0) === 1) {
-      if (b.kind === "billing_item") {
-        links.billingItemId = b.id;
-        links.contractId = b.contractId;
-        linkedTo.push(`請款項目 #${b.id}`);
-      } else if (b.kind === "subscription_period") {
-        links.subscriptionId = b.id;
-        links.subscriptionPeriod = b.periodStart;
-        links.contractId = b.contractId;
-        linkedTo.push(`訂閱 #${b.id} ${b.periodStart} 期`);
-      }
-    } else if (billing.length > 0) {
-      review(
-        billing.length > 1
-          ? "有多個可能對應的請款項目 / 訂閱期別，未自動綁定"
-          : "對應的請款項目 / 訂閱期別同時也可能屬於另一張發票，未自動綁定",
-        billing,
-      );
-    }
+function reviewItem(t: TouchedInvoice, reason: string, cands: Candidate[]): NeedsReviewItem {
+  return {
+    invoiceId: t.invoiceId,
+    invoiceNumber: t.invoiceNumber,
+    buyer: t.buyer,
+    amount: t.amountGross,
+    reason,
+    candidates: cands.map((c) => ({
+      kind: c.kind,
+      id: c.id,
+      ...(c.kind === "subscription_period" ? { periodStart: c.periodStart } : {}),
+      label: c.label,
+    })),
+  };
+}
 
-    if (linkedTo.length) {
-      await applyInvoiceLinks(orgId, t.invoiceId, t.invoiceDate, links);
-      result.autoLinked.push({ invoiceNumber: t.invoiceNumber, invoiceId: t.invoiceId, linkedTo });
-    }
+/** 依一張發票的候選決定綁定：唯一且無爭議就綁，否則列入待確認。 */
+async function applyLinkPlan(
+  orgId: string,
+  { t, txn, billing }: LinkPlan,
+  soleClaims: Map<string, number>,
+  result: SyncResult,
+): Promise<void> {
+  const linkedTo: string[] = [];
+  const links: InvoiceLinks = {};
+
+  const txnHit = uniqueUnclaimed(txn, soleClaims);
+  if (txnHit) {
+    links.transactionIds = [txnHit.id];
+    linkedTo.push(`交易 #${txnHit.id}`);
+  } else if (txn.length > 0) {
+    const reason =
+      txn.length > 1
+        ? "有多筆可能對應的收入交易，未自動綁定"
+        : "對應的收入交易同時也可能屬於另一張發票，未自動綁定";
+    result.needsReview.push(reviewItem(t, reason, txn));
+  }
+
+  const billingHit = uniqueUnclaimed(billing, soleClaims);
+  if (billingHit) {
+    const label = applyBillingCandidate(billingHit, links);
+    if (label) linkedTo.push(label);
+  } else if (billing.length > 0) {
+    const reason =
+      billing.length > 1
+        ? "有多個可能對應的請款項目 / 訂閱期別，未自動綁定"
+        : "對應的請款項目 / 訂閱期別同時也可能屬於另一張發票，未自動綁定";
+    result.needsReview.push(reviewItem(t, reason, billing));
+  }
+
+  if (linkedTo.length) {
+    await applyInvoiceLinks(orgId, t.invoiceId, t.invoiceDate, links);
+    result.autoLinked.push({ invoiceNumber: t.invoiceNumber, invoiceId: t.invoiceId, linkedTo });
+  }
+}
+
+async function autoLink(
+  orgId: string,
+  range: { startDate: string; endDate: string },
+  touched: TouchedInvoice[],
+  result: SyncResult,
+): Promise<void> {
+  if (touched.length === 0) return;
+  const linkedTxn = await invoiceIdsWithLinkedTxn(
+    orgId,
+    touched.map((t) => t.invoiceId),
+  );
+  const pools = await loadCandidatePools(orgId, range.startDate, range.endDate);
+  const plans = planAutoLinks(touched, linkedTxn, pools, result);
+  const soleClaims = countSoleClaims(plans);
+  for (const plan of plans) {
+    await applyLinkPlan(orgId, plan, soleClaims, result);
   }
 }
 

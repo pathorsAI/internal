@@ -4,7 +4,7 @@ import { useActionState, useState } from "react";
 import { toast } from "sonner";
 import { Paperclip } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { externalSingleLegSide } from "@/lib/external-transfer";
+import { externalSingleLegSide, type SingleLegSide } from "@/lib/external-transfer";
 import { updateTransaction, deleteTransactionDocument, type ActionState } from "@/db/mutations";
 import type { TxnDocument, AuditMeta as AuditMetaData } from "@/db/queries";
 import { AuditMeta } from "@/components/audit-meta";
@@ -145,39 +145,52 @@ export function EditTransactionForm({
     TYPE_KEYS.map((k) => [k, t(`type.${k}`)]),
   );
 
+  // 帳戶區塊三種版型：單腳換匯 / 一般轉帳 / 收入支出代墊。
+  let accountFields: React.ReactNode;
+  if (singleLeg) {
+    accountFields = (
+      <SingleLegAccountField
+        side={singleLeg}
+        accounts={accounts}
+        value={singleLeg === "from" ? fromAccountId : toAccountId}
+        onChange={singleLeg === "from" ? setFromAccountId : setToAccountId}
+        conversionText={txn.conversionText ?? null}
+      />
+    );
+  } else if (isTransfer) {
+    accountFields = (
+      <TransferAccountFields
+        accounts={accounts}
+        fromAccountId={fromAccountId}
+        toAccountId={toAccountId}
+        onFromChange={setFromAccountId}
+        onToChange={setToAccountId}
+        fromCurrency={fromCurrency}
+        toCurrency={toCurrency}
+      />
+    );
+  } else {
+    accountFields = (
+      <PartyAccountFields
+        txn={txn}
+        isIncome={isIncome}
+        isAdvance={isAdvance}
+        parties={parties}
+        employees={employees}
+        categories={categories}
+        defaultCategoryName={defaultCategoryName}
+        accounts={accounts}
+        accountId={accountId}
+        onAccountChange={setAccountId}
+        projects={projects}
+        contracts={contracts}
+      />
+    );
+  }
+
   return (
     <>
-      {docs.length > 0 && (
-        <div className="mb-4 space-y-2">
-          <div className="text-sm font-medium">{t("form.attachedDocs")}</div>
-          <ul className="divide-y rounded-md border">
-            {docs.map((d) => (
-              <li key={d.id} className="flex items-center gap-2 px-3 py-2 text-sm">
-                <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                  {t(`form.docLabel.${docLabelKey(d.docType, d.invoiceKind)}`)}
-                </span>
-                {d.invoiceKind === "paper" ? (
-                  <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-700">
-                    {t("form.needsNotifyAccountant")}
-                  </span>
-                ) : null}
-                <a
-                  href={`/api/documents/${d.id}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="truncate text-primary hover:underline"
-                >
-                  {d.fileName ?? t("form.viewFile")}
-                </a>
-                <span className="ml-auto">
-                  <DeleteButton action={deleteTransactionDocument} id={d.id} />
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <AttachedDocs docs={docs} />
 
       <form onSubmit={submitAction(action)} className="grid gap-4 sm:grid-cols-2">
         <input type="hidden" name="id" value={txn.id} />
@@ -208,92 +221,7 @@ export function EditTransactionForm({
           <LockedCurrencyField currency={lockedCurrency} original={txn.currency} />
         )}
 
-        {singleLeg ? (
-          <>
-            <AccountSelectField
-              name={singleLeg === "from" ? "fromAccountId" : "toAccountId"}
-              label={singleLeg === "from" ? t("form.fromAccount") : t("form.toAccount")}
-              accounts={accounts}
-              value={singleLeg === "from" ? fromAccountId : toAccountId}
-              onChange={singleLeg === "from" ? setFromAccountId : setToAccountId}
-            />
-            <p className="self-end text-xs text-muted-foreground sm:pb-2">
-              {txn.conversionText ? `${txn.conversionText} · ` : null}
-              {t("table.conversionLegHint")}
-            </p>
-          </>
-        ) : isTransfer ? (
-          <>
-            <AccountSelectField
-              name="fromAccountId"
-              label={t("form.fromAccount")}
-              accounts={accounts}
-              value={fromAccountId}
-              onChange={setFromAccountId}
-            />
-            <AccountSelectField
-              name="toAccountId"
-              label={t("form.toAccount")}
-              accounts={accounts}
-              value={toAccountId}
-              onChange={setToAccountId}
-            />
-            <TransferCurrencyWarning from={fromCurrency} to={toCurrency} />
-          </>
-        ) : (
-          <>
-            <Field
-              label={isIncome ? t("form.client") : t("form.vendor")}
-              required
-              wide
-            >
-              <PartyCombobox
-                parties={parties}
-                name="partyName"
-                defaultName={txn.partyName ?? ""}
-                placeholder={isIncome ? t("form.clientPlaceholder") : t("form.vendorPlaceholder")}
-              />
-            </Field>
-            {isAdvance && (
-              <Field label={t("form.payer")} required wide>
-                <PartyCombobox
-                  parties={employees}
-                  name="settleEmployeeName"
-                  defaultName={txn.settleName ?? ""}
-                  placeholder={t("form.payerPlaceholder")}
-                />
-              </Field>
-            )}
-            <Field label={t("form.category")} required>
-              <CategoryCombobox categories={categories} defaultName={defaultCategoryName} />
-            </Field>
-            {!isAdvance && (
-              <AccountSelectField
-                name="accountId"
-                label={isIncome ? t("form.receivingAccount") : t("form.payingAccount")}
-                accounts={accounts}
-                value={accountId}
-                onChange={setAccountId}
-              />
-            )}
-            <SelectField
-              name="projectId"
-              label={t("form.project")}
-              wide
-              placeholder={t("form.projectPlaceholder")}
-              defaultValue={txn.projectId == null ? undefined : String(txn.projectId)}
-            >
-              {projects.map((p) => (
-                <SelectItem key={p.id} value={String(p.id)}>
-                  {p.name}
-                </SelectItem>
-              ))}
-            </SelectField>
-            <Field label={t("form.contract")} wide>
-              <ContractCombobox contracts={contracts} defaultId={txn.contractId} />
-            </Field>
-          </>
-        )}
+        {accountFields}
 
         <TextField
           name="description"
@@ -302,29 +230,8 @@ export function EditTransactionForm({
           defaultValue={txn.description ?? ""}
         />
 
-        {!isTransfer && (
-          <div className="space-y-3 sm:col-span-2">
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                name="reported"
-                defaultChecked={txn.book !== "internal"}
-                className="size-4"
-              />
-              <span>{t("form.reported")}</span>
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                name="billedToCompanyTaxId"
-                checked={billed}
-                onChange={(e) => setBilled(e.target.checked)}
-                className="size-4 accent-primary"
-              />
-              <span>{t("form.billedToCompanyTaxId")}</span>
-            </label>
-            <VoucherFields billed={billed} />
-          </div>
+        {isTransfer ? null : (
+          <ReportingFields book={txn.book} billed={billed} onBilledChange={setBilled} />
         )}
 
         <div className="sm:col-span-2">
@@ -346,6 +253,227 @@ export function EditTransactionForm({
         </div>
       </form>
     </>
+  );
+}
+
+function AttachedDocs({ docs }: Readonly<{ docs: TxnDocument[] }>) {
+  const t = useTranslations("transactions");
+  if (docs.length === 0) return null;
+  return (
+    <div className="mb-4 space-y-2">
+      <div className="text-sm font-medium">{t("form.attachedDocs")}</div>
+      <ul className="divide-y rounded-md border">
+        {docs.map((d) => (
+          <li key={d.id} className="flex items-center gap-2 px-3 py-2 text-sm">
+            <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="rounded bg-muted px-1.5 py-0.5 text-xs">
+              {t(`form.docLabel.${docLabelKey(d.docType, d.invoiceKind)}`)}
+            </span>
+            {d.invoiceKind === "paper" ? (
+              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-700">
+                {t("form.needsNotifyAccountant")}
+              </span>
+            ) : null}
+            <a
+              href={`/api/documents/${d.id}`}
+              target="_blank"
+              rel="noreferrer"
+              className="truncate text-primary hover:underline"
+            >
+              {d.fileName ?? t("form.viewFile")}
+            </a>
+            <span className="ml-auto">
+              <DeleteButton action={deleteTransactionDocument} id={d.id} />
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** 外部同步的單腳轉帳（Wise 換匯）：只有原本那一腳的帳戶可選，另一腳固定空白。 */
+function SingleLegAccountField({
+  side,
+  accounts,
+  value,
+  onChange,
+  conversionText,
+}: Readonly<{
+  side: SingleLegSide;
+  accounts: Account[];
+  value: string;
+  onChange: (v: string) => void;
+  conversionText: string | null;
+}>) {
+  const t = useTranslations("transactions");
+  return (
+    <>
+      <AccountSelectField
+        name={side === "from" ? "fromAccountId" : "toAccountId"}
+        label={side === "from" ? t("form.fromAccount") : t("form.toAccount")}
+        accounts={accounts}
+        value={value}
+        onChange={onChange}
+      />
+      <p className="self-end text-xs text-muted-foreground sm:pb-2">
+        {conversionText ? `${conversionText} · ` : null}
+        {t("table.conversionLegHint")}
+      </p>
+    </>
+  );
+}
+
+function TransferAccountFields({
+  accounts,
+  fromAccountId,
+  toAccountId,
+  onFromChange,
+  onToChange,
+  fromCurrency,
+  toCurrency,
+}: Readonly<{
+  accounts: Account[];
+  fromAccountId: string;
+  toAccountId: string;
+  onFromChange: (v: string) => void;
+  onToChange: (v: string) => void;
+  fromCurrency: ReturnType<typeof accountCurrency>;
+  toCurrency: ReturnType<typeof accountCurrency>;
+}>) {
+  const t = useTranslations("transactions");
+  return (
+    <>
+      <AccountSelectField
+        name="fromAccountId"
+        label={t("form.fromAccount")}
+        accounts={accounts}
+        value={fromAccountId}
+        onChange={onFromChange}
+      />
+      <AccountSelectField
+        name="toAccountId"
+        label={t("form.toAccount")}
+        accounts={accounts}
+        value={toAccountId}
+        onChange={onToChange}
+      />
+      <TransferCurrencyWarning from={fromCurrency} to={toCurrency} />
+    </>
+  );
+}
+
+/** 收入 / 支出 / 代墊：對象、（代墊的）墊款人、分類、帳戶、專案、合約。 */
+function PartyAccountFields({
+  txn,
+  isIncome,
+  isAdvance,
+  parties,
+  employees,
+  categories,
+  defaultCategoryName,
+  accounts,
+  accountId,
+  onAccountChange,
+  projects,
+  contracts,
+}: Readonly<{
+  txn: Txn;
+  isIncome: boolean;
+  isAdvance: boolean;
+  parties: { id: number; name: string }[];
+  employees: { id: number; name: string }[];
+  categories: { id: number; name: string }[];
+  defaultCategoryName: string;
+  accounts: Account[];
+  accountId: string;
+  onAccountChange: (v: string) => void;
+  projects: { id: number; name: string }[];
+  contracts: ContractOption[];
+}>) {
+  const t = useTranslations("transactions");
+  return (
+    <>
+      <Field label={isIncome ? t("form.client") : t("form.vendor")} required wide>
+        <PartyCombobox
+          parties={parties}
+          name="partyName"
+          defaultName={txn.partyName ?? ""}
+          placeholder={isIncome ? t("form.clientPlaceholder") : t("form.vendorPlaceholder")}
+        />
+      </Field>
+      {isAdvance && (
+        <Field label={t("form.payer")} required wide>
+          <PartyCombobox
+            parties={employees}
+            name="settleEmployeeName"
+            defaultName={txn.settleName ?? ""}
+            placeholder={t("form.payerPlaceholder")}
+          />
+        </Field>
+      )}
+      <Field label={t("form.category")} required>
+        <CategoryCombobox categories={categories} defaultName={defaultCategoryName} />
+      </Field>
+      {isAdvance ? null : (
+        <AccountSelectField
+          name="accountId"
+          label={isIncome ? t("form.receivingAccount") : t("form.payingAccount")}
+          accounts={accounts}
+          value={accountId}
+          onChange={onAccountChange}
+        />
+      )}
+      <SelectField
+        name="projectId"
+        label={t("form.project")}
+        wide
+        placeholder={t("form.projectPlaceholder")}
+        defaultValue={txn.projectId == null ? undefined : String(txn.projectId)}
+      >
+        {projects.map((p) => (
+          <SelectItem key={p.id} value={String(p.id)}>
+            {p.name}
+          </SelectItem>
+        ))}
+      </SelectField>
+      <Field label={t("form.contract")} wide>
+        <ContractCombobox contracts={contracts} defaultId={txn.contractId} />
+      </Field>
+    </>
+  );
+}
+
+/** 報稅 / 統編勾選與憑證欄位（轉帳沒有這些）。 */
+function ReportingFields({
+  book,
+  billed,
+  onBilledChange,
+}: Readonly<{ book: string; billed: boolean; onBilledChange: (v: boolean) => void }>) {
+  const t = useTranslations("transactions");
+  return (
+    <div className="space-y-3 sm:col-span-2">
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          name="reported"
+          defaultChecked={book !== "internal"}
+          className="size-4"
+        />
+        <span>{t("form.reported")}</span>
+      </label>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          name="billedToCompanyTaxId"
+          checked={billed}
+          onChange={(e) => onBilledChange(e.target.checked)}
+          className="size-4 accent-primary"
+        />
+        <span>{t("form.billedToCompanyTaxId")}</span>
+      </label>
+      <VoucherFields billed={billed} />
+    </div>
   );
 }
 

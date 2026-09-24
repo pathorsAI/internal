@@ -126,6 +126,45 @@ function LogoTile({ letter, className }: Readonly<{ letter: string; className: s
   );
 }
 
+type ConnectionData = IntegrationRowData["connection"];
+type IntegrationsT = ReturnType<typeof useTranslations<"integrations">>;
+
+function StatusLine({
+  connection: c,
+  enabled,
+}: Readonly<{ connection: ConnectionData; enabled: boolean }>) {
+  const t = useTranslations("integrations");
+  if (!c) return <span>{t("status.notConnected")}</span>;
+  if (c.status === "needs_reauth") {
+    return (
+      <span className="text-destructive">
+        {t("status.needsReauth", { error: c.lastError ?? t("status.unknownError") })}
+      </span>
+    );
+  }
+  if (c.status === "error") {
+    return (
+      <span className="text-destructive">
+        {t("status.error", { error: c.lastError ?? t("status.unknownError") })}
+      </span>
+    );
+  }
+  return <span>{enabled ? t("status.connected") : t("status.connectedOff")}</span>;
+}
+
+/** 「由誰連接 · 上次同步」這行；沒連接時回空陣列（畫面改顯示說明文字）。 */
+function connectionMeta(c: ConnectionData, t: IntegrationsT): string[] {
+  if (!c) return [];
+  const meta = [
+    t("status.connectedBy", {
+      name: c.connectedByName ?? t("status.unknownMember"),
+      date: c.connectedAt,
+    }),
+  ];
+  if (c.lastSyncedAt) meta.push(t("status.lastSynced", { date: c.lastSyncedAt }));
+  return meta;
+}
+
 function IntegrationRow({
   row,
   canManage,
@@ -161,35 +200,7 @@ function IntegrationRow({
     });
   }
 
-  let statusLine: React.ReactNode;
-  if (!c) {
-    statusLine = <span>{t("status.notConnected")}</span>;
-  } else if (c.status === "needs_reauth") {
-    statusLine = (
-      <span className="text-destructive">
-        {t("status.needsReauth", { error: c.lastError ?? t("status.unknownError") })}
-      </span>
-    );
-  } else if (c.status === "error") {
-    statusLine = (
-      <span className="text-destructive">
-        {t("status.error", { error: c.lastError ?? t("status.unknownError") })}
-      </span>
-    );
-  } else {
-    statusLine = <span>{optimisticEnabled ? t("status.connected") : t("status.connectedOff")}</span>;
-  }
-
-  const meta: string[] = [];
-  if (c) {
-    meta.push(
-      t("status.connectedBy", {
-        name: c.connectedByName ?? t("status.unknownMember"),
-        date: c.connectedAt,
-      }),
-    );
-    if (c.lastSyncedAt) meta.push(t("status.lastSynced", { date: c.lastSyncedAt }));
-  }
+  const meta = connectionMeta(c, t);
 
   return (
     <li className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
@@ -197,7 +208,9 @@ function IntegrationRow({
         <LogoTile letter={row.logo.letter} className={row.logo.className} />
         <div className="min-w-0 space-y-0.5">
           <p className="font-medium">{name}</p>
-          <p className="text-sm text-muted-foreground">{statusLine}</p>
+          <p className="text-sm text-muted-foreground">
+            <StatusLine connection={c} enabled={optimisticEnabled} />
+          </p>
           {meta.length > 0 ? (
             <p className="text-xs text-muted-foreground">{meta.join(" · ")}</p>
           ) : (
@@ -210,7 +223,7 @@ function IntegrationRow({
         <Switch
           checked={optimisticEnabled}
           onCheckedChange={toggle}
-          disabled={!canManage || !c || c.status !== "connected" || pending}
+          disabled={!canManage || c?.status !== "connected" || pending}
           aria-label={t("actions.toggleLabel", { name })}
           className="mr-2"
         />

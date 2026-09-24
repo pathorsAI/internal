@@ -111,19 +111,7 @@ async function SimpanyStatusLine({
     </Link>
   );
   let text: React.ReactNode;
-  if (integration.status !== "connected") {
-    text = (
-      <span className="text-destructive">
-        {t("needsReauth", { error: integration.lastError ?? "" })} · {settings}
-      </span>
-    );
-  } else if (!integration.enabled) {
-    text = (
-      <>
-        {t("off")} {settings}
-      </>
-    );
-  } else {
+  if (integration.status === "connected" && integration.enabled) {
     text = (
       <>
         {integration.lastSyncedAt
@@ -131,6 +119,18 @@ async function SimpanyStatusLine({
           : t("neverSynced")}
         {canManage ? null : ` · ${t("readOnly")}`}
       </>
+    );
+  } else if (integration.status === "connected") {
+    text = (
+      <>
+        {t("off")} {settings}
+      </>
+    );
+  } else {
+    text = (
+      <span className="text-destructive">
+        {t("needsReauth", { error: integration.lastError ?? "" })} · {settings}
+      </span>
     );
   }
   return <p className="text-xs text-muted-foreground">{text}</p>;

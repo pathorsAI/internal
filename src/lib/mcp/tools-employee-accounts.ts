@@ -64,7 +64,8 @@ export const EMPLOYEE_ACCOUNT_ROW = rowSchema({
 /** 輸出用的遮罩摘要：「永豐銀行 807 ••••90123」。 */
 export function maskedAccountSummary(a: MaskedEmployeeAccount): string {
   const head = [a.bankName, a.bankCode].filter(Boolean).join(" ");
-  return `${head ? `${head} ` : ""}••••${a.accountLast5}`;
+  const prefix = head ? `${head} ` : "";
+  return `${prefix}••••${a.accountLast5}`;
 }
 
 /** 發薪 / 撥款結果裡的「匯入帳戶」欄位（可為 null）。 */

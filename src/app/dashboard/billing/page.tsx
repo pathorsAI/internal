@@ -38,7 +38,7 @@ import { QuickMark } from "./quick-actions";
 import { IssueInvoiceDialog } from "./issue-invoice-dialog";
 import { RecordPaymentDialog } from "./record-payment-dialog";
 import { SyncCalendarButton } from "./sync-calendar-button";
-import { SimpanyIssueSheet } from "../invoices/simpany-issue-sheet";
+import { SimpanyIssueSheet, type SimpanyIssueSource } from "../invoices/simpany-issue-sheet";
 
 export const dynamic = "force-dynamic";
 
@@ -143,16 +143,20 @@ function SourceLine({ row, t }: Readonly<{ row: BillingRow; t: T }>) {
   return <>{row.projectName ?? t("table.oneTimeSource")}</>;
 }
 
+/** 這一列在 Simpany 開票時對應的來源：單次款項或訂閱的某一期；都對不上就回 null。 */
+function simpanySourceFor(row: BillingRow, itemId: number | null): SimpanyIssueSource | null {
+  if (itemId != null) return { kind: "billing_item", billingItemId: itemId };
+  if (row.subscriptionId != null && row.periodStart) {
+    return { kind: "subscription", subscriptionId: row.subscriptionId, periodStart: row.periodStart };
+  }
+  return null;
+}
+
 /** 這一列「開發票」要用哪個流程：Simpany 直接開立，或本系統記錄 + 人去 Simpany 開。 */
 function InvoiceAction({ row, simpany }: Readonly<{ row: BillingRow; simpany: boolean }>) {
   const itemId = row.source === "billing_item" ? row.billingItemId : null;
   if (simpany) {
-    const source =
-      itemId != null
-        ? ({ kind: "billing_item", billingItemId: itemId } as const)
-        : row.subscriptionId != null && row.periodStart
-          ? ({ kind: "subscription", subscriptionId: row.subscriptionId, periodStart: row.periodStart } as const)
-          : null;
+    const source = simpanySourceFor(row, itemId);
     if (source) {
       return (
         <SimpanyIssueSheet

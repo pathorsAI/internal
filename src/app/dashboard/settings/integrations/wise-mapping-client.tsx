@@ -78,16 +78,16 @@ export function WiseMappingSection({
           syncFrom: rows[i].syncFrom || null,
         })),
       );
-      if (!res.ok) toast.error(res.error ?? t("errors.failed"));
-      else toast.success(t("mapping.saved"));
+      if (res.ok) toast.success(t("mapping.saved"));
+      else toast.error(res.error ?? t("errors.failed"));
     });
   }
 
   function refresh() {
     start(async () => {
       const res = await refreshWiseBalancesAction();
-      if (!res.ok) toast.error(res.error ?? t("errors.failed"));
-      else toast.success(t("mapping.refreshed"));
+      if (res.ok) toast.success(t("mapping.refreshed"));
+      else toast.error(res.error ?? t("errors.failed"));
     });
   }
 

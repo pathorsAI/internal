@@ -23,7 +23,9 @@ async function requireManager(): Promise<{ orgId: string } | { error: string }> 
 }
 
 function toInt(v: unknown): number | null {
-  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
+  let n = Number.NaN;
+  if (typeof v === "number") n = v;
+  else if (typeof v === "string" && v.trim() !== "") n = Number(v);
   return Number.isInteger(n) ? n : null;
 }
 

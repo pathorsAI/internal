@@ -72,7 +72,8 @@ export type WiseMoney = { value: number; currency: string };
 
 export type WiseProfile = {
   id: number;
-  type: "PERSONAL" | "BUSINESS" | string;
+  /** 已知值："PERSONAL"、"BUSINESS"；Wise 可能新增其他值，所以保留 string。 */
+  type: string;
   fullName?: string;
   businessName?: string;
   details?: { name?: string; firstName?: string; lastName?: string };
@@ -87,7 +88,8 @@ export type WiseBalance = {
 };
 
 export type WiseStatementTransaction = {
-  type: "DEBIT" | "CREDIT" | string;
+  /** 已知值："DEBIT"、"CREDIT"；保留 string 以容納未知值。 */
+  type: string;
   date: string;
   amount: WiseMoney;
   totalFees?: WiseMoney | null;
@@ -184,7 +186,8 @@ async function wiseGet<T>(
   if (!res.ok) {
     // 回應本文可能很長；只取開頭，且不含我們送出的任何東西（token 在 header，不會回顯）。
     const body = (await res.text().catch(() => "")).slice(0, 200);
-    throw new WiseApiError(res.status, `Wise 回應 ${res.status}${body ? `：${body}` : ""}`);
+    const detail = body ? `：${body}` : "";
+    throw new WiseApiError(res.status, `Wise 回應 ${res.status}${detail}`);
   }
   return (await res.json()) as T;
 }

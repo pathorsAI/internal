@@ -125,7 +125,7 @@ export const integrationTools: Record<string, ToolDef> = {
             available: getProvider(provider) !== null,
             connected: Boolean(s),
             enabled: s?.enabled ?? false,
-            usable: Boolean(s && s.enabled && s.status === "connected"),
+            usable: Boolean(s?.enabled && s.status === "connected"),
             status: s?.status ?? null,
             config: s?.config ?? {},
             connectedAt: iso(s?.connectedAt ?? null),

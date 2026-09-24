@@ -15,10 +15,13 @@ import {
 } from "@/lib/integrations/store";
 import {
   isIntegrationProviderId,
+  type IntegrationCatalogEntry,
   type IntegrationConfig,
   type IntegrationCredentials,
   type IntegrationField,
+  type IntegrationProvider,
   type IntegrationProviderId,
+  type TestConnectionResult,
 } from "@/lib/integrations/types";
 
 /**
@@ -61,6 +64,40 @@ function pickFields(
   return out;
 }
 
+/** 回傳第一個沒填的必填欄位；都有填就回 null。 */
+function findMissingRequiredField(
+  entry: IntegrationCatalogEntry,
+  credentials: IntegrationCredentials,
+  configInput: IntegrationConfig,
+): IntegrationField | null {
+  for (const f of [...entry.credentialFields, ...(entry.configFields ?? [])]) {
+    if (f.required && !(f.key in credentials) && !(f.key in configInput)) return f;
+  }
+  return null;
+}
+
+type TestOutcome =
+  | { ok: true; result: Extract<TestConnectionResult, { ok: true }> }
+  | { ok: false; error: string };
+
+/** 跑 provider.testConnection，把丟出的例外與 ok:false 都收斂成錯誤字串。 */
+async function runConnectionTest(
+  impl: IntegrationProvider,
+  credentials: IntegrationCredentials,
+  config: IntegrationConfig,
+): Promise<TestOutcome> {
+  let result: TestConnectionResult;
+  try {
+    result = await impl.testConnection(credentials, config);
+  } catch (e) {
+    // provider 自己沒處理好的例外（網路錯之類）。訊息照樣給人看，provider 有責任
+    // 不把憑證放進錯誤訊息裡。
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+  if (!result.ok) return { ok: false, error: result.error };
+  return { ok: true, result };
+}
+
 async function connectOrReconnect(
   providerArg: string,
   values: Record<string, unknown>,
@@ -82,33 +119,25 @@ async function connectOrReconnect(
     const entry = getCatalogEntry(provider);
     const credentials: IntegrationCredentials = pickFields(entry.credentialFields, values);
     const configInput: IntegrationConfig = pickFields(entry.configFields, values);
-    for (const f of [...entry.credentialFields, ...(entry.configFields ?? [])]) {
-      if (f.required && !(f.key in credentials) && !(f.key in configInput)) {
-        return { ok: false, error: t("errors.requiredField", { field: t(`fields.${f.labelKey}`) }) };
-      }
+    const missing = findMissingRequiredField(entry, credentials, configInput);
+    if (missing) {
+      return { ok: false, error: t("errors.requiredField", { field: t(`fields.${missing.labelKey}`) }) };
     }
 
     // 重新連接時把既有 config 一起給 provider：有些 provider 需要之前發現的 id 才能測。
     const existing = await getIntegration(me.orgId, provider);
-    const config: IntegrationConfig = { ...(existing?.config ?? {}), ...configInput };
+    const config: IntegrationConfig = { ...existing?.config, ...configInput };
 
-    let result;
-    try {
-      result = await impl.testConnection(credentials, config);
-    } catch (e) {
-      // provider 自己沒處理好的例外（網路錯之類）。訊息照樣給人看，provider 有責任
-      // 不把憑證放進錯誤訊息裡。
-      const msg = e instanceof Error ? e.message : String(e);
-      return { ok: false, error: t("errors.testFailed", { error: msg }) };
-    }
-    if (!result.ok) return { ok: false, error: t("errors.testFailed", { error: result.error }) };
+    const outcome = await runConnectionTest(impl, credentials, config);
+    if (!outcome.ok) return { ok: false, error: t("errors.testFailed", { error: outcome.error }) };
+    const { result } = outcome;
 
     await saveConnection({
       orgId: me.orgId,
       provider,
       userId: me.userId,
       credentials,
-      config: { ...configInput, ...(result.config ?? {}) },
+      config: { ...configInput, ...result.config },
       tokenCache: result.tokenCache,
     });
 

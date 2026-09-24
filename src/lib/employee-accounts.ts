@@ -79,7 +79,7 @@ export function bankNameForCode(code: string | null | undefined): string | null 
 
 /** 去掉空白與連字號（使用者常照存摺格式輸入 807-0180-1234…）。 */
 export function normalizeAccountNumber(raw: string): string {
-  return raw.replace(/[\s\-‐-―]/g, "");
+  return raw.replaceAll(/[\s\-‐-―]/g, "");
 }
 
 /** 末 5 碼（正規化之後）。 */
@@ -182,7 +182,7 @@ export function parseLegacySalaryAccount(raw: string): ParsedLegacyAccount | nul
     const rest = m[2].replace(/^\D+/, "");
     const branchMatch = /^(\d{4})[\s\-/]+(.+)$/.exec(rest);
     const branchCode = branchMatch ? branchMatch[1] : null;
-    const digits = (branchMatch ? branchMatch[2] : rest).replace(/\D/g, "");
+    const digits = (branchMatch ? branchMatch[2] : rest).replaceAll(/\D/g, "");
     if (/^\d{6,20}$/.test(digits)) {
       return { kind: "bank", bankCode, branchCode, bankName: bankNameForCode(bankCode), accountNumber: digits };
     }

@@ -19,6 +19,13 @@ import { formatCurrency } from "@/lib/currency";
 import type { SyncResult } from "@/lib/wise-sync";
 import { applyWiseSync, previewWiseSync } from "./wise-sync-actions";
 
+/** 樣本金額前的正負號：收入 +、支出 −、轉帳不加。 */
+function amountSign(type: string): string {
+  if (type === "income") return "+";
+  if (type === "expense") return "−";
+  return "";
+}
+
 /**
  * 帳戶頁「從 Wise 同步」：打開就先跑一次試算（dry run，不寫入），列出每個帳戶會新增
  * 幾筆與前 50 筆樣本；使用者按「寫入 N 筆」才真的寫。只給 owner / admin 看到。
@@ -133,7 +140,10 @@ export function WiseSyncButton() {
                   <p className="text-xs text-muted-foreground">
                     {t("sync.skipped", {
                       list: skipped
-                        .map((s) => `${s.profileName} ${s.currency}（${t(`sync.reason.${s.reason}`)}）`)
+                        .map((s) => {
+                          const reason = t(`sync.reason.${s.reason}`);
+                          return `${s.profileName} ${s.currency}（${reason}）`;
+                        })
                         .join("、"),
                     })}
                   </p>
@@ -172,7 +182,7 @@ export function WiseSyncButton() {
                               </td>
                               <td className="py-2 pr-3 text-muted-foreground">{r.description}</td>
                               <td className="py-2 text-right tabular-nums whitespace-nowrap">
-                                {r.type === "income" ? "+" : r.type === "expense" ? "−" : ""}
+                                {amountSign(r.type)}
                                 {formatCurrency(r.amount, r.currency)}
                               </td>
                             </tr>

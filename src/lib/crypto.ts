@@ -19,14 +19,15 @@ export class EncryptionKeyMissingError extends Error {
 
 function toBase64(bytes: Uint8Array): string {
   let s = "";
-  for (const b of bytes) s += String.fromCharCode(b);
+  for (const b of bytes) s += String.fromCodePoint(b);
   return btoa(s);
 }
 
 function fromBase64(b64: string): Uint8Array<ArrayBuffer> {
+  // atob 的輸出每個字元都是 0–255 的單一 code unit，codePointAt 不會碰到代理對。
   const s = atob(b64);
   const out = new Uint8Array(s.length);
-  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+  for (let i = 0; i < s.length; i++) out[i] = s.codePointAt(i) ?? 0;
   return out;
 }
 

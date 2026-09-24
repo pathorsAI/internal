@@ -181,31 +181,41 @@ function snippet(body: unknown): string {
   } catch {
     s = String(body);
   }
-  s = s.replace(/\s+/g, " ").trim();
+  s = s.replaceAll(/\s+/g, " ").trim();
   return s.length > 400 ? `${s.slice(0, 399)}…` : s;
+}
+
+/** 驗證錯誤：{ errors: { field: [msg] } } → 「field: msg、msg；field: msg」；沒有內容回 null。 */
+function validationErrorsMessage(errors: Record<string, unknown>): string | null {
+  const parts: string[] = [];
+  for (const [field, msgs] of Object.entries(errors)) {
+    const list = Array.isArray(msgs) ? msgs.map((m) => str(m) ?? snippet(m)) : [snippet(msgs)];
+    parts.push(`${field}: ${list.join("、")}`);
+  }
+  return parts.length ? parts.join("；") : null;
+}
+
+/** 業務錯誤：{ status: "error", error: { title, details } } / { error: { code } }；沒有內容回 null。 */
+function businessErrorMessage(e: Record<string, unknown>): string | null {
+  const title = str(e.title) ?? str(e.message);
+  const details = str(e.details) ?? (e.details === undefined ? null : snippet(e.details));
+  const code = str(e.code);
+  const text = [title, details].filter(Boolean).join("：");
+  if (text) return code ? `${text}（${code}）` : text;
+  if (code) return `錯誤代碼 ${code}`;
+  return null;
 }
 
 /** 從 Simpany 的各種錯誤形狀裡抽出人看得懂的訊息。 */
 export function simpanyErrorMessage(body: unknown): string | null {
   if (!isObj(body)) return typeof body === "string" && body.trim() ? snippet(body) : null;
-  // 驗證錯誤：{ errors: { field: [msg] } }
   if (isObj(body.errors)) {
-    const parts: string[] = [];
-    for (const [field, msgs] of Object.entries(body.errors)) {
-      const list = Array.isArray(msgs) ? msgs.map((m) => str(m) ?? snippet(m)) : [snippet(msgs)];
-      parts.push(`${field}: ${list.join("、")}`);
-    }
-    if (parts.length) return parts.join("；");
+    const validation = validationErrorsMessage(body.errors);
+    if (validation) return validation;
   }
-  // 業務錯誤：{ status: "error", error: { title, details } } / { error: { code } }
   if (isObj(body.error)) {
-    const e = body.error;
-    const title = str(e.title) ?? str(e.message);
-    const details = str(e.details) ?? (e.details === undefined ? null : snippet(e.details));
-    const code = str(e.code);
-    const text = [title, details].filter(Boolean).join("：");
-    if (text) return code ? `${text}（${code}）` : text;
-    if (code) return `錯誤代碼 ${code}`;
+    const business = businessErrorMessage(body.error);
+    if (business) return business;
   }
   const message = str(body.message);
   if (message) return message;
@@ -351,11 +361,8 @@ async function login(creds: IntegrationCredentials): Promise<TokenCache> {
   if (res.status >= 500) {
     throw new SimpanyError("http", `Simpany 登入失敗（HTTP ${res.status}）`, res.status);
   }
-  throw new SimpanyError(
-    "http",
-    `Simpany 登入失敗：${simpanyErrorMessage(body) ?? `HTTP ${res.status}`}`,
-    res.status,
-  );
+  const reason = simpanyErrorMessage(body) ?? `HTTP ${res.status}`;
+  throw new SimpanyError("http", `Simpany 登入失敗：${reason}`, res.status);
 }
 
 async function fetchCompanies(token: string): Promise<SimpanyCompany[]> {
@@ -365,11 +372,8 @@ async function fetchCompanies(token: string): Promise<SimpanyCompany[]> {
   const body = await readBody(res);
   if (res.status === 401) throw new SimpanyError("auth", "Simpany 登入已失效", 401);
   if (!res.ok) {
-    throw new SimpanyError(
-      "http",
-      `讀取 Simpany 公司清單失敗：${simpanyErrorMessage(body) ?? `HTTP ${res.status}`}`,
-      res.status,
-    );
+    const reason = simpanyErrorMessage(body) ?? `HTTP ${res.status}`;
+    throw new SimpanyError("http", `讀取 Simpany 公司清單失敗：${reason}`, res.status);
   }
   const data = unwrapData(body);
   const companies = isObj(data) && Array.isArray(data.companies) ? data.companies : [];
