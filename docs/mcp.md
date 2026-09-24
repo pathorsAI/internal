@@ -102,9 +102,10 @@ the `tools-*.ts` modules):
   `create_invoice` → "Record an invoice");
 - MCP `annotations`: `readOnlyHint` / `destructiveHint` / `idempotentHint`
   derived from the verb, plus `openWorldHint`, which is `false` for everything
-  except `sync_billing_calendar` (the only tool that writes to a third-party
-  system). Four overrides correct the verb heuristic: `sync_billing_calendar`
-  gets `openWorldHint: true`; `pay_employee_salary` gets `destructiveHint: true`
+  except the tools that reach a third-party system: `sync_billing_calendar`
+  (writes to Google Calendar) and the three `wise_*` tools (read-only GETs to
+  Wise; they declare their own read/write annotations). Four overrides correct
+  the verb heuristic: `sync_billing_calendar` gets `openWorldHint: true`; `pay_employee_salary` gets `destructiveHint: true`
   — it writes the payslip plus the salary-expense ledger entry, the month can't
   be booked twice and no tool reverses it; and `set_subscription_period`
   (an upsert) and `unmark_accountant_notified` (clears a flag to null) get
@@ -117,8 +118,8 @@ the `tools-*.ts` modules):
 - `_meta["openai/toolInvocation/invoking" | "invoked"]`, the status line ChatGPT
   shows while a call is in flight.
 
-**Output schemas.** Every tool declares an `outputSchema` — all 71 of them, as of
-server version 1.4.0. When a tool declares one the handler additionally returns
+**Output schemas.** Every tool declares an `outputSchema` — all 74 of them, as of
+server version 1.5.0. When a tool declares one the handler additionally returns
 the result as MCP `structuredContent` (the JSON text block stays, per MCP's
 back-compat recommendation), which is what ChatGPT and Codex prefer over parsing
 JSON out of text. `list_organizations` remains the reference implementation.
@@ -180,7 +181,11 @@ board automatically. `sync_billing_calendar` pushes the board to Google Calendar
 **Ledger (內外帳)** — `list_transactions`, `get_transaction`,
 `list_outstanding_advances`, `create_transaction` (expense/income/advance/transfer),
 `update_transaction` (date/amount/category/project/…), `delete_transaction`,
-`create_reimbursement` (book an advance as repaid).
+`create_reimbursement` (book an advance as repaid). Rows imported by an
+integration (the Wise sync) carry `externalSource` / `externalRef` and
+`needsReview` (待確認); `list_transactions` takes `needsReview: true` to list only
+those, and `update_transaction` clears the flag when it sets a category (or pass
+`needsReview: false` explicitly).
 
 **Accounting master data** — parties: `list_parties`/`get_party`/`create_party`/
 `update_party`/`delete_party`; categories: `list_categories`/`create_category`/
@@ -229,6 +234,18 @@ they go through `requireIntegrationForTool()` and fail with a clear zh-TW messag
 telling an owner/admin to fix it in 設定 › 整合. Every call to the external
 service is logged with `auditIntegrationCall()`. See
 [`integrations.md`](integrations.md).
+
+**Wise (read-only)** — `wise_list_balances` (profiles, balances with live amount,
+and the ledger account each is mapped to + its cutover date),
+`wise_get_statement` (`accountId` **or** `profileId` + `balanceId`, `startDate`,
+optional `endDate` / `limit` → compact statement rows), and
+`wise_sync_transactions` (`accountId?`, `startDate?`, `dryRun` — **defaults to
+true**). The description tells the model to show the dry-run preview and get the
+user's explicit approval before calling it with `dryRun: false`. All three only
+send GET requests to Wise; the sync writes only this organization's ledger
+(internal book, uncategorized, `needsReview`), deduped by Wise reference. Mapping
+balances to ledger accounts and setting the cutover date is done in the web app
+(設定 › 整合 › Wise).
 
 **Not exposed (do in the app):** creating an organization, uploading
 invoice/receipt **files** (R2), multi-currency FX entry, and *connecting* Google
