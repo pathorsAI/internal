@@ -1152,6 +1152,8 @@ export async function updateTransaction(
       .update(transactions)
       .set({
         ...transactionColumns(formData, header, f),
+        // 自動匯入（Wise 同步）的列：有人在編輯時指定了分類，就算確認過了。
+        ...(f.categoryId === null ? {} : { needsReview: false }),
         updatedAt: new Date().toISOString(),
       })
       .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)));

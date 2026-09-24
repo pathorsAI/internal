@@ -66,11 +66,13 @@ export type TxnFilters = {
   accountId?: number;
   projectId?: number;
   period?: string; // YYYY-MM
+  /** 只看自動匯入、還沒人確認的列（Wise 同步）。 */
+  needsReview?: boolean;
 };
 
 // 內外帳列表與筆數共用的 where（篩選條件的 single source of truth）
 function txnWhere(orgId: string, filters: TxnFilters) {
-  const { book, categoryId, accountId, projectId, period } = filters;
+  const { book, categoryId, accountId, projectId, period, needsReview } = filters;
   return and(
     eq(transactions.organizationId, orgId),
     book ? eq(transactions.book, book) : undefined,
@@ -83,6 +85,7 @@ function txnWhere(orgId: string, filters: TxnFilters) {
       : undefined,
     projectId ? eq(transactions.projectId, projectId) : undefined,
     period ? sql`to_char(${transactions.txnDate}, 'YYYY-MM') = ${period}` : undefined,
+    needsReview === undefined ? undefined : eq(transactions.needsReview, needsReview),
     isNull(transactions.deletedAt),
   );
 }
@@ -137,6 +140,9 @@ export async function listTransactions(
       toAccount: toAcct.name,
       partyName: parties.name,
       settleName: employees.name,
+      needsReview: transactions.needsReview,
+      externalSource: transactions.externalSource,
+      externalRef: transactions.externalRef,
     })
     .from(transactions)
     .leftJoin(categories, eq(categories.id, transactions.categoryId))
