@@ -305,7 +305,15 @@ export const transactions = pgTable("transactions", {
 	billingItemId: bigint("billing_item_id", { mode: "number" }),
 	// 撥款 / 薪資匯入的員工帳戶（migrations/0024），選填。與 fromAccountId（公司帳本帳戶）無關。
 	settleToAccountId: bigint("settle_to_account_id", { mode: "number" }),
+	// 外部來源（migrations/0026）：自動匯入的交易（Wise 同步）用 (org, source, ref) 去重，
+	// 原始細節放 externalMeta，needsReview = 還沒有人確認過（指定分類後清掉）。
+	externalSource: text("external_source"),
+	externalRef: text("external_ref"),
+	externalMeta: jsonb("external_meta").$type<Record<string, unknown>>(),
+	needsReview: boolean("needs_review").default(false).notNull(),
 }, (table) => [
+	uniqueIndex("uq_txn_external_ref").on(table.organizationId, table.externalSource, table.externalRef).where(sql`external_ref IS NOT NULL`),
+	index("idx_txn_needs_review").on(table.organizationId).where(sql`needs_review AND deleted_at IS NULL`),
 	index("idx_txn_settle_to").using("btree", table.settleToAccountId.asc().nullsLast().op("int8_ops")),
 	foreignKey({
 			columns: [table.settleToAccountId],
@@ -359,6 +367,7 @@ export const transactions = pgTable("transactions", {
 		}),
 	check("chk_txn_book", sql`book = ANY (ARRAY['both'::text, 'internal'::text, 'external'::text])`),
 	check("chk_txn_type", sql`type = ANY (ARRAY['expense'::text, 'income'::text, 'advance'::text, 'reimbursement'::text, 'transfer'::text])`),
+	check("chk_txn_external_ref_source", sql`external_ref IS NULL OR external_source IS NOT NULL`),
 ]);
 
 export const accountReconciliations = pgTable("account_reconciliations", {

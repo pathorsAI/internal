@@ -75,7 +75,7 @@ function deriveMcpAudit(name: string, out: unknown): McpAudit | null {
 
 /** Bump on every published change to tools, schemas or instructions. Clients
  *  (and OpenAI's plugin "Scan Tools") key their cached snapshot off this. */
-export const SERVER_VERSION = "1.4.0";
+export const SERVER_VERSION = "1.5.0";
 
 /** Public base URL of this deployment; doubles as the OAuth issuer.
  *  Keep in sync with the `resource` passed to `mcp()` in src/lib/auth.ts. */
@@ -111,7 +111,7 @@ const LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0];
 // belong to multiple organizations and we never guess.
 const INSTRUCTIONS = [
   "This server is the operational surface for one organization's bookkeeping: ledger transactions (內外帳), parties, categories, bank accounts, invoices, projects, subscriptions, contracts, employees, payroll records, and reconciliations.",
-  "It is a bookkeeping system and nothing else. Every write creates or edits a record in this organization's own books. No tool moves money: none of them initiates, authorizes or executes a payment, transfer, payout or trade, and the server is not connected to any bank, card or payment provider. Words like pay, payment, transfer, salary, reimbursement and advance always describe an entry being recorded, never money being sent.",
+  "It is a bookkeeping system and nothing else. Every write creates or edits a record in this organization's own books. No tool moves money: none of them initiates, authorizes or executes a payment, transfer, payout or trade, and the server cannot instruct any bank, card or payment provider — the only bank link is an optional, read-only Wise integration (wise_* tools) that reads balances and statements and can import them into the ledger. Words like pay, payment, transfer, salary, reimbursement and advance always describe an entry being recorded, never money being sent.",
   "The signed-in account may belong to multiple organizations.",
   "At the start of each session, before calling any org-scoped tool, call list_organizations and ask the user which organization to work in.",
   "If list_organizations is empty, or the user says they were invited to an organization, call list_my_invitations and offer to accept the right one with accept_invitation after the user confirms — invitations are sent from the web app, and this is the only way to join an organization over MCP.",
@@ -263,6 +263,10 @@ function toolAnnotations(name: string, explicit?: ToolAnnotations): ToolAnnotati
 // Reaches outside our own database, so it cannot claim a closed world.
 const OPENWORLD_OVERRIDES: Record<string, Partial<ToolAnnotations>> = {
   sync_billing_calendar: { openWorldHint: true },
+  // Read-only calls to the Wise API (GET only); sync writes only our own ledger.
+  wise_list_balances: { openWorldHint: true },
+  wise_get_statement: { openWorldHint: true },
+  wise_sync_transactions: { openWorldHint: true },
 };
 
 // Writes that are irreversible from MCP even though the verb isn't "delete".

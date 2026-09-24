@@ -39,6 +39,7 @@ import {
 } from "./shared";
 import { resolvePayoutAccount } from "@/db/employee-accounts";
 import { PAYOUT_ACCOUNT_SCHEMA, payoutAccountOutput } from "./tools-employee-accounts";
+import { externalSingleLegSide } from "@/lib/external-transfer";
 import {
   assertAccountCurrency,
   findMismatchInMap,
@@ -73,6 +74,22 @@ const TXN_ROW_PROPS: Record<string, unknown> = {
   billingItemId: { type: ["number", "null"] },
   invoiceId: { type: ["number", "null"] },
   relatedToId: { type: ["number", "null"], description: "The advance a reimbursement pays back." },
+  externalSource: {
+    type: ["string", "null"],
+    description: "Where an imported row came from (e.g. 'wise'); null for entries typed in by hand.",
+  },
+  externalRef: {
+    type: ["string", "null"],
+    description: "The source's unique reference (Wise referenceNumber); dedupe key with externalSource.",
+  },
+  externalMeta: {
+    type: ["object", "null"],
+    description: "Raw non-secret details from the source (merchant, original amount, rate, fees, card last four).",
+  },
+  needsReview: {
+    type: "boolean",
+    description: "Imported automatically and not yet confirmed by a person (category still to be chosen).",
+  },
   deletedAt: { type: ["string", "null"] },
   createdAt: { type: "string" },
   updatedAt: { type: "string" },
@@ -149,6 +166,16 @@ const TXN_LIST_ROW = rowSchema({
   },
   settleToBankName: { type: ["string", "null"] },
   settleToAccountLast5: { type: ["string", "null"], description: "Masked: last 5 characters only." },
+  needsReview: {
+    type: "boolean",
+    description: "Imported automatically (e.g. Wise sync) and not yet confirmed; set a category to clear it.",
+  },
+  externalSource: { type: ["string", "null"], description: "e.g. 'wise'; null when entered by hand." },
+  externalRef: { type: ["string", "null"], description: "Source reference, e.g. Wise referenceNumber." },
+  externalMeta: {
+    type: ["object", "null"],
+    description: "Raw details from the source (merchant, original amount, rate, fees; for a Wise conversion leg: conversion.counterCurrency).",
+  },
 });
 
 // getOverview 已經把聚合結果轉成 number。
@@ -566,6 +593,7 @@ function applyTxnAmountPatch(
   patch: Record<string, unknown>,
   args: Record<string, unknown>,
   existing: { type: string; amount: string; currency: string },
+  singleLeg = false,
 ) {
   const amountProvided = optNumber(args, "amount") !== undefined;
   const currencyProvided = optString(args, "currency") !== undefined;
@@ -577,15 +605,18 @@ function applyTxnAmountPatch(
     patch.amountTwd = currency === "TWD" ? amount : null;
   }
   if (optBoolean(args, "reported") !== undefined) {
+    // 外部同步的單腳轉帳（Wise 換匯）不套「轉帳固定 both」，照 reported 決定。
     patch.book =
-      existing.type === "transfer" || optBoolean(args, "reported") ? "both" : "internal";
+      (existing.type === "transfer" && !singleLeg) || optBoolean(args, "reported")
+        ? "both"
+        : "internal";
   }
 }
 
 export const transactionTools: Record<string, ToolDef> = {
   list_transactions: {
     description:
-      "List ledger transactions (內外帳), newest first. Optional filters: book, categoryId, accountId, projectId, period (YYYY-MM).",
+      "List ledger transactions (內外帳), newest first. Optional filters: book, categoryId, accountId, projectId, period (YYYY-MM), needsReview (true = rows imported by an integration such as the Wise sync that nobody has confirmed yet — review them and set a category with update_transaction).",
     inputSchema: {
       type: "object",
       properties: {
@@ -594,6 +625,10 @@ export const transactionTools: Record<string, ToolDef> = {
         accountId: { type: "number", description: "Matches from OR to account." },
         projectId: { type: "number" },
         period: { type: "string", description: "Month filter, YYYY-MM." },
+        needsReview: {
+          type: "boolean",
+          description: "true = only imported rows awaiting review (待確認); false = only confirmed rows.",
+        },
         limit: { type: "number", description: "Default 100." },
         ...ORG_ARG,
       },
@@ -608,6 +643,7 @@ export const transactionTools: Record<string, ToolDef> = {
         accountId: optNumber(args, "accountId"),
         projectId: optNumber(args, "projectId"),
         period: optString(args, "period"),
+        needsReview: optBoolean(args, "needsReview"),
       };
       const db = getDb();
       if (filters.categoryId !== undefined)
@@ -915,7 +951,7 @@ export const transactionTools: Record<string, ToolDef> = {
 
   update_transaction: {
     description:
-      "Edit a transaction's date, amount, currency, description, category (categoryId 0 clears it → 未分類), project, contract, subscription, subscription period, reported flag, or billedToCompanyTaxId (有報公司統編) — only provided fields change. To change the account or counterparty, delete and recreate, or use the app. If the edit touches a contract-linked transaction, the result carries `contractProgress` for the contracts involved — when an entry is `fullyCollected` while the contract is still draft/active, tell the user and ask whether to set that contract to completed (已完成) via update_contract; never flip the status without asking.",
+      "Edit a transaction's date, amount, currency, description, category (categoryId 0 clears it → 未分類; setting a category also clears needsReview on imported rows), needsReview (待確認 flag on rows imported by e.g. the Wise sync; pass false to confirm a row without choosing a category; a synced Wise currency conversion is a transfer with only one account set — that is expected and it can be edited like any other row), project, contract, subscription, subscription period, reported flag, or billedToCompanyTaxId (有報公司統編) — only provided fields change. To change the account or counterparty, delete and recreate, or use the app. If the edit touches a contract-linked transaction, the result carries `contractProgress` for the contracts involved — when an entry is `fullyCollected` while the contract is still draft/active, tell the user and ask whether to set that contract to completed (已完成) via update_contract; never flip the status without asking.",
     inputSchema: {
       type: "object",
       properties: {
@@ -934,6 +970,10 @@ export const transactionTools: Record<string, ToolDef> = {
         },
         reported: { type: "boolean" },
         billedToCompanyTaxId: { type: "boolean", description: "有報公司統編（進項可扣抵）。" },
+        needsReview: {
+          type: "boolean",
+          description: "待確認 flag of imported rows. false = mark as reviewed. Setting a non-zero categoryId clears it automatically.",
+        },
         ...ORG_ARG,
       },
       required: ["id"],
@@ -965,11 +1005,13 @@ export const transactionTools: Record<string, ToolDef> = {
           contractId: transactions.contractId,
           fromAccountId: transactions.fromAccountId,
           toAccountId: transactions.toAccountId,
+          externalSource: transactions.externalSource,
         })
         .from(transactions)
         .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)))
         .limit(1);
       if (!existing) throw new Error(`Transaction ${id} not found in your organization.`);
+      const singleLeg = externalSingleLegSide(existing) !== null;
 
       const patch: Record<string, unknown> = { updatedAt: new Date().toISOString() };
       if (optDate(args, "txnDate") !== undefined) patch.txnDate = optDate(args, "txnDate");
@@ -979,7 +1021,12 @@ export const transactionTools: Record<string, ToolDef> = {
         patch.billedToCompanyTaxId = optBoolean(args, "billedToCompanyTaxId");
       }
       await applyTxnRelationPatch(patch, db, args, orgId);
-      applyTxnAmountPatch(patch, args, existing);
+      // 指定了分類 = 有人看過這筆了；自動匯入（Wise 同步）的「待確認」一併清掉。
+      if (typeof patch.categoryId === "number") patch.needsReview = false;
+      if (optBoolean(args, "needsReview") !== undefined) {
+        patch.needsReview = optBoolean(args, "needsReview");
+      }
+      applyTxnAmountPatch(patch, args, existing, singleLeg);
       // 這支工具改不了帳戶，但改得了幣別 —— 改完仍要跟原本綁的帳戶對得起來。
       if (typeof patch.currency === "string") {
         await assertAccountCurrency(db, orgId, patch.currency, [

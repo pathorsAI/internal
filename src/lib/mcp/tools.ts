@@ -33,6 +33,7 @@ import { employeeAccountTools } from "./tools-employee-accounts";
 import { billingItemTools } from "./tools-billing";
 import { orgTools } from "./tools-org";
 import { integrationTools } from "./tools-integrations";
+import { wiseTools } from "./tools-wise";
 
 export type { ToolContext, ToolDef } from "./shared";
 
@@ -719,4 +720,5 @@ export const tools: Record<string, ToolDef> = {
   ...hrTools,
   ...integrationTools,
   ...employeeAccountTools,
+  ...wiseTools,
 };

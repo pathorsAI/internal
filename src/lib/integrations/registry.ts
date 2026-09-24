@@ -1,4 +1,5 @@
 import type { IntegrationProvider, IntegrationProviderId } from "./types";
+import { wiseProvider } from "./wise";
 
 /**
  * 已實作的整合。目前是空的：框架先上，Simpany / Wise 的實作各自接上來。
@@ -28,7 +29,9 @@ import type { IntegrationProvider, IntegrationProviderId } from "./types";
  * 顯示用的資料（名稱、欄位、logo）不在這裡，在 catalog.ts 與 i18n。
  * ─────────────────────────────────────────────────────────────────────
  */
-const PROVIDERS: Partial<Record<IntegrationProviderId, IntegrationProvider>> = {};
+const PROVIDERS: Partial<Record<IntegrationProviderId, IntegrationProvider>> = {
+  wise: wiseProvider,
+};
 
 /** 取實作；還沒實作的回 null（設定頁據此停用「連接」）。 */
 export function getProvider(id: IntegrationProviderId): IntegrationProvider | null {

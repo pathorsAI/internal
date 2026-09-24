@@ -21,6 +21,7 @@ import members from "./members";
 import activity from "./activity";
 import settings from "./settings";
 import integrations from "./integrations";
+import wise from "./wise";
 import auth from "./auth";
 import errors from "./errors";
 import lib from "./lib";
@@ -50,6 +51,7 @@ const catalogue = {
   activity,
   settings,
   integrations,
+  wise,
   auth,
   errors,
   lib,
