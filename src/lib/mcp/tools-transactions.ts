@@ -37,6 +37,8 @@ import {
   rowSchema,
   type ToolDef,
 } from "./shared";
+import { resolvePayoutAccount } from "@/db/employee-accounts";
+import { PAYOUT_ACCOUNT_SCHEMA, payoutAccountOutput } from "./tools-employee-accounts";
 import {
   assertAccountCurrency,
   findMismatchInMap,
@@ -141,6 +143,12 @@ const TXN_LIST_ROW = rowSchema({
   toAccount: { type: ["string", "null"], description: "Name of toAccountId." },
   partyName: { type: ["string", "null"] },
   settleName: { type: ["string", "null"], description: "Employee who fronted an advance." },
+  settleToAccountId: {
+    type: ["number", "null"],
+    description: "Employee bank account a reimbursement / salary was recorded as paid into.",
+  },
+  settleToBankName: { type: ["string", "null"] },
+  settleToAccountLast5: { type: ["string", "null"], description: "Masked: last 5 characters only." },
 });
 
 // getOverview 已經把聚合結果轉成 number。
@@ -159,6 +167,10 @@ const ADVANCE_ROW = rowSchema({
   currency: { type: "string", description: "3-letter code." },
   description: { type: ["string", "null"] },
   vendorName: { type: ["string", "null"], description: "Who the employee paid." },
+  settleEmployeeId: {
+    type: ["number", "null"],
+    description: "Employee owed the money back; see list_employee_bank_accounts for where to repay.",
+  },
   settleName: { type: ["string", "null"], description: "Employee owed the money back." },
   categoryName: { type: ["string", "null"] },
 });
@@ -1052,6 +1064,11 @@ export const transactionTools: Record<string, ToolDef> = {
         fromAccountId: { type: "number", description: "Ledger account the repayment is booked against." },
         payDate: { type: "string", description: "YYYY-MM-DD." },
         amount: { type: "number" },
+        toEmployeeAccountId: {
+          type: "number",
+          description:
+            "Optional: which of the employee's bank accounts the repayment went into (see list_employee_bank_accounts). Defaults to the employee's reimbursement-default account when omitted. Must belong to the advance's employee and be active.",
+        },
         ...ORG_ARG,
       },
       required: ["advanceId", "fromAccountId", "payDate", "amount"],
@@ -1060,8 +1077,8 @@ export const transactionTools: Record<string, ToolDef> = {
     // 回的是新建的那一列（type='reimbursement'，relatedToId 指回原代墊）。
     outputSchema: {
       type: "object",
-      properties: { ...TXN_ROW_PROPS },
-      required: TXN_ROW_REQUIRED,
+      properties: { ...TXN_ROW_PROPS, paidToAccount: PAYOUT_ACCOUNT_SCHEMA },
+      required: [...TXN_ROW_REQUIRED, "paidToAccount"],
     },
     execute: async (args, ctx) => {
       const advanceId = requireNumber(args, "advanceId");
@@ -1087,6 +1104,13 @@ export const transactionTools: Record<string, ToolDef> = {
       const currency = adv.currency ?? "TWD";
       // 撥款的幣別跟著原代墊走，付款帳戶必須是同一種幣別。
       await assertAccountCurrency(db, orgId, currency, [fromAccountId]);
+      // 匯入代墊人的哪個帳戶：有指定就驗歸屬與啟用，沒指定就用報銷預設（可能沒有）。
+      const payout = await resolvePayoutAccount(
+        orgId,
+        adv.settleEmployeeId,
+        "reimbursement",
+        optNumber(args, "toEmployeeAccountId") ?? null,
+      );
       const [row] = await db
         .insert(transactions)
         .values({
@@ -1094,6 +1118,7 @@ export const transactionTools: Record<string, ToolDef> = {
           type: "reimbursement",
           txnDate: payDate,
           settleEmployeeId: adv.settleEmployeeId,
+          settleToAccountId: payout?.id ?? null,
           amount,
           currency,
           amountTwd: currency === "TWD" ? amount : null,
@@ -1103,7 +1128,7 @@ export const transactionTools: Record<string, ToolDef> = {
           description: "撥款還代墊",
         })
         .returning();
-      return row;
+      return { ...row, paidToAccount: payoutAccountOutput(payout) };
     },
   },
 };

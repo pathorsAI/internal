@@ -41,7 +41,26 @@ import {
   type ToolDef,
 } from "./shared";
 import { assertAccountCurrency } from "@/lib/account-currency";
-import { isValidEmail, maskBankAccount, maskNationalId } from "@/lib/pii";
+import { isValidEmail, maskBankAccount } from "@/lib/pii";
+import {
+  createEmployeeAccount,
+  groupAccountsByEmployee,
+  listEmployeeAccounts,
+  nationalIdColumns,
+  readMaskedNationalId,
+  resolvePayoutAccount,
+} from "@/db/employee-accounts";
+import {
+  LEGACY_ACCOUNT_NOTE,
+  parseLegacySalaryAccount,
+  type MaskedEmployeeAccount,
+} from "@/lib/employee-accounts";
+import {
+  EMPLOYEE_ACCOUNT_ROW,
+  PAYOUT_ACCOUNT_SCHEMA,
+  assertCanManageEmployees,
+  payoutAccountOutput,
+} from "./tools-employee-accounts";
 
 const EMPLOYMENT_TYPES = ["full_time", "part_time", "freelancer", "contractor"] as const;
 
@@ -94,15 +113,50 @@ function checkEmailArg(args: Record<string, unknown>, key: string) {
 }
 
 // 員工資料離開 MCP 前遮罩身分證字號與薪轉帳戶 — MCP 的用途（payroll、
-// 聯絡資訊查詢）不需要完整值；完整值只在網頁端看得到。
-function redactEmployee<T extends { nationalId: string | null; salaryAccount: string | null }>(
-  e: T,
-): T {
+// 聯絡資訊查詢）不需要完整值；完整值只在網頁端給 owner / admin 看。
+// national_id_enc（密文）不能出現在輸出裡，連密文都不給。
+type EmployeeRowIn = typeof employees.$inferSelect;
+
+async function redactEmployee(e: EmployeeRowIn, accounts: MaskedEmployeeAccount[]) {
+  // 密文欄位整個拿掉（schema 是封閉的，多一個 key 也會讓 structuredContent 不合法）
+  const rest: Partial<EmployeeRowIn> = { ...e };
+  delete rest.nationalIdEnc;
+  const salaryDefault = accounts.find((a) => a.defaultForSalary && a.isActive);
   return {
-    ...e,
-    nationalId: maskNationalId(e.nationalId),
-    salaryAccount: maskBankAccount(e.salaryAccount),
+    ...(rest as Omit<EmployeeRowIn, "nationalIdEnc">),
+    nationalId: await readMaskedNationalId(e),
+    // 相容舊欄位：有薪資預設帳戶就用它的末 5 碼，否則退回舊的自由文字（遮罩）。
+    salaryAccount: salaryDefault
+      ? `****${salaryDefault.accountLast5}`
+      : maskBankAccount(e.salaryAccount),
+    bankAccounts: accounts,
   };
+}
+
+/** 單筆員工 → MCP 輸出（含遮罩後的帳戶清單）。 */
+async function employeeOut(orgId: string, e: EmployeeRowIn) {
+  return redactEmployee(e, await listEmployeeAccounts(orgId, e.id));
+}
+
+/**
+ * 舊的 salaryAccount 參數（已淘汰）：不再寫進明文欄位，改建一個「薪資預設」帳戶
+ * （帳號加密）。這樣舊的 MCP 呼叫端照樣能用，DB 裡也不會多出明文帳號。
+ */
+async function salaryAccountArgToAccount(
+  orgId: string,
+  employeeId: number,
+  holder: string,
+  raw: string | undefined,
+) {
+  const parsed = raw ? parseLegacySalaryAccount(raw) : null;
+  if (!parsed) return;
+  await createEmployeeAccount(orgId, employeeId, {
+    ...parsed,
+    accountHolder: holder,
+    currency: "TWD",
+    defaultForSalary: true,
+    note: LEGACY_ACCOUNT_NOTE,
+  });
 }
 
 // 員工列（employees 全欄位）離開 MCP 時的形狀。drizzle 的 numeric 欄位回傳的是
@@ -127,7 +181,7 @@ const EMPLOYEE_PROPS = {
   salaryAccount: {
     type: ["string", "null"],
     description:
-      "Masked: only the last 5 characters survive, the rest become '*' (e.g. ****12345). Null when unset.",
+      "Deprecated — see bankAccounts. Masked: the last 5 characters of the salary-default account (e.g. ****12345), or of the legacy free-text value. Null when unset.",
   },
   startDate: { type: ["string", "null"], description: "YYYY-MM-DD." },
   endDate: { type: ["string", "null"], description: "YYYY-MM-DD." },
@@ -139,6 +193,12 @@ const EMPLOYEE_PROPS = {
   userId: { type: ["string", "null"], description: "Bound login user id, or null." },
   createdAt: { type: "string", description: "ISO 8601 timestamp." },
   deletedAt: { type: ["string", "null"], description: "ISO 8601 timestamp." },
+  bankAccounts: {
+    type: "array",
+    description:
+      "The employee's bank accounts, masked (last 5 characters only). Manage them with the *_employee_bank_account tools.",
+    items: EMPLOYEE_ACCOUNT_ROW,
+  },
 };
 // 這些 tool 都用 `.returning()` 回整列，欄位一定到齊（值可能是 null）。
 const EMPLOYEE_REQUIRED = Object.keys(EMPLOYEE_PROPS);
@@ -188,6 +248,12 @@ const PAYSLIP_ROW = rowSchema({
     type: ["number", "null"],
     description: "The salary-expense ledger entry; null while the payslip is still unbooked.",
   },
+  paidToAccountId: {
+    type: ["number", "null"],
+    description: "Employee bank account the salary was recorded as paid into; see list_employee_bank_accounts.",
+  },
+  paidToBankName: { type: ["string", "null"] },
+  paidToAccountLast5: { type: ["string", "null"], description: "Masked: last 5 characters only." },
 });
 
 const RECONCILIATION_LIST_ROW = rowSchema({
@@ -246,10 +312,9 @@ async function checkEmployeeUserBinding(orgId: string, userId: string, excludeEm
 }
 
 // update_employee 可搬運的欄位，依取值方式分三組。
+// nationalId（加密）與 salaryAccount（轉成帳戶）另外處理，不在這裡。
 const EMPLOYEE_STRING_FIELDS = [
-  "nationalId",
   "employmentType",
-  "salaryAccount",
   "startDate",
   "endDate",
   "workEmail",
@@ -302,7 +367,7 @@ export const hrTools: Record<string, ToolDef> = {
   // ---- employees ----
   list_employees: {
     description:
-      "List employees (for payroll records, advances, reimbursements). National ID and salary account are masked; use the web app when the full values are needed.",
+      "List employees (for payroll records, advances, reimbursements), each with their bank accounts. National ID and account numbers are masked; the full values are only visible to owners/admins in the web app.",
     inputSchema: {
       type: "object",
       properties: { limit: { type: "number", description: "Default 200." }, ...ORG_ARG },
@@ -314,17 +379,22 @@ export const hrTools: Record<string, ToolDef> = {
       required: EMPLOYEE_REQUIRED,
       additionalProperties: false,
     }),
-    execute: async (args, ctx) =>
-      listResult(
-        (await listEmployees(await resolveOrg(args, ctx), optNumber(args, "limit") ?? 200)).map(
-          redactEmployee,
-        ),
-      ),
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      const [rows, accounts] = await Promise.all([
+        listEmployees(orgId, optNumber(args, "limit") ?? 200),
+        listEmployeeAccounts(orgId),
+      ]);
+      const byEmployee = groupAccountsByEmployee(accounts);
+      return listResult(
+        await Promise.all(rows.map((e) => redactEmployee(e, byEmployee.get(e.id) ?? []))),
+      );
+    },
   },
 
   get_employee: {
     description:
-      "Get one employee by id. National ID and salary account are masked; use the web app when the full values are needed.",
+      "Get one employee by id, with their bank accounts. National ID and account numbers are masked; the full values are only visible to owners/admins in the web app.",
     inputSchema: {
       type: "object",
       properties: { id: { type: "number" }, ...ORG_ARG },
@@ -341,8 +411,9 @@ export const hrTools: Record<string, ToolDef> = {
       additionalProperties: false,
     },
     execute: async (args, ctx) => {
-      const row = await getEmployee(await resolveOrg(args, ctx), requireNumber(args, "id"));
-      return row ? redactEmployee(row) : { error: "Not found." };
+      const orgId = await resolveOrg(args, ctx);
+      const row = await getEmployee(orgId, requireNumber(args, "id"));
+      return row ? employeeOut(orgId, row) : { error: "Not found." };
     },
   },
 
@@ -355,17 +426,21 @@ export const hrTools: Record<string, ToolDef> = {
   },
 
   create_employee: {
-    description: "Create an employee.",
+    description:
+      "Create an employee (owner/admin only). nationalId is stored encrypted. salaryAccount is deprecated: when given it becomes an encrypted bank account set as the salary default — prefer create_employee_bank_account.",
     inputSchema: {
       type: "object",
       properties: {
         name: { type: "string" },
-        nationalId: { type: "string" },
+        nationalId: { type: "string", description: "Stored encrypted; returned masked." },
         employmentType: { type: "string", enum: [...EMPLOYMENT_TYPES], description: "Default full_time." },
         baseSalary: { type: "number" },
         laborInsuredSalary: { type: "number" },
         healthInsuredSalary: { type: "number" },
-        salaryAccount: { type: "string" },
+        salaryAccount: {
+          type: "string",
+          description: "Deprecated: creates a salary-default bank account instead (see create_employee_bank_account).",
+        },
         startDate: { type: "string", description: "YYYY-MM-DD." },
         endDate: { type: "string", description: "YYYY-MM-DD." },
         workEmail: { type: "string" },
@@ -393,6 +468,7 @@ export const hrTools: Record<string, ToolDef> = {
     },
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
+      await assertCanManageEmployees(orgId, ctx.userId);
       checkEmploymentType(optString(args, "employmentType"));
       checkEmailArg(args, "workEmail");
       checkEmailArg(args, "personalEmail");
@@ -405,12 +481,11 @@ export const hrTools: Record<string, ToolDef> = {
         .values({
           organizationId: orgId,
           name: requireString(args, "name"),
-          nationalId: optString(args, "nationalId") ?? null,
+          ...(await nationalIdColumns(optString(args, "nationalId"))),
           employmentType: optString(args, "employmentType") ?? "full_time",
           baseSalary: optDecimal(args, "baseSalary") ?? null,
           laborInsuredSalary,
           healthInsuredSalary,
-          salaryAccount: optString(args, "salaryAccount") ?? null,
           startDate: optString(args, "startDate") ?? null,
           endDate: optString(args, "endDate") ?? null,
           workEmail: optString(args, "workEmail") ?? null,
@@ -426,23 +501,28 @@ export const hrTools: Record<string, ToolDef> = {
           hasPension: optBoolean(args, "hasPension") ?? false,
         })
         .returning();
-      return redactEmployee(row);
+      await salaryAccountArgToAccount(orgId, row.id, row.name, optString(args, "salaryAccount"));
+      return employeeOut(orgId, row);
     },
   },
 
   update_employee: {
-    description: "Update an employee (only provided fields). Set isActive=false to mark as left.",
+    description:
+      "Update an employee (owner/admin only; only provided fields). Set isActive=false to mark as left. nationalId is stored encrypted. salaryAccount is deprecated: when given it adds an encrypted bank account and makes it the salary default — prefer the *_employee_bank_account tools.",
     inputSchema: {
       type: "object",
       properties: {
         id: { type: "number" },
         name: { type: "string" },
-        nationalId: { type: "string" },
+        nationalId: { type: "string", description: "Stored encrypted; returned masked." },
         employmentType: { type: "string", enum: [...EMPLOYMENT_TYPES] },
         baseSalary: { type: "number" },
         laborInsuredSalary: { type: "number" },
         healthInsuredSalary: { type: "number" },
-        salaryAccount: { type: "string" },
+        salaryAccount: {
+          type: "string",
+          description: "Deprecated: adds a salary-default bank account instead (see create_employee_bank_account).",
+        },
         startDate: { type: "string", description: "YYYY-MM-DD." },
         endDate: { type: "string", description: "YYYY-MM-DD." },
         workEmail: { type: "string" },
@@ -472,24 +552,40 @@ export const hrTools: Record<string, ToolDef> = {
     execute: async (args, ctx) => {
       const id = requireNumber(args, "id");
       const orgId = await resolveOrg(args, ctx);
+      await assertCanManageEmployees(orgId, ctx.userId);
       checkEmploymentType(optString(args, "employmentType"));
       checkEmailArg(args, "workEmail");
       checkEmailArg(args, "personalEmail");
       const patch = buildEmployeePatch(args);
       if ("userId" in args) patch.userId = await resolveEmployeeUserId(args, orgId, id);
-      if (Object.keys(patch).length === 0) throw new Error("Nothing to update.");
-      const [row] = await getDb()
-        .update(employees)
-        .set(patch)
-        .where(and(eq(employees.organizationId, orgId), eq(employees.id, id)))
-        .returning();
+      if (optString(args, "nationalId") !== undefined) {
+        Object.assign(patch, await nationalIdColumns(optString(args, "nationalId")));
+      }
+      const salaryAccount = optString(args, "salaryAccount");
+      if (Object.keys(patch).length === 0 && salaryAccount === undefined) {
+        throw new Error("Nothing to update.");
+      }
+      const db = getDb();
+      await assertInOrg(db, employees, id, orgId, "Employee");
+      let row: EmployeeRowIn | undefined;
+      if (Object.keys(patch).length > 0) {
+        [row] = await db
+          .update(employees)
+          .set(patch)
+          .where(and(eq(employees.organizationId, orgId), eq(employees.id, id)))
+          .returning();
+      } else {
+        row = (await getEmployee(orgId, id)) ?? undefined;
+      }
       if (!row) throw new Error(`Employee ${id} not found in your organization.`);
-      return redactEmployee(row);
+      await salaryAccountArgToAccount(orgId, id, row.name, salaryAccount);
+      return employeeOut(orgId, row);
     },
   },
 
   delete_employee: {
-    description: "Delete an employee. Fails if payroll/transactions reference them — deactivate instead.",
+    description:
+      "Delete an employee (owner/admin only). Fails if payroll/transactions reference them — deactivate instead.",
     inputSchema: {
       type: "object",
       properties: { id: { type: "number" }, ...ORG_ARG },
@@ -505,6 +601,7 @@ export const hrTools: Record<string, ToolDef> = {
     execute: async (args, ctx) => {
       const id = requireNumber(args, "id");
       const orgId = await resolveOrg(args, ctx);
+      await assertCanManageEmployees(orgId, ctx.userId);
       const db = getDb();
       await assertInOrg(db, employees, id, orgId, "Employee");
       await db
@@ -673,6 +770,11 @@ export const hrTools: Record<string, ToolDef> = {
           enum: ["both", "internal", "external"],
           description: "Ledger book; default both (reported). Use internal to keep it off the tax books.",
         },
+        toEmployeeAccountId: {
+          type: "number",
+          description:
+            "Optional: which of the employee's bank accounts the salary went into (see list_employee_bank_accounts). Defaults to the employee's salary-default account when omitted. Must belong to this employee and be active.",
+        },
         items: {
           type: "array",
           description:
@@ -710,6 +812,7 @@ export const hrTools: Record<string, ToolDef> = {
         netPay: { type: "number", description: "taxable + nontaxable − deduction, in TWD." },
         book: { type: "string", enum: ["both", "internal", "external"] },
         transactionId: { type: "number", description: "The salary-expense transaction posted." },
+        paidToAccount: PAYOUT_ACCOUNT_SCHEMA,
         // 只有找不到「薪資費用」科目時才會出現，所以不列進 required。
         note: { type: "string" },
       },
@@ -726,6 +829,7 @@ export const hrTools: Record<string, ToolDef> = {
         "netPay",
         "book",
         "transactionId",
+        "paidToAccount",
       ],
       additionalProperties: false,
     },
@@ -759,6 +863,13 @@ export const hrTools: Record<string, ToolDef> = {
       const db = getDb();
       await assertInOrg(db, employees, employeeId, orgId, "Employee");
       await assertInOrg(db, bankAccounts, fromAccountId, orgId, "Account");
+      // 匯入員工的哪個帳戶：有指定就驗歸屬與啟用，沒指定就用薪資預設（可能沒有）。
+      const payout = await resolvePayoutAccount(
+        orgId,
+        employeeId,
+        "salary",
+        optNumber(args, "toEmployeeAccountId") ?? null,
+      );
 
       // Find or create the month's payroll run.
       let runId: number;
@@ -816,6 +927,7 @@ export const hrTools: Record<string, ToolDef> = {
           description: `${period} 薪資 - ${emp?.name ?? ""}`.trim(),
           categoryId: cat?.id ?? null,
           settleEmployeeId: employeeId,
+          settleToAccountId: payout?.id ?? null,
           amount: String(net),
           currency: "TWD",
           amountTwd: String(net),
@@ -831,6 +943,7 @@ export const hrTools: Record<string, ToolDef> = {
         deductionTotal: String(deduction),
         netPay: String(net),
         paidTransactionId: txn.id,
+        paidToAccountId: payout?.id ?? null,
       };
       let payslipId: number;
       if (existing) {
@@ -870,6 +983,7 @@ export const hrTools: Record<string, ToolDef> = {
         netPay: net,
         book,
         transactionId: txn.id,
+        paidToAccount: payoutAccountOutput(payout),
         note: cat?.id ? undefined : "No '薪資費用' category found — the expense was recorded uncategorized.",
       };
     },
