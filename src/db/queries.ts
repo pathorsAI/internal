@@ -462,6 +462,11 @@ export async function listInvoicesDetailed(
       billingItemTitle: billingItems.title,
       externalStatus: invoices.externalStatus,
       externalRef: invoices.externalRef,
+      taxTreatment: invoices.taxTreatment,
+      zeroRateReason: invoices.zeroRateReason,
+      invoiceType: invoices.invoiceType,
+      voidedAt: invoices.voidedAt,
+      voidReason: invoices.voidReason,
     })
     .from(invoices)
     .leftJoin(parties, eq(parties.id, invoices.partyId))

@@ -103,9 +103,13 @@ the `tools-*.ts` modules):
 - MCP `annotations`: `readOnlyHint` / `destructiveHint` / `idempotentHint`
   derived from the verb, plus `openWorldHint`, which is `false` for everything
   except the tools that reach a third-party system: `sync_billing_calendar`
-  (writes to Google Calendar) and the three `wise_*` tools (read-only GETs to
-  Wise; they declare their own read/write annotations). Four overrides correct
-  the verb heuristic: `sync_billing_calendar` gets `openWorldHint: true`; `pay_employee_salary` gets `destructiveHint: true`
+  (writes to Google Calendar), the three `wise_*` tools (read-only GETs to
+  Wise) and the `simpany_*` tools. The overrides that correct the verb heuristic:
+  `sync_billing_calendar`, every `wise_*` and every `simpany_*` tool get `openWorldHint: true`;
+  `simpany_void_invoice` gets `destructiveHint: true` (voiding a legal e-invoice
+  cannot be undone); `simpany_list_*` / `simpany_get_invoice` declare
+  `readOnlyHint: true` themselves (their names don't start with `list_`/`get_`);
+  `pay_employee_salary` gets `destructiveHint: true`
   — it writes the payslip plus the salary-expense ledger entry, the month can't
   be booked twice and no tool reverses it; and `set_subscription_period`
   (an upsert) and `unmark_accountant_notified` (clears a flag to null) get
@@ -118,8 +122,9 @@ the `tools-*.ts` modules):
 - `_meta["openai/toolInvocation/invoking" | "invoked"]`, the status line ChatGPT
   shows while a call is in flight.
 
-**Output schemas.** Every tool declares an `outputSchema` — all 74 of them, as of
-server version 1.5.0. When a tool declares one the handler additionally returns
+**Output schemas.** Every tool declares an `outputSchema` — all 85 of them, as of
+server version 1.6.0 (the Simpany tools whose result shape comes from Simpany's
+unofficial API declare an open object schema). When a tool declares one the handler additionally returns
 the result as MCP `structuredContent` (the JSON text block stays, per MCP's
 back-compat recommendation), which is what ChatGPT and Codex prefer over parsing
 JSON out of text. `list_organizations` remains the reference implementation.
@@ -258,6 +263,19 @@ send GET requests to Wise; the sync writes only this organization's ledger
 (internal book, uncategorized, `needsReview`), deduped by Wise reference. Mapping
 balances to ledger accounts and setting the cutover date is done in the web app
 (設定 › 整合 › Wise).
+
+**Simpany e-invoice** (`src/lib/mcp/tools-simpany.ts`, unofficial API — see
+integrations.md):
+
+| Tool | Inputs | Notes |
+| --- | --- | --- |
+| `simpany_list_invoices` | `startDate?`, `endDate?` (default last 90 days), `status?` (`all`/`void`), `query?` | Read straight from Simpany; compact rows incl. invoice number, R-id, type, buyer, total, status, void info. |
+| `simpany_get_invoice` | `invoice` (number like `FW10873802` or R-id) | Full detail: items, tax type, zero-rate reason, emails, MOF upload status. |
+| `simpany_sync_invoices` | `startDate?`, `endDate?` | Owner/admin. Upserts into `invoices` by `external_id`, auto-links unique same-party / same-amount / ±45-day income transactions and billing items / subscription periods, returns `needsReview` for ambiguous ones, clears 開發票日 of voided invoices. Writes only to these books. |
+| `simpany_preview_invoice` | `transactionId?` / `billingItemId?` / `subscriptionId?`+`subscriptionPeriod?`, `type?`, `buyer?{vat,name,address,emails}`, `taxTreatment?`, `zeroRateReason?`, `customsClearance?`, `items?[{name,quantity,price}]`, `isTaxIncluded?`, `remark?`, `foreignCurrency?`, `foreignAmount?`, `exchangeRate?` | Validates and computes amounts exactly like Simpany, warns about duplicates, stores an `invoice_drafts` row (2 h). Does **not** issue. |
+| `simpany_issue_invoice` | `draftId`, `notifyEmails?` | Owner/admin. Issues the previewed draft verbatim — a legal e-invoice uploaded to the MOF and emailed to the buyer. Only after the user approved the preview. Saves + links the invoice. |
+| `simpany_void_invoice` | `invoice`, `reason` (≤ 20 chars) | Owner/admin, destructive. Voids in Simpany, re-syncs, clears 開發票日 / transaction links. |
+| `simpany_list_zero_rate_reasons` | — | Simpany's reason codes (71 外銷貨物, 72 外銷勞務, …). |
 
 **Not exposed (do in the app):** creating an organization, uploading
 invoice/receipt **files** (R2), multi-currency FX entry, and *connecting* Google

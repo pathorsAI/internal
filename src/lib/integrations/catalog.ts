@@ -18,6 +18,11 @@ export const INTEGRATION_CATALOG: Record<IntegrationProviderId, IntegrationCatal
       { key: "account", labelKey: "account", type: "email", required: true, autoComplete: "username" },
       { key: "password", labelKey: "password", type: "password", required: true, autoComplete: "current-password" },
     ],
+    // 帳號底下只有一家公司時自動選；多家才需要填（連接失敗訊息會列出可選的 ID）。
+    configFields: [
+      { key: "companyId", labelKey: "companyId", type: "text", required: false, autoComplete: "off" },
+    ],
+    website: "https://simpany.co",
   },
   wise: {
     id: "wise",

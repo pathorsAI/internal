@@ -43,6 +43,7 @@ const integrations = {
     account: { "zh-TW": "帳號（Email）", en: "Account (email)" },
     password: { "zh-TW": "密碼", en: "Password" },
     apiToken: { "zh-TW": "API Token", en: "API token" },
+    companyId: { "zh-TW": "公司 ID（選填，帳號有多家公司時才需要）", en: "Company ID (optional; only if the account has several companies)" },
   },
   status: {
     notConnected: { "zh-TW": "未連接", en: "Not connected" },
