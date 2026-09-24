@@ -251,7 +251,15 @@ export const transactions = pgTable("transactions", {
 	// 請款項目綁定（選填）：把 income 交易掛到某一筆 billing_items，讓該期「已收多少」
 	// 自動算出來。FK 在 DB 端（migrations/0017）建立，這裡只放欄位避免宣告順序衝突。
 	billingItemId: bigint("billing_item_id", { mode: "number" }),
+	// 外部來源（migrations/0026）：自動匯入的交易（Wise 同步）用 (org, source, ref) 去重，
+	// 原始細節放 externalMeta，needsReview = 還沒有人確認過（指定分類後清掉）。
+	externalSource: text("external_source"),
+	externalRef: text("external_ref"),
+	externalMeta: jsonb("external_meta").$type<Record<string, unknown>>(),
+	needsReview: boolean("needs_review").default(false).notNull(),
 }, (table) => [
+	uniqueIndex("uq_txn_external_ref").on(table.organizationId, table.externalSource, table.externalRef).where(sql`external_ref IS NOT NULL`),
+	index("idx_txn_needs_review").on(table.organizationId).where(sql`needs_review AND deleted_at IS NULL`),
 	index("idx_txn_book").using("btree", table.book.asc().nullsLast().op("text_ops")),
 	index("idx_txn_category").using("btree", table.categoryId.asc().nullsLast().op("int8_ops")),
 	index("idx_txn_date").using("btree", table.txnDate.asc().nullsLast().op("date_ops")),
@@ -299,6 +307,7 @@ export const transactions = pgTable("transactions", {
 		}),
 	check("chk_txn_book", sql`book = ANY (ARRAY['both'::text, 'internal'::text, 'external'::text])`),
 	check("chk_txn_type", sql`type = ANY (ARRAY['expense'::text, 'income'::text, 'advance'::text, 'reimbursement'::text, 'transfer'::text])`),
+	check("chk_txn_external_ref_source", sql`external_ref IS NULL OR external_source IS NOT NULL`),
 ]);
 
 export const accountReconciliations = pgTable("account_reconciliations", {
