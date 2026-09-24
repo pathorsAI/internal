@@ -23,10 +23,14 @@ import {
   listParties,
 } from "@/db/queries";
 import { deleteInvoice } from "@/db/mutations";
-import { formatCurrency, formatDate } from "@/lib/format";
-import { requireOrg } from "@/lib/session";
+import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
+import { canManageOrg, requireOrgWithRole } from "@/lib/session";
+import { getIntegration } from "@/lib/integrations/store";
+import type { IntegrationSummary } from "@/lib/integrations/types";
+import { defaultSyncRange } from "@/lib/simpany-sync";
 import { NewInvoiceDialog } from "./new-invoice-dialog";
 import { EditInvoiceForm } from "./edit-invoice-form";
+import { SimpanySyncSheet } from "./simpany-sync-sheet";
 
 export const dynamic = "force-dynamic";
 
@@ -54,29 +58,106 @@ async function ExternalStatusBadge({ status }: Readonly<{ status: string }>) {
   return <Badge variant="outline">{externalLabel[status] ?? status}</Badge>;
 }
 
+const taxChipClass: Record<string, string> = {
+  taxable: "text-muted-foreground",
+  zero_rated: "border-sky-500/40 text-sky-700 dark:text-sky-400",
+  exempt: "border-amber-500/40 text-amber-700 dark:text-amber-400",
+};
+
+/** 發票列的狀態格：課稅別 + 有效 / 作廢（作廢附原因）。 */
+async function InvoiceStatusCell({
+  status,
+  taxTreatment,
+  voidReason,
+}: Readonly<{ status: string; taxTreatment: string; voidReason: string | null }>) {
+  const t = await getTranslations("invoices");
+  const taxLabel: Record<string, string> = {
+    taxable: t("taxTreatment.taxable"),
+    zero_rated: t("taxTreatment.zero_rated"),
+    exempt: t("taxTreatment.exempt"),
+  };
+  const statusLabel: Record<string, string> = {
+    valid: t("status.valid"),
+    void: t("voidedChip"),
+    allowance: t("status.allowance"),
+  };
+  return (
+    <div className="flex max-w-[26ch] flex-col gap-1">
+      <div className="flex flex-wrap gap-1">
+        <Badge variant="outline" className={taxChipClass[taxTreatment] ?? ""}>
+          {taxLabel[taxTreatment] ?? taxTreatment}
+        </Badge>
+        <Badge variant={statusVariant[status] ?? "outline"}>{statusLabel[status] ?? status}</Badge>
+      </div>
+      {status === "void" && voidReason ? (
+        <span className="truncate text-xs text-muted-foreground" title={voidReason}>
+          {t("voidReason", { reason: voidReason })}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/** 標題下方那行 Simpany 狀態：連接了才顯示。 */
+async function SimpanyStatusLine({
+  integration,
+  canManage,
+}: Readonly<{ integration: IntegrationSummary | null; canManage: boolean }>) {
+  if (!integration) return null;
+  const t = await getTranslations("invoices.simpany.status");
+  const settings = (
+    <Link href="/dashboard/settings/integrations" className="text-primary hover:underline">
+      {t("settingsLink")}
+    </Link>
+  );
+  let text: React.ReactNode;
+  if (integration.status === "connected" && integration.enabled) {
+    text = (
+      <>
+        {integration.lastSyncedAt
+          ? t("lastSynced", { date: formatDateTime(integration.lastSyncedAt) })
+          : t("neverSynced")}
+        {canManage ? null : ` · ${t("readOnly")}`}
+      </>
+    );
+  } else if (integration.status === "connected") {
+    text = (
+      <>
+        {t("off")} {settings}
+      </>
+    );
+  } else {
+    text = (
+      <span className="text-destructive">
+        {t("needsReauth", { error: integration.lastError ?? "" })} · {settings}
+      </span>
+    );
+  }
+  return <p className="text-xs text-muted-foreground">{text}</p>;
+}
+
 export default async function InvoicesPage({
   searchParams,
 }: Readonly<{ searchParams: Promise<{ direction?: string }> }>) {
   const t = await getTranslations("invoices");
-  const statusLabel: Record<string, string> = {
-    valid: t("status.valid"),
-    void: t("status.void"),
-    allowance: t("status.allowance"),
-  };
   const directions = [
     { key: "issued" as const, label: t("direction.issued") },
     { key: "received" as const, label: t("direction.received") },
   ];
-  const { orgId } = await requireOrg();
+  const { orgId, role } = await requireOrgWithRole();
+  const canManage = canManageOrg(role);
   const { direction: raw } = await searchParams;
   const direction = raw === "received" ? "received" : "issued";
 
-  const [rows, parties, contracts, billingItems] = await Promise.all([
+  const [rows, parties, contracts, billingItems, simpany] = await Promise.all([
     listInvoicesDetailed(orgId, direction),
     listParties(orgId),
     listContracts(orgId),
     listInvoiceableBillingItems(orgId),
+    getIntegration(orgId, "simpany"),
   ]);
+  const simpanyUsable = Boolean(simpany?.enabled && simpany.status === "connected");
+  const syncRange = defaultSyncRange();
 
   const partyOptions = parties.map((p) => ({ id: p.id, name: p.name }));
   const contractOptions = contracts.map((c) => ({ id: c.id, name: c.title }));
@@ -88,6 +169,9 @@ export default async function InvoicesPage({
   return (
     <>
       <PageHeader title={t("title")} description={t("description")}>
+        {simpanyUsable && canManage ? (
+          <SimpanySyncSheet defaultStart={syncRange.startDate} defaultEnd={syncRange.endDate} />
+        ) : null}
         <Button asChild size="sm" variant="outline">
           <Link href="/dashboard/invoices/reconcile">
             <Scale className="size-4" /> {t("reconcileLink")}
@@ -99,6 +183,8 @@ export default async function InvoicesPage({
           billingItems={billingOptions}
         />
       </PageHeader>
+
+      <SimpanyStatusLine integration={simpany} canManage={canManage} />
 
       <div className="flex gap-1">
         {directions.map((d) => (
@@ -159,9 +245,11 @@ export default async function InvoicesPage({
                         <ExternalStatusBadge status={inv.externalStatus} />
                       </TableCell>
                       <TableCell>
-                        <Badge variant={statusVariant[inv.status] ?? "outline"}>
-                          {statusLabel[inv.status] ?? inv.status}
-                        </Badge>
+                        <InvoiceStatusCell
+                          status={inv.status}
+                          taxTreatment={inv.taxTreatment}
+                          voidReason={inv.voidReason}
+                        />
                       </TableCell>
                     </>
                   }

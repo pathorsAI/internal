@@ -39,6 +39,7 @@ const routeKeys: Record<string, NavItemKey> = {
   "/dashboard/members": "members",
   "/dashboard/settings": "settings",
   "/dashboard/settings/mcp": "mcp",
+  "/dashboard/settings/integrations": "integrations",
 };
 
 export function HeaderBreadcrumb() {

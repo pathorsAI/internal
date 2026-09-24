@@ -37,6 +37,7 @@ const activity = {
     document: { "zh-TW": "憑證", en: "Document" },
     payroll_run: { "zh-TW": "薪資批次", en: "Payroll run" },
     payslip: { "zh-TW": "薪資單", en: "Payslip" },
+    integration: { "zh-TW": "整合", en: "Integration" },
   },
 } satisfies Dictionary;
 

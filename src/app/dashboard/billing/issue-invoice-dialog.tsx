@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
@@ -40,7 +41,8 @@ function todayISO() {
 /**
  * 看板上的「開發票」：把這一期的資料預填成一張發票草稿，存檔後回填開發票日。
  *
- * 只做本系統這一半 —— Simpany 那邊還是要人去開。所以外部狀態預設 pending，
+ * Simpany 整合沒開（或不是 owner / admin）時的手動流程：只做本系統這一半 ——
+ * Simpany 那邊還是要人去開。所以外部狀態預設 pending，
  * 開好之後把 Simpany 的號碼填進來（或在發票頁補），對帳表才對得起來。
  *
  * 請款金額是未稅還是含稅，各家合約寫法不同，這裡讓人選，選了就即時換算。
@@ -63,6 +65,7 @@ export function IssueInvoiceDialog({
   currency: string;
 }>) {
   const t = useTranslations("billing.issueInvoice");
+  const tInv = useTranslations("invoices.simpany");
   const tCommon = useTranslations("billing.common");
   const [open, setOpen] = React.useState(false);
   const [basis, setBasis] = React.useState<"gross" | "net">("gross");
@@ -104,6 +107,11 @@ export function IssueInvoiceDialog({
           <DialogHeader>
             <DialogTitle>{t("dialog.title")}</DialogTitle>
             <DialogDescription>{t("dialog.description")}</DialogDescription>
+            <p className="text-xs text-muted-foreground">
+              <Link href="/dashboard/settings/integrations" className="text-primary hover:underline">
+                {tInv("manualHint")}
+              </Link>
+            </p>
           </DialogHeader>
 
           {/* 綁定關係與品名沿用這一期的資料，不讓人重打。 */}

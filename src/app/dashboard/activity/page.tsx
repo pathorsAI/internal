@@ -47,6 +47,7 @@ export default async function ActivityPage() {
     document: t("entity.document"),
     payroll_run: t("entity.payroll_run"),
     payslip: t("entity.payslip"),
+    integration: t("entity.integration"),
   };
   const { orgId } = await requireOrg();
   const rows = await listActivity(orgId, { limit: 300 });

@@ -29,6 +29,7 @@ export function EditForm({
   submittingLabel,
   footer,
   className,
+  readOnly,
   children,
 }: Readonly<{
   action: (prev: ActionState, formData: FormData) => Promise<ActionState>;
@@ -40,6 +41,11 @@ export function EditForm({
   footer?: ReactNode;
   /** 覆寫表單格線；預設兩欄。 */
   className?: string;
+  /**
+   * 唯讀：欄位全部停用、不顯示「儲存」。給沒有寫入權限的角色看資料用；
+   * 真正的權限檢查仍在 server action 裡。
+   */
+  readOnly?: boolean;
   children: ReactNode;
 }>) {
   const close = useRowDialogClose();
@@ -62,15 +68,24 @@ export function EditForm({
       onSubmit={submitAction(dispatch)}
       className={cn("grid gap-4 sm:grid-cols-2", className)}
     >
-      {children}
+      {readOnly ? (
+        // fieldset 不參與格線（display: contents），欄位照原本的兩欄排
+        <fieldset disabled className="contents">
+          {children}
+        </fieldset>
+      ) : (
+        children
+      )}
       <DialogFooter className="mt-2 border-t pt-4 sm:col-span-2">
         {footer ? <div className="mr-auto">{footer}</div> : null}
         <Button type="button" variant="outline" onClick={close}>
           {cancelLabel}
         </Button>
-        <Button type="submit" disabled={pending}>
-          {pending ? submittingLabel : submitLabel}
-        </Button>
+        {readOnly ? null : (
+          <Button type="submit" disabled={pending}>
+            {pending ? submittingLabel : submitLabel}
+          </Button>
+        )}
       </DialogFooter>
     </form>
   );

@@ -29,8 +29,12 @@ import { accountingTools } from "./tools-accounting";
 import { transactionTools } from "./tools-transactions";
 import { clientTools } from "./tools-client";
 import { hrTools } from "./tools-hr";
+import { employeeAccountTools } from "./tools-employee-accounts";
 import { billingItemTools } from "./tools-billing";
 import { orgTools } from "./tools-org";
+import { integrationTools } from "./tools-integrations";
+import { wiseTools } from "./tools-wise";
+import { simpanyTools } from "./tools-simpany";
 
 export type { ToolContext, ToolDef } from "./shared";
 
@@ -715,4 +719,8 @@ export const tools: Record<string, ToolDef> = {
   ...transactionTools,
   ...clientTools,
   ...hrTools,
+  ...integrationTools,
+  ...employeeAccountTools,
+  ...wiseTools,
+  ...simpanyTools,
 };

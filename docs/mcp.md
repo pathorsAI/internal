@@ -102,9 +102,14 @@ the `tools-*.ts` modules):
   `create_invoice` → "Record an invoice");
 - MCP `annotations`: `readOnlyHint` / `destructiveHint` / `idempotentHint`
   derived from the verb, plus `openWorldHint`, which is `false` for everything
-  except `sync_billing_calendar` (the only tool that writes to a third-party
-  system). Four overrides correct the verb heuristic: `sync_billing_calendar`
-  gets `openWorldHint: true`; `pay_employee_salary` gets `destructiveHint: true`
+  except the tools that reach a third-party system: `sync_billing_calendar`
+  (writes to Google Calendar), the three `wise_*` tools (read-only GETs to
+  Wise) and the `simpany_*` tools. The overrides that correct the verb heuristic:
+  `sync_billing_calendar`, every `wise_*` and every `simpany_*` tool get `openWorldHint: true`;
+  `simpany_void_invoice` gets `destructiveHint: true` (voiding a legal e-invoice
+  cannot be undone); `simpany_list_*` / `simpany_get_invoice` declare
+  `readOnlyHint: true` themselves (their names don't start with `list_`/`get_`);
+  `pay_employee_salary` gets `destructiveHint: true`
   — it writes the payslip plus the salary-expense ledger entry, the month can't
   be booked twice and no tool reverses it; and `set_subscription_period`
   (an upsert) and `unmark_accountant_notified` (clears a flag to null) get
@@ -117,8 +122,9 @@ the `tools-*.ts` modules):
 - `_meta["openai/toolInvocation/invoking" | "invoked"]`, the status line ChatGPT
   shows while a call is in flight.
 
-**Output schemas.** Every tool declares an `outputSchema` — all 70 of them, as of
-server version 1.3.0. When a tool declares one the handler additionally returns
+**Output schemas.** Every tool declares an `outputSchema` — all 85 of them, as of
+server version 1.6.0 (the Simpany tools whose result shape comes from Simpany's
+unofficial API declare an open object schema). When a tool declares one the handler additionally returns
 the result as MCP `structuredContent` (the JSON text block stays, per MCP's
 back-compat recommendation), which is what ChatGPT and Codex prefer over parsing
 JSON out of text. `list_organizations` remains the reference implementation.
@@ -180,7 +186,11 @@ board automatically. `sync_billing_calendar` pushes the board to Google Calendar
 **Ledger (內外帳)** — `list_transactions`, `get_transaction`,
 `list_outstanding_advances`, `create_transaction` (expense/income/advance/transfer),
 `update_transaction` (date/amount/category/project/…), `delete_transaction`,
-`create_reimbursement` (book an advance as repaid).
+`create_reimbursement` (book an advance as repaid). Rows imported by an
+integration (the Wise sync) carry `externalSource` / `externalRef` and
+`needsReview` (待確認); `list_transactions` takes `needsReview: true` to list only
+those, and `update_transaction` clears the flag when it sets a category (or pass
+`needsReview: false` explicitly).
 
 **Accounting master data** — parties: `list_parties`/`get_party`/`create_party`/
 `update_party`/`delete_party`; categories: `list_categories`/`create_category`/
@@ -207,22 +217,72 @@ ask the user before calling `update_contract` with `status='completed'`. Status
 is never flipped automatically.
 
 **HR / payroll / recon** — employees: `list_employees`/`get_employee`/
-`create_employee`/`update_employee`/`delete_employee`. Employee PII is
-handled conservatively over MCP: national ID and salary account come back
-**masked** (full values are web-app only), and every employee read is written
-to the activity log as a `read` entry — so who pulled contact data, and when,
-is always answerable. Payroll:
+`create_employee`/`update_employee`/`delete_employee`; employee bank accounts
+(an employee can have several): `list_employee_bank_accounts` +
+`create_employee_bank_account`/`update_employee_bank_account`/`delete_employee_bank_account`.
+Employee PII is handled conservatively over MCP: national IDs and account
+numbers are stored encrypted, and come back **masked** — account numbers as
+their last 5 characters only. There is no way to reveal a full account number
+over MCP; that is a web-app action for owners/admins, and each reveal is
+audit-logged. Writes accept the full number but never echo it. Employee and
+employee-account writes are owner/admin only. Every employee and
+employee-account read is written to the activity log as a `read` entry — so
+who pulled contact data, and when, is always answerable. `list_employees` /
+`get_employee` include each employee's masked `bankAccounts`; the old
+`salaryAccount` field is deprecated (on write it now creates a salary-default
+account). Payroll:
 `list_payroll_runs`, `list_payslips`, `list_salary_status` (whose salary is
 booked for a month + when), `pay_employee_salary` (writes the payslip **and** the
-matching salary-expense ledger entry — bookkeeping only, it pays nobody);
+matching salary-expense ledger entry — bookkeeping only, it pays nobody; optional
+`toEmployeeAccountId` records which employee account it went into, defaulting to
+the salary-default account). `create_reimbursement` takes the same optional
+`toEmployeeAccountId` (defaulting to the reimbursement-default account);
 reconciliations: `list_reconciliations` +
 `create`/`update`/`delete`; accountant notices: `list_accountant_notices`,
 `mark_accountant_notified`, `unmark_accountant_notified`.
 
+**Integrations** — `list_integrations` shows, per external integration
+(Simpany e-invoice, Wise), whether it is available on this server, connected,
+switched on, and healthy (`status`, `lastError`, `lastSyncedAt`,
+`tokenExpiresAt`) plus its non-secret `config`. It never returns credentials.
+Integration business tools live in their own `tools-<provider>.ts` and stay in
+`tools/list` whether or not the org has connected the integration; at call time
+they go through `requireIntegrationForTool()` and fail with a clear zh-TW message
+telling an owner/admin to fix it in 設定 › 整合. Every call to the external
+service is logged with `auditIntegrationCall()`. See
+[`integrations.md`](integrations.md).
+
+**Wise (read-only)** — `wise_list_balances` (profiles, balances with live amount,
+and the ledger account each is mapped to + its cutover date),
+`wise_get_statement` (`accountId` **or** `profileId` + `balanceId`, `startDate`,
+optional `endDate` / `limit` → compact statement rows), and
+`wise_sync_transactions` (`accountId?`, `startDate?`, `dryRun` — **defaults to
+true**). The description tells the model to show the dry-run preview and get the
+user's explicit approval before calling it with `dryRun: false`. All three only
+send GET requests to Wise; the sync writes only this organization's ledger
+(internal book, uncategorized, `needsReview`), deduped by Wise reference. Mapping
+balances to ledger accounts and setting the cutover date is done in the web app
+(設定 › 整合 › Wise).
+
+**Simpany e-invoice** (`src/lib/mcp/tools-simpany.ts`, unofficial API — see
+integrations.md):
+
+| Tool | Inputs | Notes |
+| --- | --- | --- |
+| `simpany_list_invoices` | `startDate?`, `endDate?` (default last 90 days), `status?` (`all`/`void`), `query?` | Read straight from Simpany; compact rows incl. invoice number, R-id, type, buyer, total, status, void info. |
+| `simpany_get_invoice` | `invoice` (number like `FW10873802` or R-id) | Full detail: items, tax type, zero-rate reason, emails, MOF upload status. |
+| `simpany_sync_invoices` | `startDate?`, `endDate?` | Owner/admin. Upserts into `invoices` by `external_id`, auto-links unique same-party / same-amount / ±45-day income transactions and billing items / subscription periods, returns `needsReview` for ambiguous ones, clears 開發票日 of voided invoices. Writes only to these books. |
+| `simpany_preview_invoice` | `transactionId?` / `billingItemId?` / `subscriptionId?`+`subscriptionPeriod?`, `type?`, `buyer?{vat,name,address,emails}`, `taxTreatment?`, `zeroRateReason?`, `customsClearance?`, `items?[{name,quantity,price}]`, `isTaxIncluded?`, `remark?`, `foreignCurrency?`, `foreignAmount?`, `exchangeRate?` | Validates and computes amounts exactly like Simpany, warns about duplicates, stores an `invoice_drafts` row (2 h). Does **not** issue. |
+| `simpany_issue_invoice` | `draftId`, `notifyEmails?` | Owner/admin. Issues the previewed draft verbatim — a legal e-invoice uploaded to the MOF and emailed to the buyer. Only after the user approved the preview. Saves + links the invoice. |
+| `simpany_void_invoice` | `invoice`, `reason` (≤ 20 chars) | Owner/admin, destructive. Voids in Simpany, re-syncs, clears 開發票日 / transaction links. |
+| `simpany_list_zero_rate_reasons` | — | Simpany's reason codes (71 外銷貨物, 72 外銷勞務, …). |
+
 **Not exposed (do in the app):** creating an organization, uploading
 invoice/receipt **files** (R2), multi-currency FX entry, and *connecting* Google
-Calendar (the OAuth consent needs a browser — do it once in 組織設定, after which
-`sync_billing_calendar` works over MCP). These need file handling or extra UI.
+Calendar (the OAuth consent needs a browser — do it once in 設定 › 整合, after which
+`sync_billing_calendar` works over MCP), and connecting / switching / disconnecting
+integrations (credentials must not pass through an AI conversation). These need
+file handling or extra UI.
 Deletes that would break references return a clear error suggesting
 deactivation/archiving instead.
 
@@ -282,7 +342,7 @@ things that don't live in this repo:
 Both directories ask for the same thing in different words — OpenAI wants
 "test credentials for a fully populated account", Anthropic wants a "fully
 featured demo account with sample data". An empty workspace fails review: most
-of the 70 tools would answer with an empty array and the reviewer has no way to
+of the 85 tools would answer with an empty array and the reviewer has no way to
 tell what the connector does.
 
 Two commands produce that account. Run them against the environment you are

@@ -19,15 +19,19 @@ import {
 } from "@/components/ui/dialog";
 import { DatePicker } from "@/components/date-picker";
 import { submitAction } from "@/lib/form-action";
+import { formatAccountShort, type MaskedEmployeeAccount } from "@/lib/employee-accounts";
 
 const initial: ActionState = { ok: false };
 
 export function RecordReimbursementDialog({
   advance,
   accounts,
+  employeeAccounts,
 }: Readonly<{
   advance: { id: number; settleName: string; amount: string; currency: string; vendorName: string };
   accounts: { id: number; name: string; currency: string }[];
+  /** 代墊人啟用中的收款帳戶（遮罩後），選「匯入帳戶」用 */
+  employeeAccounts: MaskedEmployeeAccount[];
 }>) {
   const t = useTranslations("advances");
   const [open, setOpen] = useState(false);
@@ -100,6 +104,23 @@ export function RecordReimbursementDialog({
                   : t("dialog.fromAccountHint", { currency: advance.currency })}
               </p>
             </div>
+            {employeeAccounts.length > 0 ? (
+              <SelectField
+                name="toEmployeeAccountId"
+                label={t("dialog.toAccount")}
+                defaultValue={String(
+                  employeeAccounts.find((a) => a.defaultForReimbursement)?.id ?? "none",
+                )}
+              >
+                <SelectItem value="none">{t("dialog.toAccountNone")}</SelectItem>
+                {employeeAccounts.map((a) => (
+                  <SelectItem key={a.id} value={String(a.id)}>
+                    {formatAccountShort(a)}
+                    {a.currency === advance.currency ? "" : ` · ${a.currency}`}
+                  </SelectItem>
+                ))}
+              </SelectField>
+            ) : null}
             <Field label={t("dialog.amountLabel")}>
               <div className="flex h-9 items-center rounded-md border bg-muted px-3 text-sm text-muted-foreground">
                 {formatCurrency(advance.amount, advance.currency)}
