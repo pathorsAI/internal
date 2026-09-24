@@ -20,6 +20,7 @@ import payroll from "./payroll";
 import members from "./members";
 import activity from "./activity";
 import settings from "./settings";
+import integrations from "./integrations";
 import auth from "./auth";
 import errors from "./errors";
 import lib from "./lib";
@@ -48,6 +49,7 @@ const catalogue = {
   members,
   activity,
   settings,
+  integrations,
   auth,
   errors,
   lib,

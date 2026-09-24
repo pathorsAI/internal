@@ -1,4 +1,4 @@
-import { pgTable, check, bigint, text, boolean, char, numeric, timestamp, date, unique, integer, foreignKey, index, uniqueIndex } from "drizzle-orm/pg-core"
+import { pgTable, check, bigint, text, boolean, char, numeric, timestamp, date, unique, integer, foreignKey, index, uniqueIndex, jsonb } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 
@@ -591,4 +591,31 @@ export const calendarEventLinks = pgTable("calendar_event_links", {
 	uniqueIndex("uq_calendar_event").on(table.organizationId, table.itemKey, table.kind),
 	index("idx_calendar_event_org").using("btree", table.organizationId.asc().nullsLast().op("text_ops")),
 	check("chk_calendar_event_kind", sql`kind = ANY (ARRAY['due'::text, 'payment'::text, 'invoice'::text])`),
+]);
+
+// ---- 組織層級外部整合（migrations/0023）。一列 = 一個組織的一個 provider，
+// 框架在 src/lib/integrations。連接後預設關閉；中斷連接即刪列。----
+// credentials_enc / token_cache_enc 是 src/lib/crypto.ts 的密文，絕不存明文、
+// 絕不回傳給 client 或 MCP —— 讀取一律走 src/lib/integrations/store.ts。
+export const orgIntegrations = pgTable("org_integrations", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "org_integrations_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id").notNull(),
+	provider: text().notNull(),
+	enabled: boolean().default(false).notNull(),
+	status: text().default('connected').notNull(),
+	// 非機密設定（公司 id、帳戶對應等）
+	config: jsonb().$type<Record<string, unknown>>().default({}).notNull(),
+	credentialsEnc: text("credentials_enc"),
+	tokenCacheEnc: text("token_cache_enc"),
+	tokenExpiresAt: timestamp("token_expires_at", { withTimezone: true, mode: 'string' }),
+	lastSyncedAt: timestamp("last_synced_at", { withTimezone: true, mode: 'string' }),
+	lastError: text("last_error"),
+	lastErrorAt: timestamp("last_error_at", { withTimezone: true, mode: 'string' }),
+	connectedByUserId: text("connected_by_user_id"),
+	connectedAt: timestamp("connected_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	unique("uq_org_integration").on(table.organizationId, table.provider),
+	check("chk_org_integration_provider", sql`provider = ANY (ARRAY['simpany'::text, 'wise'::text])`),
+	check("chk_org_integration_status", sql`status = ANY (ARRAY['connected'::text, 'needs_reauth'::text, 'error'::text])`),
 ]);
