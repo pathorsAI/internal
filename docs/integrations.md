@@ -16,7 +16,7 @@ settings page just lists it alongside the others.
 | `migrations/0023_org_integrations.sql` / `orgIntegrations` in `src/db/schema.ts` | One row per (organization, provider). `credentials_enc` / `token_cache_enc` are ciphertext from `src/lib/crypto.ts` (`FIELD_ENCRYPTION_KEY`). `config` is non-secret jsonb. |
 | `src/lib/integrations/types.ts` | Provider ids, field/catalog/provider types, `IntegrationSummary` (the secret-free view). Client-safe. |
 | `src/lib/integrations/catalog.ts` | Static catalog: logo + credential/config fields per provider. Drives the settings UI. Client-safe. |
-| `src/lib/integrations/registry.ts` | Map of **implementations** (`testConnection`). Empty until a provider lands. Server only. |
+| `src/lib/integrations/registry.ts` | Map of **implementations** (`testConnection`). Simpany is registered. Server only. |
 | `src/lib/integrations/store.ts` | The only code that reads/writes `org_integrations`. Server only. |
 | `src/app/dashboard/settings/integrations/` | Settings page, server actions (owner/admin only), connect Sheet. |
 | `src/lib/mcp/tools-integrations.ts` | `list_integrations`, plus `requireIntegrationForTool` and `auditIntegrationCall` for provider tools. |
@@ -136,6 +136,60 @@ To bring one to life:
 Also: a new migration extending `chk_org_integration_provider` (and the matching
 `check(...)` in `schema.ts`), the id in `INTEGRATION_PROVIDER_IDS`, a catalog entry
 + `INTEGRATION_ORDER`, and `integrations.providers.<id>.name/description` in i18n.
+
+## Simpany（電子發票）
+
+Simpany（simpany.co）是公司的電子發票加值中心兼記帳士。**它沒有公開 API**：這裡用的是
+它會員網頁背後的私有 REST API（讀前端 bundle、用真實 session 做唯讀呼叫確認過形狀）。
+Simpany 改版就可能壞，所以所有回應都防禦式解析，認不得就把 Simpany 的原始錯誤訊息
+（截短）丟給使用者，不猜。使用者明確選擇了這條路，並同意把 Simpany 帳密加密存放。
+
+| Where | What |
+| --- | --- |
+| `src/lib/integrations/simpany.ts` | `simpanyProvider`（連接測試）與 `SimpanyClient` / `getSimpanyClient(orgId)` |
+| `src/lib/simpany-sync.ts` | Simpany → `invoices` 同步、自動綁定、作廢清理 |
+| `src/lib/simpany-issue.ts` | 預覽（`invoice_drafts`）→ 開立、作廢；MCP 與 web 共用 |
+| `src/lib/mcp/tools-simpany.ts` | MCP 工具（見 [mcp.md](mcp.md)） |
+| `src/app/dashboard/invoices/simpany-*.ts(x)` | 發票頁「從 Simpany 同步」、看板「在 Simpany 開立」、server actions |
+| `migrations/0025_invoice_simpany_sync.sql` | invoices 的課稅別 / 零稅率原因 / 外幣匯率 / B2B-B2C / `external_id` / 作廢欄位，`invoice_drafts` 表 |
+
+**Config**：`companyId` + `companyName`（非機密）。帳號底下只有一家公司時連接時自動選；
+多家就要在連接 Sheet 填「公司 ID」（失敗訊息會列出可選的 ID）。
+
+**用到的端點**（其他一概不碰）：
+
+| Host | Endpoint | 用途 |
+| --- | --- | --- |
+| `api.simpany.co/v1` | `POST login` `{account, password}` → `data.token`（JWT，`exp` ≈ 30 天） | 登入 |
+| | `GET me` → `data.companies[]` | 選公司 |
+| `member2.simpany.co/api/v1/c/{companyId}/` | `GET receipts?status=ALL\|INVALID&startDate&endDate&page&limit[&query]` | 列表（`status` 必填） |
+| | `GET receipts/{R-id}` | 明細（id 是 R…，不是發票號碼） |
+| | `POST receipts/b2b` / `receipts/b2c` | **開立**（照會員網頁組的 body） |
+| | `DELETE receipts/{R-id}` `{reason, emails: []}` | **作廢** |
+| | `GET receipts/zero-tax-rate-reasons` | 零稅率原因清單 |
+| | `GET track-numbers?year=<民國年>` | 字軌剩餘（形狀未驗證，只用來提示） |
+
+所有請求帶 `Accept: application/json`、`X-Requested-With: XMLHttpRequest`、
+`Authorization: Bearer <JWT>`。
+
+**重新登入**：`getSimpanyClient` 先用 `loadTokenCache` 的 JWT（到期時間取自 JWT 的
+`exp`）；沒有就用解密後的帳密登入並 `saveTokenCache`。請求回 401 → `clearTokenCache`、
+重新登入、重試一次；重新登入本身被拒（密碼改了）→ `markNeedsReauth`，整合轉成「需要
+重新連接」並丟出中文錯誤。網路錯 / 5xx → `recordSyncFailure`（狀態不變）；成功 →
+`recordSyncSuccess`。帳密與 JWT 不進 log、錯誤訊息或任何回傳值。
+
+**開立一定兩段式**：preview 把要送出的 body 原樣存成 `invoice_drafts`（2 小時過期）；
+開立只收 `draftId`，先以 `pending → issued` 的條件式 update 搶下草稿（按兩次也只會開一張），
+再送出。Simpany 明確拒絕（4xx）→ 草稿退回 `pending`；網路中斷 / 5xx（不知道開了沒）→
+草稿改 `cancelled`，請使用者先同步確認再重新預覽，避免重複開立。
+
+**稅務規則**（預覽時檢查）：B2B 要 8 碼統編；海外買方沒有台灣統編 → B2C、零稅率、
+原因 72 外銷勞務、`NOT_VIA_CUSTOMS`；外幣收款一定要提供取自銀行水單的匯率，
+台幣銷售額 = round(外幣 × 匯率)；稅額算法同 Simpany（含稅 round(sum − sum/1.05)、
+未稅 round(sum × 0.05)）。外銷勞務**不是**免稅（FW10873800 就是開成 B2C 免稅而作廢）。
+
+**xlsx 對帳**（`src/lib/simpany-export.ts`、發票 › Simpany 對帳）保留，給沒開整合的組織用；
+API 同步取代它。
 
 ## Security rules
 
