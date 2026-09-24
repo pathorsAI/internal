@@ -19,18 +19,36 @@ import { listAccountBalances } from "@/db/queries";
 import { formatCurrency } from "@/lib/format";
 import { CurrencyFlag } from "@/components/currency-flag";
 import { NewBankAccountDialog } from "./new-bank-account-dialog";
-import { requireOrg } from "@/lib/session";
+import { canManageOrg, requireOrgWithRole } from "@/lib/session";
+import { getIntegration } from "@/lib/integrations/store";
+import { parseWiseConfig } from "@/lib/wise-sync";
+import { WiseSyncButton } from "./wise-sync-sheet";
 
 export const dynamic = "force-dynamic";
 
 export default async function BankAccountsPage() {
   const t = await getTranslations("bankAccounts");
-  const { orgId } = await requireOrg();
-  const rows = await listAccountBalances(orgId, { includeInactive: true });
+  const tw = await getTranslations("wise");
+  const { orgId, role } = await requireOrgWithRole();
+  const [rows, wise] = await Promise.all([
+    listAccountBalances(orgId, { includeInactive: true }),
+    getIntegration(orgId, "wise"),
+  ]);
+  // 對應到 Wise 餘額的帳本帳戶（名稱旁標 Wise）；整合可用且有對應時，owner / admin 看得到同步按鈕。
+  const wiseMapped = new Set(
+    parseWiseConfig(wise?.config)
+      .accountMappings.map((m) => m.bankAccountId)
+      .filter((id): id is number => id !== null),
+  );
+  const canSyncWise =
+    canManageOrg(role) &&
+    Boolean(wise?.enabled && wise.status === "connected") &&
+    wiseMapped.size > 0;
 
   return (
     <>
       <PageHeader title={t("title")} description={t("description")}>
+        {canSyncWise ? <WiseSyncButton /> : null}
         <NewBankAccountDialog />
       </PageHeader>
       <TableCard>
@@ -56,7 +74,16 @@ export default async function BankAccountsPage() {
                   description={t("rowDialogDescription")}
                   cells={
                     <>
-                      <TableCell className="font-medium">{a.name}</TableCell>
+                      <TableCell className="font-medium">
+                        <span className="flex items-center gap-2">
+                          {a.name}
+                          {wiseMapped.has(a.id) ? (
+                            <Badge variant="outline" className="font-normal">
+                              {tw("sync.mappedBadge")}
+                            </Badge>
+                          ) : null}
+                        </span>
+                      </TableCell>
                       <TableCell>
                         <Badge variant={a.kind === "bank" ? "outline" : "secondary"}>
                           {a.kind === "bank" ? t("physical") : t("virtual")}

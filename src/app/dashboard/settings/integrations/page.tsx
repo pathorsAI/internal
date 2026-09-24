@@ -12,6 +12,8 @@ import { getProvider } from "@/lib/integrations/registry";
 import { listIntegrations } from "@/lib/integrations/store";
 import { IntegrationsList, type IntegrationRowData } from "./integrations-client";
 import { CalendarSettingsClient } from "./calendar-settings-client";
+import { WiseMappingSection } from "./wise-mapping-client";
+import { loadWiseMappingView } from "./wise-mapping-data";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +52,8 @@ export default async function IntegrationsPage() {
   });
 
   const calendarConnected = Boolean(calendar?.ownerUserId && calendar?.googleCalendarId);
+  const wiseSummary = summaries.find((x) => x.provider === "wise") ?? null;
+  const wiseView = wiseSummary ? await loadWiseMappingView(orgId, wiseSummary) : null;
 
   return (
     <>
@@ -59,6 +63,18 @@ export default async function IntegrationsPage() {
         canManage={canManage}
         calendar={{ connected: calendarConnected, ownerLabel: calendarOwner }}
       />
+      {wiseView ? (
+        <section id="wise" className="scroll-mt-20">
+          <WiseMappingSection
+            key={wiseView.key}
+            balances={wiseView.balances}
+            accounts={wiseView.accounts}
+            suggestions={wiseView.suggestions}
+            canManage={canManage}
+            enabled={wiseView.enabled}
+          />
+        </section>
+      ) : null}
       <section id="google-calendar" className="scroll-mt-20">
         <CalendarSettingsClient
           connected={calendarConnected}

@@ -19,6 +19,16 @@ const transactions = {
     monthLabel: { "zh-TW": "{year} 年 {month} 月", en: "{month}/{year}" },
     rowsCount: { "zh-TW": "{count} 筆", en: "{count} entries" },
     uncategorized: { "zh-TW": "未分類", en: "Uncategorized" },
+    needsReview: { "zh-TW": "待確認", en: "To review" },
+    needsReviewHint: {
+      "zh-TW": "自動匯入（{source}），還沒有人確認。指定分類後會清掉。",
+      en: "Imported automatically ({source}) and not yet reviewed. Choosing a category clears it.",
+    },
+  },
+  review: {
+    count: { "zh-TW": "{count} 筆自動匯入待確認", en: "{count} imported entries to review" },
+    showOnly: { "zh-TW": "只看待確認", en: "Show only these" },
+    showAll: { "zh-TW": "顯示全部", en: "Show all" },
   },
   empty: {
     noData: { "zh-TW": "尚無交易", en: "No transactions yet" },

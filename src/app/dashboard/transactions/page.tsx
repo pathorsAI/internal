@@ -1,4 +1,5 @@
 import { Fragment } from "react";
+import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { BookBadge } from "@/components/book-badge";
 import { Badge } from "@/components/ui/badge";
@@ -69,6 +70,8 @@ function TransactionRow({
   editDialogTitle,
   editDialogDescription,
   uncategorizedLabel,
+  needsReviewLabel,
+  needsReviewHint,
   categories,
   parties,
   employees,
@@ -83,6 +86,9 @@ function TransactionRow({
   editDialogTitle: string;
   editDialogDescription: string;
   uncategorizedLabel: string;
+  needsReviewLabel: string;
+  /** 待確認 chip 的說明；{source} 會換成來源（wise）。 */
+  needsReviewHint: (source: string) => string;
   categories: Opt[];
   parties: Opt[];
   employees: Opt[];
@@ -108,9 +114,20 @@ function TransactionRow({
           <TableCell>
             <div className="flex min-w-0 flex-col gap-1">
               <span className="truncate">{t.partyName ?? t.settleName ?? "—"}</span>
-              <Badge variant="secondary" className="w-fit font-normal">
-                {typeLabel[t.type] ?? t.type}
-              </Badge>
+              <div className="flex flex-wrap gap-1">
+                <Badge variant="secondary" className="w-fit font-normal">
+                  {typeLabel[t.type] ?? t.type}
+                </Badge>
+                {t.needsReview ? (
+                  <Badge
+                    variant="outline"
+                    className="w-fit border-amber-500/50 font-normal text-amber-700 dark:text-amber-400"
+                    title={needsReviewHint(t.externalSource ?? "—")}
+                  >
+                    {needsReviewLabel}
+                  </Badge>
+                ) : null}
+              </div>
             </div>
           </TableCell>
           <TableCell className="truncate text-muted-foreground">
@@ -180,6 +197,8 @@ export default async function TransactionsPage({
     account?: string;
     period?: string;
     page?: string;
+    /** review=1：只看自動匯入、待確認的列。 */
+    review?: string;
   }>;
 }>) {
   const { orgId } = await requireOrg();
@@ -202,15 +221,16 @@ export default async function TransactionsPage({
     { label: tr("columns.lastUpdated"), width: "w-36" },
     { label: tr("columns.amount"), width: "w-32", align: "right" },
   ];
-  const { book, category, account, period, page: pageParam } = await searchParams;
+  const { book, category, account, period, page: pageParam, review } = await searchParams;
   const active = (["internal", "external", "both"].includes(book ?? "") ? book : undefined) as
     | Book
     | undefined;
   const categoryId = category && Number.isFinite(Number(category)) ? Number(category) : undefined;
   const accountId = account && Number.isFinite(Number(account)) ? Number(account) : undefined;
   const page = Math.max(1, Math.trunc(Number(pageParam)) || 1);
-  const filters = { book: active, categoryId, accountId, period };
-  const [rows, total, accounts, categories, parties, employees, projects, contracts, months] =
+  const needsReview = review === "1" ? true : undefined;
+  const filters = { book: active, categoryId, accountId, period, needsReview };
+  const [rows, total, accounts, categories, parties, employees, projects, contracts, months, reviewCount] =
     await Promise.all([
       listTransactions(orgId, filters, PAGE_SIZE, (page - 1) * PAGE_SIZE),
       countTransactions(orgId, filters),
@@ -221,6 +241,7 @@ export default async function TransactionsPage({
       listProjects(orgId),
       listContractOptions(orgId),
       listTransactionMonths(orgId),
+      countTransactions(orgId, { needsReview: true }),
     ]);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const [docsMap, auditMap] = await Promise.all([
@@ -260,6 +281,29 @@ export default async function TransactionsPage({
         account={account}
         period={period}
       />
+
+      {reviewCount > 0 || needsReview ? (
+        <div className="flex items-center gap-2 text-sm">
+          <Badge
+            variant="outline"
+            className="border-amber-500/50 font-normal text-amber-700 dark:text-amber-400"
+          >
+            {tr("review.count", { count: reviewCount })}
+          </Badge>
+          <Link
+            className="text-muted-foreground underline-offset-2 hover:underline"
+            href={{
+              pathname: "/dashboard/transactions",
+              query: Object.fromEntries(
+                Object.entries({ book, category, account, period, review: needsReview ? undefined : "1" })
+                  .filter(([, v]) => v !== undefined),
+              ),
+            }}
+          >
+            {needsReview ? tr("review.showAll") : tr("review.showOnly")}
+          </Link>
+        </div>
+      ) : null}
 
       {groups.length === 0 ? (
         <TableCard>
@@ -304,6 +348,8 @@ export default async function TransactionsPage({
                       editDialogTitle={tr("editDialog.title")}
                       editDialogDescription={tr("editDialog.description")}
                       uncategorizedLabel={tr("table.uncategorized")}
+                      needsReviewLabel={tr("table.needsReview")}
+                      needsReviewHint={(source) => tr("table.needsReviewHint", { source })}
                       categories={categories}
                       parties={partyOpts}
                       employees={employeeOpts}
@@ -326,7 +372,7 @@ export default async function TransactionsPage({
         totalPages={totalPages}
         total={total}
         basePath="/dashboard/transactions"
-        params={{ book, category, account, period }}
+        params={{ book, category, account, period, review }}
       />
     </>
   );
