@@ -164,8 +164,12 @@ type Source = {
 
 function extractEmails(text: string | null | undefined): string[] {
   if (!text) return [];
-  const found = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? [];
-  return [...new Set(found.map((e) => e.toLowerCase()))].filter(isValidEmail);
+  // 先依分隔符切成片段，再逐一用 isValidEmail（線性、不回溯）檢查，
+  // 不在整段自由文字上跑 `[A-Z0-9.-]+\.[A-Z]{2,}` 這種會回溯的樣式（S5852）。
+  const tokens = text
+    .split(/[\s,;<>()"'，；、]+/)
+    .filter((t) => t.includes("@"));
+  return [...new Set(tokens.map((e) => e.toLowerCase()))].filter(isValidEmail);
 }
 
 /** Simpany 的品名不能有半形冒號（他們的 UI 會換成全形）。 */

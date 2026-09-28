@@ -180,9 +180,13 @@ export function parseLegacySalaryAccount(raw: string): ParsedLegacyAccount | nul
     const bankCode = m[1];
     // 代碼後面可能夾著銀行名稱或括號（「807 永豐 0180-1234…」），先跳到第一個數字
     const rest = m[2].replace(/^\D+/, "");
-    const branchMatch = /^(\d{4})[\s\-/]+(.+)$/.exec(rest);
-    const branchCode = branchMatch ? branchMatch[1] : null;
-    const digits = (branchMatch ? branchMatch[2] : rest).replaceAll(/\D/g, "");
+    // 分行代碼 = 開頭 4 碼後面緊接分隔符；分隔符後面的部分用 slice 取，不用 `[\s\-/]+(.+)`
+    // 這種兩個量詞可重疊的寫法（失敗時會退化成 O(n²)，S5852）。
+    const branchMatch = /^(\d{4})[\s\-/]+/.exec(rest);
+    const afterBranch = branchMatch ? rest.slice(branchMatch[0].length) : "";
+    const hasBranch = branchMatch !== null && afterBranch.length > 0;
+    const branchCode = hasBranch ? branchMatch[1] : null;
+    const digits = (hasBranch ? afterBranch : rest).replaceAll(/\D/g, "");
     if (/^\d{6,20}$/.test(digits)) {
       return { kind: "bank", bankCode, branchCode, bankName: bankNameForCode(bankCode), accountNumber: digits };
     }

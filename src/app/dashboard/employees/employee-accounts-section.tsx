@@ -100,9 +100,11 @@ function draftFrom(a: MaskedEmployeeAccount): Draft {
 
 /** 銀行欄位的自由輸入 → 代碼與名稱。開頭 3 碼數字就是代碼，其餘文字當名稱。 */
 function parseBankInput(v: string): { bankCode: string; bankName: string } {
-  const m = /^\s*(\d{3})\s*(.*)$/.exec(v);
-  if (!m) return { bankCode: "", bankName: v.trim() };
-  return { bankCode: m[1], bankName: m[2].trim() || (bankNameForCode(m[1]) ?? "") };
+  // 先 trim 再只比對開頭 3 碼，剩下用 slice 取：不讓兩個可重疊的量詞夾住同一段空白（ReDoS，S5852）。
+  const t = v.trim();
+  if (!/^\d{3}/.test(t)) return { bankCode: "", bankName: t };
+  const bankCode = t.slice(0, 3);
+  return { bankCode, bankName: t.slice(3).trim() || (bankNameForCode(bankCode) ?? "") };
 }
 
 /** 在帳戶輸入框按 Enter 不要送出外層的員工表單。 */
