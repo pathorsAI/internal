@@ -971,7 +971,7 @@ function owedMonth(p: Person, m: number, ctx: MonthCtx): ReconMonth | null {
   const estimated = !filed && win.estimateUnfiled && expected != null && inRange && due;
   // 沒申報、也不估計，而且不在任職期間的月份就不列出來（避免一整排 0）
   if (!filed && !estimated && !inRange) return null;
-  const owed = declaredNet ?? (estimated ? (expected as number) : 0);
+  const owed = declaredNet ?? (estimated ? expected : 0);
   return {
     month: m,
     formStatus: formStatusOf(form),
