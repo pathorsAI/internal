@@ -140,7 +140,7 @@ const SYNC_OUTPUT = {
           currency: { type: "string" },
           reason: {
             type: "string",
-            enum: ["unmapped", "no_sync_from", "account_missing", "currency_mismatch"],
+            enum: ["unmapped", "no_sync_from", "account_missing", "currency_mismatch", "sca_required"],
           },
         },
       },

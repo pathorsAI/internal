@@ -6,6 +6,7 @@ import type { IntegrationConfig } from "@/lib/integrations/types";
 import {
   discoverAccounts,
   withWiseClient,
+  WiseScaRequiredError,
   type WiseBalanceSummary,
   type WiseClient,
   type WiseProfileSummary,
@@ -592,7 +593,7 @@ export type SkippedBalance = {
   profileName: string;
   balanceId: number;
   currency: string;
-  reason: "unmapped" | "no_sync_from" | "account_missing" | "currency_mismatch";
+  reason: "unmapped" | "no_sync_from" | "account_missing" | "currency_mismatch" | "sca_required";
 };
 
 export type SyncResult = {
@@ -980,9 +981,16 @@ export async function syncWiseTransactions(orgId: string, opts: SyncOptions): Pr
         skippedBalances.push(skippedEntry(m, profileName, check.reason));
         continue;
       }
-      const { result, rows } = await planAccount(ctx, m, check.acct, check.syncFrom);
-      planned.push(...rows);
-      results.push(result);
+      // 個人 profile 的對帳單常被 Wise 要求 SCA（本系統不實作 SCA 簽章）：
+      // 只跳過這個餘額並列在結果裡，不讓整次同步失敗、其他帳戶照常同步。
+      try {
+        const { result, rows } = await planAccount(ctx, m, check.acct, check.syncFrom);
+        planned.push(...rows);
+        results.push(result);
+      } catch (e) {
+        if (!(e instanceof WiseScaRequiredError)) throw e;
+        skippedBalances.push(skippedEntry(m, profileName, "sca_required"));
+      }
     }
 
     const existing = await existingRefs(db, orgId, planned.map((p) => p.externalRef));

@@ -84,6 +84,7 @@ const wise = {
       no_sync_from: { "zh-TW": "未設切換日", en: "no cutover date" },
       account_missing: { "zh-TW": "帳本帳戶不存在", en: "ledger account missing" },
       currency_mismatch: { "zh-TW": "幣別不符", en: "currency mismatch" },
+      sca_required: { "zh-TW": "Wise 要求強驗證（SCA），此帳戶無法以 API token 讀取對帳單", en: "Wise requires SCA for this statement; it can't be read with an API token" },
     },
     nothing: { "zh-TW": "沒有新的交易需要寫入。", en: "Nothing new to write." },
     apply: { "zh-TW": "寫入 {count} 筆", en: "Write {count} entries" },
