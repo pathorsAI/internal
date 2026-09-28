@@ -21,6 +21,14 @@ import {
   salaryReconciliation,
   syncSalaryDeclarations,
 } from "@/lib/simpany-salary";
+import {
+  applySalaryFiling,
+  prepareSalaryFiling,
+  sendPayslips,
+  settleSalaryFiling,
+  type SalaryFilingEmployeeInput,
+  type SalaryItemInput,
+} from "@/lib/simpany-payroll";
 import { auditIntegrationCall, requireIntegrationForTool } from "./tools-integrations";
 import {
   listResult,
@@ -146,6 +154,76 @@ function optNumberMap(v: unknown, key: string): Record<string, number> | undefin
   }
   return out;
 }
+
+
+function parseSalaryItems(v: unknown, key: string): SalaryItemInput[] | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (!Array.isArray(v)) throw new Error(`"${key}" must be an array.`);
+  return v.map((raw, i) => {
+    if (!raw || typeof raw !== "object") throw new Error(`${key}[${i}] must be an object.`);
+    const it = raw as Record<string, unknown>;
+    return { itemId: requireNumber(it, "itemId"), amount: requireNumber(it, "amount"), note: optString(it, "note") };
+  });
+}
+
+function parseSalaryEmployees(v: unknown): SalaryFilingEmployeeInput[] | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (!Array.isArray(v)) throw new Error('"employees" must be an array.');
+  return v.map((raw, i) => {
+    if (!raw || typeof raw !== "object") throw new Error(`employees[${i}] must be an object.`);
+    const e = raw as Record<string, unknown>;
+    return {
+      employeeId: optNumber(e, "employeeId"),
+      name: optString(e, "name"),
+      baseSalary: optNumber(e, "baseSalary"),
+      bonus: optNumber(e, "bonus"),
+      reimbursement: optNumber(e, "reimbursement"),
+      otherAllowances: parseSalaryItems(e.otherAllowances, `employees[${i}].otherAllowances`),
+      otherDeductions: parseSalaryItems(e.otherDeductions, `employees[${i}].otherDeductions`),
+      note: optString(e, "note"),
+    };
+  });
+}
+
+function requireMonth(args: Record<string, unknown>): number {
+  const m = monthArg(args, "month");
+  if (m === undefined || m === 0) throw new Error('"month" is required (1-12).');
+  return m;
+}
+
+const SALARY_ITEM_SCHEMA = {
+  type: "object",
+  properties: {
+    itemId: { type: "number", description: "Simpany item id from the form settings." },
+    amount: { type: "number", description: "Whole TWD, >= 0." },
+    note: { type: "string" },
+  },
+  required: ["itemId", "amount"],
+  additionalProperties: false,
+} as const;
+
+const SALARY_EMPLOYEE_SCHEMA = {
+  type: "object",
+  properties: {
+    employeeId: { type: "number", description: "Internal employee id (list_employees); or give name." },
+    name: { type: "string", description: "Exact name as on Simpany." },
+    baseSalary: { type: "number", description: "本薪 in whole TWD. Default: the employee record's base salary, else the last filed 本薪." },
+    bonus: { type: "number", description: "非經常性獎金 (Simpany item 11) this month; one-off, never carried over." },
+    reimbursement: { type: "number", description: "員工代墊款 (item 49) this month; one-off." },
+    otherAllowances: {
+      type: "array",
+      items: SALARY_ITEM_SCHEMA,
+      description: "Replaces all other allowances: 1 免稅伙食津貼, 5 應稅其他加項, 6 特休未休代金, 8 免稅加班費, 10 年終獎金, 36 經常性獎金, 51 免稅資遣費. Default: keep the template's recurring ones (1, 36).",
+    },
+    otherDeductions: {
+      type: "array",
+      items: SALARY_ITEM_SCHEMA,
+      description: "Editable deductions: 44 應稅其他減項, 50 公司代墊款. Default: none.",
+    },
+    note: { type: "string", description: "Note printed on the bonus / reimbursement items added this month." },
+  },
+  additionalProperties: false,
+} as const;
 
 export const simpanyTools: Record<string, ToolDef> = {
   simpany_list_invoices: {
@@ -543,6 +621,200 @@ export const simpanyTools: Record<string, ToolDef> = {
         "simpany",
         "update",
         `salary sync ${year}: ${filed} filed months, ${res.declarationsUpserted} rows, -${res.declarationsRemoved}`,
+      );
+      return res;
+    },
+  },
+
+  // ---- 薪資申報寫入（src/lib/simpany-payroll.ts；assertSalaryWrite 白名單）----
+  // 準備（試算 + 草稿）→ 使用者同意 → 寫入（只收 draftId）→ 使用者三個確認 → 結算 → 寄薪資單。
+
+  simpany_prepare_salary_filing: {
+    description:
+      "Prepare (but do NOT save) a month's salary declaration (薪資申報) in Simpany, the company's payroll filing to its bookkeeper. Loads the month's Simpany form and each employee's declaration as a template, changes only the pay/insurance dates and the amounts (本薪, optional 非經常性獎金 / 員工代墊款 / other items; insurance brackets, insurance flags, dependents and pension settings are kept), runs Simpany's own calculation (POST …/calculate, which does not save), and stores a draft valid for 2 hours. Returns draftId plus per employee: gross, personal insurance, company insurance, withholding, net pay (實際發薪), declared salary, insured brackets, owner flag, and warnings (month-sequence restriction, payday not the 5th of next month, brackets, one-off items not carried over). If employees are missing from the month's form it plans a copy from the latest settled month; the copy writes to Simpany and only runs with allowCopy: true (otherwise draftId is null and the plan is returned). Employees that don't exist in Simpany are reported — they must be added in Simpany's own UI (this tool never creates employees). Never put shareholder loan repayments (股東往來還款) into a salary declaration — they are not salary. Show the preview to the user and get explicit approval before simpany_apply_salary_filing. Owner/admin only.",
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    inputSchema: {
+      type: "object",
+      properties: {
+        year: { type: "number", description: "Western year of the salary month." },
+        month: { type: "number", description: "Salary month 1-12 (the month the salary is for, not the payday month)." },
+        payday: { type: "string", description: "YYYY-MM-DD. Default: the 5th of the next month (the convention)." },
+        employees: {
+          type: "array",
+          items: SALARY_EMPLOYEE_SCHEMA,
+          description: "Who to file and with what amounts. Default: everyone on this month's form plus the latest settled month, excluding employees whose end date is before this month.",
+        },
+        allowCopy: { type: "boolean", description: "Copy missing employees from the latest settled month's form into this month (a write to Simpany). Default false: only return the plan." },
+        sourceFormId: { type: "number", description: "Simpany form id to copy from instead of the latest settled one." },
+        companyOwner: { type: "string", description: "Name of the company owner (負責人; pays the full health premium, no employment insurance). Default: whoever is flagged in the latest settled month." },
+        ...ORG_ARG,
+      },
+      required: ["year", "month"],
+      additionalProperties: false,
+    },
+    outputSchema: LOOSE_OBJECT,
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      await requireIntegrationForTool(orgId, "simpany");
+      await requireManager(orgId, ctx, "準備 Simpany 薪資申報");
+      const year = yearArg(args);
+      const month = requireMonth(args);
+      const preview = await prepareSalaryFiling(orgId, ctx.userId, {
+        year,
+        month,
+        payday: optDate(args, "payday"),
+        employees: parseSalaryEmployees(args.employees),
+        allowCopy: optBoolean(args, "allowCopy") ?? false,
+        sourceFormId: optNumber(args, "sourceFormId"),
+        companyOwner: optString(args, "companyOwner"),
+      });
+      await auditIntegrationCall(
+        ctx,
+        orgId,
+        "simpany",
+        preview.copy?.performed ? "update" : "read",
+        `salary prepare ${year}-${String(month).padStart(2, "0")}: draft ${preview.draftId ?? "none"}, ${preview.employees.length} employees, net ${preview.totals.net}${preview.copy?.performed ? `, copied ${preview.copy.employees.length} from form #${preview.copy.sourceFormId}` : ""}`,
+      );
+      return {
+        ...preview,
+        nextStep: preview.draftId
+          ? (preview.notInSimpany.length
+              ? `NOT in this draft (they don't exist in Simpany — the user must add them in Simpany's own UI first): ${preview.notInSimpany.join(", ")}. `
+              : "") +
+            "Show this preview to the user (per employee: base, bonus, gross, personal burden, company burden, withholding, net; payday; owner; warnings). Only after they explicitly approve it in this conversation, call simpany_apply_salary_filing({ draftId }). The draft expires at expiresAt."
+          : "No draft was created. Resolve the problems / copy plan / missing employees shown here (e.g. re-run with allowCopy: true after the user agrees to copy, or add employees in Simpany's UI), then prepare again.",
+      };
+    },
+  },
+
+  simpany_apply_salary_filing: {
+    description:
+      "Write a prepared salary declaration draft into Simpany: fixes the company-owner flags, sets the payday, then saves each employee's declaration exactly as previewed (PUT), reads the month back to verify each net pay (實際發薪) matches the preview, and re-syncs the year locally. Only call after the user has explicitly approved the preview from simpany_prepare_salary_filing in this conversation. Takes ONLY the draftId. The month stays editable in Simpany (not submitted to the bookkeeper until simpany_settle_salary_filing). On failure it reports exactly which declarations were written; every step overwrites, so the same draft can be retried. Owner/admin only.",
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    inputSchema: {
+      type: "object",
+      properties: {
+        draftId: { type: "number", description: "From simpany_prepare_salary_filing." },
+        ...ORG_ARG,
+      },
+      required: ["draftId"],
+      additionalProperties: false,
+    },
+    outputSchema: LOOSE_OBJECT,
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      await requireIntegrationForTool(orgId, "simpany");
+      await requireManager(orgId, ctx, "寫入 Simpany 薪資申報");
+      const draftId = requireNumber(args, "draftId");
+      try {
+        const res = await applySalaryFiling(orgId, draftId);
+        await auditIntegrationCall(
+          ctx,
+          orgId,
+          "simpany",
+          "update",
+          `salary apply draft #${draftId} ${res.year}-${String(res.month).padStart(2, "0")}: wrote ${res.written.length}, verified ${res.verified}`,
+        );
+        return {
+          ...res,
+          nextStep: res.verified
+            ? "Written. When the user is ready to submit this month to the bookkeeper, ask them to confirm the payday, the company owner and the salary amounts, then call simpany_settle_salary_filing with all three confirmations."
+            : "Written, but some net amounts read back from Simpany differ from the preview (see verification). Show the differences to the user before settling.",
+        };
+      } catch (e) {
+        await auditIntegrationCall(
+          ctx,
+          orgId,
+          "simpany",
+          "update",
+          `salary apply draft #${draftId} failed: ${(e instanceof Error ? e.message : String(e)).slice(0, 200)}`,
+        );
+        throw e;
+      }
+    },
+  },
+
+  simpany_settle_salary_filing: {
+    description:
+      "Settle (結算) a month's salary declarations in Simpany, which SUBMITS THEM TO THE BOOKKEEPER for withholding / insurance filing. Cannot be undone from here. Requires three explicit confirmations from the user — exactly like Simpany's own dialog: the payday is correct (confirmPayday), the company owner flag is correct (confirmOwner), the salary amounts are correct (confirmSalary); all three must be true, and only set them after the user confirmed each in this conversation. Refuses when Simpany says the month cannot be settled yet (months must be settled in order — returns the missing earlier months) or when data is incomplete. Owner/admin only.",
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+    inputSchema: {
+      type: "object",
+      properties: {
+        year: { type: "number" },
+        month: { type: "number", description: "Salary month 1-12." },
+        confirmPayday: { type: "boolean", description: "The user confirmed the payday is correct." },
+        confirmOwner: { type: "boolean", description: "The user confirmed the company owner (負責人) flag is correct." },
+        confirmSalary: { type: "boolean", description: "The user confirmed every employee's salary is correct." },
+        ...ORG_ARG,
+      },
+      required: ["year", "month", "confirmPayday", "confirmOwner", "confirmSalary"],
+      additionalProperties: false,
+    },
+    outputSchema: LOOSE_OBJECT,
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      await requireIntegrationForTool(orgId, "simpany");
+      await requireManager(orgId, ctx, "送出 Simpany 薪資申報結算");
+      const year = yearArg(args);
+      const month = requireMonth(args);
+      const label = `${year}-${String(month).padStart(2, "0")}`;
+      try {
+        const res = await settleSalaryFiling(orgId, {
+          year,
+          month,
+          confirmPayday: optBoolean(args, "confirmPayday") === true,
+          confirmOwner: optBoolean(args, "confirmOwner") === true,
+          confirmSalary: optBoolean(args, "confirmSalary") === true,
+        });
+        await auditIntegrationCall(ctx, orgId, "simpany", "update", `salary settle ${label}: settled ${res.settled}`);
+        return res;
+      } catch (e) {
+        await auditIntegrationCall(
+          ctx,
+          orgId,
+          "simpany",
+          "update",
+          `salary settle ${label} failed: ${(e instanceof Error ? e.message : String(e)).slice(0, 200)}`,
+        );
+        throw e;
+      }
+    },
+  },
+
+  simpany_send_payslips: {
+    description:
+      "Email payslips (薪資單) for a settled month through Simpany: each employee receives an encrypted PDF (password = their national id). Only for months already settled. Without employeeNames it sends to everyone on the month's form. Uses Simpany's default email text. Only call after the user explicitly asked to send them. Owner/admin only.",
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    inputSchema: {
+      type: "object",
+      properties: {
+        year: { type: "number" },
+        month: { type: "number", description: "Salary month 1-12." },
+        employeeNames: { type: "array", items: { type: "string" }, description: "Only these employees (exact Simpany names). Default: everyone." },
+        ...ORG_ARG,
+      },
+      required: ["year", "month"],
+      additionalProperties: false,
+    },
+    outputSchema: LOOSE_OBJECT,
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      await requireIntegrationForTool(orgId, "simpany");
+      await requireManager(orgId, ctx, "寄送 Simpany 薪資單");
+      const year = yearArg(args);
+      const month = requireMonth(args);
+      const res = await sendPayslips(orgId, {
+        year,
+        month,
+        employeeNames: optStringArray(args.employeeNames, "employeeNames"),
+      });
+      await auditIntegrationCall(
+        ctx,
+        orgId,
+        "simpany",
+        "update",
+        `payslips ${year}-${String(month).padStart(2, "0")} sent to ${res.recipients.length}`,
       );
       return res;
     },

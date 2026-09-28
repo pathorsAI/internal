@@ -236,6 +236,7 @@ Simpany 改版就可能壞，所以所有回應都防禦式解析，認不得就
 | `src/lib/simpany-sync.ts` | Simpany → `invoices` 同步、自動綁定、作廢清理 |
 | `src/lib/simpany-issue.ts` | 預覽（`invoice_drafts`）→ 開立、作廢；MCP 與 web 共用 |
 | `src/lib/simpany-salary.ts` | 薪資申報唯讀同步與欠薪對帳（見下方「薪資申報」） |
+| `src/lib/simpany-payroll.ts` | 薪資申報寫入：準備（試算 + 草稿）→ 寫入 → 結算 → 寄薪資單（見下方「薪資申報寫入」） |
 | `src/lib/mcp/tools-simpany.ts` | MCP 工具（見 [mcp.md](mcp.md)） |
 | `src/app/dashboard/invoices/simpany-*.ts(x)` | 發票頁「從 Simpany 同步」、看板「在 Simpany 開立」、server actions |
 | `migrations/0025_invoice_simpany_sync.sql` | invoices 的課稅別 / 零稅率原因 / 外幣匯率 / B2B-B2C / `external_id` / 作廢欄位，`invoice_drafts` 表 |
@@ -243,7 +244,7 @@ Simpany 改版就可能壞，所以所有回應都防禦式解析，認不得就
 **Config**：`companyId` + `companyName`（非機密）。帳號底下只有一家公司時連接時自動選；
 多家就要在連接 Sheet 填「公司 ID」（失敗訊息會列出可選的 ID）。
 
-**用到的端點**（其他一概不碰；薪資申報的唯讀端點另見下方「薪資申報」）：
+**用到的端點**（其他一概不碰；薪資申報的端點另見下方「薪資申報」與「薪資申報寫入」）：
 
 | Host | Endpoint | 用途 |
 | --- | --- | --- |
@@ -299,10 +300,10 @@ Simpany 也是公司申報薪資（扣繳、勞健保）的地方。這裡**只�
 
 `month` 是**薪資所屬月份**（`yearMonth`），發薪日通常是次月 5 日（`payday`）。
 
-**唯讀護欄**：薪資請求一律走 `SimpanyClient` 的私有 `salaryGet()` → `assertSalaryReadOnly()`：
+**唯讀護欄**：同步與對帳用的薪資請求一律走 `SimpanyClient` 的私有 `salaryGet()` → `assertSalaryReadOnly()`：
 method 必須是 GET、路徑必須符合白名單（`form/monthly-forms/{yyyy}`、`form`）、query key 只能是
-`year` / `month`，否則**不發請求**直接丟錯。結算、複製、建立、寄薪資單等端點沒有任何程式碼路徑；
-要加端點只能加唯讀的 GET 到白名單。
+`year` / `month`，否則**不發請求**直接丟錯。寫入端點另有一條獨立的白名單（`assertSalaryWrite`，見下方
+「薪資申報寫入」），只有 `src/lib/simpany-payroll.ts` 會用；同步、對帳、每日自動同步都不會碰到。
 
 **個資**：Simpany 的回應含身分證字號（`personalId`）、戶籍地址（`address`）、國籍（`nationality`）。
 `parseSalaryForm` 只挑白名單欄位組新物件，這三個欄位**從來不會被讀進記憶體裡的結構**，所以不會進
@@ -342,6 +343,85 @@ Simpany 上已不存在的表單 / 員工會從本地刪掉，所以重跑是冪
 未指定員工的薪資支出）；MCP `simpany_list_salary_declarations`、`simpany_sync_salary_declarations`、
 `salary_arrears`（見 [mcp.md](mcp.md)）。
 
+### 薪資申報寫入（準備 → 寫入 → 結算 → 寄薪資單）
+
+讓 owner / admin 從本系統（薪資頁、MCP）直接在 Simpany 填每月薪資申報，不用再到 Simpany 介面一格一格點。
+流程跟電子發票開立一樣是「預覽成草稿 → 使用者確認 → 只收 draft id 寫入」，結算與寄薪資單各自再要明確確認。
+
+| Where | What |
+| --- | --- |
+| `src/lib/integrations/simpany.ts` | `assertSalaryWrite()`（寫入白名單）、`getSalaryDeclaration` / `getSalarySetting` / `calculateSalaryDeclaration` / `updateSalaryDeclaration` / `copySalaryForm` / `setSalaryPayday` / `setSalaryCompanyOwner` / `settleSalaryForm` / `sendSalaryPayslips` |
+| `src/lib/simpany-payroll.ts` | `prepareSalaryFiling`、`applySalaryFiling`、`settleSalaryFiling`、`sendPayslips`、`buildDeclarationPayload`（純函式）、`salaryFilingDefaults`（web 預設值，只讀本地表） |
+| `migrations/0029_simpany_salary_drafts.sql` | `simpany_salary_drafts`（pending → applied → settled；cancelled / expired） |
+| `src/app/dashboard/payroll/simpany-salary-filing.tsx` | 月份格上的「準備申報 / 薪資單」Sheet |
+
+**寫入白名單**（`assertSalaryWrite`，相對於 `api.simpany.co/v1/{companyId}/salary-declaration/`；method + 路徑逐條比對，不接受任何 query）：
+
+| Method | Path | 用途 |
+| --- | --- | --- |
+| GET | `form/{formId}/salary-declaration/{declId}` | 單一申報明細（模板） |
+| GET | `form/{formId}/setting` | 加項 / 減項選項、基本工資、投保級距表 |
+| POST | `form/{formId}/salary-declaration/{declId}/calculate` | Simpany 的即時試算（不存檔）；只在「準備」時呼叫 |
+| PUT | `form/{formId}/salary-declaration/{declId}` | 存檔申報明細（整份覆寫）；422 → `{errors:{field:[msg]}}` |
+| POST | `form/{formId}/copy` `{sourceFormId, employeeIds}` | 從別的月份複製員工與申報明細 |
+| PATCH | `form/{formId}/payday` `{payday}` | 發薪日；可能回 `healthInsuranceRangeByPayDateAdjustments` |
+| PUT | `form/{formId}/salary-declaration/{declId}/company-owner` `{isCompanyOwner}` | 負責人旗標 |
+| POST | `form/{formId}/settle` `{resignedEmployeeIds: []}` | **結算，送給記帳士** |
+| POST | `form/{formId}/payslip/send` `{mode, mailContent[, salaryDeclarationIds]}` | 寄薪資單；404 = 薪資單還在產生 |
+
+員工的建立 / 修改 / 刪除 / pre-check（都需要身分證字號）**刻意不在白名單**：表單上找不到的人一律回報
+`notInSimpany`，請使用者到 Simpany 的介面新增。
+
+> ⚠️ 這些端點是從 Simpany 前端 bundle 讀出來的，payload 形狀以真實 GET 的回應比對過，但**寫入端點從未實際呼叫驗證**
+> （開發時嚴禁打寫入端點）。第一次上線使用時要人工在 Simpany 介面對一次結果。
+
+**1. 準備（`prepareSalaryFiling`）**——對 Simpany 只發 GET 與 POST calculate（allowCopy 時另有 POST copy）：
+
+- `GET form?year&month`（Simpany 對還沒建立的月份會自動建空白表單，它的介面也是這樣）。已結算 → 拒絕。
+  `monthSequenceRestriction`（例如 `EXISTING_OUT_OF_SEQUENCE_RECORDS` + `missingMonths`）→ 警示：月份必須依序結算，不繞過。
+- 對象：有給 `employees` 就用（`employeeId` 或與 Simpany 完全相同的姓名）；沒給 = 這個月表單上的人 + 最近一個已結算月份的人，
+  排除本系統記錄在這個月之前就離職的。
+- 表單上缺人 → 找最近一個有這些人的已結算表單（或 `sourceFormId`），規劃 `POST copy`。**複製是寫入**，只有
+  `allowCopy: true` 才做；否則回傳計畫、不產生草稿。
+- 每位員工：`GET` 申報明細當模板 → `buildDeclarationPayload`：
+  - 只改日期與金額：薪資期間 = 整個月；勞保 / 勞退期間模板有值才改成整個月（沒有就維持 null）。
+  - 本薪 = 輸入 → 員工資料的本薪 → 上次申報的本薪。
+  - 沿用模板的：投保級距（INSURANCE_RANGE 原樣）、投保旗標、扶養人數、勞退自提 / 提繳率、每月固定的加項（1 免稅伙食津貼、36 經常性獎金）。
+  - 一次性的**不沿用**並列在 `droppedItems`：非經常性獎金（11）、員工代墊款（49）、年終、加班費、減項（44 / 50）等；這個月有才用
+    `bonus` / `reimbursement` / `otherAllowances` / `otherDeductions` 帶。
+  - `salaryDeclarationItems` = 可編輯項目（ALLOWANCE、INSURANCE_RANGE、選項清單內的 DEDUCTION）；其餘放
+    `calculatedSalaryDeclarationItems`。INSURANCE_FEE（員工補助金額）目前歸在「算出來的」那一邊 —— 未經驗證。
+- `POST calculate` → 用回傳的 `calculatedSalaryDeclarationItems` 組成要 PUT 的 body，抽出應發、個人負擔、公司負擔、扣繳、
+  實發（`實際發薪`）、實際申報薪資、投保級距。本薪高於級距、Simpany 建議級距不同、低於基本工資、月中到離職都只警示，**不自動改級距**。
+- 負責人：`companyOwner` 輸入 → 最近一個已結算月份標記的人 → 這個月表單上標記的人。旗標不符時在寫入時修正（派斯是鄭宇傑：
+  負責人健保全額自付、沒有就業保險）。
+- 發薪日預設次月 5 日；不是的話警示（Simpany 介面也會警告）。
+- 全部都算得出來、也沒有待複製的人，才寫一筆 `simpany_salary_drafts`（每份 PUT body 原樣 + 預覽，2 小時過期）。
+
+**2. 寫入（`applySalaryFiling(draftId)`）**：條件式搶草稿（`pending → applied`，過期搶不到）→ 再讀一次表單（已結算 / 換了表單 /
+申報明細不見 → 取消草稿）→ **負責人旗標 → 發薪日 → 逐一 PUT 申報明細**（旗標與發薪日是 Simpany 試算的輸入，所以先設）→
+讀回來比對每人實發（`verification`、`verified`）→ `syncSalaryDeclarations(org, year)`。任何一步失敗：草稿退回 `pending`，
+`apply_result` 與錯誤訊息列出已修正的旗標、是否已改發薪日、已寫入 / 尚未寫入的人。每一步都是覆寫式，可以用同一份草稿重試。
+
+**3. 結算（`settleSalaryFiling`）**：`confirmPayday`、`confirmOwner`、`confirmSalary` 三個確認**都必須為 true**（同 Simpany 的三個勾選）；
+表單未建立 / 已結算 / 沒有任何申報 / Simpany 標記資料不完整（`hasMissing*Data`）/ `canSettle = false`（回傳順序限制與缺的月份）
+一律拒絕。`POST settle {resignedEmployeeIds: []}`；網路中斷或 5xx → 回報「結果不明，先同步確認，不要重送」。
+成功後讀回來確認 `isSettled`、把該月 applied 草稿標 `settled`、重新同步。**送出後無法從這裡撤回。**
+
+**4. 寄薪資單（`sendPayslips`）**：只限已結算的月份；沒指定人 = `COMPANY_SALARY_DECLARATION_FORM`（整張表單），
+指定姓名 = `SALARY_DECLARATIONS` + 申報明細 id。信件內容用 Simpany 的預設文字（發薪日取表單的 `payday`）。
+404 = 薪資單 PDF 還在產生，稍後再寄。
+
+**個資**：申報明細只以白名單欄位解析（`parseSalaryDeclarationDetail`），身分證字號 / 地址 / 國籍不進記憶體結構、草稿、log、
+回傳值；Simpany 回的調整建議先經 `stripSalaryPii`。請求 / 回應 body 都不寫 log，錯誤訊息只取結構化的 message。
+
+**股東往來還款不是薪資**，永遠不填進 Simpany 的薪資申報（工具描述與 Sheet 都有提醒）。
+
+入口：薪資頁月份格的「準備申報」（已結算的月份是「薪資單」）Sheet —— 可編輯每人本薪 / 非經常性獎金 / 員工代墊款、
+發薪日（預設次月 5 日）、是否允許複製 →「計算」顯示 Simpany 試算結果與順序限制警示 →「寫入 Simpany」→ 三個勾選
+→「送出給記帳士」→「寄送薪資單」。只對 owner / admin、整合可用、且月份不晚於本月時顯示。
+MCP：`simpany_prepare_salary_filing`、`simpany_apply_salary_filing`、`simpany_settle_salary_filing`、`simpany_send_payslips`。
+
 ## 每日自動同步
 
 已連接、已開啟、狀態正常的整合每天自動同步一次，不用再有人去按「同步」。
@@ -361,7 +441,7 @@ Simpany 上已不存在的表單 / 員工會從本地刪掉，所以重跑是冪
 **安全**：
 
 - **只同步，不開立**：Simpany 只走列表 / 明細 / 薪資申報的 GET；自動同步沒有任何開立、
-  作廢發票或其他 Simpany 寫入端點的程式碼路徑。Wise 本來就只有 GET（見上方唯讀保證）。
+  作廢發票、薪資申報寫入 / 結算或其他 Simpany 寫入端點的程式碼路徑。Wise 本來就只有 GET（見上方唯讀保證）。
 - Wise 寫入是安全的：以 referenceNumber 去重（`ON CONFLICT DO NOTHING`，刪掉的也不會長回來）、
   永遠不早於切換日、新列一律「待確認」。Simpany 發票與薪資申報同步都是冪等 upsert。
 - **依序、不平行**：一個組織一個整合接著跑，對 Simpany 的非官方 API 溫和一點。

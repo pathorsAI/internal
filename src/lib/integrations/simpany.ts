@@ -28,8 +28,10 @@ import type {
  * 三個 base：
  * - api.simpany.co/v1        登入、/me（使用者與公司清單）
  * - member2.simpany.co/api/v1/c/{companyId}/   電子發票（receipts）
- * - api.simpany.co/v1/{companyId}/salary-declaration/   薪資申報（**只讀**：GET + 路徑白名單，
- *   見 assertSalaryReadOnly）。回應含身分證字號 / 地址 / 國籍，解析時一律丟掉。
+ * - api.simpany.co/v1/{companyId}/salary-declaration/   薪資申報。讀取走 assertSalaryReadOnly
+ *   （GET + 路徑白名單）；寫入（申報明細、發薪日、負責人、結算、寄薪資單）另走 assertSalaryWrite
+ *   （method + 路徑逐條白名單），只由 src/lib/simpany-payroll.ts 呼叫。回應含身分證字號 / 地址 /
+ *   國籍，解析時一律丟掉；請求 / 回應 body 一律不寫 log。
  */
 
 const AUTH_BASE = "https://api.simpany.co/v1";
@@ -62,6 +64,46 @@ export function assertSalaryReadOnly(
     if (!SALARY_QUERY_KEYS.has(k)) {
       throw new SimpanyError("config", `Simpany 薪資申報不允許 query 參數 ${k}`);
     }
+  }
+}
+
+/**
+ * 薪資申報的**寫入**端點白名單（相對於 {companyId}/salary-declaration/），method 與路徑逐條對應。
+ * 只有這幾條；員工的建立 / 修改 / 刪除（需要身分證字號）刻意不在清單內。
+ * 讀取用的 GET（form、monthly-forms）仍走 assertSalaryReadOnly。
+ */
+const SALARY_WRITE_ENDPOINTS: readonly { method: string; path: RegExp }[] = [
+  // 讀單一申報明細 / 表單設定（加項 / 減項選項、投保級距）—— 準備寫入時才用到
+  { method: "GET", path: /^form\/\d+\/salary-declaration\/\d+$/ },
+  { method: "GET", path: /^form\/\d+\/setting$/ },
+  // 試算（Simpany UI 的即時預覽；不存檔，但仍是 POST）
+  { method: "POST", path: /^form\/\d+\/salary-declaration\/\d+\/calculate$/ },
+  // 存檔申報明細
+  { method: "PUT", path: /^form\/\d+\/salary-declaration\/\d+$/ },
+  // 從前一個月的表單複製員工與申報明細
+  { method: "POST", path: /^form\/\d+\/copy$/ },
+  // 發薪日
+  { method: "PATCH", path: /^form\/\d+\/payday$/ },
+  // 負責人旗標
+  { method: "PUT", path: /^form\/\d+\/salary-declaration\/\d+\/company-owner$/ },
+  // 結算（送給記帳士）
+  { method: "POST", path: /^form\/\d+\/settle$/ },
+  // 寄薪資單給員工
+  { method: "POST", path: /^form\/\d+\/payslip\/send$/ },
+];
+
+/** 薪資申報的寫入護欄：method + 路徑不在白名單、或帶了任何 query，一律不發請求直接丟錯。 */
+export function assertSalaryWrite(
+  method: string,
+  path: string,
+  query?: Record<string, unknown>,
+): void {
+  const m = method.toUpperCase();
+  if (!SALARY_WRITE_ENDPOINTS.some((e) => e.method === m && e.path.test(path))) {
+    throw new SimpanyError("config", `Simpany 薪資申報不允許 ${m} ${path}（不在寫入端點白名單內）`);
+  }
+  if (Object.keys(query ?? {}).length > 0) {
+    throw new SimpanyError("config", `Simpany 薪資申報寫入端點不接受 query 參數（${m} ${path}）`);
   }
 }
 
@@ -192,6 +234,9 @@ export type SimpanySalaryFormEmployee = {
   } | null;
 };
 
+/** 月份必須依序結算：Simpany 列出前面還沒結算的月份（例如 "2026-06"）。 */
+export type SimpanyMonthSequenceRestriction = { reason: string; missingMonths: string[] };
+
 export type SimpanySalaryForm = {
   id: number | null;
   year: number;
@@ -199,8 +244,95 @@ export type SimpanySalaryForm = {
   payday: string | null;
   isSettled: boolean;
   canSettle: boolean | null;
+  /** null = 沒有順序限制。 */
+  monthSequenceRestriction: SimpanyMonthSequenceRestriction | null;
   employees: SimpanySalaryFormEmployee[];
 };
+
+/** 申報明細的一個項目，含寫回 Simpany 需要的 itemId / note。 */
+export type SimpanySalaryPayloadItem = {
+  itemId: number;
+  amount: number;
+  note: string | null;
+  name: string;
+  type: string;
+};
+
+export type SimpanySalarySubtotal = {
+  allowance: number | null;
+  deduction: number | null;
+  personalBurden: number | null;
+  withholdingTax: number | null;
+};
+
+/**
+ * GET form/{formId}/salary-declaration/{declId} 的白名單欄位（寫入時當模板用）。
+ * 不含任何身分證字號 / 地址 / 國籍。
+ */
+export type SimpanySalaryDeclarationDetail = {
+  id: number;
+  isCompanyOwner: boolean;
+  payday: string | null;
+  yearMonth: string | null;
+  payStartDate: string | null;
+  payEndDate: string | null;
+  laborInsuranceStartDate: string | null;
+  laborInsuranceEndDate: string | null;
+  laborPensionStartDate: string | null;
+  laborPensionEndDate: string | null;
+  shouldAskIfTerminated: boolean | null;
+  hasPensionPreparationFundByCompany: boolean;
+  pensionPreparationFundByCompanyRate: string;
+  pensionPreparationFundBySelfRate: string;
+  withholdingTaxDependents: number;
+  healthInsuranceDependents: number;
+  hasOrdinaryAccidentInsurance: boolean;
+  hasEmploymentInsurance: boolean;
+  hasOccupationalAccidentInsurance: boolean;
+  items: SimpanySalaryPayloadItem[];
+  subtotal: SimpanySalarySubtotal | null;
+};
+
+/** POST …/calculate 與 PUT …/salary-declaration/{declId} 的 body（Simpany 會員網頁送的形狀）。 */
+export type SimpanySalaryDeclarationPayload = {
+  payStartDate: string;
+  payEndDate: string;
+  hasEmploymentInsurance: boolean;
+  hasOrdinaryAccidentInsurance: boolean;
+  hasPensionPreparationFundByCompany: boolean;
+  healthInsuranceDependents: number;
+  pensionPreparationFundByCompanyRate: string;
+  pensionPreparationFundBySelfRate: string;
+  withholdingTaxDependents: number;
+  /** 使用者可編輯的項目：ALLOWANCE、INSURANCE_RANGE、可選的 DEDUCTION（應稅其他減項、公司代墊款）。 */
+  salaryDeclarationItems: SimpanySalaryPayloadItem[];
+  /** Simpany 算出來的項目（保費、扣繳、小計…），來自上一次試算或 GET。 */
+  calculatedSalaryDeclarationItems: SimpanySalaryPayloadItem[];
+  laborInsuranceStartDate: string | null;
+  laborInsuranceEndDate: string | null;
+  laborPensionStartDate: string | null;
+  laborPensionEndDate: string | null;
+  hasOccupationalAccidentInsurance: boolean;
+};
+
+export type SimpanySalaryCalculation = {
+  calculatedItems: SimpanySalaryPayloadItem[];
+  subtotal: SimpanySalarySubtotal | null;
+  /** 形狀未經驗證，只留基本型別的值（去個資）。 */
+  suggestedInsuranceRange: unknown;
+};
+
+export type SimpanySalaryOption = { id: number; name: string };
+
+export type SimpanySalarySetting = {
+  minimumSalary: number | null;
+  allowanceOptions: SimpanySalaryOption[];
+  deductionOptions: SimpanySalaryOption[];
+};
+
+export type SimpanyPayslipSendBody =
+  | { mode: "COMPANY_SALARY_DECLARATION_FORM"; mailContent: string }
+  | { mode: "SALARY_DECLARATIONS"; salaryDeclarationIds: number[]; mailContent: string };
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -475,7 +607,136 @@ export function parseSalaryForm(data: unknown, year: number, month: number): Sim
     payday: dateStr(data.payday),
     isSettled: data.isSettled === true,
     canSettle: bool(data.canSettle),
+    monthSequenceRestriction: parseMonthSequenceRestriction(data.monthSequenceRestriction),
     employees,
+  };
+}
+
+/** missingMonths 的每一格可能是 "2026-06"、數字或 {year, month}；都轉成 "YYYY-MM"（認不得的丟掉）。 */
+function missingMonthLabel(v: unknown): string | null {
+  if (typeof v === "string") return v.trim() || null;
+  if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  if (isObj(v)) {
+    const y = numOrNull(v.year);
+    const m = numOrNull(v.month);
+    if (y != null && m != null) return `${y}-${String(m).padStart(2, "0")}`;
+    return str(v.yearMonth);
+  }
+  return null;
+}
+
+export function parseMonthSequenceRestriction(v: unknown): SimpanyMonthSequenceRestriction | null {
+  if (!isObj(v)) return null;
+  const missingMonths = Array.isArray(v.missingMonths)
+    ? v.missingMonths.map(missingMonthLabel).filter((x): x is string => x !== null)
+    : [];
+  return { reason: str(v.reason) ?? "UNKNOWN", missingMonths };
+}
+
+function parsePayloadItems(v: unknown): SimpanySalaryPayloadItem[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter(isObj).flatMap((it): SimpanySalaryPayloadItem[] => {
+    const itemId = numOrNull(it.itemId);
+    if (itemId == null) return [];
+    return [
+      {
+        itemId,
+        amount: num(it.amount),
+        note: str(it.note),
+        name: str(it.name)?.trim() ?? "",
+        type: str(it.type) ?? "",
+      },
+    ];
+  });
+}
+
+function parseSubtotal(v: unknown): SimpanySalarySubtotal | null {
+  if (!isObj(v)) return null;
+  return {
+    allowance: numOrNull(v.allowance),
+    deduction: numOrNull(v.deduction),
+    personalBurden: numOrNull(v.personalBurden),
+    withholdingTax: numOrNull(v.withholdingTax),
+  };
+}
+
+/** 解析單一申報明細：只挑白名單欄位組新物件。 */
+export function parseSalaryDeclarationDetail(v: unknown): SimpanySalaryDeclarationDetail | null {
+  if (!isObj(v)) return null;
+  const id = numOrNull(v.id);
+  if (id == null) return null;
+  return {
+    id,
+    isCompanyOwner: v.isCompanyOwner === true,
+    payday: dateStr(v.payday),
+    yearMonth: str(v.yearMonth),
+    payStartDate: dateStr(v.payStartDate),
+    payEndDate: dateStr(v.payEndDate),
+    laborInsuranceStartDate: dateStr(v.laborInsuranceStartDate),
+    laborInsuranceEndDate: dateStr(v.laborInsuranceEndDate),
+    laborPensionStartDate: dateStr(v.laborPensionStartDate),
+    laborPensionEndDate: dateStr(v.laborPensionEndDate),
+    shouldAskIfTerminated: bool(v.shouldAskIfTerminated),
+    hasPensionPreparationFundByCompany: v.hasPensionPreparationFundByCompany === true,
+    pensionPreparationFundByCompanyRate: str(v.pensionPreparationFundByCompanyRate) ?? "0.00",
+    pensionPreparationFundBySelfRate: str(v.pensionPreparationFundBySelfRate) ?? "0.00",
+    withholdingTaxDependents: num(v.withholdingTaxDependents),
+    healthInsuranceDependents: num(v.healthInsuranceDependents),
+    hasOrdinaryAccidentInsurance: v.hasOrdinaryAccidentInsurance === true,
+    hasEmploymentInsurance: v.hasEmploymentInsurance === true,
+    hasOccupationalAccidentInsurance: v.hasOccupationalAccidentInsurance === true,
+    items: parsePayloadItems(v.salaryDeclarationItems),
+    subtotal: parseSubtotal(v.subtotal),
+  };
+}
+
+const PII_KEY = /personal|address|nationality|birth|passport|resident|email|phone|bank|account/i;
+
+/**
+ * 形狀未知的回應（調整建議等）：遞迴複製，丟掉看起來像個資的欄位、只留基本型別，限制深度與長度。
+ * 用在回傳給使用者看的「Simpany 自動調整了什麼」。
+ */
+export function stripSalaryPii(v: unknown, depth = 0): unknown {
+  if (v === null || typeof v === "boolean" || typeof v === "number") return v;
+  if (typeof v === "string") return v.length > 200 ? `${v.slice(0, 199)}…` : v;
+  if (depth >= 4) return null;
+  if (Array.isArray(v)) return v.slice(0, 50).map((x) => stripSalaryPii(x, depth + 1));
+  if (isObj(v)) {
+    const out: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v)) {
+      if (PII_KEY.test(k)) continue;
+      out[k] = stripSalaryPii(x, depth + 1);
+    }
+    return out;
+  }
+  return null;
+}
+
+export function parseSalaryCalculation(v: unknown): SimpanySalaryCalculation | null {
+  if (!isObj(v)) return null;
+  if (!Array.isArray(v.calculatedSalaryDeclarationItems)) return null;
+  return {
+    calculatedItems: parsePayloadItems(v.calculatedSalaryDeclarationItems),
+    subtotal: parseSubtotal(v.subtotal),
+    suggestedInsuranceRange:
+      v.suggestedInsuranceRange === undefined ? null : stripSalaryPii(v.suggestedInsuranceRange),
+  };
+}
+
+function parseOptions(v: unknown): SimpanySalaryOption[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .filter(isObj)
+    .map((o) => ({ id: numOrNull(o.id), name: str(o.name)?.trim() ?? "" }))
+    .filter((o): o is SimpanySalaryOption => o.id != null && o.name !== "");
+}
+
+export function parseSalarySetting(v: unknown): SimpanySalarySetting | null {
+  if (!isObj(v)) return null;
+  return {
+    minimumSalary: numOrNull(v.salaryMonthMinimumSalary),
+    allowanceOptions: parseOptions(v.salaryBasicItemAllowanceOptions),
+    deductionOptions: parseOptions(v.salaryBasicItemDeductionOptions),
   };
 }
 
@@ -638,13 +899,16 @@ async function loginAndCache(orgId: string, credentials: IntegrationCredentials)
 }
 
 type RequestOptions = {
-  method?: "GET" | "POST" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   query?: Record<string, string | number | undefined>;
   body?: unknown;
 };
 
-/** einvoice = member2 的電子發票；salary = api 的薪資申報（唯讀）。 */
-type ApiBase = "einvoice" | "salary";
+/**
+ * einvoice = member2 的電子發票；salary = api 的薪資申報唯讀端點（assertSalaryReadOnly）；
+ * salaryWrite = 同一個 host 的薪資申報寫入端點（assertSalaryWrite）。
+ */
+type ApiBase = "einvoice" | "salary" | "salaryWrite";
 
 /**
  * 已登入、已選定公司的 Simpany client。用 getSimpanyClient(orgId) 取得。
@@ -689,9 +953,9 @@ export class SimpanyClient {
 
   private url(base: ApiBase, path: string, query?: RequestOptions["query"]): string {
     const u = new URL(
-      base === "salary"
-        ? `${SALARY_BASE}/${this.companyId}/salary-declaration/${path}`
-        : `${EINVOICE_BASE}/${this.companyId}/${path}`,
+      base === "einvoice"
+        ? `${EINVOICE_BASE}/${this.companyId}/${path}`
+        : `${SALARY_BASE}/${this.companyId}/salary-declaration/${path}`,
     );
     for (const [k, v] of Object.entries(query ?? {})) {
       if (v !== undefined && v !== "") u.searchParams.set(k, String(v));
@@ -706,6 +970,7 @@ export class SimpanyClient {
     opts: RequestOptions,
   ): Promise<Response> {
     if (base === "salary") assertSalaryReadOnly(opts.method ?? "GET", path, opts.query);
+    if (base === "salaryWrite") assertSalaryWrite(opts.method ?? "GET", path, opts.query);
     const headers: Record<string, string> = { ...BASE_HEADERS, Authorization: `Bearer ${token}` };
     if (opts.body !== undefined) headers["Content-Type"] = "application/json";
     return safeFetch(this.url(base, path, opts.query), {
@@ -754,7 +1019,7 @@ export class SimpanyClient {
     const body = await readBody(res);
     // 薪資申報的回應可能含個資：錯誤訊息只取結構化的 message，不附 body 片段。
     const errorText = (b: unknown) =>
-      base === "salary" ? salaryErrorMessage(b) : simpanyErrorMessage(b);
+      base === "einvoice" ? simpanyErrorMessage(b) : salaryErrorMessage(b);
     if (res.ok) {
       // 業務錯誤有時仍是 2xx：{ status: "error", error: {...} }
       if (isObj(body) && body.status === "error") {
@@ -814,6 +1079,113 @@ export class SimpanyClient {
     const form = parseSalaryForm(unwrapData(body), year, month);
     if (!form) throw new SimpanyError("business", "Simpany 回傳的薪資申報表單格式無法辨識");
     return form;
+  }
+
+  // ---- salary declarations（寫入；只由 src/lib/simpany-payroll.ts 呼叫）----
+  //
+  // 全部走 salaryWrite → assertSalaryWrite（method + 路徑白名單）。請求 / 回應 body 不寫 log；
+  // 錯誤訊息只取 Simpany 的結構化 message（salaryErrorMessage），不附 body 片段。
+
+  private async salaryWrite(
+    method: "GET" | "POST" | "PUT" | "PATCH",
+    path: string,
+    body?: unknown,
+  ): Promise<unknown> {
+    assertSalaryWrite(method, path);
+    return this.requestAt("salaryWrite", path, { method, body });
+  }
+
+  /** GET form/{formId}/salary-declaration/{declId}：單一申報明細（寫入時的模板）。 */
+  async getSalaryDeclaration(formId: number, declId: number): Promise<SimpanySalaryDeclarationDetail> {
+    const body = await this.salaryWrite(
+      "GET",
+      `form/${positiveId(formId, "formId")}/salary-declaration/${positiveId(declId, "declarationId")}`,
+    );
+    const detail = parseSalaryDeclarationDetail(unwrapData(body));
+    if (!detail) throw new SimpanyError("business", "Simpany 回傳的薪資申報明細格式無法辨識");
+    return detail;
+  }
+
+  /** GET form/{formId}/setting：加項 / 減項選項、基本工資。 */
+  async getSalarySetting(formId: number): Promise<SimpanySalarySetting> {
+    const body = await this.salaryWrite("GET", `form/${positiveId(formId, "formId")}/setting`);
+    const setting = parseSalarySetting(unwrapData(body));
+    if (!setting) throw new SimpanyError("business", "Simpany 回傳的薪資申報設定格式無法辨識");
+    return setting;
+  }
+
+  /**
+   * POST …/calculate：Simpany 會員網頁的即時試算（不存檔）。只在「準備申報」時呼叫。
+   */
+  async calculateSalaryDeclaration(
+    formId: number,
+    declId: number,
+    payload: SimpanySalaryDeclarationPayload,
+  ): Promise<SimpanySalaryCalculation> {
+    const body = await this.salaryWrite(
+      "POST",
+      `form/${positiveId(formId, "formId")}/salary-declaration/${positiveId(declId, "declarationId")}/calculate`,
+      payload,
+    );
+    const calc = parseSalaryCalculation(unwrapData(body));
+    if (!calc) throw new SimpanyError("business", "Simpany 回傳的薪資試算結果格式無法辨識");
+    return calc;
+  }
+
+  /** PUT …/salary-declaration/{declId}：存檔申報明細（整份覆寫，重送同一份結果相同）。 */
+  async updateSalaryDeclaration(
+    formId: number,
+    declId: number,
+    payload: SimpanySalaryDeclarationPayload,
+  ): Promise<void> {
+    await this.salaryWrite(
+      "PUT",
+      `form/${positiveId(formId, "formId")}/salary-declaration/${positiveId(declId, "declarationId")}`,
+      payload,
+    );
+  }
+
+  /** POST form/{formId}/copy：把來源表單的員工與申報明細複製進來。回傳 Simpany 的級距調整（去個資）。 */
+  async copySalaryForm(formId: number, sourceFormId: number, employeeIds: number[]): Promise<unknown> {
+    const ids = employeeIds.map((id) => positiveId(id, "employeeId"));
+    if (ids.length === 0) throw new SimpanyError("config", "複製薪資申報至少要指定一位員工");
+    const body = await this.salaryWrite("POST", `form/${positiveId(formId, "formId")}/copy`, {
+      sourceFormId: positiveId(sourceFormId, "sourceFormId"),
+      employeeIds: ids,
+    });
+    const data = unwrapData(body);
+    return isObj(data) && data.rangeAdjustments !== undefined ? stripSalaryPii(data.rangeAdjustments) : null;
+  }
+
+  /** PATCH form/{formId}/payday。回傳 Simpany 依發薪日做的健保級距調整（去個資）。 */
+  async setSalaryPayday(formId: number, payday: string): Promise<unknown> {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(payday)) throw new SimpanyError("config", `不合法的發薪日：${payday}`);
+    const body = await this.salaryWrite("PATCH", `form/${positiveId(formId, "formId")}/payday`, { payday });
+    const data = unwrapData(body);
+    return isObj(data) && data.healthInsuranceRangeByPayDateAdjustments !== undefined
+      ? stripSalaryPii(data.healthInsuranceRangeByPayDateAdjustments)
+      : null;
+  }
+
+  /** PUT …/salary-declaration/{declId}/company-owner。 */
+  async setSalaryCompanyOwner(formId: number, declId: number, isCompanyOwner: boolean): Promise<void> {
+    await this.salaryWrite(
+      "PUT",
+      `form/${positiveId(formId, "formId")}/salary-declaration/${positiveId(declId, "declarationId")}/company-owner`,
+      { isCompanyOwner },
+    );
+  }
+
+  /** POST form/{formId}/settle：把這個月送給記帳士。**送出後無法從這裡撤回。** */
+  async settleSalaryForm(formId: number, resignedEmployeeIds: number[] = []): Promise<void> {
+    await this.salaryWrite("POST", `form/${positiveId(formId, "formId")}/settle`, {
+      resignedEmployeeIds: resignedEmployeeIds.map((id) => positiveId(id, "employeeId")),
+    });
+  }
+
+  /** POST form/{formId}/payslip/send：寄薪資單給員工（Simpany 寄信）。 */
+  async sendSalaryPayslips(formId: number, body: SimpanyPayslipSendBody): Promise<void> {
+    await this.salaryWrite("POST", `form/${positiveId(formId, "formId")}/payslip/send`, body);
   }
 
   // ---- receipts ----
@@ -913,6 +1285,12 @@ export class SimpanyClient {
       return null;
     }
   }
+}
+
+/** 路徑裡的 id：必須是正整數（擋掉路徑注入）。 */
+function positiveId(v: number, what: string): number {
+  if (!Number.isSafeInteger(v) || v <= 0) throw new SimpanyError("config", `不合法的 ${what}：${v}`);
+  return v;
 }
 
 /** 在未知形狀裡找「剩餘」類欄位加總；找不到回 null。 */

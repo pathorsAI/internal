@@ -18,8 +18,10 @@ import {
 import { formatCurrency, formatDateTime } from "@/lib/format";
 import type { IntegrationSummary } from "@/lib/integrations/types";
 import type { SalaryMonthStatus, SalaryReconciliation } from "@/lib/simpany-salary";
+import { currentYearMonth } from "@/lib/simpany-payroll";
 import { cn } from "@/lib/utils";
 import { ArrearsDetailSheet, SalarySyncButton } from "./simpany-salary-client";
+import { SalaryFilingSheet } from "./simpany-salary-filing";
 
 const statusClass: Record<SalaryMonthStatus, string> = {
   settled: "border-emerald-500/40 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400",
@@ -45,6 +47,10 @@ export async function SimpanySalarySection({
   const t = await getTranslations("payroll.simpany");
   const usable = integration?.status === "connected" && integration.enabled;
   const { year } = recon;
+  // 申報寫入只開放給 owner / admin，而且只到本月（還沒發生的月份不能申報）。
+  const now = currentYearMonth();
+  const canFile = (month: number) =>
+    canManage && usable && (year < now.year || (year === now.year && month <= now.month));
 
   return (
     <section className="space-y-4">
@@ -102,6 +108,9 @@ export async function SimpanySalarySection({
                 <span className="tabular-nums opacity-80">
                   {t("months.filedOf", { filed: m.filedCount, total: m.employeeCount })}
                 </span>
+              ) : null}
+              {canFile(m.month) ? (
+                <SalaryFilingSheet year={year} month={m.month} settled={m.status === "settled"} />
               ) : null}
             </div>
           ))}
