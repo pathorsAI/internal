@@ -4,7 +4,7 @@ import { useOptimistic, useState, useTransition } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
-import { Info, Link2, RefreshCw, Unlink } from "lucide-react";
+import { CalendarClock, Info, Link2, Play, RefreshCw, Unlink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -38,6 +38,8 @@ import {
   connectIntegration,
   disconnectIntegration,
   reconnectIntegration,
+  runAutoSyncNowAction,
+  setIntegrationAutoSyncAction,
   setIntegrationEnabledAction,
 } from "./actions";
 
@@ -57,6 +59,12 @@ export type IntegrationRowData = {
     connectedByName: string | null;
     lastSyncedAt: string | null;
     lastError: string | null;
+    /** 每日自動同步；這個整合沒有自動同步可跑時為 null。 */
+    autoSync: {
+      on: boolean;
+      /** 上次自動同步；`at` 已格式化成台北時間。 */
+      last: { at: string; ok: boolean; error: string | null; manual: boolean } | null;
+    } | null;
   } | null;
 };
 
@@ -65,10 +73,13 @@ type SheetTarget = { row: IntegrationRowData; mode: "connect" | "reconnect"; non
 export function IntegrationsList({
   rows,
   canManage,
+  canRunAutoSync,
   calendar,
 }: Readonly<{
   rows: IntegrationRowData[];
   canManage: boolean;
+  /** owner / admin 且至少有一個整合支援自動同步時，顯示「立即執行自動同步」。 */
+  canRunAutoSync: boolean;
   calendar: { connected: boolean; ownerLabel: string | null };
 }>) {
   const t = useTranslations("integrations");
@@ -89,6 +100,7 @@ export function IntegrationsList({
           {t("readOnlyNote")}
         </p>
       )}
+      <AutoSyncBar canRun={canRunAutoSync} />
       <ul className="divide-y rounded-lg border bg-card">
         {rows.map((row) => (
           <IntegrationRow
@@ -107,6 +119,43 @@ export function IntegrationsList({
           open={sheetOpen}
           onOpenChange={setSheetOpen}
         />
+      ) : null}
+    </div>
+  );
+}
+
+/** 自動同步的說明 + owner / admin 的「立即執行自動同步」按鈕。 */
+function AutoSyncBar({ canRun }: Readonly<{ canRun: boolean }>) {
+  const t = useTranslations("integrations");
+  const [pending, start] = useTransition();
+
+  function runNow() {
+    start(async () => {
+      const res = await runAutoSyncNowAction();
+      if (!res.ok) {
+        toast.error(res.error ?? t("toast.failed"));
+        return;
+      }
+      if (!res.ran) {
+        toast.info(t("autoSync.runNothing"));
+        return;
+      }
+      const msg = t("autoSync.runDone", { ok: res.ran - (res.failed ?? 0), failed: res.failed ?? 0 });
+      if (res.failed) toast.error(msg);
+      else toast.success(msg);
+    });
+  }
+
+  return (
+    <div className="flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+      <p className="flex items-start gap-2">
+        <CalendarClock className="mt-0.5 size-4 shrink-0" />
+        {t("autoSync.schedule")}
+      </p>
+      {canRun ? (
+        <Button type="button" size="sm" variant="outline" onClick={runNow} disabled={pending} className="shrink-0">
+          <Play className="size-4" /> {pending ? t("autoSync.running") : t("autoSync.runNow")}
+        </Button>
       ) : null}
     </div>
   );
@@ -216,10 +265,19 @@ function IntegrationRow({
           ) : (
             <p className="text-xs text-muted-foreground">{t(`providers.${row.id}.description`)}</p>
           )}
+          {c?.autoSync ? <LastAutoSyncLine last={c.autoSync.last} /> : null}
         </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:justify-end">
+        {c?.autoSync ? (
+          <AutoSyncSwitch
+            provider={row.id}
+            name={name}
+            on={c.autoSync.on}
+            disabled={!canManage || pending}
+          />
+        ) : null}
         <Switch
           checked={optimisticEnabled}
           onCheckedChange={toggle}
@@ -284,6 +342,59 @@ function IntegrationRow({
         </AlertDialogContent>
       </AlertDialog>
     </li>
+  );
+}
+
+/** 「上次自動同步：YYYY-MM-DD HH:mm · 成功 / 失敗：…」。 */
+function LastAutoSyncLine({
+  last,
+}: Readonly<{ last: NonNullable<NonNullable<ConnectionData>["autoSync"]>["last"] }>) {
+  const t = useTranslations("integrations");
+  if (!last) return <p className="text-xs text-muted-foreground">{t("autoSync.never")}</p>;
+  const result = last.ok
+    ? t("autoSync.ok")
+    : t("autoSync.failed", { error: last.error ?? t("status.unknownError") });
+  return (
+    <p className={cn("text-xs", last.ok ? "text-muted-foreground" : "text-destructive")}>
+      {t("autoSync.last", { date: last.at, result })}
+      {last.manual ? ` ${t("autoSync.lastManual")}` : ""}
+    </p>
+  );
+}
+
+/** 列上的「自動同步」小開關（config.autoSync；預設開）。 */
+function AutoSyncSwitch({
+  provider,
+  name,
+  on,
+  disabled,
+}: Readonly<{ provider: IntegrationProviderId; name: string; on: boolean; disabled: boolean }>) {
+  const t = useTranslations("integrations");
+  const [pending, start] = useTransition();
+  const [optimisticOn, setOptimisticOn] = useOptimistic(on);
+  const id = `autosync-${provider}`;
+
+  function toggle(next: boolean) {
+    start(async () => {
+      setOptimisticOn(next);
+      const res = await setIntegrationAutoSyncAction(provider, next);
+      if (!res.ok) toast.error(res.error ?? t("toast.failed"));
+    });
+  }
+
+  return (
+    <div className="mr-2 flex items-center gap-2">
+      <label htmlFor={id} className="text-xs whitespace-nowrap text-muted-foreground">
+        {t("autoSync.label")}
+      </label>
+      <Switch
+        id={id}
+        checked={optimisticOn}
+        onCheckedChange={toggle}
+        disabled={disabled || pending}
+        aria-label={t("autoSync.toggleLabel", { name })}
+      />
+    </div>
   );
 }
 

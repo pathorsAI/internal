@@ -32,12 +32,16 @@ export function proxy(request: NextRequest) {
 // and published as `resource_policy_uri` / `resource_tos_uri` in the RFC 9728
 // metadata, where OpenAI's plugin review fetches them without any session.
 //
+// /api/cron 是 Cloudflare Cron Trigger 的內部進入點（worker.ts 的 scheduled() 在同一個
+// isolate 裡直接呼叫，沒有 session cookie）；它自己用一次性 token 驗證，外部請求一律 404。
+// 見 src/lib/cron-token.ts。
+//
 // /flags 是 public/flags 那套國旗圖示（幣別與語系切換器都吃它）。正式環境其實碰不到
 // 這裡 —— Cloudflare 的 assets binding 會在 Worker 之前就把 public/ 的檔案送出去 ——
 // 但 `next dev` 沒有那一層，於是同一張圖在本機會被導去 /login，公開頁面的語系切換器
 // 在開發時就少了旗子。列進來讓本機跟線上看到的是同一件事。
 export const config = {
   matcher: [
-    "/((?!login|signup|landing|privacy|terms|flags|api/auth|mcp|.well-known|_next/static|_next/image|favicon.ico).*)",
+    "/((?!login|signup|landing|privacy|terms|flags|api/auth|api/cron|mcp|.well-known|_next/static|_next/image|favicon.ico).*)",
   ],
 };

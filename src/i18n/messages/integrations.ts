@@ -65,6 +65,32 @@ const integrations = {
     toggleLabel: { "zh-TW": "開啟 {name}", en: "Enable {name}" },
   },
   notImplemented: { "zh-TW": "尚未開放連接", en: "Not available yet" },
+  autoSync: {
+    label: { "zh-TW": "自動同步", en: "Auto-sync" },
+    toggleLabel: { "zh-TW": "{name} 每日自動同步", en: "Daily auto-sync for {name}" },
+    schedule: {
+      "zh-TW": "已開啟、狀態正常且沒關掉「自動同步」的整合，每天台北時間 06:00 會自動同步一次（Simpany：最近 90 天發票 + 今年薪資申報；Wise：交易，新列標為待確認）。",
+      en: "Every day at 06:00 Taipei time, each integration that is switched on, healthy and has auto-sync on is synced once (Simpany: last 90 days of invoices + this year's salary declarations; Wise: transactions, new rows flagged for review).",
+    },
+    last: {
+      "zh-TW": "上次自動同步：{date} · {result}",
+      en: "Last auto-sync: {date} · {result}",
+    },
+    lastManual: { "zh-TW": "（手動執行）", en: "(run manually)" },
+    ok: { "zh-TW": "成功", en: "Succeeded" },
+    failed: { "zh-TW": "失敗：{error}", en: "Failed: {error}" },
+    never: { "zh-TW": "尚未自動同步過", en: "Not auto-synced yet" },
+    runNow: { "zh-TW": "立即執行自動同步", en: "Run auto-sync now" },
+    running: { "zh-TW": "同步中…", en: "Syncing…" },
+    runDone: {
+      "zh-TW": "自動同步完成：{ok} 個成功、{failed} 個失敗",
+      en: "Auto-sync finished: {ok} succeeded, {failed} failed",
+    },
+    runNothing: {
+      "zh-TW": "沒有可自動同步的整合（需要已開啟、狀態正常且自動同步開著）",
+      en: "Nothing to sync (an integration must be switched on, healthy and have auto-sync on)",
+    },
+  },
   sheet: {
     connectTitle: { "zh-TW": "連接 {name}", en: "Connect {name}" },
     reconnectTitle: { "zh-TW": "重新連接 {name}", en: "Reconnect {name}" },
@@ -147,6 +173,14 @@ const integrations = {
     enabled: { "zh-TW": "開啟 {name}", en: "{name} switched on" },
     disabled: { "zh-TW": "關閉 {name}", en: "{name} switched off" },
     disconnected: { "zh-TW": "中斷 {name}", en: "{name} disconnected" },
+    autoSyncOn: { "zh-TW": "開啟 {name} 自動同步", en: "{name} auto-sync switched on" },
+    autoSyncOff: { "zh-TW": "關閉 {name} 自動同步", en: "{name} auto-sync switched off" },
+    autoSyncRun: {
+      "zh-TW": "手動執行 {name} 自動同步（{result}）：{summary}",
+      en: "Ran {name} auto-sync manually ({result}): {summary}",
+    },
+    autoSyncOk: { "zh-TW": "成功", en: "succeeded" },
+    autoSyncFailed: { "zh-TW": "失敗", en: "failed" },
   },
 } satisfies Dictionary;
 

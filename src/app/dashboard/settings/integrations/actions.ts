@@ -12,7 +12,10 @@ import {
   getIntegration,
   saveConnection,
   setIntegrationEnabled,
+  updateConfig,
 } from "@/lib/integrations/store";
+import { supportsAutoSync } from "@/lib/integrations/autosync-config";
+import { runScheduledSync } from "@/lib/integrations/autosync";
 import {
   isIntegrationProviderId,
   type IntegrationCatalogEntry,
@@ -242,6 +245,84 @@ export async function disconnectIntegration(
     }
     revalidatePath(PAGE);
     return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : t("toast.failed") };
+  }
+}
+
+/** 每日自動同步的開關（config.autoSync）。沒存 = 開；關掉存 false。 */
+export async function setIntegrationAutoSyncAction(
+  providerArg: string,
+  autoSync: boolean,
+): Promise<IntegrationActionState> {
+  const t = await getTranslations("integrations");
+  // 在 try 外面：未登入時 requireOrg() 會 redirect，那個例外不能被吞掉。
+  const me = await requireManager();
+  if ("error" in me) return { ok: false, error: me.error };
+  try {
+    if (!isIntegrationProviderId(providerArg) || !supportsAutoSync(providerArg)) {
+      return { ok: false, error: t("errors.unknownProvider", { provider: String(providerArg) }) };
+    }
+    const provider: IntegrationProviderId = providerArg;
+    const name = t(`providers.${provider}.name`);
+    const row = await getIntegration(me.orgId, provider);
+    if (!row) return { ok: false, error: t("errors.notConnected", { name }) };
+    if ((row.config.autoSync !== false) !== autoSync) {
+      await updateConfig(me.orgId, provider, { autoSync });
+      await logWeb(
+        me.orgId,
+        "update",
+        "integration",
+        null,
+        autoSync ? t("activity.autoSyncOn", { name }) : t("activity.autoSyncOff", { name }),
+      );
+    }
+    revalidatePath(PAGE);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : t("toast.failed") };
+  }
+}
+
+export type RunAutoSyncState = IntegrationActionState & {
+  /** 實際跑了幾個 / 失敗幾個（跑了 0 個 = 沒有符合條件的整合）。 */
+  ran?: number;
+  failed?: number;
+};
+
+/**
+ * 「立即執行自動同步」：只跑目前組織，走跟每日 cron 完全相同的 runScheduledSync。
+ * 給 owner / admin 測試用；操作紀錄記成按下按鈕的這位成員（channel = web），不是 system。
+ */
+export async function runAutoSyncNowAction(): Promise<RunAutoSyncState> {
+  const t = await getTranslations("integrations");
+  // 在 try 外面：未登入時 requireOrg() 會 redirect，那個例外不能被吞掉。
+  const me = await requireManager();
+  if ("error" in me) return { ok: false, error: me.error };
+  try {
+    const run = await runScheduledSync(new Date(), {
+      orgId: me.orgId,
+      trigger: "manual",
+      audit: async (orgId, provider, ok, summary) => {
+        await logWeb(
+          orgId,
+          "update",
+          "integration",
+          null,
+          t("activity.autoSyncRun", {
+            name: t(`providers.${provider}.name`),
+            result: ok ? t("activity.autoSyncOk") : t("activity.autoSyncFailed"),
+            summary,
+          }),
+        );
+      },
+    });
+    revalidatePath(PAGE);
+    return {
+      ok: true,
+      ran: run.results.length,
+      failed: run.results.filter((r) => !r.ok).length,
+    };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("toast.failed") };
   }

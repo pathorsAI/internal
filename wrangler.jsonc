@@ -10,7 +10,9 @@
   // 或用 `wrangler deploy --config <你的檔案>` 指到另一份設定。
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "pathors-internal",
-  "main": ".open-next/worker.js",
+  // 自訂的 worker 進入點：轉發 OpenNext 產生的 .open-next/worker.js（fetch），
+  // 再加上 Cron Trigger 的 scheduled。見 worker.ts 與 docs/deployment.md。
+  "main": "worker.ts",
   "compatibility_date": "2025-08-01",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "workers_dev": true,
@@ -38,6 +40,9 @@
       "enabled": false
     }
   },
+  // 整合每日自動同步：22:00 UTC = 台北 06:00（Cron Trigger 一律以 UTC 計）。
+  // scheduled() 在 worker.ts；同步內容見 docs/integrations.md「每日自動同步」。
+  "triggers": { "crons": ["0 22 * * *"] },
   "vars": {
     "NEXT_PUBLIC_APP_NAME": "Pathors Internal"
   }

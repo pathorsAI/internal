@@ -10,12 +10,55 @@ import { formatDate, formatDateTime } from "@/lib/format";
 import { INTEGRATION_CATALOG, INTEGRATION_ORDER } from "@/lib/integrations/catalog";
 import { getProvider } from "@/lib/integrations/registry";
 import { listIntegrations } from "@/lib/integrations/store";
+import type { IntegrationConfig, IntegrationProviderId } from "@/lib/integrations/types";
+import {
+  isAutoSyncOn,
+  parseLastAutoSync,
+  supportsAutoSync,
+} from "@/lib/integrations/autosync-config";
 import { IntegrationsList, type IntegrationRowData } from "./integrations-client";
 import { CalendarSettingsClient } from "./calendar-settings-client";
 import { WiseMappingSection } from "./wise-mapping-client";
 import { loadWiseMappingView } from "./wise-mapping-data";
 
 export const dynamic = "force-dynamic";
+
+/** 自動同步時間一律顯示台北時間（Worker 的時區是 UTC）：YYYY-MM-DD HH:mm。 */
+function formatTaipeiMinute(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(d);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}`;
+}
+
+/** 列上「自動同步」開關與上次結果；不支援自動同步的整合回 null。 */
+function autoSyncView(
+  id: IntegrationProviderId,
+  config: IntegrationConfig,
+): NonNullable<IntegrationRowData["connection"]>["autoSync"] {
+  if (!supportsAutoSync(id)) return null;
+  const last = parseLastAutoSync(config);
+  return {
+    on: isAutoSyncOn(config),
+    last: last
+      ? {
+          at: formatTaipeiMinute(last.at),
+          ok: last.ok,
+          error: last.error,
+          manual: last.trigger === "manual",
+        }
+      : null,
+  };
+}
 
 export default async function IntegrationsPage() {
   const t = await getTranslations("integrations");
@@ -46,6 +89,7 @@ export default async function IntegrationsPage() {
             connectedByName: s.connectedByName,
             lastSyncedAt: s.lastSyncedAt ? formatDateTime(s.lastSyncedAt) : null,
             lastError: s.lastError,
+            autoSync: autoSyncView(id, s.config),
           }
         : null,
     };
@@ -60,6 +104,7 @@ export default async function IntegrationsPage() {
       <PageHeader title={t("title")} description={t("description")} />
       <IntegrationsList
         rows={rows}
+        canRunAutoSync={canManage && rows.some((r) => r.connection?.autoSync)}
         canManage={canManage}
         calendar={{ connected: calendarConnected, ownerLabel: calendarOwner }}
       />

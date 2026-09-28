@@ -75,7 +75,7 @@ function deriveMcpAudit(name: string, out: unknown): McpAudit | null {
 
 /** Bump on every published change to tools, schemas or instructions. Clients
  *  (and OpenAI's plugin "Scan Tools") key their cached snapshot off this. */
-export const SERVER_VERSION = "1.7.0";
+export const SERVER_VERSION = "1.8.0";
 
 /** Public base URL of this deployment; doubles as the OAuth issuer.
  *  Keep in sync with the `resource` passed to `mcp()` in src/lib/auth.ts. */
@@ -281,6 +281,9 @@ const OPENWORLD_OVERRIDES: Record<string, Partial<ToolAnnotations>> = {
   // our tables, so it keeps the closed-world default.
   simpany_list_salary_declarations: { openWorldHint: true },
   simpany_sync_salary_declarations: { openWorldHint: true },
+  // Runs the daily auto-sync for the caller's org: Simpany invoice + salary sync
+  // (GET-only for this path) and Wise transaction sync (GET-only); writes only our books.
+  run_integration_sync: { openWorldHint: true },
 };
 
 // Writes that are irreversible from MCP even though the verb isn't "delete".
@@ -330,6 +333,7 @@ const TITLE_OVERRIDES: Record<string, string> = {
   mark_accountant_notified: "Mark as sent to the accountant",
   salary_arrears: "Salary arrears by employee",
   pay_employee_salary: "Record a salary payslip",
+  run_integration_sync: "Run the integration auto-sync now",
   sync_billing_calendar: "Sync the billing calendar",
   simpany_get_invoice: "Simpany e-invoice detail",
   simpany_issue_invoice: "Issue a Simpany e-invoice",

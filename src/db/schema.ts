@@ -645,7 +645,7 @@ export const activityLog = pgTable("activity_log", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	index("idx_activity_org_time").using("btree", table.organizationId.asc().nullsLast(), table.createdAt.desc()),
-	check("chk_activity_channel", sql`channel = ANY (ARRAY['web'::text, 'mcp'::text])`),
+	check("chk_activity_channel", sql`channel = ANY (ARRAY['web'::text, 'mcp'::text, 'system'::text])`),
 	check("chk_activity_action", sql`action = ANY (ARRAY['create'::text, 'update'::text, 'delete'::text, 'read'::text])`),
 ]);
 

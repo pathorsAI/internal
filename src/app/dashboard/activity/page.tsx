@@ -80,11 +80,11 @@ export default async function ActivityPage() {
                     {formatDateTime(r.createdAt)}
                   </TableCell>
                   <TableCell className="whitespace-nowrap">
-                    {r.actorName ?? r.actorEmail ?? "—"}
+                    {r.actorName ?? r.actorEmail ?? (r.channel === "system" ? t("systemActor") : "—")}
                   </TableCell>
                   <TableCell>
-                    {r.channel === "mcp" ? (
-                      <Badge variant="secondary">{t("source.mcp")}</Badge>
+                    {r.channel === "mcp" || r.channel === "system" ? (
+                      <Badge variant="secondary">{t(`source.${r.channel}`)}</Badge>
                     ) : (
                       <span className="text-muted-foreground">{t("source.web")}</span>
                     )}
