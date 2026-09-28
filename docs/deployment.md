@@ -115,6 +115,64 @@ echo "$FIELD_ENCRYPTION_KEY" | bunx wrangler secret put FIELD_ENCRYPTION_KEY
 # …and GOOGLE_CLIENT_SECRET, BETTER_AUTH_URL
 ```
 
+### Custom worker entry + Cron Trigger (daily integration auto-sync)
+
+`wrangler.jsonc` does **not** point `main` at OpenNext's generated
+`.open-next/worker.js`. It points at [`worker.ts`](../worker.ts) in the repo root,
+which follows OpenNext's
+[custom worker](https://opennext.js.org/cloudflare/howtos/custom-worker) pattern:
+
+- `fetch` is OpenNext's handler, forwarded unchanged.
+- `scheduled` is new — Cloudflare calls it for the Cron Trigger
+  `"triggers": { "crons": ["0 22 * * *"] }` (cron is always UTC: 22:00 UTC =
+  **06:00 Asia/Taipei**). It runs the daily integration auto-sync
+  (see [integrations.md](integrations.md#每日自動同步)).
+- The Durable Object classes OpenNext's worker exports (`DOQueueHandler`,
+  `DOShardedTagCache`, `BucketCachePurge`) are re-exported as-is. None are bound
+  today; they are there so turning on OpenNext caching later needs no change here.
+
+How `scheduled` runs app code: it does **not** import `src/lib/…` directly (that
+code expects a Next request context — cookies/headers for next-intl, the session —
+and wrangler would bundle it a second time). Instead it calls OpenNext's `fetch`
+**as a function in the same isolate** with a synthetic
+`POST <BETTER_AUTH_URL origin>/api/cron/integrations-autosync`. So the sync runs in
+an ordinary Next route handler, and:
+
+- **Env / secrets**: OpenNext's `fetch` wrapper copies every string binding
+  (`vars` and `wrangler secret`s: `DATABASE_URL`, `FIELD_ENCRYPTION_KEY`, …) into
+  `process.env` on the isolate's first request — the synthetic request counts —
+  exactly as for web traffic. Nothing extra to configure. (The synthetic request
+  uses the real public origin because OpenNext also derives its origin from the
+  isolate's first request.)
+- **Auth of the internal route**: `scheduled` mints a one-time 256-bit token, keeps
+  it in a `globalThis` set for the duration of the call and sends it in a header;
+  the route consumes it or answers 404. The token never leaves isolate memory, so
+  the route is unreachable from the internet and needs **no new secret**
+  ([`src/lib/cron-token.ts`](../src/lib/cron-token.ts)). `/api/cron` is excluded
+  from the auth proxy's matcher (`src/proxy.ts`), since there is no session.
+- **Limits**: a cron invocation may run up to 15 minutes wall-clock on the paid
+  plan; the sync is sequential and I/O bound. A non-2xx from the route throws, so
+  Cloudflare marks that cron run as failed (Workers → the worker → Settings →
+  Trigger Events / logs). Every org × integration result is also logged
+  (`[autosync] …`) and stored in the integration's `config.lastAutoSync`.
+
+Nothing changes for deploys: `bun run cf:build` still produces `.open-next/`, and
+`wrangler deploy` (Workers Builds' deploy command) bundles `worker.ts`, which
+imports it. The cron schedule is part of `wrangler.jsonc`, so it is created/updated
+by that same deploy. To exercise `scheduled` locally:
+`bun run cf:build && bunx wrangler dev --test-scheduled`, then
+`curl "http://localhost:8787/__scheduled?cron=0+22+*+*+*"` (wrangler's test
+endpoint). **This really syncs** against whatever DB and integrations `.dev.vars`
+points to — for a harmless check of the wiring, point it at a DB with no enabled
+integrations. On production, the owner-facing way to test is 設定 › 整合 →
+「立即執行自動同步」 (or MCP `run_integration_sync`), which runs the same code for
+one organization.
+
+**Migration**: `migrations/0028_activity_channel_system.sql` allows
+`activity_log.channel = 'system'` (the auto-sync's audit entries, no human actor).
+Deploying before running it is safe — those log inserts are silently dropped by
+the CHECK until it runs; the sync itself is unaffected.
+
 ### Useful scripts
 
 | Script | What it does |

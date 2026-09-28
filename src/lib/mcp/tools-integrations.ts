@@ -1,5 +1,12 @@
 import { getTranslations } from "next-intl/server";
 import { logMcp, type ActivityAction } from "@/db/activity";
+import { canManageOrg, getOrgRole } from "@/lib/session";
+import { runScheduledSync } from "@/lib/integrations/autosync";
+import {
+  isAutoSyncOn,
+  parseLastAutoSync,
+  supportsAutoSync,
+} from "@/lib/integrations/autosync-config";
 import { INTEGRATION_ORDER } from "@/lib/integrations/catalog";
 import { getProvider } from "@/lib/integrations/registry";
 import { listIntegrations, requireEnabledIntegration } from "@/lib/integrations/store";
@@ -21,8 +28,9 @@ import {
 
 // ---- 外部整合（org_integrations）----
 //
-// 這裡只有「看狀態」的 list_integrations。連接 / 開關 / 中斷一律在 web 的
-// 設定 › 整合 做：要輸入憑證，而憑證不該經過 AI 對話。
+// 這裡有「看狀態」的 list_integrations，與「立即跑一次每日自動同步」的
+// run_integration_sync（owner / admin、只跑目前組織，與 cron 同一條程式碼路徑）。
+// 連接 / 開關 / 中斷一律在 web 的 設定 › 整合 做：要輸入憑證，而憑證不該經過 AI 對話。
 //
 // 各 provider 的業務工具（開發票、抓 Wise 交易…）放在各自的 tools-<provider>.ts，
 // 並遵守同一套規則：
@@ -98,6 +106,38 @@ const INTEGRATION_ROW = rowSchema({
   },
   lastSyncedAt: { type: ["string", "null"], description: "ISO 8601; last successful call to the service." },
   lastError: { type: ["string", "null"], description: "Most recent failure message, if any." },
+  autoSync: {
+    type: ["boolean", "null"],
+    description:
+      "Daily auto-sync switch (06:00 Asia/Taipei). true = on (the default), false = an owner/admin switched it off. null when the provider has no auto-sync or is not connected. Only runs while the integration is also enabled and healthy.",
+  },
+  lastAutoSync: {
+    anyOf: [
+      {
+        type: "object",
+        properties: {
+          at: { type: "string", description: "ISO 8601." },
+          ok: { type: "boolean" },
+          summary: { type: "string", description: "What was synced (zh-TW)." },
+          error: { type: ["string", "null"] },
+          trigger: { type: "string", enum: ["cron", "manual"] },
+        },
+        required: ["at", "ok", "summary", "error", "trigger"],
+        additionalProperties: false,
+      },
+      { type: "null" },
+    ],
+    description: "Result of the most recent auto-sync run for this integration (scheduled or manual); null if it never ran.",
+  },
+});
+
+const AUTO_SYNC_ITEM = rowSchema({
+  organizationId: { type: "string" },
+  provider: { type: "string", enum: [...INTEGRATION_PROVIDER_IDS] },
+  ok: { type: "boolean" },
+  summary: { type: "string", description: "What was synced (zh-TW), one clause per step." },
+  error: { type: ["string", "null"], description: "First failure message, if any." },
+  durationMs: { type: "number" },
 });
 
 export const integrationTools: Record<string, ToolDef> = {
@@ -133,9 +173,66 @@ export const integrationTools: Record<string, ToolDef> = {
             tokenExpiresAt: iso(s?.tokenExpiresAt ?? null),
             lastSyncedAt: iso(s?.lastSyncedAt ?? null),
             lastError: s?.lastError ?? null,
+            autoSync: s && supportsAutoSync(provider) ? isAutoSyncOn(s.config) : null,
+            lastAutoSync: s ? parseLastAutoSync(s.config) : null,
           };
         }),
       );
+    },
+  },
+
+  run_integration_sync: {
+    description:
+      "Run the daily integration auto-sync right now for THIS organization only (owner/admin only) — exactly what the 06:00 Asia/Taipei scheduled run does, same code path. For each integration that is switched on, healthy and has auto-sync on: Simpany → import e-invoices of the last 90 days into invoices (+ auto-link) and this year's salary declarations (January: last year too); Wise → import balance-statement transactions into the ledger for mapped balances (deduped by Wise reference, never before the cutover date, new rows flagged needsReview). Reads the third parties (Simpany GET-only for this, Wise GET-only) and writes only this organization's own books; it NEVER issues or voids invoices and moves no money. Idempotent. Results are also stored per integration as lastAutoSync (see list_integrations). Can take a while (sequential, gentle on Simpany).",
+    inputSchema: {
+      type: "object",
+      properties: { ...ORG_ARG },
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: "object",
+      properties: {
+        trigger: { type: "string", enum: ["cron", "manual"] },
+        startedAt: { type: "string", description: "ISO 8601." },
+        finishedAt: { type: "string", description: "ISO 8601." },
+        results: { type: "array", items: AUTO_SYNC_ITEM },
+        skippedAutoSyncOff: {
+          type: "array",
+          description: "Enabled integrations skipped because an owner/admin switched auto-sync off.",
+          items: rowSchema({
+            organizationId: { type: "string" },
+            provider: { type: "string", enum: [...INTEGRATION_PROVIDER_IDS] },
+          }),
+        },
+      },
+      required: ["trigger", "startedAt", "finishedAt", "results", "skippedAutoSyncOff"],
+      additionalProperties: false,
+    },
+    annotations: {
+      title: "Run the integration auto-sync now",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      const role = await getOrgRole(orgId, ctx.userId);
+      if (!canManageOrg(role)) {
+        throw new Error("只有組織的擁有者或管理員可以執行整合自動同步，請找 owner 或 admin 操作。");
+      }
+      return runScheduledSync(new Date(), {
+        orgId,
+        trigger: "manual",
+        audit: (auditOrgId, provider, ok, summary) =>
+          auditIntegrationCall(
+            ctx,
+            auditOrgId,
+            provider,
+            "update",
+            `手動執行自動同步${ok ? "" : "（失敗）"}：${summary}`,
+          ),
+      });
     },
   },
 };

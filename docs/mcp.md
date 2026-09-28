@@ -123,8 +123,8 @@ the `tools-*.ts` modules):
 - `_meta["openai/toolInvocation/invoking" | "invoked"]`, the status line ChatGPT
   shows while a call is in flight.
 
-**Output schemas.** Every tool declares an `outputSchema` — all 88 of them, as of
-server version 1.7.0 (the Simpany tools whose result shape comes from Simpany's
+**Output schemas.** Every tool declares an `outputSchema` — all 89 of them, as of
+server version 1.8.0 (the Simpany tools whose result shape comes from Simpany's
 unofficial API declare an open object schema). When a tool declares one the handler additionally returns
 the result as MCP `structuredContent` (the JSON text block stays, per MCP's
 back-compat recommendation), which is what ChatGPT and Codex prefer over parsing
@@ -245,7 +245,12 @@ reconciliations: `list_reconciliations` +
 **Integrations** — `list_integrations` shows, per external integration
 (Simpany e-invoice, Wise), whether it is available on this server, connected,
 switched on, and healthy (`status`, `lastError`, `lastSyncedAt`,
-`tokenExpiresAt`) plus its non-secret `config`. It never returns credentials.
+`tokenExpiresAt`) plus its non-secret `config`, the daily auto-sync switch
+(`autoSync`) and the last auto-sync result (`lastAutoSync`). It never returns
+credentials. `run_integration_sync` (owner/admin, write, open world) runs the daily
+auto-sync right now for the current organization only — the same code path as the
+06:00 Taipei Cron Trigger (Simpany invoices + salary declarations, Wise
+transactions; never issues or voids invoices).
 Integration business tools live in their own `tools-<provider>.ts` and stay in
 `tools/list` whether or not the org has connected the integration; at call time
 they go through `requireIntegrationForTool()` and fail with a clear zh-TW message

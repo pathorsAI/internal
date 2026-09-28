@@ -15,7 +15,9 @@ const activity = {
   source: {
     mcp: { "zh-TW": "MCP", en: "MCP" },
     web: { "zh-TW": "網頁", en: "Web" },
+    system: { "zh-TW": "系統排程", en: "Scheduled" },
   },
+  systemActor: { "zh-TW": "系統", en: "System" },
   action: {
     create: { "zh-TW": "新增", en: "Added" },
     update: { "zh-TW": "修改", en: "Updated" },

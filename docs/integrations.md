@@ -19,7 +19,8 @@ settings page just lists it alongside the others.
 | `src/lib/integrations/registry.ts` | Map of **implementations** (`testConnection`). Simpany and Wise are registered. Server only. |
 | `src/lib/integrations/store.ts` | The only code that reads/writes `org_integrations`. Server only. |
 | `src/app/dashboard/settings/integrations/` | Settings page, server actions (owner/admin only), connect Sheet. |
-| `src/lib/mcp/tools-integrations.ts` | `list_integrations`, plus `requireIntegrationForTool` and `auditIntegrationCall` for provider tools. |
+| `src/lib/mcp/tools-integrations.ts` | `list_integrations` (incl. `autoSync` / `lastAutoSync`), `run_integration_sync`, plus `requireIntegrationForTool` and `auditIntegrationCall` for provider tools. |
+| `src/lib/integrations/autosync.ts` | Daily auto-sync (see [每日自動同步](#每日自動同步)). |
 
 ## Lifecycle
 
@@ -340,6 +341,69 @@ Simpany 上已不存在的表單 / 員工會從本地刪掉，所以重跑是冪
 入口：薪資頁（`/dashboard/payroll?year=YYYY`）的「Simpany 薪資申報」區塊（月份狀態格、欠薪表、明細 Sheet、
 未指定員工的薪資支出）；MCP `simpany_list_salary_declarations`、`simpany_sync_salary_declarations`、
 `salary_arrears`（見 [mcp.md](mcp.md)）。
+
+## 每日自動同步
+
+已連接、已開啟、狀態正常的整合每天自動同步一次，不用再有人去按「同步」。
+
+**排程**：Cloudflare Cron Trigger `0 22 * * *`（UTC）= 每天**台北 06:00**。接線方式
+（`worker.ts` 的 `scheduled()` → 內部 route `/api/cron/integrations-autosync`）見
+[deployment.md](deployment.md#custom-worker-entry--cron-trigger-daily-integration-auto-sync)。
+
+**範圍**：`org_integrations` 裡 `enabled = true AND status = 'connected'`、且
+`config.autoSync !== false` 的每一列（每個組織、每個整合）。
+
+| 整合 | 跑什麼 | 等同於 |
+| --- | --- | --- |
+| Simpany | `syncSimpanyInvoices(org, 最近 90 天～今天)`（台北日期）→ `syncSalaryDeclarations(org, 今年)`；一月時另外跑去年 | 發票頁「從 Simpany 同步」+ 薪資頁「Simpany 薪資申報」同步 |
+| Wise | `syncWiseTransactions(org, { dryRun: false })`；還沒設帳戶對應就略過（不算失敗、不打 Wise） | 帳戶頁「從 Wise 同步」按「寫入」 |
+
+**安全**：
+
+- **只同步，不開立**：Simpany 只走列表 / 明細 / 薪資申報的 GET；自動同步沒有任何開立、
+  作廢發票或其他 Simpany 寫入端點的程式碼路徑。Wise 本來就只有 GET（見上方唯讀保證）。
+- Wise 寫入是安全的：以 referenceNumber 去重（`ON CONFLICT DO NOTHING`，刪掉的也不會長回來）、
+  永遠不早於切換日、新列一律「待確認」。Simpany 發票與薪資申報同步都是冪等 upsert。
+- **依序、不平行**：一個組織一個整合接著跑，對 Simpany 的非官方 API 溫和一點。
+- **互相隔離**：每個 組織 × 整合（以及 Simpany 的發票 / 薪資各步驟）各自 try/catch，
+  一個失敗不影響其他。401 / 5xx 照舊由 provider 程式碼 `markNeedsReauth` /
+  `recordSyncFailure`；本地錯誤（寫 DB…）由自動同步補記 `recordSyncFailure`。
+  整合在跑的途中被關掉或轉成需要重新連接時不覆寫 `last_error`。
+- 發票同步一次最多抓 80 張明細（`MAX_DETAIL_FETCHES`，Workers subrequest 上限）；
+  沒抓完會在摘要註明，隔天接著做。
+
+**結果**：
+
+- `config.lastAutoSync = { at, ok, summary, error, trigger }`（`updateConfig` 淺層合併；非機密，
+  成員與 MCP 看得到）。`summary` 是 zh-TW 的一行摘要，例如
+  「發票 2026-07-01～2026-09-29：讀到 12 張、新增 1、更新 0、作廢 0、自動綁定 1、待確認 0；薪資申報 2026：寫入 36 筆」。
+- 操作紀錄每個 組織 × 整合 一筆，entity = `integration`。排程觸發的來源是 **system**（`channel = 'system'`，
+  操作人欄位全 NULL —— 不冒充任何成員；需要 `migrations/0028`）；手動觸發記成按下的那位成員（web / mcp）。
+
+**開關**（owner / admin）：設定 › 整合 每個已連接的 Simpany / Wise 列上有「自動同步」開關，
+存成 `config.autoSync`（沒有這個欄位 = 開，預設開）；下面一行顯示
+「上次自動同步：YYYY-MM-DD HH:mm · 成功 / 失敗：…」（台北時間）。
+關掉自動同步不影響手動同步與 MCP 工具。
+
+**手動觸發**（測試用，只跑目前組織、同一條程式碼路徑 `runScheduledSync(now, { orgId, trigger: "manual" })`）：
+
+- Web：設定 › 整合 上方的「立即執行自動同步」（owner / admin）。
+- MCP：`run_integration_sync`（owner / admin，write，openWorldHint）。
+
+| Where | What |
+| --- | --- |
+| `src/lib/integrations/autosync.ts` | `runScheduledSync(now, { orgId?, trigger?, audit? })`、`autoSyncWindow(now)` |
+| `src/lib/integrations/autosync-config.ts` | client-safe：`isAutoSyncOn(config)`、`parseLastAutoSync(config)`、`AUTO_SYNC_PROVIDERS` |
+| `src/app/api/cron/integrations-autosync/route.ts` | cron 的內部進入點（一次性 token，外部一律 404） |
+| `src/lib/cron-token.ts` | 一次性 token（`worker.ts` 與 route 共用 `globalThis` 上的 Set） |
+| `src/i18n/server-t.ts` | `runAsSystem()` / `getServerT(namespace)`：沒有 request 語系時用 zh-TW 字典 |
+| `worker.ts`、`wrangler.jsonc` `triggers` | Cron Trigger 與自訂 worker 進入點 |
+
+**i18n**：同步路徑上唯一用到翻譯的是 `store.ts`（`requireEnabledIntegration` 的錯誤訊息、
+`integrationDisplayName`）。它們改用 `getServerT()`：在 `runAsSystem()` 裡（自動同步一律如此）
+回傳 zh-TW 的 `createTranslator`，不碰 `cookies()` / `headers()`；其他情況就是原本的
+`getTranslations`，web 與 MCP 行為不變。新增會在自動同步路徑上用到翻譯的程式碼時，
+用 `getServerT` 而不是 `getTranslations`。
 
 ## Security rules
 

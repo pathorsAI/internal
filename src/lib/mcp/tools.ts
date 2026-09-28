@@ -95,7 +95,11 @@ const ACTIVITY_ROW: JsonSchemaObject = rowSchema({
   id: { type: "number" },
   actorName: { type: ["string", "null"] },
   actorEmail: { type: ["string", "null"] },
-  channel: { type: "string", enum: ["web", "mcp"] },
+  channel: {
+    type: "string",
+    enum: ["web", "mcp", "system"],
+    description: "system = scheduled work with no human actor (e.g. the daily integration auto-sync); actor fields are null.",
+  },
   action: { type: "string", enum: ["create", "update", "delete", "read"] },
   entityType: { type: "string" },
   entityId: { type: ["number", "null"] },

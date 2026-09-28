@@ -1,5 +1,5 @@
 import { and, eq, sql } from "drizzle-orm";
-import { getTranslations } from "next-intl/server";
+import { getServerT } from "@/i18n/server-t";
 import { getDb } from "@/db";
 import { orgIntegrations } from "@/db/schema";
 import { user } from "@/db/auth-schema";
@@ -71,7 +71,7 @@ function whereRow(orgId: string, provider: IntegrationProviderId) {
 
 /** 整合在目前語系下的顯示名稱（integrations.providers.<id>.name）。 */
 export async function integrationDisplayName(provider: IntegrationProviderId): Promise<string> {
-  const t = await getTranslations("integrations");
+  const t = await getServerT("integrations");
   return t(`providers.${provider}.name`);
 }
 
@@ -151,7 +151,7 @@ export async function requireEnabledIntegration(
   provider: IntegrationProviderId,
 ): Promise<{ row: IntegrationSummary; credentials: IntegrationCredentials }> {
   const row = await getIntegration(orgId, provider);
-  const t = await getTranslations("integrations");
+  const t = await getServerT("integrations");
   const name = t(`providers.${provider}.name`);
   if (!row) {
     throw new IntegrationUnavailableError(provider, "not_connected", t("errors.unavailable", { name }));

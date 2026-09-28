@@ -6,9 +6,17 @@ import { getSession } from "@/lib/session";
 
 export type ActivityAction = "create" | "update" | "delete" | "read";
 
+/**
+ * web = 登入的成員在網頁操作；mcp = 透過 OAuth MCP；system = 沒有人觸發的排程工作
+ * （例如整合每日自動同步）。system 沒有操作人 —— actor 欄位一律 NULL，不冒充任何成員。
+ * 'system' 需要 migrations/0028 放寬 chk_activity_channel；還沒跑之前寫入會被 CHECK 擋下，
+ * 而 record() 會吞掉錯誤，所以只是少一筆紀錄，不會讓同步失敗。
+ */
+export type ActivityChannel = "web" | "mcp" | "system";
+
 type RecordArgs = {
   orgId: string;
-  channel: "web" | "mcp";
+  channel: ActivityChannel;
   actorUserId: string | null;
   actorEmail: string | null;
   actorName: string | null;
@@ -102,4 +110,27 @@ export async function logMcp(
   } catch {
     // ignore
   }
+}
+
+// Scheduled / background work with no human actor (e.g. the daily integration
+// auto-sync). Deliberately NOT attributed to any member: actor fields stay NULL
+// and channel = 'system'.
+export async function logSystem(
+  orgId: string,
+  action: ActivityAction,
+  entityType: string,
+  entityId: number | null,
+  summary?: string,
+) {
+  await record({
+    orgId,
+    channel: "system",
+    actorUserId: null,
+    actorEmail: null,
+    actorName: null,
+    action,
+    entityType,
+    entityId,
+    summary,
+  });
 }
