@@ -67,6 +67,7 @@ export type NavItemKey =
   | "members"
   | "activity"
   | "mcp"
+  | "integrations"
   | "settings";
 
 const daily = [
@@ -129,9 +130,15 @@ export function AppSidebar({
 
   const isActive = (href: string) => {
     if (href === "/dashboard") return pathname === "/dashboard";
-    // /settings is a prefix of /settings/mcp — match it exactly so only the
-    // specific sub-page (e.g. MCP) highlights, not both.
-    if (href === "/dashboard/settings") return pathname === "/dashboard/settings";
+    // /settings is a prefix of /settings/mcp — MCP has its own sidebar entry, so
+    // exclude it here so only one item highlights. Other settings sub-pages
+    // (e.g. integrations) have no entry of their own and light up "settings".
+    if (href === "/dashboard/settings") {
+      return (
+        pathname.startsWith("/dashboard/settings") &&
+        !pathname.startsWith("/dashboard/settings/mcp")
+      );
+    }
     return pathname.startsWith(href);
   };
 

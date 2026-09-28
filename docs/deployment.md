@@ -30,7 +30,8 @@ This document describes two paths:
 | Postgres | Any Postgres. Schema is introspect-only (`bun run db:pull`); migrations under [`migrations/`](../migrations) are plain forward-only SQL. |
 | A Postgres driver that matches your runtime | On serverless/edge you need an **HTTP** driver (e.g. Neon). On a normal Node server you can use a regular TCP driver (`pg`). See [Database driver](#database-driver). |
 | Object storage *(only for document uploads)* | Cloudflare R2 by default. Swappable — see [Storage portability](#storage-portability). |
-| Env vars | `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`. See [`.env.example`](../.env.example). |
+| Env vars | `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `FIELD_ENCRYPTION_KEY`. See [`.env.example`](../.env.example). |
+| `FIELD_ENCRYPTION_KEY` | 32 random bytes, base64 (`openssl rand -base64 32`). AES-256-GCM key for field-level encryption of integration credentials (Simpany, Wise — see [integrations.md](integrations.md)) and other high-sensitivity fields. Without it, connecting an integration fails with a clear error. **Losing or rotating it makes stored credentials unreadable** — every integration must be reconnected. |
 
 ---
 
@@ -110,6 +111,7 @@ Local dev reads `.env.local`. For the deployed Worker, set secrets with wrangler
 echo "$BETTER_AUTH_SECRET" | bunx wrangler secret put BETTER_AUTH_SECRET
 echo "$DATABASE_URL"       | bunx wrangler secret put DATABASE_URL
 echo "$GOOGLE_CLIENT_ID"   | bunx wrangler secret put GOOGLE_CLIENT_ID
+echo "$FIELD_ENCRYPTION_KEY" | bunx wrangler secret put FIELD_ENCRYPTION_KEY
 # …and GOOGLE_CLIENT_SECRET, BETTER_AUTH_URL
 ```
 

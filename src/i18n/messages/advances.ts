@@ -34,6 +34,8 @@ const advances = {
       "zh-TW": "目前沒有 {currency} 帳戶，請先到「銀行帳戶」建立一個。",
       en: "There is no {currency} account yet — create one on the Bank accounts page first.",
     },
+    toAccount: { "zh-TW": "匯入帳戶", en: "Paid into" },
+    toAccountNone: { "zh-TW": "不記錄", en: "Don't record" },
     amountLabel: { "zh-TW": "金額（依代墊，不可改）", en: "Amount (fixed by the advance, can't change)" },
     confirm: { "zh-TW": "確認撥款", en: "Confirm reimbursement" },
     saving: { "zh-TW": "儲存中…", en: "Saving…" },

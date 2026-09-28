@@ -7,7 +7,7 @@ import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { CalendarPlus, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { syncCalendar } from "../settings/calendar-actions";
+import { syncCalendar } from "../settings/integrations/calendar-actions";
 
 /**
  * 尚未連結時直接指向設定頁，而不是按了才報錯 —— 讓「還沒設定」這件事在按下去之前
@@ -21,7 +21,7 @@ export function SyncCalendarButton({ connected }: Readonly<{ connected: boolean 
   if (!connected) {
     return (
       <Button asChild size="sm" variant="outline">
-        <Link href="/dashboard/settings">
+        <Link href="/dashboard/settings/integrations#google-calendar">
           <CalendarPlus className="size-4" /> {t("connect")}
         </Link>
       </Button>

@@ -2,7 +2,13 @@ import type { Dictionary } from "./dictionary";
 
 const settings = {
   title: { "zh-TW": "組織設定", en: "Organization settings" },
-  description: { "zh-TW": "管理這個組織的基本資料與整合", en: "Manage this organization's basic info and integrations" },
+  description: { "zh-TW": "管理這個組織的基本資料", en: "Manage this organization's basic info" },
+  nav: {
+    label: { "zh-TW": "設定分區", en: "Settings sections" },
+    general: { "zh-TW": "基本資料", en: "General" },
+    integrations: { "zh-TW": "整合", en: "Integrations" },
+    mcp: { "zh-TW": "MCP", en: "MCP" },
+  },
   org: {
     title: { "zh-TW": "基本資料", en: "Basic info" },
     descriptionEditable: { "zh-TW": "修改組織名稱", en: "Edit the organization name" },

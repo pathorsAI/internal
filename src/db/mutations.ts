@@ -28,7 +28,7 @@ import {
 } from "./schema";
 import { oauthAccessToken, oauthConsent, member } from "./auth-schema";
 import { uploadDocument } from "@/lib/storage";
-import { requireOrg } from "@/lib/session";
+import { canManageOrg, requireOrg, requireOrgWithRole } from "@/lib/session";
 import { auth } from "@/lib/auth";
 import { logWeb } from "@/db/activity";
 import { isValidEmail } from "@/lib/pii";
@@ -39,6 +39,9 @@ import {
   type ScheduleInput,
 } from "@/lib/billing-schedule";
 import { findAccountCurrencyMismatches } from "@/lib/account-currency";
+import { nationalIdColumns, resolvePayoutAccount, type PayoutPurpose } from "./employee-accounts";
+import { EmployeeAccountError } from "@/lib/employee-accounts";
+import { externalSingleLegSide, type SingleLegSide } from "@/lib/external-transfer";
 
 export type ActionState = { ok: boolean; error?: string };
 
@@ -427,6 +430,32 @@ async function resolveTransfer(
   return { fields: { ...blankFields, fromAccountId, toAccountId } };
 }
 
+/**
+ * 外部同步的單腳轉帳（Wise 換匯的一腳）：只有原本那一腳的帳戶，另一腳固定留空。
+ * 只在編輯既有的外部同步列時使用 —— 一般轉帳照 resolveTransfer 要求兩個帳戶。
+ */
+async function resolveSingleLegTransfer(
+  db: ReturnType<typeof getDb>,
+  orgId: string,
+  side: SingleLegSide,
+  formData: FormData,
+): Promise<TxnResult> {
+  const accountId = num(formData.get(side === "from" ? "fromAccountId" : "toAccountId"));
+  if (!accountId) {
+    const t = await getTranslations("errors");
+    return { error: t("required.transferAccounts") };
+  }
+  const refError = await unownedRefError(db, orgId, [[bankAccounts, [accountId]]]);
+  if (refError) return { error: refError };
+  return {
+    fields: {
+      ...blankFields,
+      fromAccountId: side === "from" ? accountId : null,
+      toAccountId: side === "to" ? accountId : null,
+    },
+  };
+}
+
 // 依情境（type）解析交易要寫的欄位，順便驗證；回傳欄位或錯誤訊息。
 async function resolveTxnFields(
   db: ReturnType<typeof getDb>,
@@ -673,6 +702,14 @@ export async function createReimbursement(
     if (!adv) return { ok: false, error: t("notFound.advanceRecord") };
     const refError = await unownedRefError(db, orgId, [[bankAccounts, [fromAccountId]]]);
     if (refError) return { ok: false, error: refError };
+    // 匯入代墊人的哪個帳戶（選填）：沒選就用他的報銷預設帳戶
+    const payout = await payoutAccountFromForm(
+      orgId,
+      adv.settleEmployeeId,
+      "reimbursement",
+      formData,
+    );
+    if ("error" in payout) return { ok: false, error: payout.error };
     const advCurrency = adv.currency ?? "TWD";
     // 撥款的幣別跟著原代墊走，所以要驗的是「付款帳戶是不是同一種幣別」。
     const currencyError = await accountCurrencyError(db, orgId, advCurrency, [fromAccountId]);
@@ -685,6 +722,7 @@ export async function createReimbursement(
         type: "reimbursement",
         txnDate: payDate,
         settleEmployeeId: adv.settleEmployeeId, // 付給代墊人（員工）
+        settleToAccountId: payout.accountId,
         amount,
         currency: advCurrency,
         amountTwd: advCurrency === "TWD" ? amount : null,
@@ -849,7 +887,48 @@ export async function deleteBankAccount(id: number): Promise<ActionState> {
   }
 }
 
+// ---- 員工收款帳戶（發薪 / 撥款的匯入帳戶）----
+
+/**
+ * 表單的 toEmployeeAccountId → 要記錄的員工帳戶 id。
+ * - 欄位不存在：用該用途的預設帳戶（沒有預設就是 null）
+ * - "none"：使用者明確選了「不記錄」→ null
+ * - 其他值：必須是這位員工、這個組織、啟用中的帳戶
+ */
+async function payoutAccountFromForm(
+  orgId: string,
+  employeeId: number | null,
+  purpose: PayoutPurpose,
+  formData: FormData,
+): Promise<{ accountId: number | null } | { error: string }> {
+  const raw = str(formData.get("toEmployeeAccountId"));
+  if (raw === "none") return { accountId: null };
+  try {
+    const acct = await resolvePayoutAccount(orgId, employeeId, purpose, raw === null ? null : Number(raw));
+    return { accountId: acct?.id ?? null };
+  } catch (e) {
+    if (e instanceof EmployeeAccountError) {
+      const t = await getTranslations("errors");
+      return { error: t(`employeeAccount.${e.code}`) };
+    }
+    throw e;
+  }
+}
+
 // ---- 員工 ----
+
+/**
+ * 員工資料的寫入只給 owner / admin（成員仍可讀非敏感欄位）。
+ * 隱藏按鈕只擋得住誤按，擋不住直接呼叫 action，所以在 server 端重驗角色。
+ */
+async function requireEmployeeManager(): Promise<{ orgId: string } | { error: string }> {
+  const { orgId, role } = await requireOrgWithRole();
+  if (!canManageOrg(role)) {
+    const t = await getTranslations("errors");
+    return { error: t("forbidden.manageEmployees") };
+  }
+  return { orgId };
+}
 
 /**
  * 員工表單的 user 綁定值 → user_id。空值/未選 = 不綁定（NULL）。
@@ -892,6 +971,8 @@ async function employeeEmailError(formData: FormData): Promise<string | null> {
 
 /**
  * 新增與編輯員工共用的欄位。差別只有 isActive：新增一律 true，編輯看勾選。
+ * 身分證字號另外走 nationalIdColumns（加密），薪轉帳戶改由 employee_bank_accounts 管理，
+ * 這裡都不碰 —— 舊的 salary_account 值會留著，直到轉成帳戶或跑搬移腳本。
  */
 function employeeColumns(
   formData: FormData,
@@ -902,7 +983,6 @@ function employeeColumns(
   const healthInsured = str(formData.get("healthInsuredSalary"));
   return {
     name,
-    nationalId: str(formData.get("nationalId")),
     employmentType: str(formData.get("employmentType")) ?? "full_time",
     hasLaborInsurance: laborInsured !== null,
     hasHealthInsurance: healthInsured !== null,
@@ -910,7 +990,6 @@ function employeeColumns(
     baseSalary: str(formData.get("baseSalary")),
     laborInsuredSalary: laborInsured,
     healthInsuredSalary: healthInsured,
-    salaryAccount: str(formData.get("salaryAccount")),
     startDate: str(formData.get("startDate")),
     endDate: str(formData.get("endDate")),
     workEmail: str(formData.get("workEmail")),
@@ -931,13 +1010,16 @@ export async function createEmployee(
   const emailErr = await employeeEmailError(formData);
   if (emailErr) return { ok: false, error: emailErr };
   try {
-    const { orgId } = await requireOrg();
+    const auth = await requireEmployeeManager();
+    if ("error" in auth) return { ok: false, error: auth.error };
+    const { orgId } = auth;
     const userId = await resolveEmployeeUserId(orgId, str(formData.get("userId")));
     const [inserted] = await getDb()
       .insert(employees)
       .values({
         organizationId: orgId,
         ...employeeColumns(formData, name, userId),
+        ...(await nationalIdColumns(str(formData.get("nationalId")))),
         isActive: true,
       })
       .returning({ id: employees.id });
@@ -961,12 +1043,19 @@ export async function updateEmployee(
   const emailErr = await employeeEmailError(formData);
   if (emailErr) return { ok: false, error: emailErr };
   try {
-    const { orgId } = await requireOrg();
+    const auth = await requireEmployeeManager();
+    if ("error" in auth) return { ok: false, error: auth.error };
+    const { orgId } = auth;
     const userId = await resolveEmployeeUserId(orgId, str(formData.get("userId")), id);
+    // 身分證字號欄位有送上來才改（寫密文、清空明文）；沒送就維持原值。
+    const nationalId = formData.has("nationalId")
+      ? await nationalIdColumns(str(formData.get("nationalId")))
+      : {};
     await getDb()
       .update(employees)
       .set({
         ...employeeColumns(formData, name, userId),
+        ...nationalId,
         isActive: formData.get("isActive") === "on",
       })
       .where(and(eq(employees.organizationId, orgId), eq(employees.id, id)));
@@ -982,7 +1071,9 @@ export async function updateEmployee(
 export async function deleteEmployee(id: number): Promise<ActionState> {
   const t = await getTranslations("errors");
   try {
-    const { orgId } = await requireOrg();
+    const auth = await requireEmployeeManager();
+    if ("error" in auth) return { ok: false, error: auth.error };
+    const { orgId } = auth;
     await getDb()
       .update(employees)
       .set({ deletedAt: new Date().toISOString() })
@@ -1132,12 +1223,28 @@ export async function updateTransaction(
     // join（queries.ts listAccountantNotices）是純用 id 對的，會把對方的金額、
     // 對象名稱與分類一起顯示出來。
     const [owned] = await db
-      .select({ id: transactions.id })
+      .select({
+        id: transactions.id,
+        type: transactions.type,
+        book: transactions.book,
+        externalSource: transactions.externalSource,
+        fromAccountId: transactions.fromAccountId,
+        toAccountId: transactions.toAccountId,
+      })
       .from(transactions)
       .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)))
       .limit(1);
     if (!owned) return { ok: false, error: t("notFound.transaction") };
-    const resolved = await resolveTxnFields(db, orgId, header.type, formData);
+    // 外部同步的單腳轉帳（Wise 換匯）：只驗原本那一腳，且保留原本的 book（同步進來是 internal，
+    // 一般轉帳「固定 both」的規則不套用）。type 以 DB 為準，不聽表單。
+    const singleLeg = externalSingleLegSide(owned);
+    if (singleLeg) {
+      header.type = owned.type;
+      header.book = owned.book === "internal" ? "internal" : "both";
+    }
+    const resolved = singleLeg
+      ? await resolveSingleLegTransfer(db, orgId, singleLeg, formData)
+      : await resolveTxnFields(db, orgId, header.type, formData);
     if ("error" in resolved) return { ok: false, error: resolved.error };
     const f = resolved.fields;
     const linkError = await transactionLinkError(db, orgId, formData);
@@ -1152,6 +1259,8 @@ export async function updateTransaction(
       .update(transactions)
       .set({
         ...transactionColumns(formData, header, f),
+        // 自動匯入（Wise 同步）的列：有人在編輯時指定了分類，就算確認過了。
+        ...(f.categoryId === null ? {} : { needsReview: false }),
         updatedAt: new Date().toISOString(),
       })
       .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)));
@@ -1592,6 +1701,9 @@ export async function payEmployeeSalary(
       [payrollItemTypes, items.map((r) => r.itemTypeId)],
     ]);
     if (refError) return { ok: false, error: refError };
+    // 薪資匯入員工的哪個帳戶（選填）：沒選就用他的薪資預設帳戶
+    const payout = await payoutAccountFromForm(orgId, employeeId, "salary", formData);
+    if ("error" in payout) return { ok: false, error: payout.error };
     const runId = await getOrCreatePayrollRunId(db, orgId, year, month, payDate);
 
     // 一個員工一個月一張：已發放就擋
@@ -1627,6 +1739,7 @@ export async function payEmployeeSalary(
         description: tRec("records.salary", { period, name: emp?.name ?? "" }).trim(),
         categoryId: cat?.id ?? null,
         settleEmployeeId: employeeId,
+        settleToAccountId: payout.accountId,
         amount: String(net),
         currency: "TWD",
         amountTwd: String(net),
@@ -1642,6 +1755,7 @@ export async function payEmployeeSalary(
       deductionTotal: String(deductionTotal),
       netPay: String(net),
       paidTransactionId: txn.id,
+      paidToAccountId: payout.accountId,
     };
 
     let payslipId: number;

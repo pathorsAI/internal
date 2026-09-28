@@ -327,7 +327,7 @@ export const billingItemTools: Record<string, ToolDef> = {
 
   sync_billing_calendar: {
     description:
-      "[write] Push the current billing board to the organization's Google Calendar (creates/updates/removes reminders). Idempotent. Fails with a clear message if nobody has connected Google Calendar yet — connect it from 組織設定 in the web app. Normally unnecessary: the sync runs automatically whenever billing data changes.",
+      "[write] Push the current billing board to the organization's Google Calendar (creates/updates/removes reminders). Idempotent. Fails with a clear message if nobody has connected Google Calendar yet — connect it from 組織設定 › 整合 (Settings › Integrations) in the web app. Normally unnecessary: the sync runs automatically whenever billing data changes.",
     inputSchema: {
       type: "object",
       properties: { ...ORG_ARG },

@@ -76,6 +76,24 @@ const errors = {
     // 說「那筆屬於別的組織」等於幫人確認該 id 存在，本身就是一種洩漏。
     referencedRecord: { "zh-TW": "找不到選取的資料，請重新選擇", en: "A selected record was not found. Please choose again." },
   },
+  forbidden: {
+    manageEmployees: { "zh-TW": "只有組織的擁有者或管理員可以修改員工資料", en: "Only organization owners and admins can change employee records" },
+  },
+  employeeAccount: {
+    kindInvalid: { "zh-TW": "帳戶類型不正確", en: "Invalid account type" },
+    numberRequired: { "zh-TW": "請輸入帳號", en: "Enter an account number" },
+    numberDigits: { "zh-TW": "銀行帳號須為 6–20 位數字（空白與連字號會自動去除）", en: "A bank account number must be 6–20 digits (spaces and dashes are ignored)" },
+    numberLength: { "zh-TW": "帳號最多 64 個字元", en: "Account number can be at most 64 characters" },
+    bankCodeRequired: { "zh-TW": "銀行帳戶需要 3 碼銀行代碼（例：807）", en: "A bank account needs a 3-digit bank code (e.g. 807)" },
+    bankCodeFormat: { "zh-TW": "銀行代碼須為 3 位數字", en: "Bank code must be 3 digits" },
+    branchCodeFormat: { "zh-TW": "分行代碼須為 4 位數字", en: "Branch code must be 4 digits" },
+    currencyFormat: { "zh-TW": "幣別須為 3 碼英文代碼（例：TWD）", en: "Currency must be a 3-letter code (e.g. TWD)" },
+    notFound: { "zh-TW": "找不到這個員工帳戶", en: "Employee bank account not found" },
+    inactive: { "zh-TW": "這個員工帳戶已停用", en: "That employee bank account is deactivated" },
+    wrongEmployee: { "zh-TW": "這個帳戶不屬於該員工", en: "That account belongs to a different employee" },
+    revealFailed: { "zh-TW": "無法顯示完整帳號（加密金鑰未設定或密文損壞）", en: "Could not reveal the account number (encryption key missing or data corrupted)" },
+    nothingToConvert: { "zh-TW": "沒有可轉換的舊薪資帳戶，或這位員工已經有帳戶了", en: "There is no legacy salary account to convert, or this employee already has accounts" },
+  },
   unsupported: {
     transactionType: { "zh-TW": "不支援的交易類型", en: "Unsupported transaction type" },
   },

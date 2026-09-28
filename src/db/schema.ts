@@ -1,4 +1,4 @@
-import { pgTable, check, bigint, text, boolean, char, numeric, timestamp, date, unique, integer, foreignKey, index, uniqueIndex } from "drizzle-orm/pg-core"
+import { pgTable, check, bigint, text, boolean, char, numeric, timestamp, date, unique, integer, foreignKey, index, uniqueIndex, jsonb } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 
@@ -55,6 +55,24 @@ export const invoices = pgTable("invoices", {
 	// 來源，本系統只負責「該開什麼」與「開了沒」，差異用對帳頁呈現而非硬要同步。
 	externalStatus: text("external_status").default('pending').notNull(),
 	externalRef: text("external_ref"),
+	// Simpany API 同步 / 開立（migrations/0025）。external_ref 仍是發票號碼；external_id 是
+	// Simpany 的 R… id（取明細、作廢要用）。amount_gross 是發票上的台幣金額，外幣收款的
+	// 換算依據另存 foreign_* 與 exchange_rate（水單匯率）。
+	taxTreatment: text("tax_treatment").default('taxable').notNull(),
+	zeroRateReason: text("zero_rate_reason"),
+	exchangeRate: numeric("exchange_rate", { precision: 12, scale: 6 }),
+	foreignCurrency: text("foreign_currency"),
+	foreignAmount: numeric("foreign_amount", { precision: 14, scale: 2 }),
+	invoiceType: text("invoice_type"),
+	externalId: text("external_id"),
+	voidedAt: timestamp("voided_at", { withTimezone: true, mode: 'string' }),
+	voidReason: text("void_reason"),
+	buyerEmails: text("buyer_emails").array(),
+	// 訂閱期別綁定（期別不物化，同 transactions.subscription_id / subscription_period）。
+	// FK 在 DB 端建立，這裡只放欄位避免與 subscriptions 的宣告順序衝突。
+	subscriptionId: bigint("subscription_id", { mode: "number" }),
+	subscriptionPeriod: date("subscription_period"),
+	externalSyncedAt: timestamp("external_synced_at", { withTimezone: true, mode: 'string' }),
 }, (table) => [
 	index("idx_invoice_party").using("btree", table.partyId.asc().nullsLast().op("int8_ops")),
 	index("idx_invoice_billing_item").using("btree", table.billingItemId.asc().nullsLast().op("int8_ops")),
@@ -62,6 +80,10 @@ export const invoices = pgTable("invoices", {
 	check("chk_invoice_direction", sql`direction = ANY (ARRAY['issued'::text, 'received'::text])`),
 	check("chk_invoice_status", sql`status = ANY (ARRAY['valid'::text, 'void'::text, 'allowance'::text])`),
 	check("chk_invoice_external_status", sql`external_status = ANY (ARRAY['pending'::text, 'issued'::text, 'void'::text, 'n_a'::text])`),
+	check("chk_invoice_tax_treatment", sql`tax_treatment = ANY (ARRAY['taxable'::text, 'zero_rated'::text, 'exempt'::text])`),
+	check("chk_invoice_type", sql`invoice_type IS NULL OR invoice_type = ANY (ARRAY['B2B'::text, 'B2C'::text])`),
+	uniqueIndex("uq_invoice_external_id").on(table.organizationId, table.externalId).where(sql`external_id IS NOT NULL`),
+	index("idx_invoice_subscription").using("btree", table.subscriptionId.asc().nullsLast().op("int8_ops"), table.subscriptionPeriod.asc().nullsLast().op("date_ops")).where(sql`subscription_id IS NOT NULL`),
 ]);
 
 export const employees = pgTable("employees", {
@@ -70,7 +92,10 @@ export const employees = pgTable("employees", {
 	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
 	organizationId: text("organization_id"),
 	name: text().notNull(),
+	// 已淘汰：明文身分證字號。新寫入一律改存 nationalIdEnc 並清空這欄（migrations/0024）。
 	nationalId: text("national_id"),
+	// 身分證字號密文（src/lib/crypto.ts encryptField）。讀取走 src/db/employee-accounts.ts 的 readNationalId。
+	nationalIdEnc: text("national_id_enc"),
 	employmentType: text("employment_type").default('full_time').notNull(),
 	hasLaborInsurance: boolean("has_labor_insurance").default(true).notNull(),
 	hasHealthInsurance: boolean("has_health_insurance").default(true).notNull(),
@@ -79,6 +104,7 @@ export const employees = pgTable("employees", {
 	// 勞健保投保薪資（記錄保多少，先不試算保費）；是否有勞退看 hasPension
 	laborInsuredSalary: numeric("labor_insured_salary", { precision: 18, scale: 2 }),
 	healthInsuredSalary: numeric("health_insured_salary", { precision: 18, scale: 2 }),
+	// 已淘汰：單一自由文字的薪轉帳戶，改用 employee_bank_accounts（migrations/0024）。
 	salaryAccount: text("salary_account"),
 	startDate: date("start_date"),
 	endDate: date("end_date"),
@@ -94,6 +120,46 @@ export const employees = pgTable("employees", {
 	userId: text("user_id"),
 }, () => [
 	check("chk_emp_type", sql`employment_type = ANY (ARRAY['full_time'::text, 'part_time'::text, 'freelancer'::text, 'contractor'::text])`),
+]);
+
+// ---- 員工收款帳戶（migrations/0024）：薪轉 / 報銷撥款匯入的帳戶，一位員工可有多個。
+// 帳號只存密文（accountNumberEnc），列表一律用末 5 碼；完整帳號只在 owner/admin
+// 明確「顯示完整帳號」時於 server 端解密，並寫入 activity_log。----
+export const employeeBankAccounts = pgTable("employee_bank_accounts", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "employee_bank_accounts_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id"),
+	employeeId: bigint("employee_id", { mode: "number" }).notNull(),
+	kind: text().default('bank').notNull(),
+	bankCode: text("bank_code"),
+	branchCode: text("branch_code"),
+	bankName: text("bank_name"),
+	accountHolder: text("account_holder"),
+	accountNumberEnc: text("account_number_enc").notNull(),
+	accountLast5: text("account_last5").notNull(),
+	currency: text().default('TWD').notNull(),
+	label: text(),
+	defaultForSalary: boolean("default_for_salary").default(false).notNull(),
+	defaultForReimbursement: boolean("default_for_reimbursement").default(false).notNull(),
+	isActive: boolean("is_active").default(true).notNull(),
+	note: text(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+	foreignKey({
+			columns: [table.employeeId],
+			foreignColumns: [employees.id],
+			name: "employee_bank_accounts_employee_id_fkey"
+		}),
+	index("idx_emp_acct_employee").using("btree", table.employeeId.asc().nullsLast().op("int8_ops")).where(sql`deleted_at IS NULL`),
+	index("idx_emp_acct_org").using("btree", table.organizationId.asc().nullsLast().op("text_ops")).where(sql`deleted_at IS NULL`),
+	uniqueIndex("uq_emp_acct_default_salary").using("btree", table.employeeId.asc().nullsLast().op("int8_ops")).where(sql`default_for_salary AND deleted_at IS NULL`),
+	uniqueIndex("uq_emp_acct_default_reimbursement").using("btree", table.employeeId.asc().nullsLast().op("int8_ops")).where(sql`default_for_reimbursement AND deleted_at IS NULL`),
+	check("chk_emp_acct_kind", sql`kind = ANY (ARRAY['bank'::text, 'wise'::text, 'other'::text])`),
+	check("chk_emp_acct_bank_code", sql`((kind <> 'bank'::text) OR (bank_code IS NOT NULL)) AND ((bank_code IS NULL) OR (bank_code ~ '^[0-9]{3}$'::text))`),
+	check("chk_emp_acct_branch_code", sql`(branch_code IS NULL) OR (branch_code ~ '^[0-9]{4}$'::text)`),
+	check("chk_emp_acct_last5", sql`(char_length(account_last5) >= 1) AND (char_length(account_last5) <= 5)`),
+	check("chk_emp_acct_currency", sql`currency ~ '^[A-Z]{3}$'::text`),
 ]);
 
 export const payrollRuns = pgTable("payroll_runs", {
@@ -127,7 +193,15 @@ export const payslips = pgTable("payslips", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	paidTransactionId: bigint("paid_transaction_id", { mode: "number" }),
 	note: text(),
+	// 薪資匯入的員工帳戶（migrations/0024），選填
+	paidToAccountId: bigint("paid_to_account_id", { mode: "number" }),
 }, (table) => [
+	index("idx_payslip_paid_to").using("btree", table.paidToAccountId.asc().nullsLast().op("int8_ops")),
+	foreignKey({
+			columns: [table.paidToAccountId],
+			foreignColumns: [employeeBankAccounts.id],
+			name: "payslips_paid_to_account_id_fkey"
+		}),
 	foreignKey({
 			columns: [table.payrollRunId],
 			foreignColumns: [payrollRuns.id],
@@ -251,7 +325,23 @@ export const transactions = pgTable("transactions", {
 	// 請款項目綁定（選填）：把 income 交易掛到某一筆 billing_items，讓該期「已收多少」
 	// 自動算出來。FK 在 DB 端（migrations/0017）建立，這裡只放欄位避免宣告順序衝突。
 	billingItemId: bigint("billing_item_id", { mode: "number" }),
+	// 撥款 / 薪資匯入的員工帳戶（migrations/0024），選填。與 fromAccountId（公司帳本帳戶）無關。
+	settleToAccountId: bigint("settle_to_account_id", { mode: "number" }),
+	// 外部來源（migrations/0026）：自動匯入的交易（Wise 同步）用 (org, source, ref) 去重，
+	// 原始細節放 externalMeta，needsReview = 還沒有人確認過（指定分類後清掉）。
+	externalSource: text("external_source"),
+	externalRef: text("external_ref"),
+	externalMeta: jsonb("external_meta").$type<Record<string, unknown>>(),
+	needsReview: boolean("needs_review").default(false).notNull(),
 }, (table) => [
+	uniqueIndex("uq_txn_external_ref").on(table.organizationId, table.externalSource, table.externalRef).where(sql`external_ref IS NOT NULL`),
+	index("idx_txn_needs_review").on(table.organizationId).where(sql`needs_review AND deleted_at IS NULL`),
+	index("idx_txn_settle_to").using("btree", table.settleToAccountId.asc().nullsLast().op("int8_ops")),
+	foreignKey({
+			columns: [table.settleToAccountId],
+			foreignColumns: [employeeBankAccounts.id],
+			name: "transactions_settle_to_account_id_fkey"
+		}),
 	index("idx_txn_book").using("btree", table.book.asc().nullsLast().op("text_ops")),
 	index("idx_txn_category").using("btree", table.categoryId.asc().nullsLast().op("int8_ops")),
 	index("idx_txn_date").using("btree", table.txnDate.asc().nullsLast().op("date_ops")),
@@ -299,6 +389,7 @@ export const transactions = pgTable("transactions", {
 		}),
 	check("chk_txn_book", sql`book = ANY (ARRAY['both'::text, 'internal'::text, 'external'::text])`),
 	check("chk_txn_type", sql`type = ANY (ARRAY['expense'::text, 'income'::text, 'advance'::text, 'reimbursement'::text, 'transfer'::text])`),
+	check("chk_txn_external_ref_source", sql`external_ref IS NULL OR external_source IS NOT NULL`),
 ]);
 
 export const accountReconciliations = pgTable("account_reconciliations", {
@@ -591,4 +682,54 @@ export const calendarEventLinks = pgTable("calendar_event_links", {
 	uniqueIndex("uq_calendar_event").on(table.organizationId, table.itemKey, table.kind),
 	index("idx_calendar_event_org").using("btree", table.organizationId.asc().nullsLast().op("text_ops")),
 	check("chk_calendar_event_kind", sql`kind = ANY (ARRAY['due'::text, 'payment'::text, 'invoice'::text])`),
+]);
+
+// ---- 組織層級外部整合（migrations/0023）。一列 = 一個組織的一個 provider，
+// 框架在 src/lib/integrations。連接後預設關閉；中斷連接即刪列。----
+// credentials_enc / token_cache_enc 是 src/lib/crypto.ts 的密文，絕不存明文、
+// 絕不回傳給 client 或 MCP —— 讀取一律走 src/lib/integrations/store.ts。
+export const orgIntegrations = pgTable("org_integrations", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "org_integrations_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id").notNull(),
+	provider: text().notNull(),
+	enabled: boolean().default(false).notNull(),
+	status: text().default('connected').notNull(),
+	// 非機密設定（公司 id、帳戶對應等）
+	config: jsonb().$type<Record<string, unknown>>().default({}).notNull(),
+	credentialsEnc: text("credentials_enc"),
+	tokenCacheEnc: text("token_cache_enc"),
+	tokenExpiresAt: timestamp("token_expires_at", { withTimezone: true, mode: 'string' }),
+	lastSyncedAt: timestamp("last_synced_at", { withTimezone: true, mode: 'string' }),
+	lastError: text("last_error"),
+	lastErrorAt: timestamp("last_error_at", { withTimezone: true, mode: 'string' }),
+	connectedByUserId: text("connected_by_user_id"),
+	connectedAt: timestamp("connected_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	unique("uq_org_integration").on(table.organizationId, table.provider),
+	check("chk_org_integration_provider", sql`provider = ANY (ARRAY['simpany'::text, 'wise'::text])`),
+	check("chk_org_integration_status", sql`status = ANY (ARRAY['connected'::text, 'needs_reauth'::text, 'error'::text])`),
+]);
+
+// ---- Simpany 開立前的預覽草稿（migrations/0025）。preview 寫一列，issue 只收 draft id，
+// 確保「使用者看過的」就是「送出去的」。2 小時過期。----
+export const invoiceDrafts = pgTable("invoice_drafts", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "invoice_drafts_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id").notNull(),
+	createdByUserId: text("created_by_user_id"),
+	payload: jsonb().$type<Record<string, unknown>>().notNull(),
+	summary: jsonb().$type<Record<string, unknown>>().default({}).notNull(),
+	links: jsonb().$type<Record<string, unknown>>().default({}).notNull(),
+	status: text().default('pending').notNull(),
+	issuedInvoiceId: bigint("issued_invoice_id", { mode: "number" }),
+	expiresAt: timestamp("expires_at", { withTimezone: true, mode: 'string' }).default(sql`(now() + '02:00:00'::interval)`).notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_invoice_draft_org").using("btree", table.organizationId.asc().nullsLast().op("text_ops"), table.createdAt.desc().nullsFirst().op("timestamptz_ops")),
+	foreignKey({
+			columns: [table.issuedInvoiceId],
+			foreignColumns: [invoices.id],
+			name: "invoice_drafts_issued_invoice_id_fkey"
+		}),
+	check("chk_invoice_draft_status", sql`status = ANY (ARRAY['pending'::text, 'issued'::text, 'cancelled'::text, 'expired'::text])`),
 ]);

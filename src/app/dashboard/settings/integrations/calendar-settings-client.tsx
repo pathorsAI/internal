@@ -72,14 +72,14 @@ export function CalendarSettingsClient({
 
   /**
    * 先跳 Google 授權（要到 calendar 權限），回來後才把自己設為日曆擁有者並同步。
-   * 授權完成會導回 /settings，使用者再按一次「連結並同步」即可 —— 這裡不自動接續，
+   * 授權完成會導回 設定 › 整合，使用者再按一次「連結並同步」即可 —— 這裡不自動接續，
    * 因為 OAuth 是整頁跳轉，回來後元件已重新掛載。
    */
   function grant() {
     start(async () => {
       const { error } = await authClient.oauth2.link({
         providerId: "google-calendar",
-        callbackURL: "/dashboard/settings",
+        callbackURL: "/dashboard/settings/integrations",
       });
       if (error) toast.error(error.message ?? t("calendar.toast.authFailed"));
     });

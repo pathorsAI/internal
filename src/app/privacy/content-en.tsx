@@ -137,26 +137,34 @@ export function PrivacyEn() {
         </p>
         <ul>
           <li>
-            National ID numbers and payroll bank accounts are{" "}
-            <strong>stored as plain text in database columns</strong>; we do not apply
-            field-level encryption or hashing. What protects them is transport encryption
-            (HTTPS), the encryption at rest provided by our database and object storage
-            providers, and login, organization isolation and role-based permissions.
+            Employees&rsquo; bank account numbers and national ID numbers are{" "}
+            <strong>encrypted at the field level before they are stored</strong> (AES-GCM). The
+            encryption key is a secret of the deployment environment and is not kept in the
+            database, so the database contents alone do not reveal these values. On top of that
+            come transport encryption (HTTPS), the encryption at rest provided by our database
+            and object storage providers, and login, organization isolation and role-based
+            permissions.
           </li>
           <li>
-            <strong>Masking happens only at the output layer, and only for MCP</strong>: when
-            employee data is read through MCP, only the first 3 characters of the national ID
-            number and the last 5 characters of the payroll bank account are kept, and the rest
-            are replaced with <code>*</code>.
+            <strong>Masked everywhere</strong>: lists, forms, payroll and reimbursement records,
+            and MCP only ever show masked values &mdash; the last 5 characters of an
+            account number and the first 3 characters of a national ID number, with the rest
+            replaced by <code>*</code>.
           </li>
           <li>
-            In the web interface, members of the same organization who have the permission{" "}
-            <strong>see the full values</strong> (filing labor and health insurance and running
-            payroll transfers require them).
+            The one exception is an organization <strong>owner or admin</strong> explicitly
+            clicking &ldquo;show full number&rdquo; in the web app (payroll transfers need it), or
+            editing an employee&rsquo;s national ID number. Regular members cannot see the full
+            values and cannot change employee records.
           </li>
           <li>
-            In other words: masking is not encryption, and the values stored in the database are
-            not rewritten by it.
+            Every &ldquo;show full number&rdquo; is written to the audit records (who, when, which
+            account); the record itself does not contain the number. MCP has no way to reveal a
+            full account number.
+          </li>
+          <li>
+            Older records entered as plain text before this feature are converted to the encrypted
+            fields, and the plain text removed, by a one-time migration.
           </li>
         </ul>
       </section>
@@ -263,13 +271,15 @@ export function PrivacyEn() {
           </p>
           <h3>Masking still applies</h3>
           <p>
-            Employees&rsquo; national ID numbers and payroll bank accounts are always masked
-            before being sent out over MCP (see the section on sensitive fields above); AI
-            clients do not receive the full values.
+            Employees&rsquo; national ID numbers and bank account numbers are always masked
+            before being sent out over MCP (see the section on sensitive fields above), and MCP
+            has no tool that reveals a full account number; AI clients do not receive the full
+            values.
           </p>
           <h3>Every access is recorded</h3>
           <p>
-            Every write through MCP, and every read of employee data, is written to the audit
+            Every write through MCP, and every read of employee data or employee bank accounts,
+            is written to the audit
             records with the channel marked as <code>mcp</code>, viewable inside the system.
           </p>
           <h3>Where tokens are stored</h3>
@@ -398,7 +408,8 @@ export function PrivacyEn() {
           The measures we take include: login with a Google account (the Service holds no
           passwords), data isolation along organization boundaries, role-based permissions,
           always re-verifying permissions on the server rather than trusting the front end,
-          complete audit records, masking of sensitive fields in MCP output, and origin
+          complete audit records, field-level encryption and masking of employee account
+          numbers and national ID numbers, and origin
           validation on the MCP endpoint. We do not claim the system is absolutely secure; if an
           incident affects your data, we will notify the affected organizations as soon as
           possible after establishing the facts.
