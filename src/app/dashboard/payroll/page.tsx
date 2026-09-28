@@ -17,15 +17,34 @@ import { listPayslipRecords } from "@/db/queries";
 import { formatCurrency, formatYearMonth } from "@/lib/format";
 import { DeleteButton } from "@/components/delete-button";
 import { deletePayslip } from "@/db/mutations";
-import { requireOrg } from "@/lib/session";
+import { canManageOrg, requireOrgWithRole } from "@/lib/session";
 import { formatAccountShort } from "@/lib/employee-accounts";
+import { getIntegration } from "@/lib/integrations/store";
+import { salaryReconciliation } from "@/lib/simpany-salary";
+import { taipeiDate } from "@/lib/simpany-sync";
+import { SimpanySalarySection } from "./simpany-salary-section";
 
 export const dynamic = "force-dynamic";
 
-export default async function PayrollPage() {
+export default async function PayrollPage({
+  searchParams,
+}: Readonly<{ searchParams: Promise<{ year?: string }> }>) {
   const t = await getTranslations("payroll");
-  const { orgId } = await requireOrg();
-  const rows = await listPayslipRecords(orgId);
+  const { orgId, role } = await requireOrgWithRole();
+  const { year: yearParam } = await searchParams;
+  const thisYear = Number(taipeiDate().slice(0, 4));
+  const parsedYear = Number(yearParam);
+  const year =
+    Number.isInteger(parsedYear) && parsedYear >= 2000 && parsedYear <= 2100 ? parsedYear : thisYear;
+  const [rows, integration, recon] = await Promise.all([
+    listPayslipRecords(orgId),
+    getIntegration(orgId, "simpany"),
+    // 對帳失敗（例如 migration 0027 還沒跑）不該讓整個薪資頁掛掉：記 log、不顯示該區塊。
+    salaryReconciliation(orgId, { year }).catch((e: unknown) => {
+      console.error("salaryReconciliation failed", e);
+      return null;
+    }),
+  ]);
 
   return (
     <>
@@ -108,6 +127,14 @@ export default async function PayrollPage() {
           </TableBody>
         </Table>
       </TableCard>
+
+      {recon && (integration || recon.lastSyncedAt) ? (
+        <SimpanySalarySection
+          recon={recon}
+          integration={integration}
+          canManage={canManageOrg(role)}
+        />
+      ) : null}
     </>
   );
 }

@@ -16,6 +16,11 @@ import {
   type TaxTreatment,
 } from "@/lib/simpany-sync";
 import { getSimpanyClient } from "@/lib/integrations/simpany";
+import {
+  listSalaryDeclarationsLive,
+  salaryReconciliation,
+  syncSalaryDeclarations,
+} from "@/lib/simpany-salary";
 import { auditIntegrationCall, requireIntegrationForTool } from "./tools-integrations";
 import {
   listResult,
@@ -116,6 +121,31 @@ const LIST_ROW: JsonSchemaObject = rowSchema({
 });
 
 const LOOSE_OBJECT: JsonSchemaObject = { type: "object", additionalProperties: true };
+
+function yearArg(args: Record<string, unknown>, fallback?: number): number {
+  const year = optNumber(args, "year") ?? fallback ?? Number(taipeiDate().slice(0, 4));
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) throw new Error('"year" must be a 4-digit year.');
+  return year;
+}
+
+function monthArg(args: Record<string, unknown>, key: string): number | undefined {
+  const m = optNumber(args, key);
+  if (m === undefined) return undefined;
+  if (!Number.isInteger(m) || m < 0 || m > 12) throw new Error(`"${key}" must be 1-12.`);
+  return m;
+}
+
+function optNumberMap(v: unknown, key: string): Record<string, number> | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== "object" || Array.isArray(v)) throw new Error(`"${key}" must be an object of name → number.`);
+  const out: Record<string, number> = {};
+  for (const [k, raw] of Object.entries(v as Record<string, unknown>)) {
+    const n = typeof raw === "number" ? raw : Number(raw);
+    if (!Number.isFinite(n) || n < 0) throw new Error(`"${key}.${k}" must be a non-negative number.`);
+    out[k.trim()] = n;
+  }
+  return out;
+}
 
 export const simpanyTools: Record<string, ToolDef> = {
   simpany_list_invoices: {
@@ -448,6 +478,109 @@ export const simpanyTools: Record<string, ToolDef> = {
       const orgId = await resolveOrg(args, ctx);
       await requireIntegrationForTool(orgId, "simpany");
       return listResult(await listZeroTaxReasons(orgId));
+    },
+  },
+
+  // ---- 薪資申報（唯讀：只對 Simpany 發 GET，見 assertSalaryReadOnly）----
+  // 回應在解析時就丟掉身分證字號 / 地址 / 國籍；工具結果只有姓名、Simpany 員工 id、金額、日期、旗標。
+
+  simpany_list_salary_declarations: {
+    description:
+      "[read] Salary declarations (薪資申報) filed in Simpany for a year (or one month), read live from Simpany — GET only, nothing is written anywhere. Per month: status (missing = no form that month, empty = form exists but nobody's salary was declared, draft = declared but not settled, settled = filed/closed), payday, and per employee: name, Simpany employee id, company-owner flag, filed flag, base salary, non-recurring bonus, declared gross (實際申報薪資), net paid (實際發薪), personal/company labour & health insurance, employment insurance, and the item list (name/type/amount). Contains no national id, address or nationality. Requires the Simpany integration (設定 › 整合).",
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    inputSchema: {
+      type: "object",
+      properties: {
+        year: { type: "number", description: "Western year, e.g. 2026. Default: this year (Taipei)." },
+        month: { type: "number", description: "1-12: only this salary month (the month the salary is for, not the payday month)." },
+        ...ORG_ARG,
+      },
+      additionalProperties: false,
+    },
+    outputSchema: LOOSE_OBJECT,
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      await requireIntegrationForTool(orgId, "simpany");
+      const year = yearArg(args);
+      const month = monthArg(args, "month");
+      if (month === 0) throw new Error('"month" must be 1-12.');
+      const res = await listSalaryDeclarationsLive(orgId, year, month);
+      const monthSuffix = month ? `-${String(month).padStart(2, "0")}` : "";
+      await auditIntegrationCall(
+        ctx,
+        orgId,
+        "simpany",
+        "read",
+        `salary declarations ${year}${monthSuffix}`,
+      );
+      return res;
+    },
+  },
+
+  simpany_sync_salary_declarations: {
+    description:
+      "[write] Pull a year's Simpany salary declarations (薪資申報) into this organization's own tables (simpany_salary_forms / simpany_salary_declarations) so salary_arrears can reconcile them. Only GET requests go to Simpany; nothing is written to Simpany. Idempotent: re-running replaces the year's rows, and forms/employees removed in Simpany are removed here. Each Simpany employee is linked to an employee record by exact name (unmatched names are returned). Owner/admin only.",
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+    inputSchema: {
+      type: "object",
+      properties: {
+        year: { type: "number", description: "Western year, e.g. 2026. Default: this year (Taipei)." },
+        ...ORG_ARG,
+      },
+      additionalProperties: false,
+    },
+    outputSchema: LOOSE_OBJECT,
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      await requireIntegrationForTool(orgId, "simpany");
+      await requireManager(orgId, ctx, "同步 Simpany 薪資申報");
+      const year = yearArg(args);
+      const res = await syncSalaryDeclarations(orgId, year);
+      const filed = res.months.filter((m) => m.filedCount > 0).length;
+      await auditIntegrationCall(
+        ctx,
+        orgId,
+        "simpany",
+        "update",
+        `salary sync ${year}: ${filed} filed months, ${res.declarationsUpserted} rows, -${res.declarationsRemoved}`,
+      );
+      return res;
+    },
+  },
+
+  salary_arrears: {
+    description:
+      "[read] Salary arrears (欠薪) per employee: what was declared in Simpany (net paid 實際發薪, per month) versus what this organization actually recorded as paid (payslips + expense transactions in the 薪資費用 category linked to the employee by settle-employee or by party name). Reads only this organization's tables — run simpany_sync_salary_declarations first to refresh. Payments tied to a payslip period go to that month first; everything else is applied oldest-month-first (FIFO). Returns per employee: totalDeclaredNet, totalPaid, arrears (due, declared months still unpaid), estimatedArrears (months not declared in Simpany, estimated from the latest declared month's net minus its one-off bonus, flagged estimated: true), notYetDue, credit (paid with nothing to apply to), monthly rows and payments with their allocation; plus the month grid (missing / empty / draft / settled / not_synced) and unallocatedPayments — 薪資費用 outflows not linked to any employee, for the owner to assign.",
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    inputSchema: {
+      type: "object",
+      properties: {
+        year: { type: "number", description: "Default: this year (Taipei)." },
+        throughMonth: { type: "number", description: "Last salary month to include (1-12). Default: current month for this year, 12 for past years." },
+        paidFrom: { type: "string", description: "YYYY-MM-DD: earliest date of 薪資費用 transactions counted as payments (payslip-linked ones count by period instead). Default: Jan 1 of year." },
+        paidTo: { type: "string", description: "YYYY-MM-DD: latest payment date counted, also the as-of date for 'due'. Default: today for this year, Jan 31 of the next year for past years." },
+        estimateUnfiled: { type: "boolean", description: "Estimate months with no Simpany declaration (within employment) from expectedMonthlyNet. Default true." },
+        expectedMonthlyNet: {
+          type: "object",
+          additionalProperties: { type: "number" },
+          description: "Override the monthly net used for estimates, keyed by employee name, e.g. {\"呂安\": 38376}.",
+        },
+        ...ORG_ARG,
+      },
+      additionalProperties: false,
+    },
+    outputSchema: LOOSE_OBJECT,
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      const year = yearArg(args);
+      return salaryReconciliation(orgId, {
+        year,
+        throughMonth: monthArg(args, "throughMonth"),
+        paidFrom: optDate(args, "paidFrom"),
+        paidTo: optDate(args, "paidTo"),
+        estimateUnfiled: optBoolean(args, "estimateUnfiled"),
+        expectedMonthlyNet: optNumberMap(args.expectedMonthlyNet, "expectedMonthlyNet"),
+      });
     },
   },
 };
