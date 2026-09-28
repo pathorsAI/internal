@@ -13,7 +13,7 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment -- 檔案存在時不是錯誤，@ts-expect-error 會反過來報錯
 // @ts-ignore -- `.open-next/worker.js` 由 `bun run cf:build` 產生，型別檢查時可能還不存在
-import { default as openNextHandler } from "./.open-next/worker.js";
+import openNextHandler from "./.open-next/worker.js";
 import {
   AUTOSYNC_CRON_PATH,
   CRON_TOKEN_HEADER,

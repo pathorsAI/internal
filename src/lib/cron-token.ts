@@ -48,6 +48,6 @@ export function revokeCronToken(token: string): void {
 
 /** route 用：token 有效就消耗掉並回 true。 */
 export function consumeCronToken(token: string | null): boolean {
-  if (!token || token.length !== 64) return false;
+  if (token?.length !== 64) return false;
   return tokens().delete(token);
 }
