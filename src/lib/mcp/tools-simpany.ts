@@ -27,6 +27,7 @@ import {
   sendPayslips,
   settleSalaryFiling,
   type SalaryFilingEmployeeInput,
+  type SalaryFilingPreview,
   type SalaryItemInput,
 } from "@/lib/simpany-payroll";
 import { auditIntegrationCall, requireIntegrationForTool } from "./tools-integrations";
@@ -189,6 +190,26 @@ function requireMonth(args: Record<string, unknown>): number {
   const m = monthArg(args, "month");
   if (m === undefined || m === 0) throw new Error('"month" is required (1-12).');
   return m;
+}
+
+function prepareAuditLine(year: number, month: number, preview: SalaryFilingPreview): string {
+  const copied = preview.copy?.performed
+    ? `, copied ${preview.copy.employees.length} from form #${preview.copy.sourceFormId}`
+    : "";
+  return `salary prepare ${year}-${String(month).padStart(2, "0")}: draft ${preview.draftId ?? "none"}, ${preview.employees.length} employees, net ${preview.totals.net}${copied}`;
+}
+
+function prepareNextStep(preview: SalaryFilingPreview): string {
+  if (!preview.draftId) {
+    return "No draft was created. Resolve the problems / copy plan / missing employees shown here (e.g. re-run with allowCopy: true after the user agrees to copy, or add employees in Simpany's UI), then prepare again.";
+  }
+  const missing = preview.notInSimpany.length
+    ? `NOT in this draft (they don't exist in Simpany — the user must add them in Simpany's own UI first): ${preview.notInSimpany.join(", ")}. `
+    : "";
+  return (
+    missing +
+    "Show this preview to the user (per employee: base, bonus, gross, personal burden, company burden, withholding, net; payday; owner; warnings). Only after they explicitly approve it in this conversation, call simpany_apply_salary_filing({ draftId }). The draft expires at expiresAt."
+  );
 }
 
 const SALARY_ITEM_SCHEMA = {
@@ -673,17 +694,9 @@ export const simpanyTools: Record<string, ToolDef> = {
         orgId,
         "simpany",
         preview.copy?.performed ? "update" : "read",
-        `salary prepare ${year}-${String(month).padStart(2, "0")}: draft ${preview.draftId ?? "none"}, ${preview.employees.length} employees, net ${preview.totals.net}${preview.copy?.performed ? `, copied ${preview.copy.employees.length} from form #${preview.copy.sourceFormId}` : ""}`,
+        prepareAuditLine(year, month, preview),
       );
-      return {
-        ...preview,
-        nextStep: preview.draftId
-          ? (preview.notInSimpany.length
-              ? `NOT in this draft (they don't exist in Simpany — the user must add them in Simpany's own UI first): ${preview.notInSimpany.join(", ")}. `
-              : "") +
-            "Show this preview to the user (per employee: base, bonus, gross, personal burden, company burden, withholding, net; payday; owner; warnings). Only after they explicitly approve it in this conversation, call simpany_apply_salary_filing({ draftId }). The draft expires at expiresAt."
-          : "No draft was created. Resolve the problems / copy plan / missing employees shown here (e.g. re-run with allowCopy: true after the user agrees to copy, or add employees in Simpany's UI), then prepare again.",
-      };
+      return { ...preview, nextStep: prepareNextStep(preview) };
     },
   },
 

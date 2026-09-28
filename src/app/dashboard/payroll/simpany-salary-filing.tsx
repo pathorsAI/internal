@@ -175,9 +175,10 @@ function PreviewNotices({ preview }: Readonly<{ preview: SalaryFilingPreview }>)
     ...(preview.notInSimpany.length ? [t("notInSimpany", { names: preview.notInSimpany.join("、") })] : []),
   ];
   const copy = preview.copy;
+  const copyKey = copy?.performed ? "copied" : "copyPlan";
   const copyLine =
     copy?.required && copy.sourceYear != null && copy.sourceMonth != null
-      ? t(copy.performed ? "copied" : "copyPlan", {
+      ? t(copyKey, {
           names: copy.employees.join("、"),
           year: copy.sourceYear,
           month: copy.sourceMonth,
@@ -350,6 +351,13 @@ function PayslipPanel({ year, month }: Readonly<{ year: number; month: number }>
   );
 }
 
+const AMOUNT_FIELDS = ["base", "bonus", "reimbursement"] as const;
+const AMOUNT_LABEL = {
+  base: "columns.base",
+  bonus: "columns.bonus",
+  reimbursement: "columns.reimbursement",
+} as const;
+
 /** 準備申報的輸入表：每人本薪 / 獎金 / 代墊款、發薪日、是否允許複製。 */
 function FilingForm({
   defaults,
@@ -422,11 +430,11 @@ function FilingForm({
                       </Badge>
                     ) : null}
                   </TableCell>
-                  {(["base", "bonus", "reimbursement"] as const).map((k) => (
+                  {AMOUNT_FIELDS.map((k) => (
                     <TableCell key={k} className={k === "reimbursement" ? "pr-3" : undefined}>
                       <Input
                         inputMode="numeric"
-                        aria-label={`${r.name} ${t(`columns.${k}`)}`}
+                        aria-label={r.name + " " + t(AMOUNT_LABEL[k])}
                         value={r[k]}
                         placeholder={k === "base" ? "" : "0"}
                         disabled={!r.include}
@@ -447,6 +455,135 @@ function FilingForm({
       </Check>
     </div>
   );
+}
+
+/** 大於 0（NaN 視為否）。 */
+const isPositive = (n: number) => n > 0;
+/** 0 以上（NaN 視為否）。 */
+const isNonNegative = (n: number) => n >= 0;
+
+type EmployeeAmounts = { name: string; baseSalary: number; bonus: number; reimbursement: number };
+
+/** 本薪要大於 0、獎金與代墊款要是 0 以上的數字。 */
+function invalidAmounts(e: EmployeeAmounts): boolean {
+  return !isPositive(e.baseSalary) || !isNonNegative(e.bonus) || !isNonNegative(e.reimbursement);
+}
+
+/** 開 Sheet 時要停在哪一步：已結算 → 薪資單；已寫入 → 結算；其他 → 填表。 */
+function stepAfterLoad(d: SalaryFilingDefaults, settled: boolean): Step {
+  if (settled || d.latestDraft?.status === "settled") return { name: "settled" };
+  if (d.latestDraft?.status !== "applied") return { name: "form" };
+  const s = d.latestDraft.summary as unknown as SalaryFilingPreview;
+  return {
+    name: "applied",
+    preview: Array.isArray(s?.employees) ? s : null,
+    result: null,
+    appliedAt: d.latestDraft.appliedAt ?? d.latestDraft.createdAt,
+    draftId: d.latestDraft.id,
+  };
+}
+
+/** 試算結果：警示、每人金額、草稿效期。 */
+function PreviewStep({ preview }: Readonly<{ preview: SalaryFilingPreview }>) {
+  const t = useTranslations("payroll.simpany.filing");
+  return (
+    <div className="space-y-4">
+      <PreviewNotices preview={preview} />
+      {preview.employees.length ? <PreviewTable preview={preview} /> : null}
+      {preview.draftId == null ? (
+        <p className="text-sm text-destructive">{t("noDraft")}</p>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          {t("expires", {
+            id: preview.draftId,
+            time: preview.expiresAt ? formatDateTime(preview.expiresAt) : "—",
+          })}
+        </p>
+      )}
+    </div>
+  );
+}
+
+type AppliedStepState = Extract<Step, { name: "applied" }>;
+
+/** 已寫入 Simpany：寫入結果（或先前寫入的紀錄）+ 結算。 */
+function AppliedStep({
+  step,
+  year,
+  month,
+  onSettled,
+}: Readonly<{ step: AppliedStepState; year: number; month: number; onSettled: () => void }>) {
+  const t = useTranslations("payroll.simpany.filing");
+  return (
+    <div className="space-y-4">
+      {step.result ? (
+        <ApplyResultView result={step.result} />
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          {t("appliedEarlier", {
+            id: step.draftId ?? "—",
+            time: step.appliedAt ? formatDateTime(step.appliedAt) : "—",
+          })}
+        </p>
+      )}
+      {step.preview?.employees.length ? <PreviewTable preview={step.preview} /> : null}
+      <SettlePanel
+        year={year}
+        month={month}
+        payday={step.result?.payday ?? step.preview?.payday ?? null}
+        ownerName={step.preview?.companyOwner?.name ?? null}
+        onSettled={onSettled}
+      />
+    </div>
+  );
+}
+
+/** Sheet 底部依步驟變化的按鈕。 */
+function FilingActions({
+  step,
+  pending,
+  canCalculate,
+  onCalculate,
+  onBack,
+  onApply,
+  onReprepare,
+}: Readonly<{
+  step: Step;
+  pending: boolean;
+  canCalculate: boolean;
+  onCalculate: () => void;
+  onBack: (p: SalaryFilingPreview) => void;
+  onApply: (p: SalaryFilingPreview) => void;
+  onReprepare: () => void;
+}>) {
+  const t = useTranslations("payroll.simpany.filing");
+  if (step.name === "form") {
+    return (
+      <Button size="sm" onClick={onCalculate} disabled={pending || !canCalculate}>
+        {pending ? t("calculating") : t("calculate")}
+      </Button>
+    );
+  }
+  if (step.name === "preview") {
+    return (
+      <>
+        <Button size="sm" variant="outline" onClick={() => onBack(step.preview)} disabled={pending}>
+          {t("back")}
+        </Button>
+        <Button size="sm" onClick={() => onApply(step.preview)} disabled={pending || step.preview.draftId == null}>
+          {pending ? t("applying") : t("apply")}
+        </Button>
+      </>
+    );
+  }
+  if (step.name === "applied") {
+    return (
+      <Button size="sm" variant="outline" onClick={onReprepare} disabled={pending}>
+        {t("reprepare")}
+      </Button>
+    );
+  }
+  return null;
 }
 
 /**
@@ -482,20 +619,7 @@ export function SalaryFilingSheet({
       setRows(rowsFrom(d));
       setPayday(d.payday);
       setAllowCopy(false);
-      if (settled || d.latestDraft?.status === "settled") {
-        setStep({ name: "settled" });
-      } else if (d.latestDraft?.status === "applied") {
-        const s = d.latestDraft.summary as unknown as SalaryFilingPreview;
-        setStep({
-          name: "applied",
-          preview: Array.isArray(s?.employees) ? s : null,
-          result: null,
-          appliedAt: d.latestDraft.appliedAt ?? d.latestDraft.createdAt,
-          draftId: d.latestDraft.id,
-        });
-      } else {
-        setStep({ name: "form" });
-      }
+      setStep(stepAfterLoad(d, settled));
     });
   }
 
@@ -513,9 +637,7 @@ export function SalaryFilingSheet({
       bonus: r.bonus.trim() ? toInt(r.bonus) : 0,
       reimbursement: r.reimbursement.trim() ? toInt(r.reimbursement) : 0,
     }));
-    const bad = employees.find(
-      (e) => !(e.baseSalary > 0) || Number.isNaN(e.bonus) || Number.isNaN(e.reimbursement) || e.bonus < 0 || e.reimbursement < 0,
-    );
+    const bad = employees.find(invalidAmounts);
     if (bad) {
       toast.error(`${bad.name}：${t("columns.base")} / ${t("columns.bonus")} / ${t("columns.reimbursement")}`);
       return;
@@ -582,69 +704,24 @@ export function SalaryFilingSheet({
             />
           ) : null}
 
-          {step.name === "preview" ? (
-            <div className="space-y-4">
-              <PreviewNotices preview={step.preview} />
-              {step.preview.employees.length ? <PreviewTable preview={step.preview} /> : null}
-              {step.preview.draftId == null ? (
-                <p className="text-sm text-destructive">{t("noDraft")}</p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  {t("expires", {
-                    id: step.preview.draftId,
-                    time: step.preview.expiresAt ? formatDateTime(step.preview.expiresAt) : "—",
-                  })}
-                </p>
-              )}
-            </div>
-          ) : null}
+          {step.name === "preview" ? <PreviewStep preview={step.preview} /> : null}
 
           {step.name === "applied" ? (
-            <div className="space-y-4">
-              {step.result ? (
-                <ApplyResultView result={step.result} />
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  {t("appliedEarlier", {
-                    id: step.draftId ?? "—",
-                    time: step.appliedAt ? formatDateTime(step.appliedAt) : "—",
-                  })}
-                </p>
-              )}
-              {step.preview?.employees.length ? <PreviewTable preview={step.preview} /> : null}
-              <SettlePanel
-                year={year}
-                month={month}
-                payday={step.result?.payday ?? step.preview?.payday ?? null}
-                ownerName={step.preview?.companyOwner?.name ?? null}
-                onSettled={() => setStep({ name: "settled" })}
-              />
-            </div>
+            <AppliedStep step={step} year={year} month={month} onSettled={() => setStep({ name: "settled" })} />
           ) : null}
 
           {step.name === "settled" ? <PayslipPanel year={year} month={month} /> : null}
         </div>
         <SheetFooter className="flex-row justify-end gap-2">
-          {step.name === "form" ? (
-            <Button size="sm" onClick={calculate} disabled={pending || rows.every((r) => !r.include)}>
-              {pending ? t("calculating") : t("calculate")}
-            </Button>
-          ) : null}
-          {step.name === "preview" ? (
-            <>
-              <Button size="sm" variant="outline" onClick={() => back(step.preview)} disabled={pending}>
-                {t("back")}
-              </Button>
-              <Button size="sm" onClick={() => apply(step.preview)} disabled={pending || step.preview.draftId == null}>
-                {pending ? t("applying") : t("apply")}
-              </Button>
-            </>
-          ) : null}
-          {step.name === "applied" ? (
-            <Button size="sm" variant="outline" onClick={() => setStep({ name: "form" })} disabled={pending}>
-              {t("reprepare")}
-            </Button>
-          ) : null}
+          <FilingActions
+            step={step}
+            pending={pending}
+            canCalculate={rows.some((r) => r.include)}
+            onCalculate={calculate}
+            onBack={back}
+            onApply={apply}
+            onReprepare={() => setStep({ name: "form" })}
+          />
           <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
             {t("close")}
           </Button>

@@ -6,6 +6,7 @@ import {
   SimpanyError,
   type SimpanyClient,
   type SimpanyMonthSequenceRestriction,
+  type SimpanyPayslipSendBody,
   type SimpanySalaryDeclarationDetail,
   type SimpanySalaryDeclarationPayload,
   type SimpanySalaryForm,
@@ -178,6 +179,82 @@ function optionItems(
   });
 }
 
+/** 本薪以外、不能用 otherAllowances 帶的加項（獎金 / 代墊款有自己的欄位）。 */
+const RESERVED_ALLOWANCE_IDS: ReadonlySet<number> = new Set<number>([
+  SALARY_ITEM_ID.BONUS,
+  SALARY_ITEM_ID.REIMBURSEMENT,
+  SALARY_ITEM_ID.BASE,
+]);
+
+type ItemSplit = { items: SimpanySalaryPayloadItem[]; dropped: SimpanySalaryPayloadItem[] };
+
+/** 本薪項目：沿用模板的 itemId / 名稱 / 備註，只換金額。 */
+function baseItem(baseTpl: SimpanySalaryPayloadItem | undefined, amount: number): SimpanySalaryPayloadItem {
+  return {
+    itemId: baseTpl?.itemId ?? SALARY_ITEM_ID.BASE,
+    amount,
+    note: baseTpl?.note ?? null,
+    name: baseTpl?.name || "本薪",
+    type: "ALLOWANCE",
+  };
+}
+
+/** 其他加項：有指定就整組取代；沒指定只沿用每月固定的，其餘列為 dropped。 */
+function otherAllowanceItems(
+  otherTpl: SimpanySalaryPayloadItem[],
+  given: SalaryItemInput[] | undefined,
+  allowNames: Map<number, string>,
+): ItemSplit {
+  if (given) {
+    const items = optionItems(given, allowNames, "ALLOWANCE", RESERVED_ALLOWANCE_IDS);
+    return { items, dropped: otherTpl.filter((it) => !items.some((g) => g.itemId === it.itemId)) };
+  }
+  return {
+    items: otherTpl.filter((it) => RECURRING_ALLOWANCE_IDS.has(it.itemId)).map((it) => ({ ...it })),
+    dropped: otherTpl.filter((it) => !RECURRING_ALLOWANCE_IDS.has(it.itemId)),
+  };
+}
+
+/** 這個月才有的一次性加項（獎金 / 代墊款）；金額是 0 或沒給就不放。 */
+function oneOffItem(
+  itemId: number,
+  amount: number | undefined,
+  note: string | null,
+  allowNames: Map<number, string>,
+  fallbackName: string,
+): SimpanySalaryPayloadItem[] {
+  if (!amount || amount <= 0) return [];
+  return [{ itemId, amount, note, name: allowNames.get(itemId) ?? fallbackName, type: "ALLOWANCE" }];
+}
+
+/** 可編輯的減項：一律一次性，有指定才放；模板裡的列為 dropped。 */
+function deductionItems(
+  dedTpl: SimpanySalaryPayloadItem[],
+  given: SalaryItemInput[] | undefined,
+  dedNames: Map<number, string>,
+): ItemSplit {
+  const items = given ? optionItems(given, dedNames, "DEDUCTION", new Set()) : [];
+  return { items, dropped: dedTpl.filter((it) => !items.some((d) => d.itemId === it.itemId)) };
+}
+
+/** 模板有勞保 / 勞退期間才改成整個月，沒有就維持 null。 */
+function periodDates(
+  decl: SimpanySalaryDeclarationDetail,
+  range: { start: string; end: string },
+): Pick<
+  SimpanySalaryDeclarationPayload,
+  "laborInsuranceStartDate" | "laborInsuranceEndDate" | "laborPensionStartDate" | "laborPensionEndDate"
+> {
+  const hasLabor = decl.laborInsuranceStartDate != null || decl.laborInsuranceEndDate != null;
+  const hasPension = decl.laborPensionStartDate != null || decl.laborPensionEndDate != null;
+  return {
+    laborInsuranceStartDate: hasLabor ? range.start : null,
+    laborInsuranceEndDate: hasLabor ? range.end : null,
+    laborPensionStartDate: hasPension ? range.start : null,
+    laborPensionEndDate: hasPension ? range.end : null,
+  };
+}
+
 /**
  * 以 Simpany 的申報明細為模板，組出這個月要試算 / 存檔的 body。
  * 只改：薪資期間與勞保 / 勞退期間（模板有值才改成整個月）、本薪、獎金、代墊款、其他加減項。
@@ -201,66 +278,29 @@ export function buildDeclarationPayload(
 
   const editable = decl.items.filter((it) => isEditableItem(it, dedIds));
   const calculated = decl.items.filter((it) => !isEditableItem(it, dedIds)).map((it) => ({ ...it }));
-  const dropped: SimpanySalaryPayloadItem[] = [];
 
-  // 本薪
   const baseTpl = editable.find(isBaseItem);
-  const allowances: SimpanySalaryPayloadItem[] = [
-    {
-      itemId: baseTpl?.itemId ?? SALARY_ITEM_ID.BASE,
-      amount: amounts.baseSalary,
-      note: baseTpl?.note ?? null,
-      name: baseTpl?.name || "本薪",
-      type: "ALLOWANCE",
-    },
-  ];
-
-  // 其他加項：有指定就整組取代；沒指定只沿用每月固定的
-  const otherTpl = editable.filter((it) => typeOf(it) === "ALLOWANCE" && it !== baseTpl);
-  const oneOff = new Set<number>([SALARY_ITEM_ID.BONUS, SALARY_ITEM_ID.REIMBURSEMENT, SALARY_ITEM_ID.BASE]);
-  if (amounts.otherAllowances) {
-    const given = optionItems(amounts.otherAllowances, allowNames, "ALLOWANCE", oneOff);
-    allowances.push(...given);
-    dropped.push(...otherTpl.filter((it) => !given.some((g) => g.itemId === it.itemId)));
-  } else {
-    for (const it of otherTpl) {
-      if (RECURRING_ALLOWANCE_IDS.has(it.itemId)) allowances.push({ ...it });
-      else dropped.push(it);
-    }
-  }
-
+  const others = otherAllowanceItems(
+    editable.filter((it) => typeOf(it) === "ALLOWANCE" && it !== baseTpl),
+    amounts.otherAllowances,
+    allowNames,
+  );
   const note = amounts.note?.trim() || null;
-  if (amounts.bonus && amounts.bonus > 0) {
-    allowances.push({
-      itemId: SALARY_ITEM_ID.BONUS,
-      amount: amounts.bonus,
-      note,
-      name: allowNames.get(SALARY_ITEM_ID.BONUS) ?? "非經常性獎金",
-      type: "ALLOWANCE",
-    });
-  }
-  if (amounts.reimbursement && amounts.reimbursement > 0) {
-    allowances.push({
-      itemId: SALARY_ITEM_ID.REIMBURSEMENT,
-      amount: amounts.reimbursement,
-      note,
-      name: allowNames.get(SALARY_ITEM_ID.REIMBURSEMENT) ?? "員工代墊款",
-      type: "ALLOWANCE",
-    });
-  }
-
-  // 可編輯的減項：一律一次性，有指定才放
-  const dedTpl = editable.filter((it) => typeOf(it) === "DEDUCTION");
-  const deductions = amounts.otherDeductions
-    ? optionItems(amounts.otherDeductions, dedNames, "DEDUCTION", new Set())
-    : [];
-  dropped.push(...dedTpl.filter((it) => !deductions.some((d) => d.itemId === it.itemId)));
-
+  const allowances: SimpanySalaryPayloadItem[] = [
+    baseItem(baseTpl, amounts.baseSalary),
+    ...others.items,
+    ...oneOffItem(SALARY_ITEM_ID.BONUS, amounts.bonus, note, allowNames, "非經常性獎金"),
+    ...oneOffItem(SALARY_ITEM_ID.REIMBURSEMENT, amounts.reimbursement, note, allowNames, "員工代墊款"),
+  ];
+  const deductions = deductionItems(
+    editable.filter((it) => typeOf(it) === "DEDUCTION"),
+    amounts.otherDeductions,
+    dedNames,
+  );
   // 投保級距：原樣沿用
   const ranges = editable.filter((it) => typeOf(it) === "INSURANCE_RANGE").map((it) => ({ ...it }));
+  const dates = periodDates(decl, range);
 
-  const hasLabor = decl.laborInsuranceStartDate != null || decl.laborInsuranceEndDate != null;
-  const hasPension = decl.laborPensionStartDate != null || decl.laborPensionEndDate != null;
   const payload: SimpanySalaryDeclarationPayload = {
     payStartDate: range.start,
     payEndDate: range.end,
@@ -271,18 +311,19 @@ export function buildDeclarationPayload(
     pensionPreparationFundByCompanyRate: decl.pensionPreparationFundByCompanyRate,
     pensionPreparationFundBySelfRate: decl.pensionPreparationFundBySelfRate,
     withholdingTaxDependents: decl.withholdingTaxDependents,
-    salaryDeclarationItems: [...allowances, ...deductions, ...ranges],
+    salaryDeclarationItems: [...allowances, ...deductions.items, ...ranges],
     calculatedSalaryDeclarationItems: calculated,
-    laborInsuranceStartDate: hasLabor ? range.start : null,
-    laborInsuranceEndDate: hasLabor ? range.end : null,
-    laborPensionStartDate: hasPension ? range.start : null,
-    laborPensionEndDate: hasPension ? range.end : null,
+    laborInsuranceStartDate: dates.laborInsuranceStartDate,
+    laborInsuranceEndDate: dates.laborInsuranceEndDate,
+    laborPensionStartDate: dates.laborPensionStartDate,
+    laborPensionEndDate: dates.laborPensionEndDate,
     hasOccupationalAccidentInsurance: decl.hasOccupationalAccidentInsurance,
   };
+  const dropped = [...others.dropped, ...deductions.dropped];
   return {
     payload,
     dropped: dropped.filter(
-      (it) => !allowances.some((a) => a.itemId === it.itemId) && !deductions.some((d) => d.itemId === it.itemId),
+      (it) => !allowances.some((a) => a.itemId === it.itemId) && !deductions.items.some((d) => d.itemId === it.itemId),
     ),
   };
 }
@@ -608,7 +649,7 @@ async function planCopy(ctx: CopyContext): Promise<{
     source = await findFormById(client, input.year, input.sourceFormId);
     if (!source) throw new SalaryFilingError(`在 ${input.year - 1}～${input.year} 年找不到 Simpany 表單 #${input.sourceFormId}`);
     if (!source.form.isSettled) ctx.warnings.push(`複製來源 ${source.year}-${pad2(source.month)} 還沒結算`);
-  } else if (ctx.template && ctx.template.form.employees.some((e) => want.has(e.name))) {
+  } else if (ctx.template?.form.employees.some((e) => want.has(e.name))) {
     source = ctx.template;
   } else {
     source = await findLatestSettledForm(client, input.year, input.month, want);
@@ -706,7 +747,8 @@ async function calculateEmployee(t: Target, emp: SimpanySalaryFormEmployee, ctx:
     w.push(`${t.name}：${t.internal.endDate} 離職（月中），薪資期間仍以整月計，請確認`);
   }
   if (built.dropped.length) {
-    w.push(`${t.name}：模板裡的 ${built.dropped.map((d) => `${d.name} ${d.amount}`).join("、")} 是一次性項目，這個月沒有沿用`);
+    const droppedText = built.dropped.map((d) => d.name + " " + String(d.amount)).join("、");
+    w.push(`${t.name}：模板裡的 ${droppedText} 是一次性項目，這個月沒有沿用`);
   }
 
   const bonus = body.salaryDeclarationItems.find((it) => it.itemId === SALARY_ITEM_ID.BONUS)?.amount ?? 0;
@@ -796,6 +838,120 @@ function summaryLine(p: Pick<SalaryFilingPreview, "year" | "month" | "payday" | 
   ].join("｜");
 }
 
+/** 讀這個月的表單；沒有表單或已結算就拒絕。 */
+async function loadOpenForm(client: SimpanyClient, year: number, month: number): Promise<SimpanySalaryForm> {
+  const form = await client.getSalaryForm(year, month);
+  if (form.id == null) throw new SalaryFilingError(`Simpany 沒有 ${year}-${pad2(month)} 的薪資申報表單`);
+  if (form.isSettled) {
+    throw new SalaryFilingError(`${year}-${pad2(month)} 在 Simpany 已經結算，不能再修改`);
+  }
+  return form;
+}
+
+/** 對象裡有表單上沒有的人：規劃（allowCopy 時執行）複製。沒有缺人就原樣回傳表單。 */
+async function resolveMissing(
+  client: SimpanyClient,
+  input: PrepareSalaryInput,
+  form: SimpanySalaryForm,
+  template: FoundForm | null,
+  targets: Target[],
+  warnings: string[],
+): Promise<{ form: SimpanySalaryForm; copy: SalaryCopyPlan | null; notInSimpany: string[] }> {
+  const missing = targets.map((t) => t.name).filter((n) => !form.employees.some((e) => e.name === n));
+  if (missing.length === 0) return { form, copy: null, notInSimpany: [] };
+  const res = await planCopy({ client, input, form, template, missing, warnings });
+  return { form: res.form, copy: res.plan, notInSimpany: res.notInSimpany };
+}
+
+/** 逐一試算表單上的對象；Simpany 拒絕或資料不足的人收進 problems（不中斷其他人）。 */
+async function calculateTargets(
+  targets: Target[],
+  form: SimpanySalaryForm,
+  ctx: CalcContext,
+): Promise<{ results: EmployeeCalc[]; problems: SalaryFilingPreview["problems"] }> {
+  const results: EmployeeCalc[] = [];
+  const problems: SalaryFilingPreview["problems"] = [];
+  for (const t of targets) {
+    const emp = form.employees.find((e) => e.name === t.name);
+    if (!emp) continue; // 已列在 copy / notInSimpany
+    try {
+      results.push(await calculateEmployee(t, emp, ctx));
+    } catch (e) {
+      if (!(e instanceof SalaryFilingError || e instanceof SimpanyError)) throw e;
+      problems.push({ name: t.name, message: e.message });
+    }
+  }
+  return { results, problems };
+}
+
+/** 寫入時才會生效的變更（負責人旗標、發薪日）先警示。 */
+function pushApplyWarnings(
+  warnings: string[],
+  results: EmployeeCalc[],
+  owner: SalaryFilingPreview["companyOwner"],
+  currentPayday: string | null,
+  payday: string,
+): void {
+  if (results.some((r) => r.preview.ownerFlagChange)) {
+    warnings.push(
+      `負責人旗標會在寫入時修正（負責人：${owner?.name}）。預覽金額是以 Simpany 目前的旗標試算的；寫入後會讀回來比對實發。`,
+    );
+  }
+  if (currentPayday && currentPayday !== payday) {
+    warnings.push(`Simpany 目前的發薪日是 ${currentPayday}，寫入時會改成 ${payday}（Simpany 可能依發薪日調整健保級距，寫入後會比對實發）`);
+  }
+}
+
+function sumTotals(emps: SalaryFilingEmployeePreview[]): SalaryFilingPreview["totals"] {
+  return {
+    gross: sum(emps.map((e) => e.gross)),
+    personalBurden: sum(emps.map((e) => e.personalBurden)),
+    companyInsurance: sum(emps.map((e) => e.companyInsurance)),
+    withholding: sum(emps.map((e) => e.withholding)),
+    net: sum(emps.map((e) => e.net ?? 0)),
+  };
+}
+
+/** 存草稿：每份要 PUT 的 body 原樣 + 預覽，2 小時過期。 */
+async function saveDraft(d: {
+  orgId: string;
+  userId: string | null;
+  formId: number;
+  payday: string;
+  owner: SalaryFilingPreview["companyOwner"];
+  results: EmployeeCalc[];
+  base: Omit<SalaryFilingPreview, "draftId" | "expiresAt">;
+}): Promise<{ draftId: number; expiresAt: string }> {
+  const expiresAt = new Date(Date.now() + DRAFT_TTL_MS).toISOString();
+  const [draft] = await getDb()
+    .insert(simpanySalaryDrafts)
+    .values({
+      organizationId: d.orgId,
+      year: d.base.year,
+      month: d.base.month,
+      simpanyFormId: d.formId,
+      payday: d.payday,
+      payload: {
+        companyOwner: d.owner?.name ?? null,
+        declarations: d.results.map((r) => ({
+          declarationId: r.preview.declarationId,
+          simpanyEmployeeId: r.preview.simpanyEmployeeId,
+          name: r.preview.name,
+          isCompanyOwner: r.preview.isCompanyOwner,
+          ownerFlagChange: r.preview.ownerFlagChange,
+          expectedNet: r.preview.net,
+          body: r.body,
+        })),
+      },
+      summary: { expiresAt, ...d.base } as unknown as Record<string, unknown>,
+      status: "pending",
+      createdByUserId: d.userId,
+      expiresAt,
+    })
+    .returning({ id: simpanySalaryDrafts.id });
+  return { draftId: draft.id, expiresAt };
+}
+
 /**
  * 準備某個月的薪資申報：讀 Simpany、試算、存草稿，回傳預覽。
  * 會對 Simpany 發：GET（表單、明細、設定）與 POST calculate（試算，不存檔）；
@@ -814,32 +970,19 @@ export async function prepareSalaryFiling(
   const { start: monthStart, end: monthEnd } = monthRange(input.year, input.month);
   const client = clientArg ?? (await getSimpanyClient(orgId));
 
-  let form = await client.getSalaryForm(input.year, input.month);
-  if (form.id == null) throw new SalaryFilingError(`Simpany 沒有 ${input.year}-${pad2(input.month)} 的薪資申報表單`);
-  if (form.isSettled) {
-    throw new SalaryFilingError(`${input.year}-${pad2(input.month)} 在 Simpany 已經結算，不能再修改`);
-  }
-  const restriction = form.monthSequenceRestriction;
+  const openForm = await loadOpenForm(client, input.year, input.month);
+  const restriction = openForm.monthSequenceRestriction;
   if (restriction) warnings.push(restrictionText(restriction));
 
   const internal = await loadInternalEmployees(orgId);
   const template = await findLatestSettledForm(client, input.year, input.month, null);
   const targets = input.employees?.length
     ? explicitTargets(input.employees, internal)
-    : defaultTargets(form, template?.form ?? null, internal, monthStart);
+    : defaultTargets(openForm, template?.form ?? null, internal, monthStart);
   if (targets.length === 0) throw new SalaryFilingError("沒有要申報的員工");
 
-  // ---- 表單缺人 → 複製計畫 ----
-  let copy: SalaryCopyPlan | null = null;
-  let notInSimpany: string[] = [];
-  const missing = targets.map((t) => t.name).filter((n) => !form.employees.some((e) => e.name === n));
-  if (missing.length) {
-    const res = await planCopy({ client, input, form, template, missing, warnings });
-    form = res.form;
-    copy = res.plan;
-    notInSimpany = res.notInSimpany;
-    // 複製計畫與找不到的人放在 copy / notInSimpany 欄位（UI 與 MCP 各自呈現），不重複塞進 warnings。
-  }
+  // 表單缺人 → 複製計畫（複製計畫與找不到的人放在 copy / notInSimpany 欄位，不重複塞進 warnings）
+  const { form, copy, notInSimpany } = await resolveMissing(client, input, openForm, template, targets, warnings);
   const formId = form.id as number;
 
   const { options, minimumSalary } = await loadOptions(client, formId, warnings);
@@ -859,35 +1002,11 @@ export async function prepareSalaryFiling(
     warnings,
   };
 
-  const results: EmployeeCalc[] = [];
-  const problems: SalaryFilingPreview["problems"] = [];
-  for (const t of targets) {
-    const emp = form.employees.find((e) => e.name === t.name);
-    if (!emp) continue; // 已列在 copy / notInSimpany
-    try {
-      results.push(await calculateEmployee(t, emp, ctx));
-    } catch (e) {
-      if (!(e instanceof SalaryFilingError || e instanceof SimpanyError)) throw e;
-      problems.push({ name: t.name, message: e.message });
-    }
-  }
-  if (results.some((r) => r.preview.ownerFlagChange)) {
-    warnings.push(
-      `負責人旗標會在寫入時修正（負責人：${owner?.name}）。預覽金額是以 Simpany 目前的旗標試算的；寫入後會讀回來比對實發。`,
-    );
-  }
-  if (form.payday && form.payday !== payday) {
-    warnings.push(`Simpany 目前的發薪日是 ${form.payday}，寫入時會改成 ${payday}（Simpany 可能依發薪日調整健保級距，寫入後會比對實發）`);
-  }
+  const { results, problems } = await calculateTargets(targets, form, ctx);
+  pushApplyWarnings(warnings, results, owner, form.payday, payday);
 
   const emps = results.map((r) => r.preview);
-  const totals = {
-    gross: sum(emps.map((e) => e.gross)),
-    personalBurden: sum(emps.map((e) => e.personalBurden)),
-    companyInsurance: sum(emps.map((e) => e.companyInsurance)),
-    withholding: sum(emps.map((e) => e.withholding)),
-    net: sum(emps.map((e) => e.net ?? 0)),
-  };
+  const totals = sumTotals(emps);
   const base = {
     year: input.year,
     month: input.month,
@@ -909,34 +1028,8 @@ export async function prepareSalaryFiling(
   const blocked = problems.length > 0 || (copy?.required && !copy.performed) || results.length === 0;
   if (blocked) return { draftId: null, expiresAt: null, ...base };
 
-  const expiresAt = new Date(Date.now() + DRAFT_TTL_MS).toISOString();
-  const [draft] = await getDb()
-    .insert(simpanySalaryDrafts)
-    .values({
-      organizationId: orgId,
-      year: input.year,
-      month: input.month,
-      simpanyFormId: formId,
-      payday,
-      payload: {
-        companyOwner: owner?.name ?? null,
-        declarations: results.map((r) => ({
-          declarationId: r.preview.declarationId,
-          simpanyEmployeeId: r.preview.simpanyEmployeeId,
-          name: r.preview.name,
-          isCompanyOwner: r.preview.isCompanyOwner,
-          ownerFlagChange: r.preview.ownerFlagChange,
-          expectedNet: r.preview.net,
-          body: r.body,
-        })),
-      },
-      summary: { expiresAt, ...base } as unknown as Record<string, unknown>,
-      status: "pending",
-      createdByUserId: userId,
-      expiresAt,
-    })
-    .returning({ id: simpanySalaryDrafts.id });
-  return { draftId: draft.id, expiresAt, ...base };
+  const saved = await saveDraft({ orgId, userId, formId, payday, owner, results, base });
+  return { draftId: saved.draftId, expiresAt: saved.expiresAt, ...base };
 }
 
 // ---------------------------------------------------------------------------
@@ -1025,6 +1118,14 @@ type ApplyProgress = {
   paydayAdjustments: unknown;
 };
 
+/** 草稿已經不適用的原因（表單已結算、換了表單、申報明細不見）；還能寫入回 null。 */
+function staleFormReason(form: SimpanySalaryForm, formId: number, decls: DraftDeclaration[]): string | null {
+  if (form.isSettled) return "這個月在 Simpany 已經結算";
+  if (form.id !== formId) return "Simpany 上這個月的表單已經換了";
+  const gone = decls.filter((d) => !form.employees.some((e) => e.declaration?.id === d.declarationId));
+  return gone.length ? `表單上已經沒有 ${gone.map((d) => d.name).join("、")} 的申報明細` : null;
+}
+
 /** 寫入前再確認一次：表單沒被結算、沒換表單、每份申報明細都還在。不符就取消草稿。 */
 async function precheckForm(
   client: SimpanyClient,
@@ -1033,13 +1134,7 @@ async function precheckForm(
   decls: DraftDeclaration[],
 ): Promise<SimpanySalaryForm> {
   const form = await client.getSalaryForm(row.year, row.month);
-  let reason: string | null = null;
-  if (form.isSettled) reason = "這個月在 Simpany 已經結算";
-  else if (form.id !== row.simpanyFormId) reason = "Simpany 上這個月的表單已經換了";
-  else {
-    const gone = decls.filter((d) => !form.employees.some((e) => e.declaration?.id === d.declarationId));
-    if (gone.length) reason = `表單上已經沒有 ${gone.map((d) => d.name).join("、")} 的申報明細`;
-  }
+  const reason = staleFormReason(form, row.simpanyFormId, decls);
   if (reason) {
     await setDraft(draftId, { status: "cancelled", appliedAt: null, applyResult: { error: reason } });
     throw new SalaryFilingError(`${reason}，草稿 #${draftId} 已取消，請重新準備`);
@@ -1082,15 +1177,9 @@ const STEP_LABEL: Record<ApplyProgress["step"], string> = {
   declarations: "寫入申報明細",
 };
 
-/**
- * 把預覽過的草稿寫進 Simpany。**會修改 Simpany 上的薪資申報（尚未結算，仍可再改）。**
- * 只在使用者明確確認預覽之後呼叫。順序：負責人旗標 → 發薪日 → 逐一 PUT 申報明細 →
- * 讀回來比對實發 → 同步回本地。每一步都是覆寫式：失敗時草稿退回 pending，可用同一份重試。
- */
-export async function applySalaryFiling(orgId: string, draftId: number): Promise<SalaryApplyResult> {
-  const db = getDb();
-  // 先搶下草稿（pending → applied）：按兩次，第二次搶不到。
-  const [row] = await db
+/** 先搶下草稿（pending → applied）：按兩次，第二次搶不到（回 undefined）。 */
+async function claimDraft(orgId: string, draftId: number) {
+  const [row] = await getDb()
     .update(simpanySalaryDrafts)
     .set({ status: "applied", appliedAt: sql`now()` })
     .where(
@@ -1102,6 +1191,82 @@ export async function applySalaryFiling(orgId: string, draftId: number): Promise
       ),
     )
     .returning();
+  return row;
+}
+
+/** 取 Simpany client；拿不到（整合不可用）就把草稿放回 pending 再丟錯。 */
+async function clientOrRelease(orgId: string, draftId: number): Promise<SimpanyClient> {
+  try {
+    return await getSimpanyClient(orgId);
+  } catch (e) {
+    await setDraft(draftId, { status: "pending", appliedAt: null });
+    throw e;
+  }
+}
+
+/** 寫入中途失敗：草稿退回 pending、記下進度，回傳列出已寫入 / 未寫入的錯誤。 */
+async function recordApplyFailure(
+  draftId: number,
+  payday: string,
+  decls: DraftDeclaration[],
+  p: ApplyProgress,
+  e: unknown,
+): Promise<SalaryFilingError> {
+  const msg = e instanceof Error ? e.message : String(e);
+  const notWritten = decls.map((d) => d.name).filter((n) => !p.written.includes(n));
+  await setDraft(draftId, {
+    status: "pending",
+    appliedAt: null,
+    applyResult: {
+      failedStep: p.step,
+      error: msg.slice(0, 500),
+      written: p.written,
+      ownerFlagsChanged: p.ownerFlagsChanged,
+      paydayChanged: p.paydayChanged,
+    },
+  });
+  const ownerNames = p.ownerFlagsChanged.map((o) => o.name).join("、");
+  return new SalaryFilingError(
+    [
+      `在「${STEP_LABEL[p.step]}」失敗：${msg}`,
+      p.ownerFlagsChanged.length ? `已修正負責人旗標：${ownerNames}` : null,
+      p.paydayChanged ? `已把發薪日改成 ${payday}` : null,
+      `已寫入申報明細：${p.written.length ? p.written.join("、") : "（無）"}`,
+      `尚未寫入：${notWritten.join("、") || "（無）"}`,
+      `每一步都是覆寫式，確認原因後可以用同一份草稿 #${draftId} 重試（已退回可寫入），或重新準備。`,
+    ]
+      .filter(Boolean)
+      .join("。"),
+  );
+}
+
+/** 讀回來的每人實發 vs 預覽。 */
+function verifyNets(after: SimpanySalaryForm, decls: DraftDeclaration[]): SalaryApplyResult["verification"] {
+  return decls.map((d) => {
+    const emp = after.employees.find((e) => e.declaration?.id === d.declarationId);
+    const actualNet = emp ? summarizeDeclaration(emp.declaration?.items ?? []).netPay : null;
+    const ok = actualNet != null && d.expectedNet != null && Math.abs(actualNet - d.expectedNet) < 0.5;
+    return { name: d.name, expectedNet: d.expectedNet, actualNet, ok };
+  });
+}
+
+/** 寫入 / 結算後重新同步這一年；失敗不影響主流程，只回報。 */
+async function syncYear(orgId: string, year: number): Promise<SalaryApplyResult["sync"]> {
+  try {
+    const res = await syncSalaryDeclarations(orgId, year);
+    return { ok: true, declarationsUpserted: res.declarationsUpserted };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * 把預覽過的草稿寫進 Simpany。**會修改 Simpany 上的薪資申報（尚未結算，仍可再改）。**
+ * 只在使用者明確確認預覽之後呼叫。順序：負責人旗標 → 發薪日 → 逐一 PUT 申報明細 →
+ * 讀回來比對實發 → 同步回本地。每一步都是覆寫式：失敗時草稿退回 pending，可用同一份重試。
+ */
+export async function applySalaryFiling(orgId: string, draftId: number): Promise<SalaryApplyResult> {
+  const row = await claimDraft(orgId, draftId);
   if (!row) return explainUnavailableDraft(orgId, draftId);
 
   const decls = parseDraftDeclarations(row.payload);
@@ -1110,14 +1275,7 @@ export async function applySalaryFiling(orgId: string, draftId: number): Promise
     throw new SalaryFilingError(`草稿 #${draftId} 內容損毀，請重新準備`);
   }
 
-  let client: SimpanyClient;
-  try {
-    client = await getSimpanyClient(orgId);
-  } catch (e) {
-    await setDraft(draftId, { status: "pending", appliedAt: null });
-    throw e;
-  }
-
+  const client = await clientOrRelease(orgId, draftId);
   const p: ApplyProgress = {
     step: "precheck",
     written: [],
@@ -1135,48 +1293,13 @@ export async function applySalaryFiling(orgId: string, draftId: number): Promise
   try {
     await writeDraft(client, form, row.payday, decls, p);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    const notWritten = decls.map((d) => d.name).filter((n) => !p.written.includes(n));
-    await setDraft(draftId, {
-      status: "pending",
-      appliedAt: null,
-      applyResult: {
-        failedStep: p.step,
-        error: msg.slice(0, 500),
-        written: p.written,
-        ownerFlagsChanged: p.ownerFlagsChanged,
-        paydayChanged: p.paydayChanged,
-      },
-    });
-    throw new SalaryFilingError(
-      [
-        `在「${STEP_LABEL[p.step]}」失敗：${msg}`,
-        p.ownerFlagsChanged.length ? `已修正負責人旗標：${p.ownerFlagsChanged.map((o) => o.name).join("、")}` : null,
-        p.paydayChanged ? `已把發薪日改成 ${row.payday}` : null,
-        `已寫入申報明細：${p.written.length ? p.written.join("、") : "（無）"}`,
-        `尚未寫入：${notWritten.join("、") || "（無）"}`,
-        `每一步都是覆寫式，確認原因後可以用同一份草稿 #${draftId} 重試（已退回可寫入），或重新準備。`,
-      ]
-        .filter(Boolean)
-        .join("。"),
-    );
+    throw await recordApplyFailure(draftId, row.payday, decls, p, e);
   }
 
   // ---- 讀回來比對實發 ----
   const after = await client.getSalaryForm(row.year, row.month);
-  const verification = decls.map((d) => {
-    const emp = after.employees.find((e) => e.declaration?.id === d.declarationId);
-    const actualNet = emp ? summarizeDeclaration(emp.declaration?.items ?? []).netPay : null;
-    const ok = actualNet != null && d.expectedNet != null && Math.abs(actualNet - d.expectedNet) < 0.5;
-    return { name: d.name, expectedNet: d.expectedNet, actualNet, ok };
-  });
-  let sync: SalaryApplyResult["sync"];
-  try {
-    const res = await syncSalaryDeclarations(orgId, row.year);
-    sync = { ok: true, declarationsUpserted: res.declarationsUpserted };
-  } catch (e) {
-    sync = { ok: false, error: e instanceof Error ? e.message : String(e) };
-  }
+  const verification = verifyNets(after, decls);
+  const sync = await syncYear(orgId, row.year);
   const result: SalaryApplyResult = {
     draftId,
     year: row.year,
@@ -1316,13 +1439,7 @@ export async function settleSalaryFiling(orgId: string, input: SettleInput): Pro
         ),
       );
   }
-  let sync: SalaryApplyResult["sync"];
-  try {
-    const res = await syncSalaryDeclarations(orgId, input.year);
-    sync = { ok: true, declarationsUpserted: res.declarationsUpserted };
-  } catch (e) {
-    sync = { ok: false, error: e instanceof Error ? e.message : String(e) };
-  }
+  const sync = await syncYear(orgId, input.year);
   if (!after.isSettled) {
     throw new SimpanyError(
       "business",
@@ -1366,6 +1483,39 @@ export type SendPayslipsResult = {
   recipients: { name: string; payslipSentAt: string | null }[];
 };
 
+/** 寄薪資單的 body 與收件人：有指定姓名就只寄那些人的申報明細，否則整張表單。 */
+function payslipRequest(
+  form: SimpanySalaryForm,
+  names: string[],
+  label: string,
+  mailContent: string,
+): { body: SimpanyPayslipSendBody; recipients: string[] } {
+  if (names.length === 0) {
+    return {
+      body: { mode: "COMPANY_SALARY_DECLARATION_FORM", mailContent },
+      recipients: form.employees.filter((e) => e.declaration?.items.length).map((e) => e.name),
+    };
+  }
+  const ids: number[] = [];
+  const unknown: string[] = [];
+  for (const n of names) {
+    const id = form.employees.find((e) => e.name === n)?.declaration?.id;
+    if (id == null) unknown.push(n);
+    else ids.push(id);
+  }
+  if (unknown.length) throw new SalaryFilingError(`${label} 的表單上沒有這些人的申報明細：${unknown.join("、")}`);
+  return { body: { mode: "SALARY_DECLARATIONS", salaryDeclarationIds: ids, mailContent }, recipients: names };
+}
+
+/** 讀表單；失敗回 null（只用來補充結果，不影響主流程）。 */
+async function formOrNull(client: SimpanyClient, year: number, month: number): Promise<SimpanySalaryForm | null> {
+  try {
+    return await client.getSalaryForm(year, month);
+  } catch {
+    return null;
+  }
+}
+
 /** 寄薪資單給員工（Simpany 寄信，附加密 PDF）。只能寄已結算的月份。 */
 export async function sendPayslips(orgId: string, input: SendPayslipsInput): Promise<SendPayslipsResult> {
   assertYearMonth(input.year, input.month);
@@ -1378,26 +1528,9 @@ export async function sendPayslips(orgId: string, input: SendPayslipsInput): Pro
   const mailContent = input.mailContent?.trim() || defaultPayslipMail(input.year, input.month, payday);
 
   const names = (input.employeeNames ?? []).map((n) => n.trim()).filter(Boolean);
-  let recipientNames: string[];
-  let mode: SendPayslipsResult["mode"];
+  const req = payslipRequest(form, names, label, mailContent);
   try {
-    if (names.length) {
-      const ids: number[] = [];
-      const unknown: string[] = [];
-      for (const n of names) {
-        const id = form.employees.find((e) => e.name === n)?.declaration?.id;
-        if (id == null) unknown.push(n);
-        else ids.push(id);
-      }
-      if (unknown.length) throw new SalaryFilingError(`${label} 的表單上沒有這些人的申報明細：${unknown.join("、")}`);
-      mode = "SALARY_DECLARATIONS";
-      recipientNames = names;
-      await client.sendSalaryPayslips(form.id, { mode, salaryDeclarationIds: ids, mailContent });
-    } else {
-      mode = "COMPANY_SALARY_DECLARATION_FORM";
-      recipientNames = form.employees.filter((e) => e.declaration?.items.length).map((e) => e.name);
-      await client.sendSalaryPayslips(form.id, { mode, mailContent });
-    }
+    await client.sendSalaryPayslips(form.id, req.body);
   } catch (e) {
     if (e instanceof SimpanyError && e.status === 404) {
       throw new SalaryFilingError("Simpany 的薪資單還在產生中（結算後需要一點時間），請稍後再寄");
@@ -1405,17 +1538,12 @@ export async function sendPayslips(orgId: string, input: SendPayslipsInput): Pro
     throw e;
   }
 
-  let after: SimpanySalaryForm | null = null;
-  try {
-    after = await client.getSalaryForm(input.year, input.month);
-  } catch {
-    after = null;
-  }
+  const after = await formOrNull(client, input.year, input.month);
   return {
     year: input.year,
     month: input.month,
-    mode,
-    recipients: recipientNames.map((n) => ({
+    mode: req.body.mode,
+    recipients: req.recipients.map((n) => ({
       name: n,
       payslipSentAt: after?.employees.find((e) => e.name === n)?.payslipSentAt ?? null,
     })),
@@ -1457,47 +1585,52 @@ function employedInMonth(e: InternalEmployee, start: string, end: string): boole
   return !(e.endDate && e.endDate < start);
 }
 
-/**
- * 「準備申報」表單的預設值：最近一個有申報的月份（本地同步表）的人 + 這個月在職的正職 / 兼職，
- * 本薪 = 員工資料的本薪，沒有就用上次申報的本薪。另附這個月最新的一份草稿（可以接著寫入 / 結算）。
- */
-export async function salaryFilingDefaults(orgId: string, year: number, month: number): Promise<SalaryFilingDefaults> {
-  assertYearMonth(year, month);
-  const db = getDb();
-  const { start, end } = monthRange(year, month);
-  const [internal, filedRows] = await Promise.all([
-    loadInternalEmployees(orgId),
-    db
-      .select({
-        year: simpanySalaryDeclarations.year,
-        month: simpanySalaryDeclarations.month,
-        name: simpanySalaryDeclarations.employeeName,
-        employeeId: simpanySalaryDeclarations.employeeId,
-        baseSalary: simpanySalaryDeclarations.baseSalary,
-        isCompanyOwner: simpanySalaryDeclarations.isCompanyOwner,
-      })
-      .from(simpanySalaryDeclarations)
-      .where(
-        and(
-          eq(simpanySalaryDeclarations.organizationId, orgId),
-          eq(simpanySalaryDeclarations.filed, true),
-          or(
-            sql`${simpanySalaryDeclarations.year} < ${year}`,
-            and(eq(simpanySalaryDeclarations.year, year), lte(simpanySalaryDeclarations.month, month)),
-          ),
+/** 本地同步表裡、這個月（含）以前有申報的列，新的在前。 */
+async function loadFiledRows(orgId: string, year: number, month: number) {
+  return getDb()
+    .select({
+      year: simpanySalaryDeclarations.year,
+      month: simpanySalaryDeclarations.month,
+      name: simpanySalaryDeclarations.employeeName,
+      employeeId: simpanySalaryDeclarations.employeeId,
+      baseSalary: simpanySalaryDeclarations.baseSalary,
+      isCompanyOwner: simpanySalaryDeclarations.isCompanyOwner,
+    })
+    .from(simpanySalaryDeclarations)
+    .where(
+      and(
+        eq(simpanySalaryDeclarations.organizationId, orgId),
+        eq(simpanySalaryDeclarations.filed, true),
+        or(
+          sql`${simpanySalaryDeclarations.year} < ${year}`,
+          and(eq(simpanySalaryDeclarations.year, year), lte(simpanySalaryDeclarations.month, month)),
         ),
-      )
-      .orderBy(desc(simpanySalaryDeclarations.year), desc(simpanySalaryDeclarations.month)),
-  ]);
-  const top = filedRows[0];
-  const lastFiled = top ? { year: top.year, month: top.month } : null;
-  const lastRows = top ? filedRows.filter((r) => r.year === top.year && r.month === top.month) : [];
+      ),
+    )
+    .orderBy(desc(simpanySalaryDeclarations.year), desc(simpanySalaryDeclarations.month));
+}
 
+type FiledRow = Awaited<ReturnType<typeof loadFiledRows>>[number];
+type DefaultEmployee = SalaryFilingDefaults["employees"][number];
+
+function baseSourceOf(fromEmp: number | null, last: number | null): DefaultEmployee["baseSource"] {
+  if (fromEmp != null) return "employee";
+  return last == null ? null : "last_filed";
+}
+
+/** 上次申報的人（排除已離職）+ 這個月在職、有本薪的正職 / 兼職。 */
+function defaultEmployees(
+  lastRows: FiledRow[],
+  internal: InternalEmployee[],
+  start: string,
+  end: string,
+): DefaultEmployee[] {
   const byName = byUniqueName(internal);
-  const out: SalaryFilingDefaults["employees"] = [];
+  const out: DefaultEmployee[] = [];
   const seen = new Set<string>();
   for (const r of lastRows) {
-    const emp = (r.employeeId != null ? internal.find((e) => e.id === r.employeeId) : null) ?? byName.get(r.name) ?? null;
+    const byId = r.employeeId == null ? null : internal.find((e) => e.id === r.employeeId);
+    const emp = byId ?? byName.get(r.name) ?? null;
     if (emp?.endDate && emp.endDate < start) continue;
     const fromEmp = positiveNumber(emp?.baseSalary);
     const last = positiveNumber(r.baseSalary);
@@ -1505,7 +1638,7 @@ export async function salaryFilingDefaults(orgId: string, year: number, month: n
       name: r.name,
       employeeId: emp?.id ?? null,
       baseSalary: fromEmp ?? last,
-      baseSource: fromEmp == null ? (last == null ? null : "last_filed") : "employee",
+      baseSource: baseSourceOf(fromEmp, last),
       isCompanyOwner: r.isCompanyOwner,
     });
     seen.add(r.name.trim());
@@ -1516,8 +1649,12 @@ export async function salaryFilingDefaults(orgId: string, year: number, month: n
     if (base == null) continue;
     out.push({ name: e.name.trim(), employeeId: e.id, baseSalary: base, baseSource: "employee", isCompanyOwner: false });
   }
+  return out;
+}
 
-  const [draft] = await db
+/** 這個月最新一份還有效的草稿（過期的 pending 不算）。 */
+async function latestLiveDraft(orgId: string, year: number, month: number): Promise<SalaryFilingDefaults["latestDraft"]> {
+  const [draft] = await getDb()
     .select({
       id: simpanySalaryDrafts.id,
       status: simpanySalaryDrafts.status,
@@ -1538,15 +1675,33 @@ export async function salaryFilingDefaults(orgId: string, year: number, month: n
     )
     .orderBy(desc(simpanySalaryDrafts.createdAt))
     .limit(1);
-  const live = draft && !(draft.status === "pending" && new Date(draft.expiresAt).getTime() <= Date.now());
+  if (!draft) return null;
+  const expiredPending = draft.status === "pending" && new Date(draft.expiresAt).getTime() <= Date.now();
+  return expiredPending ? null : draft;
+}
+
+/**
+ * 「準備申報」表單的預設值：最近一個有申報的月份（本地同步表）的人 + 這個月在職的正職 / 兼職，
+ * 本薪 = 員工資料的本薪，沒有就用上次申報的本薪。另附這個月最新的一份草稿（可以接著寫入 / 結算）。
+ */
+export async function salaryFilingDefaults(orgId: string, year: number, month: number): Promise<SalaryFilingDefaults> {
+  assertYearMonth(year, month);
+  const { start, end } = monthRange(year, month);
+  const [internal, filedRows] = await Promise.all([
+    loadInternalEmployees(orgId),
+    loadFiledRows(orgId, year, month),
+  ]);
+  const top = filedRows[0];
+  const lastFiled = top ? { year: top.year, month: top.month } : null;
+  const lastRows = top ? filedRows.filter((r) => r.year === top.year && r.month === top.month) : [];
 
   return {
     year,
     month,
     payday: defaultSalaryPayday(year, month),
     lastFiled,
-    employees: out,
-    latestDraft: live ? draft : null,
+    employees: defaultEmployees(lastRows, internal, start, end),
+    latestDraft: await latestLiveDraft(orgId, year, month),
   };
 }
 
