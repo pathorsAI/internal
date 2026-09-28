@@ -162,11 +162,23 @@ const nextConfig: NextConfig = {
     },
   },
   async redirects() {
-    return MOVED_TO_DASHBOARD.map((segment) => ({
-      source: `/${segment}/:path*`,
-      destination: `/dashboard/${segment}/:path*`,
-      permanent: true,
-    }));
+    // 拆成兩條，不能只寫一條 `/:segment/:path*`：OpenNext 的 redirect matcher
+    // 只有在 source 真的抓到參數時才會把 destination 丟進 compile() 代換，
+    // `/settings` 這種沒有子路徑的網址 `:path*` 抓到零段 → 沒有參數 → destination
+    // 原字照回，使用者被導去字面上的 `/dashboard/settings/:path*`。沒登入時這串
+    // 又被帶進 /login 的 callbackURL，better-auth 驗不過就回 INVALID_CALLBACK_URL。
+    return MOVED_TO_DASHBOARD.flatMap((segment) => [
+      {
+        source: `/${segment}`,
+        destination: `/dashboard/${segment}`,
+        permanent: true,
+      },
+      {
+        source: `/${segment}/:path+`,
+        destination: `/dashboard/${segment}/:path+`,
+        permanent: true,
+      },
+    ]);
   },
   async headers() {
     return [
