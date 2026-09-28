@@ -75,7 +75,7 @@ function deriveMcpAudit(name: string, out: unknown): McpAudit | null {
 
 /** Bump on every published change to tools, schemas or instructions. Clients
  *  (and OpenAI's plugin "Scan Tools") key their cached snapshot off this. */
-export const SERVER_VERSION = "1.6.0";
+export const SERVER_VERSION = "1.7.0";
 
 /** Public base URL of this deployment; doubles as the OAuth issuer.
  *  Keep in sync with the `resource` passed to `mcp()` in src/lib/auth.ts. */
@@ -276,6 +276,11 @@ const OPENWORLD_OVERRIDES: Record<string, Partial<ToolAnnotations>> = {
   simpany_issue_invoice: { openWorldHint: true },
   simpany_void_invoice: { openWorldHint: true },
   simpany_list_zero_rate_reasons: { openWorldHint: true },
+  // Salary declarations: GET-only reads from Simpany (assertSalaryReadOnly); the
+  // sync writes only our own simpany_salary_* tables. salary_arrears reads only
+  // our tables, so it keeps the closed-world default.
+  simpany_list_salary_declarations: { openWorldHint: true },
+  simpany_sync_salary_declarations: { openWorldHint: true },
 };
 
 // Writes that are irreversible from MCP even though the verb isn't "delete".
@@ -323,14 +328,17 @@ const TITLE_OVERRIDES: Record<string, string> = {
   list_salary_status: "Salary status by month",
   list_upcoming_billing: "Upcoming billing",
   mark_accountant_notified: "Mark as sent to the accountant",
+  salary_arrears: "Salary arrears by employee",
   pay_employee_salary: "Record a salary payslip",
   sync_billing_calendar: "Sync the billing calendar",
   simpany_get_invoice: "Simpany e-invoice detail",
   simpany_issue_invoice: "Issue a Simpany e-invoice",
   simpany_list_invoices: "List Simpany e-invoices",
+  simpany_list_salary_declarations: "List Simpany salary declarations",
   simpany_list_zero_rate_reasons: "Simpany zero-rate reasons",
   simpany_preview_invoice: "Preview a Simpany e-invoice",
   simpany_sync_invoices: "Sync invoices from Simpany",
+  simpany_sync_salary_declarations: "Sync salary declarations from Simpany",
   simpany_void_invoice: "Void a Simpany e-invoice",
   unmark_accountant_notified: "Unmark as sent to the accountant",
 };

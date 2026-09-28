@@ -234,6 +234,7 @@ Simpany 改版就可能壞，所以所有回應都防禦式解析，認不得就
 | `src/lib/integrations/simpany.ts` | `simpanyProvider`（連接測試）與 `SimpanyClient` / `getSimpanyClient(orgId)` |
 | `src/lib/simpany-sync.ts` | Simpany → `invoices` 同步、自動綁定、作廢清理 |
 | `src/lib/simpany-issue.ts` | 預覽（`invoice_drafts`）→ 開立、作廢；MCP 與 web 共用 |
+| `src/lib/simpany-salary.ts` | 薪資申報唯讀同步與欠薪對帳（見下方「薪資申報」） |
 | `src/lib/mcp/tools-simpany.ts` | MCP 工具（見 [mcp.md](mcp.md)） |
 | `src/app/dashboard/invoices/simpany-*.ts(x)` | 發票頁「從 Simpany 同步」、看板「在 Simpany 開立」、server actions |
 | `migrations/0025_invoice_simpany_sync.sql` | invoices 的課稅別 / 零稅率原因 / 外幣匯率 / B2B-B2C / `external_id` / 作廢欄位，`invoice_drafts` 表 |
@@ -241,7 +242,7 @@ Simpany 改版就可能壞，所以所有回應都防禦式解析，認不得就
 **Config**：`companyId` + `companyName`（非機密）。帳號底下只有一家公司時連接時自動選；
 多家就要在連接 Sheet 填「公司 ID」（失敗訊息會列出可選的 ID）。
 
-**用到的端點**（其他一概不碰）：
+**用到的端點**（其他一概不碰；薪資申報的唯讀端點另見下方「薪資申報」）：
 
 | Host | Endpoint | 用途 |
 | --- | --- | --- |
@@ -275,6 +276,70 @@ Simpany 改版就可能壞，所以所有回應都防禦式解析，認不得就
 
 **xlsx 對帳**（`src/lib/simpany-export.ts`、發票 › Simpany 對帳）保留，給沒開整合的組織用；
 API 同步取代它。
+
+### 薪資申報（唯讀）+ 欠薪對帳
+
+Simpany 也是公司申報薪資（扣繳、勞健保）的地方。這裡**只讀**它的薪資申報，存到本地，再跟
+本系統實際記錄的發薪對帳，算出每位員工每月的欠薪。
+
+| Where | What |
+| --- | --- |
+| `src/lib/integrations/simpany.ts` | `SimpanyClient.listSalaryMonthlyForms(year)`、`getSalaryForm(year, month)`、`assertSalaryReadOnly()` |
+| `src/lib/simpany-salary.ts` | `syncSalaryDeclarations(orgId, year)`、`salaryReconciliation(orgId, opts)`、`listSalaryDeclarationsLive()`、`allocatePayments()` |
+| `migrations/0027_simpany_salary_declarations.sql` | `simpany_salary_forms`（一個月一列）、`simpany_salary_declarations`（員工 × 月一列） |
+| `src/app/dashboard/payroll/simpany-salary-*.ts(x)` | 薪資頁「Simpany 薪資申報」區塊、同步 server action |
+
+**端點**（不同 host / path：沒有 `c/`，在 `api.simpany.co`；header 與 JWT 同上；回應 `{status, code, data, meta}`）：
+
+| Endpoint | 用途 |
+| --- | --- |
+| `GET api.simpany.co/v1/{companyId}/salary-declaration/form/monthly-forms/{year}` | 一年 12 格 `{id\|null, year, rocYear, month, employees[{id, name}]}`；`id` null = 那個月沒建表單 |
+| `GET api.simpany.co/v1/{companyId}/salary-declaration/form?year=YYYY&month=M` | 那個月的表單：`payday`、`isSettled`、每位員工的 `salaryDeclaration.salaryDeclarationItems[{name, type, amount}]` |
+
+`month` 是**薪資所屬月份**（`yearMonth`），發薪日通常是次月 5 日（`payday`）。
+
+**唯讀護欄**：薪資請求一律走 `SimpanyClient` 的私有 `salaryGet()` → `assertSalaryReadOnly()`：
+method 必須是 GET、路徑必須符合白名單（`form/monthly-forms/{yyyy}`、`form`）、query key 只能是
+`year` / `month`，否則**不發請求**直接丟錯。結算、複製、建立、寄薪資單等端點沒有任何程式碼路徑；
+要加端點只能加唯讀的 GET 到白名單。
+
+**個資**：Simpany 的回應含身分證字號（`personalId`）、戶籍地址（`address`）、國籍（`nationality`）。
+`parseSalaryForm` 只挑白名單欄位組新物件，這三個欄位**從來不會被讀進記憶體裡的結構**，所以不會進
+DB、log、錯誤訊息、server action 或 MCP 結果。薪資請求的錯誤訊息也不附 body 片段（`salaryErrorMessage`）。
+本地只存姓名、Simpany 員工 id、金額、日期、旗標；`items` 只有 `{name, type, amount}`（不存 Simpany 的 `note`）。
+
+**資料表**（兩張而不是一張加哨兵列：「沒建表單 / 表單空白 / 已申報」是月份層級的事實，跟員工無關）：
+
+- `simpany_salary_forms`：`(org, year, month)` 唯一。`simpany_form_id` NULL = 未建立；
+  `filed_count = 0` = 表單空白；`is_settled` = 已申報。沒有列 = 沒同步過。
+- `simpany_salary_declarations`：`(org, year, month, simpany_employee_id)` 唯一。從明細抽出
+  本薪、非經常性獎金、實際申報薪資（`gross_declared`）、實際發薪（`net_pay`）、勞健保個人 / 公司負擔、
+  就業保險；`filed` = 有申報明細。`employee_id` = 同組織姓名完全相同的員工（重名不綁），否則 NULL。
+
+月份狀態：`missing`（未建立）、`empty`（表單空白）、`draft`（有明細但沒結算）、`settled`（已申報）、
+`not_synced`。
+
+**同步**（`syncSalaryDeclarations`，owner / admin）：1 + (有表單的月數) 個 GET。以唯一鍵 upsert；
+Simpany 上已不存在的表單 / 員工會從本地刪掉，所以重跑是冪等的。只寫本組織的這兩張表。
+
+**對帳**（`salaryReconciliation`，只讀本地表）：
+
+- 應發 = 已申報月份的 `net_pay`。未申報的月份（沒表單、表單空白、表單上沒有這個人）在任職期間內
+  （`employees.start_date`，沒有就從第一個有申報的月份起；到 `end_date`）且發薪日已過時，用
+  `expectedMonthlyNet` 估：預設 = 最近一次申報的實發 − 非經常性獎金，可用姓名覆寫；這些月份標
+  `estimated: true`，另計在 `estimatedArrears`，不混進 `arrears`。
+- 已發 = (1) `payslips`（有 `paid_transaction_id` 的以那筆交易為準；沒有交易但批次 `status = paid` 的以
+  `net_pay` 計）+ (2) `type = expense`、分類「薪資費用」、`txn_date` 在 `paidFrom ~ paidTo` 的交易，
+  對象是員工（`settle_employee_id`，或對象 party 名稱 = 員工姓名）。屬於別年 payslip 的交易不算。
+- 分配（`allocatePayments`）：payslip 有期別的先補那個月；其餘（含超付部分）依付款日期先進先出，
+  從最舊的欠款月份補起；再有剩 = `credit`。
+- 發薪日（表單 `payday`，沒有就假設次月 5 日）還沒到的月份，未付金額算 `notYetDue`，不算欠薪。
+- 分類是「薪資費用」卻對不到任何員工的交易 → `unallocatedPayments`，讓 owner 去交易頁指派。
+- 預設 `throughMonth` = 今年的本月 / 過去年份 12；`paidFrom` = 1/1；`paidTo` = 今天 / 過去年份為隔年 1/31。
+
+入口：薪資頁（`/dashboard/payroll?year=YYYY`）的「Simpany 薪資申報」區塊（月份狀態格、欠薪表、明細 Sheet、
+未指定員工的薪資支出）；MCP `simpany_list_salary_declarations`、`simpany_sync_salary_declarations`、
+`salary_arrears`（見 [mcp.md](mcp.md)）。
 
 ## Security rules
 

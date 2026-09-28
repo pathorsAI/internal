@@ -733,3 +733,59 @@ export const invoiceDrafts = pgTable("invoice_drafts", {
 		}),
 	check("chk_invoice_draft_status", sql`status = ANY (ARRAY['pending'::text, 'issued'::text, 'cancelled'::text, 'expired'::text])`),
 ]);
+
+// ---- Simpany 薪資申報（migrations/0027，唯讀同步 → 欠薪對帳，src/lib/simpany-salary.ts）。
+// 月份層級狀態一張、員工明細一張。⚠️ 不存身分證字號 / 地址 / 國籍。----
+export const simpanySalaryForms = pgTable("simpany_salary_forms", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "simpany_salary_forms_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id").notNull(),
+	year: integer().notNull(),
+	month: integer().notNull(),
+	// NULL = Simpany 那個月沒建表單
+	simpanyFormId: bigint("simpany_form_id", { mode: "number" }),
+	payday: date(),
+	isSettled: boolean("is_settled").default(false).notNull(),
+	employeeCount: integer("employee_count").default(0).notNull(),
+	filedCount: integer("filed_count").default(0).notNull(),
+	syncedAt: timestamp("synced_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	unique("uq_simpany_salary_form").on(table.organizationId, table.year, table.month),
+	check("chk_simpany_salary_form_month", sql`(month >= 1) AND (month <= 12)`),
+]);
+
+export type SimpanySalaryItem = { name: string; type: string; amount: number };
+
+export const simpanySalaryDeclarations = pgTable("simpany_salary_declarations", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "simpany_salary_declarations_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id").notNull(),
+	year: integer().notNull(),
+	month: integer().notNull(),
+	simpanyFormId: bigint("simpany_form_id", { mode: "number" }),
+	payday: date(),
+	isSettled: boolean("is_settled").default(false).notNull(),
+	simpanyEmployeeId: bigint("simpany_employee_id", { mode: "number" }).notNull(),
+	employeeName: text("employee_name").notNull(),
+	employeeId: bigint("employee_id", { mode: "number" }),
+	isCompanyOwner: boolean("is_company_owner").default(false).notNull(),
+	baseSalary: numeric("base_salary", { precision: 18, scale: 2 }),
+	bonus: numeric({ precision: 18, scale: 2 }),
+	grossDeclared: numeric("gross_declared", { precision: 18, scale: 2 }),
+	netPay: numeric("net_pay", { precision: 18, scale: 2 }),
+	laborInsPersonal: numeric("labor_ins_personal", { precision: 18, scale: 2 }),
+	healthInsPersonal: numeric("health_ins_personal", { precision: 18, scale: 2 }),
+	laborInsCompany: numeric("labor_ins_company", { precision: 18, scale: 2 }),
+	healthInsCompany: numeric("health_ins_company", { precision: 18, scale: 2 }),
+	employmentInsCompany: numeric("employment_ins_company", { precision: 18, scale: 2 }),
+	items: jsonb().$type<SimpanySalaryItem[]>().default([]).notNull(),
+	filed: boolean().default(false).notNull(),
+	syncedAt: timestamp("synced_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	unique("uq_simpany_salary_decl").on(table.organizationId, table.year, table.month, table.simpanyEmployeeId),
+	index("idx_simpany_salary_decl_employee").using("btree", table.employeeId.asc().nullsLast().op("int8_ops")).where(sql`employee_id IS NOT NULL`),
+	foreignKey({
+			columns: [table.employeeId],
+			foreignColumns: [employees.id],
+			name: "simpany_salary_declarations_employee_id_fkey"
+		}).onDelete("set null"),
+	check("chk_simpany_salary_decl_month", sql`(month >= 1) AND (month <= 12)`),
+]);

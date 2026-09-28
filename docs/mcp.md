@@ -104,10 +104,11 @@ the `tools-*.ts` modules):
   derived from the verb, plus `openWorldHint`, which is `false` for everything
   except the tools that reach a third-party system: `sync_billing_calendar`
   (writes to Google Calendar), the three `wise_*` tools (read-only GETs to
-  Wise) and the `simpany_*` tools. The overrides that correct the verb heuristic:
+  Wise) and the `simpany_*` tools (`salary_arrears` reads only our own tables
+  and stays closed-world). The overrides that correct the verb heuristic:
   `sync_billing_calendar`, every `wise_*` and every `simpany_*` tool get `openWorldHint: true`;
   `simpany_void_invoice` gets `destructiveHint: true` (voiding a legal e-invoice
-  cannot be undone); `simpany_list_*` / `simpany_get_invoice` declare
+  cannot be undone); `simpany_list_*` / `simpany_get_invoice` / `salary_arrears` declare
   `readOnlyHint: true` themselves (their names don't start with `list_`/`get_`);
   `pay_employee_salary` gets `destructiveHint: true`
   — it writes the payslip plus the salary-expense ledger entry, the month can't
@@ -122,8 +123,8 @@ the `tools-*.ts` modules):
 - `_meta["openai/toolInvocation/invoking" | "invoked"]`, the status line ChatGPT
   shows while a call is in flight.
 
-**Output schemas.** Every tool declares an `outputSchema` — all 85 of them, as of
-server version 1.6.0 (the Simpany tools whose result shape comes from Simpany's
+**Output schemas.** Every tool declares an `outputSchema` — all 88 of them, as of
+server version 1.7.0 (the Simpany tools whose result shape comes from Simpany's
 unofficial API declare an open object schema). When a tool declares one the handler additionally returns
 the result as MCP `structuredContent` (the JSON text block stays, per MCP's
 back-compat recommendation), which is what ChatGPT and Codex prefer over parsing
@@ -276,6 +277,13 @@ integrations.md):
 | `simpany_issue_invoice` | `draftId`, `notifyEmails?` | Owner/admin. Issues the previewed draft verbatim — a legal e-invoice uploaded to the MOF and emailed to the buyer. Only after the user approved the preview. Saves + links the invoice. |
 | `simpany_void_invoice` | `invoice`, `reason` (≤ 20 chars) | Owner/admin, destructive. Voids in Simpany, re-syncs, clears 開發票日 / transaction links. |
 | `simpany_list_zero_rate_reasons` | — | Simpany's reason codes (71 外銷貨物, 72 外銷勞務, …). |
+| `simpany_list_salary_declarations` | `year?` (default this year), `month?` (1-12, salary month) | Read live from Simpany (GET only, `assertSalaryReadOnly`). Per month: status (`missing`/`empty`/`draft`/`settled`), payday, and per employee name, Simpany id, owner flag, filed flag, base / bonus / declared gross / net paid / insurance amounts and `{name,type,amount}` items. **No national id, address or nationality.** |
+| `simpany_sync_salary_declarations` | `year?` | Owner/admin. GETs the year from Simpany and upserts `simpany_salary_forms` / `simpany_salary_declarations` (idempotent; removes forms/employees gone from Simpany). Links employees by exact name; returns `unmatchedNames`. Writes nothing to Simpany. |
+| `salary_arrears` | `year?`, `throughMonth?`, `paidFrom?`, `paidTo?`, `estimateUnfiled?` (default true), `expectedMonthlyNet?` (`{name: amount}`) | Reads **only our tables** (closed world). Per employee: `totalDeclaredNet`, `totalPaid`, `arrears`, `estimatedArrears` (unfiled months, `estimated: true`), `notYetDue`, `credit`, monthly rows and payments with allocations; plus the month grid and `unallocatedPayments` (薪資費用 outflows with no employee). Payslip periods first, then FIFO by date. |
+
+Salary declarations are read-only end to end: the salary endpoints are GET-only and
+path-whitelisted in `src/lib/integrations/simpany.ts`, and the only writes are to
+this organization's own `simpany_salary_*` tables.
 
 **Not exposed (do in the app):** creating an organization, uploading
 invoice/receipt **files** (R2), multi-currency FX entry, and *connecting* Google
@@ -342,7 +350,7 @@ things that don't live in this repo:
 Both directories ask for the same thing in different words — OpenAI wants
 "test credentials for a fully populated account", Anthropic wants a "fully
 featured demo account with sample data". An empty workspace fails review: most
-of the 85 tools would answer with an empty array and the reviewer has no way to
+of the 88 tools would answer with an empty array and the reviewer has no way to
 tell what the connector does.
 
 Two commands produce that account. Run them against the environment you are
