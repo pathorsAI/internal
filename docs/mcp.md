@@ -108,7 +108,8 @@ the `tools-*.ts` modules):
   and stays closed-world). The overrides that correct the verb heuristic:
   `sync_billing_calendar`, every `wise_*` and every `simpany_*` tool get `openWorldHint: true`;
   `simpany_void_invoice` gets `destructiveHint: true` (voiding a legal e-invoice
-  cannot be undone); `simpany_list_*` / `simpany_get_invoice` / `salary_arrears` declare
+  cannot be undone), as does `simpany_settle_salary_filing` (submits the month's
+  salary declarations to the bookkeeper); `simpany_list_*` / `simpany_get_invoice` / `salary_arrears` declare
   `readOnlyHint: true` themselves (their names don't start with `list_`/`get_`);
   `pay_employee_salary` gets `destructiveHint: true`
   — it writes the payslip plus the salary-expense ledger entry, the month can't
@@ -123,8 +124,8 @@ the `tools-*.ts` modules):
 - `_meta["openai/toolInvocation/invoking" | "invoked"]`, the status line ChatGPT
   shows while a call is in flight.
 
-**Output schemas.** Every tool declares an `outputSchema` — all 89 of them, as of
-server version 1.8.0 (the Simpany tools whose result shape comes from Simpany's
+**Output schemas.** Every tool declares an `outputSchema` — all 93 of them, as of
+server version 1.9.0 (the Simpany tools whose result shape comes from Simpany's
 unofficial API declare an open object schema). When a tool declares one the handler additionally returns
 the result as MCP `structuredContent` (the JSON text block stays, per MCP's
 back-compat recommendation), which is what ChatGPT and Codex prefer over parsing
@@ -286,9 +287,21 @@ integrations.md):
 | `simpany_sync_salary_declarations` | `year?` | Owner/admin. GETs the year from Simpany and upserts `simpany_salary_forms` / `simpany_salary_declarations` (idempotent; removes forms/employees gone from Simpany). Links employees by exact name; returns `unmatchedNames`. Writes nothing to Simpany. |
 | `salary_arrears` | `year?`, `throughMonth?`, `paidFrom?`, `paidTo?`, `estimateUnfiled?` (default true), `expectedMonthlyNet?` (`{name: amount}`) | Reads **only our tables** (closed world). Per employee: `totalDeclaredNet`, `totalPaid`, `arrears`, `estimatedArrears` (unfiled months, `estimated: true`), `notYetDue`, `credit`, monthly rows and payments with allocations; plus the month grid and `unallocatedPayments` (薪資費用 outflows with no employee). Payslip periods first, then FIFO by date. |
 
-Salary declarations are read-only end to end: the salary endpoints are GET-only and
-path-whitelisted in `src/lib/integrations/simpany.ts`, and the only writes are to
-this organization's own `simpany_salary_*` tables.
+| `simpany_prepare_salary_filing` | `year`, `month`, `payday?` (default the 5th of next month), `employees?[{employeeId\|name, baseSalary?, bonus?, reimbursement?, otherAllowances?[{itemId,amount,note?}], otherDeductions?[…], note?}]`, `allowCopy?` (default false), `sourceFormId?`, `companyOwner?` | Owner/admin. Uses each Simpany declaration as a template, changes only dates + amounts (brackets / insurance flags / dependents kept, one-off items not carried over), runs Simpany's `calculate` (no save) and stores a `simpany_salary_drafts` row (2 h). Returns per employee gross / personal & company insurance / withholding / net / declared, the month-sequence restriction and warnings. Employees missing from the form → copy plan from the latest settled month, executed only with `allowCopy: true` (a write); employees not in Simpany at all → `notInSimpany` (add them in Simpany's UI). No draft when anything is unresolved. |
+| `simpany_apply_salary_filing` | `draftId` | Owner/admin. Only after the user approved the preview. Owner flags → payday → PUT each declaration verbatim → read back and verify net pay → re-sync. Reports exactly what was written on failure; retryable (all overwrites). The month is still editable (not yet settled). |
+| `simpany_settle_salary_filing` | `year`, `month`, `confirmPayday`, `confirmOwner`, `confirmSalary` | Owner/admin, **destructive**: submits the month to the bookkeeper; cannot be undone here. All three confirmations must be true (the user confirmed each). Refuses when `canSettle` is false (returns the missing earlier months), data is incomplete, or the month is already settled. |
+| `simpany_send_payslips` | `year`, `month`, `employeeNames?` | Owner/admin. Settled months only. Simpany emails each employee an encrypted payslip PDF (default text); 404 = payslips still generating. |
+
+Salary reads (list / sync / arrears) are read-only: they use the GET-only
+`assertSalaryReadOnly` whitelist and write only this organization's own
+`simpany_salary_*` tables. Salary **writes** go only through the four filing tools
+above, via a separate method + path whitelist (`assertSalaryWrite`) of exactly the
+endpoints Simpany's own UI uses (declaration GET / calculate / PUT, copy, payday,
+company-owner, settle, payslip send). Creating, editing or removing Simpany
+employees (national-id data) is deliberately not possible. Shareholder loan
+repayments (股東往來還款) are not salary and never go into a declaration. The write
+endpoints were read from Simpany's frontend and have not been exercised live —
+see integrations.md.
 
 **Not exposed (do in the app):** creating an organization, uploading
 invoice/receipt **files** (R2), multi-currency FX entry, and *connecting* Google

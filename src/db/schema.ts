@@ -789,3 +789,31 @@ export const simpanySalaryDeclarations = pgTable("simpany_salary_declarations", 
 		}).onDelete("set null"),
 	check("chk_simpany_salary_decl_month", sql`(month >= 1) AND (month <= 12)`),
 ]);
+
+// ---- Simpany 薪資申報寫入的草稿（migrations/0029，src/lib/simpany-payroll.ts）。
+// 準備申報時把要 PUT 給 Simpany 的每份申報明細 body 原樣存起來；寫入只接受 draft id
+// （看過的 = 送出的），2 小時過期。⚠️ 不存身分證字號 / 地址 / 國籍。----
+export const simpanySalaryDrafts = pgTable("simpany_salary_drafts", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "simpany_salary_drafts_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id").notNull(),
+	year: integer().notNull(),
+	month: integer().notNull(),
+	simpanyFormId: bigint("simpany_form_id", { mode: "number" }).notNull(),
+	payday: date().notNull(),
+	// { declarations: [{ declarationId, simpanyEmployeeId, name, isCompanyOwner, ownerFlagChange, body }], companyOwner }
+	payload: jsonb().$type<Record<string, unknown>>().notNull(),
+	// 給人看的預覽（每人應發 / 個人負擔 / 公司負擔 / 扣繳 / 實發、警示）
+	summary: jsonb().$type<Record<string, unknown>>().default({}).notNull(),
+	// 寫入結果：written / failedStep / error / verification
+	applyResult: jsonb("apply_result").$type<Record<string, unknown>>().default({}).notNull(),
+	status: text().default('pending').notNull(),
+	createdByUserId: text("created_by_user_id"),
+	expiresAt: timestamp("expires_at", { withTimezone: true, mode: 'string' }).default(sql`(now() + '02:00:00'::interval)`).notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	appliedAt: timestamp("applied_at", { withTimezone: true, mode: 'string' }),
+	settledAt: timestamp("settled_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+	index("idx_simpany_salary_draft_org_month").using("btree", table.organizationId.asc().nullsLast().op("text_ops"), table.year.asc().nullsLast().op("int4_ops"), table.month.asc().nullsLast().op("int4_ops"), table.createdAt.desc().nullsFirst().op("timestamptz_ops")),
+	check("chk_simpany_salary_draft_status", sql`status = ANY (ARRAY['pending'::text, 'applied'::text, 'settled'::text, 'cancelled'::text, 'expired'::text])`),
+	check("chk_simpany_salary_draft_month", sql`(month >= 1) AND (month <= 12)`),
+]);

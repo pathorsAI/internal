@@ -75,7 +75,7 @@ function deriveMcpAudit(name: string, out: unknown): McpAudit | null {
 
 /** Bump on every published change to tools, schemas or instructions. Clients
  *  (and OpenAI's plugin "Scan Tools") key their cached snapshot off this. */
-export const SERVER_VERSION = "1.8.0";
+export const SERVER_VERSION = "1.9.0";
 
 /** Public base URL of this deployment; doubles as the OAuth issuer.
  *  Keep in sync with the `resource` passed to `mcp()` in src/lib/auth.ts. */
@@ -281,6 +281,13 @@ const OPENWORLD_OVERRIDES: Record<string, Partial<ToolAnnotations>> = {
   // our tables, so it keeps the closed-world default.
   simpany_list_salary_declarations: { openWorldHint: true },
   simpany_sync_salary_declarations: { openWorldHint: true },
+  // Salary filing writes (src/lib/simpany-payroll.ts, assertSalaryWrite whitelist):
+  // prepare (calculate + optional copy), apply (PUT declarations), settle (submits
+  // the month to the bookkeeper), send payslips (emails employees).
+  simpany_prepare_salary_filing: { openWorldHint: true },
+  simpany_apply_salary_filing: { openWorldHint: true },
+  simpany_settle_salary_filing: { openWorldHint: true },
+  simpany_send_payslips: { openWorldHint: true },
   // Runs the daily auto-sync for the caller's org: Simpany invoice + salary sync
   // (GET-only for this path) and Wise transaction sync (GET-only); writes only our books.
   run_integration_sync: { openWorldHint: true },
@@ -291,6 +298,8 @@ const OPENWORLD_OVERRIDES: Record<string, Partial<ToolAnnotations>> = {
 const DESTRUCTIVE_OVERRIDES: Record<string, Partial<ToolAnnotations>> = {
   // Voids a legal e-invoice at the Ministry of Finance; cannot be undone.
   simpany_void_invoice: { destructiveHint: true },
+  // Submits the month's salary declarations to the bookkeeper; cannot be undone here.
+  simpany_settle_salary_filing: { destructiveHint: true },
   // Writes the payslip AND the matching salary-expense ledger entry; the month
   // cannot be recorded twice and there is no tool that reverses the entry.
   pay_employee_salary: { destructiveHint: true },
@@ -340,7 +349,11 @@ const TITLE_OVERRIDES: Record<string, string> = {
   simpany_list_invoices: "List Simpany e-invoices",
   simpany_list_salary_declarations: "List Simpany salary declarations",
   simpany_list_zero_rate_reasons: "Simpany zero-rate reasons",
+  simpany_apply_salary_filing: "Write a salary filing draft to Simpany",
+  simpany_prepare_salary_filing: "Prepare a Simpany salary filing",
   simpany_preview_invoice: "Preview a Simpany e-invoice",
+  simpany_send_payslips: "Email payslips via Simpany",
+  simpany_settle_salary_filing: "Submit a salary month to the bookkeeper",
   simpany_sync_invoices: "Sync invoices from Simpany",
   simpany_sync_salary_declarations: "Sync salary declarations from Simpany",
   simpany_void_invoice: "Void a Simpany e-invoice",
