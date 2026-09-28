@@ -505,12 +505,13 @@ export const simpanyTools: Record<string, ToolDef> = {
       const month = monthArg(args, "month");
       if (month === 0) throw new Error('"month" must be 1-12.');
       const res = await listSalaryDeclarationsLive(orgId, year, month);
+      const monthSuffix = month ? `-${String(month).padStart(2, "0")}` : "";
       await auditIntegrationCall(
         ctx,
         orgId,
         "simpany",
         "read",
-        `salary declarations ${year}${month ? `-${String(month).padStart(2, "0")}` : ""}`,
+        `salary declarations ${year}${monthSuffix}`,
       );
       return res;
     },
