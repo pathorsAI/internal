@@ -3,35 +3,26 @@ import type { Dictionary } from "./dictionary";
 const auth = {
   login: {
     title: { "zh-TW": "登入內部管理系統", en: "Sign in to the internal admin system" },
-    description: { "zh-TW": "選擇一種方式進入後台", en: "Choose how you want to sign in" },
     signInWithGoogle: { "zh-TW": "使用 Google 登入", en: "Sign in with Google" },
-    redirecting: { "zh-TW": "前往 Google…", en: "Redirecting to Google…" },
     or: { "zh-TW": "或", en: "or" },
-    sso: {
-      button: { "zh-TW": "使用單一登入（SSO）", en: "Continue with SSO" },
-      emailLabel: { "zh-TW": "公司 email", en: "Work email" },
-      emailPlaceholder: { "zh-TW": "you@company.com", en: "you@company.com" },
-      submit: { "zh-TW": "繼續", en: "Continue" },
-      submitting: { "zh-TW": "前往識別提供者…", en: "Redirecting to your provider…" },
-      cancel: { "zh-TW": "取消", en: "Cancel" },
+    email: {
+      label: { "zh-TW": "Email", en: "Email" },
+      placeholder: { "zh-TW": "you@company.com", en: "you@company.com" },
+      continue: { "zh-TW": "繼續", en: "Continue" },
+      checking: { "zh-TW": "確認中…", en: "Checking…" },
     },
     password: {
-      toggle: { "zh-TW": "改用 email 與密碼登入", en: "Sign in with email and password" },
-      emailLabel: { "zh-TW": "Email", en: "Email" },
-      emailPlaceholder: { "zh-TW": "you@example.com", en: "you@example.com" },
-      passwordLabel: { "zh-TW": "密碼", en: "Password" },
+      label: { "zh-TW": "密碼", en: "Password" },
+      change: { "zh-TW": "更改", en: "Change" },
+      ssoUnavailable: {
+        "zh-TW": "目前無法確認單一登入，請用密碼登入",
+        en: "Couldn't check single sign-on right now. Sign in with your password.",
+      },
       submit: { "zh-TW": "登入", en: "Sign in" },
       submitting: { "zh-TW": "登入中…", en: "Signing in…" },
-      cancel: { "zh-TW": "取消", en: "Cancel" },
     },
     toast: {
       failed: { "zh-TW": "登入失敗", en: "Sign-in failed" },
-      // 找不到對應 provider 時故意講「這個網域」而不是「這個帳號不存在」：
-      // 後者會變成帳號探測工具。
-      ssoNotConfigured: {
-        "zh-TW": "這個 email 網域尚未設定單一登入",
-        en: "SSO is not configured for this email domain",
-      },
       badCredentials: {
         "zh-TW": "email 或密碼不正確",
         en: "Incorrect email or password",
