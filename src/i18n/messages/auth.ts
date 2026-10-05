@@ -14,6 +14,10 @@ const auth = {
     password: {
       label: { "zh-TW": "密碼", en: "Password" },
       change: { "zh-TW": "更改", en: "Change" },
+      ssoUnavailable: {
+        "zh-TW": "目前無法確認單一登入，請用密碼登入",
+        en: "Couldn't check single sign-on right now. Sign in with your password.",
+      },
       submit: { "zh-TW": "登入", en: "Sign in" },
       submitting: { "zh-TW": "登入中…", en: "Signing in…" },
     },

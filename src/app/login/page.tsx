@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useHydrated } from "@/hooks/use-hydrated";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { afterSsoLookup, type AfterSsoLookupNote, type SsoLookupResult } from "./sso-lookup";
 
 function GoogleIcon() {
   return (
@@ -45,8 +46,6 @@ function mcpAuthorizeCallback(params: URLSearchParams): string | null {
   return `/api/auth/mcp/authorize?${params.toString()}`;
 }
 
-type Step = "email" | "password";
-
 function formText(form: FormData, name: string): string {
   const value = form.get(name);
   return typeof value === "string" ? value : "";
@@ -54,8 +53,8 @@ function formText(form: FormData, name: string): string {
 
 /**
  * Identifier-first：卡片先只問 email。email 的網域有註冊 SSO provider 就直接導去
- * IdP；沒有（plugin 回 404）就換到密碼那一步。分支只看網域，不看帳號存不存在，
- * 所以這個表單不能拿來探測帳號。
+ * IdP；其他結果一律換到密碼那一步（見 afterSsoLookup）。分支只看網域，不看帳號
+ * 存不存在，所以這個表單不能拿來探測帳號。
  */
 function SignInMethods() {
   const t = useTranslations("auth.login");
@@ -63,7 +62,8 @@ function SignInMethods() {
   // ⚠️ 三種登入方式共用同一個 redirectTo。MCP 的 authorize query 只要有一條路徑
   // 沒接上，ChatGPT / Claude / Codex 的 OAuth 流程就會在登入後斷在這裡。
   const redirectTo = mcpAuthorizeCallback(params) || params.get("redirect") || "/dashboard";
-  const [step, setStep] = useState<Step>("email");
+  const [step, setStep] = useState<"email" | "password">("email");
+  const [note, setNote] = useState<AfterSsoLookupNote>(null);
   const [email, setEmail] = useState("");
   const [pending, setPending] = useState(false);
   const hydrated = useHydrated();
@@ -86,15 +86,16 @@ function SignInMethods() {
     const address = formText(new FormData(e.currentTarget), "email").trim();
     setEmail(address);
     setPending(true);
-    const { error } = await authClient.signIn.sso({ email: address, callbackURL: redirectTo });
-    if (!error) return; // better-auth 的 client 正在導去 IdP，不必重設 pending。
+    // better-fetch 只把 HTTP 錯誤包成 { error }；網路錯誤會直接丟例外。
+    const result: SsoLookupResult = await authClient.signIn
+      .sso({ email: address, callbackURL: redirectTo })
+      .then(({ error }) => (error ? { status: error.status } : null))
+      .catch(() => ({}));
+    const next = afterSsoLookup(result);
+    if (next.step === "redirecting") return; // better-auth 的 client 正在導去 IdP，不必重設 pending。
     setPending(false);
-    // 404 = 這個網域沒有註冊 IdP。密碼登入一律開著，所以直接換到密碼那一步。
-    if (error.status === 404) {
-      setStep("password");
-      return;
-    }
-    toast.error(error.message || t("toast.failed"));
+    setNote(next.note);
+    setStep("password");
   }
 
   async function onPassword(e: React.FormEvent<HTMLFormElement>) {
@@ -138,6 +139,7 @@ function SignInMethods() {
             {t("password.change")}
           </Button>
         </div>
+        {note && <p className="text-sm text-muted-foreground">{t(`password.${note}`)}</p>}
         <div className="space-y-1.5">
           <Label htmlFor="password">{t("password.label")}</Label>
           <Input
