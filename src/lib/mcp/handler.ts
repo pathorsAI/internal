@@ -2,6 +2,7 @@ import { type ToolContext, tools } from "./tools";
 import { type ToolAnnotations, type ToolDef, resolveOrg } from "./shared";
 import { logMcp, type ActivityAction } from "@/db/activity";
 import { publicBaseUrl } from "@/lib/base-url";
+import { MCP_SERVER_ICONS } from "./mcp-icons";
 
 type McpAudit = {
   action: ActivityAction;
@@ -100,6 +101,10 @@ const SERVER_INFO = {
   title: "Pathors Internal — 內部帳務",
   version: SERVER_VERSION,
   websiteUrl: PUBLIC_BASE_URL,
+  // MCP 2025-11-25 `Implementation.icons`（SEP-973）：沿用 src/app/icon.svg 的 logo，
+  // 讓會畫 server icon 的 client（例如 Codex）能把 Internal 跟其他 *.pathors.com
+  // connector 分開。舊版 client 不認得這個欄位會直接忽略，所以不必跟著升 protocol version。
+  icons: MCP_SERVER_ICONS,
 };
 
 /** Protocol revisions this server speaks, newest first. */
