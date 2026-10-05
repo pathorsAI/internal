@@ -3,9 +3,11 @@
 Besides Google, the app can sign people in through **any OIDC identity provider** —
 Cloudflare Access, Okta, Entra ID, Auth0, Keycloak, whatever speaks OpenID Connect.
 
-The login page does **home realm discovery**: the user picks *Continue with SSO* and
-types their email. The email's domain is matched against the registered providers and
-the browser is handed to whichever IdP owns that domain. No domain is hardcoded
+The login page is **identifier-first** (home realm discovery): the card asks only for an
+email. The email's domain is matched against the registered providers and the browser is
+handed to whichever IdP owns that domain. A domain with no provider moves on to the
+password step. The branch depends on the domain alone, never on whether an account
+exists, so the page cannot be used to probe accounts. No domain is hardcoded
 anywhere in the UI — which domains work is entirely a function of what has been
 registered in the database.
 
@@ -120,11 +122,11 @@ the IdP.
 
 ## Verifying
 
-1. Open `/login`, click **Continue with SSO**, enter an address at the registered domain.
+1. Open `/login`, enter an address at the registered domain, and press **Continue**.
 2. You should be sent to the IdP, and back to `/dashboard` (or straight back into an MCP
    OAuth flow, if that is what started the login).
-3. An email domain with no provider gets a friendly "SSO is not configured for this email
-   domain" toast rather than a raw error.
+3. An email domain with no provider goes to the password step, showing the address with a
+   **Change** link back.
 
 ## Removing a provider
 
