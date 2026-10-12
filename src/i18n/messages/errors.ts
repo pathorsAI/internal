@@ -16,6 +16,7 @@ const errors = {
     transferAccounts: { "zh-TW": "請選擇轉出與轉入帳戶", en: "Select the transfer-out and transfer-in accounts" },
     endDate: { "zh-TW": "請選擇截止日期", en: "Select an end date" },
     startDate: { "zh-TW": "請選擇開始日期", en: "Select a start date" },
+    anchorDate: { "zh-TW": "固定日期扣款要填一個扣款日", en: "A fixed-date charge needs a charge date" },
     date: { "zh-TW": "請選擇日期", en: "Select a date" },
     payPeriod: { "zh-TW": "請選擇發薪月份", en: "Select a pay period" },
     payDate: { "zh-TW": "請選擇發薪日", en: "Select a pay date" },
@@ -48,6 +49,8 @@ const errors = {
   },
   validation: {
     statusInvalid: { "zh-TW": "狀態不正確", en: "Invalid status" },
+    scheduleInvalid: { "zh-TW": "扣款方式不正確", en: "Invalid charge schedule" },
+    httpUrl: { "zh-TW": "網址須以 http:// 或 https:// 開頭", en: "The link must start with http:// or https://" },
     categoryKindInvalid: { "zh-TW": "分類別不正確", en: "Invalid category type" },
     billedDocKind: { "zh-TW": "有報公司統編時，憑證類型必須是電子發票或其他發票", en: "When tax ID is reported, the document type must be an e-invoice or a paper invoice" },
     notOrgMember: { "zh-TW": "該使用者不是此組織成員", en: "That user is not a member of this organization" },
@@ -79,6 +82,7 @@ const errors = {
   },
   forbidden: {
     manageEmployees: { "zh-TW": "只有組織的擁有者或管理員可以修改員工資料", en: "Only organization owners and admins can change employee records" },
+    manageRecurringExpenses: { "zh-TW": "只有組織的擁有者或管理員可以修改固定支出", en: "Only organization owners and admins can change recurring expenses" },
   },
   employeeAccount: {
     kindInvalid: { "zh-TW": "帳戶類型不正確", en: "Invalid account type" },

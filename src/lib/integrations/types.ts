@@ -5,10 +5,10 @@ import type integrationsMessages from "@/i18n/messages/integrations";
 
 /**
  * 系統認得的整合代號。必須與 chk_org_integration_provider 一致（migrations/0023，
- * azure / gcp 由 0031 加入）—— 新增一家要同時：寫新 migration 擴充 CHECK、在這裡加代號、
- * 在 catalog.ts 補一筆。
+ * azure / gcp 由 0031、discord 由 0032 加入）—— 新增一家要同時：寫新 migration 擴充 CHECK、
+ * 在這裡加代號、在 catalog.ts 補一筆。
  */
-export const INTEGRATION_PROVIDER_IDS = ["simpany", "wise", "azure", "gcp"] as const;
+export const INTEGRATION_PROVIDER_IDS = ["simpany", "wise", "azure", "gcp", "discord"] as const;
 export type IntegrationProviderId = (typeof INTEGRATION_PROVIDER_IDS)[number];
 
 export function isIntegrationProviderId(v: unknown): v is IntegrationProviderId {

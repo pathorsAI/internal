@@ -1,7 +1,8 @@
 import { addDays, addMonths, format, isAfter, parseISO } from "date-fns";
-import { sql, eq, desc, and, or, lte, inArray, isNull, isNotNull, aliasedTable } from "drizzle-orm";
+import { sql, eq, desc, and, or, lte, gte, lt, inArray, isNull, isNotNull, aliasedTable } from "drizzle-orm";
 import { getDb } from "./index";
 import { nextChargeDate, todayStr } from "@/lib/mcp/shared";
+import { periodRange, type LedgerTransaction } from "@/lib/recurring-expenses";
 import {
   transactions,
   categories,
@@ -21,6 +22,8 @@ import {
   billingItems,
   activityLog,
   employeeBankAccounts,
+  recurringExpenses,
+  paymentMethods,
 } from "./schema";
 import {
   oauthApplication,
@@ -80,11 +83,13 @@ export type TxnFilters = {
   needsReview?: boolean;
   /** 只看某個交易對象（總覽「支出去向」點進來的）。 */
   partyId?: number;
+  /** 只看指定的交易 id（Discord 通知連結用）；仍受 organization 範圍限制。 */
+  ids?: number[];
 };
 
 // 內外帳列表與筆數共用的 where（篩選條件的 single source of truth）
 function txnWhere(orgId: string, filters: TxnFilters) {
-  const { book, categoryId, accountId, projectId, period, needsReview, partyId } = filters;
+  const { book, categoryId, accountId, projectId, period, needsReview, partyId, ids } = filters;
   return and(
     eq(transactions.organizationId, orgId),
     book ? eq(transactions.book, book) : undefined,
@@ -99,6 +104,7 @@ function txnWhere(orgId: string, filters: TxnFilters) {
     partyId ? eq(transactions.partyId, partyId) : undefined,
     period ? sql`to_char(${transactions.txnDate}, 'YYYY-MM') = ${period}` : undefined,
     needsReview === undefined ? undefined : eq(transactions.needsReview, needsReview),
+    ids && ids.length > 0 ? inArray(transactions.id, ids) : undefined,
     isNull(transactions.deletedAt),
   );
 }
@@ -2371,4 +2377,106 @@ export async function getAuditMeta(
     map.set(r.entityId, meta);
   }
   return map;
+}
+
+// ---- 固定支出（recurring_expenses，migrations/0032）----
+
+/**
+ * 固定支出列表（含廠商、付款方式，以及付款方式最後從哪個帳本帳戶扣）；web 頁、MCP 與
+ * Discord 通知共用。付款方式被軟刪除時 label 等欄位為 null。
+ */
+export async function listRecurringExpenses(orgId: string, opts: { activeOnly?: boolean } = {}) {
+  const db = getDb();
+  return db
+    .select({
+      id: recurringExpenses.id,
+      name: recurringExpenses.name,
+      partyId: recurringExpenses.partyId,
+      partyName: parties.name,
+      matchPattern: recurringExpenses.matchPattern,
+      paymentMethodId: recurringExpenses.paymentMethodId,
+      paymentMethodLabel: paymentMethods.label,
+      paymentMethodLast4: paymentMethods.last4,
+      expectedAccountId: paymentMethods.settlesFromAccountId,
+      expectedAccountName: bankAccounts.name,
+      schedule: recurringExpenses.schedule,
+      anchorDate: recurringExpenses.anchorDate,
+      intervalMonths: recurringExpenses.intervalMonths,
+      expectedAmount: recurringExpenses.expectedAmount,
+      currency: recurringExpenses.currency,
+      billingUrl: recurringExpenses.billingUrl,
+      note: recurringExpenses.note,
+      isActive: recurringExpenses.isActive,
+      createdAt: recurringExpenses.createdAt,
+      updatedAt: recurringExpenses.updatedAt,
+    })
+    .from(recurringExpenses)
+    .leftJoin(parties, eq(parties.id, recurringExpenses.partyId))
+    .leftJoin(
+      paymentMethods,
+      and(
+        eq(paymentMethods.id, recurringExpenses.paymentMethodId),
+        eq(paymentMethods.organizationId, orgId),
+        isNull(paymentMethods.deletedAt),
+      ),
+    )
+    .leftJoin(
+      bankAccounts,
+      and(eq(bankAccounts.id, paymentMethods.settlesFromAccountId), eq(bankAccounts.organizationId, orgId)),
+    )
+    .where(
+      and(
+        eq(recurringExpenses.organizationId, orgId),
+        isNull(recurringExpenses.deletedAt),
+        opts.activeOnly ? eq(recurringExpenses.isActive, true) : undefined,
+      ),
+    )
+    .orderBy(desc(recurringExpenses.isActive), recurringExpenses.name, recurringExpenses.id);
+}
+
+export type RecurringExpenseRow = Awaited<ReturnType<typeof listRecurringExpenses>>[number];
+
+/**
+ * 某個月（台北日曆，'YYYY-MM'）的支出與代墊，給固定支出回顧比對用：實際付款帳戶、
+ * 對象名稱、代墊的員工。金額在這裡轉成 number（領域模組只吃 number）。
+ */
+export async function listLedgerTransactionsForPeriod(
+  orgId: string,
+  period: string,
+): Promise<LedgerTransaction[]> {
+  const db = getDb();
+  const { start, endExclusive } = periodRange(period);
+  const rows = await db
+    .select({
+      id: transactions.id,
+      txnDate: transactions.txnDate,
+      type: transactions.type,
+      amount: transactions.amount,
+      currency: transactions.currency,
+      fromAccountId: transactions.fromAccountId,
+      fromAccountName: bankAccounts.name,
+      cardLast4: sql<string | null>`${transactions.externalMeta}->>'cardLastFour'`,
+      partyName: parties.name,
+      description: transactions.description,
+      settleEmployeeName: employees.name,
+    })
+    .from(transactions)
+    .leftJoin(bankAccounts, eq(bankAccounts.id, transactions.fromAccountId))
+    .leftJoin(parties, eq(parties.id, transactions.partyId))
+    .leftJoin(employees, eq(employees.id, transactions.settleEmployeeId))
+    .where(
+      and(
+        eq(transactions.organizationId, orgId),
+        inArray(transactions.type, ["expense", "advance"]),
+        gte(transactions.txnDate, start),
+        lt(transactions.txnDate, endExclusive),
+        isNull(transactions.deletedAt),
+      ),
+    )
+    .orderBy(transactions.txnDate, transactions.id);
+  return rows.map((r) => ({
+    ...r,
+    type: r.type === "advance" ? "advance" : "expense",
+    amount: Number(r.amount),
+  }));
 }

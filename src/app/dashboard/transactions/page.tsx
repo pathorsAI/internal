@@ -45,6 +45,7 @@ import { requireOrg } from "@/lib/session";
 import { formatAccountShort } from "@/lib/employee-accounts";
 import { getTranslations } from "next-intl/server";
 import { PartyAvatar } from "@/components/party-avatar";
+import { parseIdsParam } from "@/lib/ids-param";
 
 export const dynamic = "force-dynamic";
 
@@ -244,6 +245,8 @@ export default async function TransactionsPage({
     review?: string;
     /** 交易對象 id（總覽「支出去向」點進來的） */
     party?: string;
+    /** ids=1,2,3：只看這幾筆（Discord 通知連到這裡）。 */
+    ids?: string | string[];
   }>;
 }>) {
   const { orgId } = await requireOrg();
@@ -266,7 +269,8 @@ export default async function TransactionsPage({
     { label: tr("columns.lastUpdated"), width: "w-36" },
     { label: tr("columns.amount"), width: "w-32", align: "right" },
   ];
-  const { book, category, account, period, page: pageParam, review, party } = await searchParams;
+  const { book, category, account, period, page: pageParam, review, party, ids: idsParam } =
+    await searchParams;
   const active = (["internal", "external", "both"].includes(book ?? "") ? book : undefined) as
     | Book
     | undefined;
@@ -275,7 +279,9 @@ export default async function TransactionsPage({
   const partyId = idParam(party);
   const page = Math.max(1, Math.trunc(Number(pageParam)) || 1);
   const needsReview = review === "1" ? true : undefined;
-  const filters = { book: active, categoryId, accountId, partyId, period, needsReview };
+  const ids = parseIdsParam(idsParam) ?? undefined;
+  const idsQuery = ids?.join(",");
+  const filters = { book: active, categoryId, accountId, partyId, period, needsReview, ids };
   const [rows, total, accounts, categories, parties, employees, projects, contracts, months, reviewCount] =
     await Promise.all([
       listTransactions(orgId, filters, PAGE_SIZE, (page - 1) * PAGE_SIZE),
@@ -344,12 +350,33 @@ export default async function TransactionsPage({
             href={{
               pathname: "/dashboard/transactions",
               query: Object.fromEntries(
-                Object.entries({ book, category, account, party, period, review: needsReview ? undefined : "1" })
-                  .filter(([, v]) => v !== undefined),
+                Object.entries({
+                  book,
+                  category,
+                  account,
+                  party,
+                  period,
+                  review: needsReview ? undefined : "1",
+                  ids: idsQuery,
+                }).filter(([, v]) => v !== undefined),
               ),
             }}
           >
             {needsReview ? tr("review.showAll") : tr("review.showOnly")}
+          </Link>
+        </div>
+      ) : null}
+
+      {ids ? (
+        <div className="flex items-center gap-2 text-sm">
+          <Badge variant="outline" className="font-normal">
+            {tr("selected.notice", { count: total })}
+          </Badge>
+          <Link
+            className="text-muted-foreground underline-offset-2 hover:underline"
+            href="/dashboard/transactions"
+          >
+            {tr("selected.clear")}
           </Link>
         </div>
       ) : null}
@@ -425,7 +452,7 @@ export default async function TransactionsPage({
         totalPages={totalPages}
         total={total}
         basePath="/dashboard/transactions"
-        params={{ book, category, account, party, period, review }}
+        params={{ book, category, account, party, period, review, ids: idsQuery }}
       />
     </>
   );

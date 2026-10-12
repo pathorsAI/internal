@@ -5,6 +5,7 @@ import {
   bankAccounts,
   parties,
   paymentMethods,
+  recurringExpenses,
   transactions,
   vendorBillingAccounts,
   vendorBillingResources,
@@ -691,6 +692,10 @@ export async function deletePaymentMethod(orgId: string, id: number): Promise<vo
     .update(vendorBillingAccounts)
     .set({ paymentMethodId: null, updatedAt: sql`now()` })
     .where(and(eq(vendorBillingAccounts.organizationId, orgId), eq(vendorBillingAccounts.paymentMethodId, id)));
+  await db
+    .update(recurringExpenses)
+    .set({ paymentMethodId: null, updatedAt: sql`now()` })
+    .where(and(eq(recurringExpenses.organizationId, orgId), eq(recurringExpenses.paymentMethodId, id)));
 }
 
 /**

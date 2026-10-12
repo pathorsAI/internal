@@ -34,6 +34,10 @@ const transactions = {
     showOnly: { "zh-TW": "只看待確認", en: "Show only these" },
     showAll: { "zh-TW": "顯示全部", en: "Show all" },
   },
+  selected: {
+    notice: { "zh-TW": "只顯示 {count} 筆指定交易", en: "Showing only {count} selected transactions" },
+    clear: { "zh-TW": "清除", en: "Clear" },
+  },
   empty: {
     noData: { "zh-TW": "尚無交易", en: "No transactions yet" },
     noPageData: { "zh-TW": "此頁沒有資料", en: "No data on this page" },

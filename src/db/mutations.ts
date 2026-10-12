@@ -25,6 +25,7 @@ import {
   contracts,
   billingItems,
   payrollItemTypes,
+  recurringExpenses,
 } from "./schema";
 import { oauthAccessToken, oauthConsent, member } from "./auth-schema";
 import { uploadDocument } from "@/lib/storage";
@@ -45,6 +46,7 @@ import { findAccountCurrencyMismatches } from "@/lib/account-currency";
 import { nationalIdColumns, resolvePayoutAccount, type PayoutPurpose } from "./employee-accounts";
 import { EmployeeAccountError } from "@/lib/employee-accounts";
 import { externalSingleLegSide, type SingleLegSide } from "@/lib/external-transfer";
+import { assertOrgRefs } from "@/lib/vendor-billing/guards";
 
 export type ActionState = { ok: boolean; error?: string };
 
@@ -2097,6 +2099,166 @@ export async function deleteSubscription(id: number): Promise<ActionState> {
       .where(and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, id)));
     await logWeb(orgId, "delete", "subscription", id);
     revalidatePath("/dashboard/subscriptions");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
+  }
+}
+
+// ---- 固定支出（recurring_expenses）----
+// 寫入只給 owner / admin：這裡決定 Discord 頻道提醒「用哪個付款方式扣」，
+// 跟整合設定同一個層級。成員仍可在頁面上看。
+const RECURRING_SCHEDULE = new Set(["fixed", "usage"]);
+
+function recurringExpenseValues(formData: FormData) {
+  const expectedAmount = str(formData.get("expectedAmount"));
+  return {
+    name: str(formData.get("name")),
+    partyName: str(formData.get("partyName")),
+    matchPattern: str(formData.get("matchPattern")),
+    paymentMethodId: optRefNum(formData.get("paymentMethodId")),
+    schedule: str(formData.get("schedule")) ?? "fixed",
+    anchorDate: str(formData.get("anchorDate")),
+    intervalMonths: clampInt(num(formData.get("intervalMonths")), 1, 36, 1) ?? 1,
+    expectedAmount,
+    // 沒有預估金額時幣別沒有意義，不存（下拉一定會送一個預設值）。
+    currency: expectedAmount === null ? null : (str(formData.get("currency")) ?? "TWD"),
+    billingUrl: str(formData.get("billingUrl")),
+    isActive: str(formData.get("isActive")) !== "inactive",
+    note: str(formData.get("note")),
+  };
+}
+
+type RecurringExpenseValues = ReturnType<typeof recurringExpenseValues>;
+
+function isHttpUrl(v: string): boolean {
+  try {
+    const u = new URL(v);
+    return u.protocol === "https:" || u.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+/** 欄位驗證，過了就回傳收窄成 non-null 的名稱（同 requiredSubscriptionFields 的理由）。 */
+async function requiredRecurringExpenseFields(
+  v: RecurringExpenseValues,
+): Promise<{ name: string } | { error: string }> {
+  const t = await getTranslations("errors");
+  if (!v.name) return { error: t("required.name") };
+  if (!RECURRING_SCHEDULE.has(v.schedule)) return { error: t("validation.scheduleInvalid") };
+  if (v.schedule === "fixed" && !v.anchorDate) return { error: t("required.anchorDate") };
+  if (v.billingUrl !== null && !isHttpUrl(v.billingUrl)) return { error: t("validation.httpUrl") };
+  return { name: v.name };
+}
+
+function recurringExpenseColumns(v: RecurringExpenseValues, name: string, partyId: number | null) {
+  return {
+    name,
+    partyId,
+    matchPattern: v.matchPattern,
+    paymentMethodId: v.paymentMethodId,
+    schedule: v.schedule,
+    // usage 沒有扣款日；表單切回 usage 時把舊的日期清掉，免得畫面上留著沒作用的值。
+    anchorDate: v.schedule === "fixed" ? v.anchorDate : null,
+    intervalMonths: v.intervalMonths,
+    expectedAmount: v.expectedAmount,
+    currency: v.currency,
+    billingUrl: v.billingUrl,
+    isActive: v.isActive,
+    note: v.note,
+  };
+}
+
+async function requireRecurringExpenseManager(): Promise<{ orgId: string } | { error: string }> {
+  const { orgId, role } = await requireOrgWithRole();
+  if (!canManageOrg(role)) {
+    const t = await getTranslations("errors");
+    return { error: t("forbidden.manageRecurringExpenses") };
+  }
+  return { orgId };
+}
+
+/** 新增與編輯共用：驗欄位 → 驗外鍵歸屬 → 廠商名稱轉 id（查無就新建）。 */
+async function prepareRecurringExpense(
+  orgId: string,
+  formData: FormData,
+): Promise<{ columns: ReturnType<typeof recurringExpenseColumns>; partyCreated: boolean } | { error: string }> {
+  const v = recurringExpenseValues(formData);
+  const required = await requiredRecurringExpenseFields(v);
+  if ("error" in required) return required;
+  // 找不到（別的組織、已刪除）會丟 OrgRefError，訊息由呼叫端的 catch 回給表單。
+  await assertOrgRefs(orgId, { paymentMethod: [v.paymentMethodId] });
+  const party = await resolvePartyName(getDb(), orgId, v.partyName, "vendor");
+  return { columns: recurringExpenseColumns(v, required.name, party.id), partyCreated: party.created };
+}
+
+export async function createRecurringExpense(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const t = await getTranslations("errors");
+  // 在 try 外面：未登入時 requireOrg() 會 redirect，那個例外不能被吞掉。
+  const me = await requireRecurringExpenseManager();
+  if ("error" in me) return { ok: false, error: me.error };
+  try {
+    const prepared = await prepareRecurringExpense(me.orgId, formData);
+    if ("error" in prepared) return { ok: false, error: prepared.error };
+    const [inserted] = await getDb()
+      .insert(recurringExpenses)
+      .values({ organizationId: me.orgId, ...prepared.columns })
+      .returning({ id: recurringExpenses.id });
+    await logWeb(me.orgId, "create", "recurring_expense", inserted.id, prepared.columns.name);
+    revalidatePath("/dashboard/recurring-expenses");
+    if (prepared.partyCreated) revalidatePath("/dashboard/parties");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
+  }
+}
+
+export async function updateRecurringExpense(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const t = await getTranslations("errors");
+  const id = num(formData.get("id"));
+  if (!id) return { ok: false, error: t("required.id") };
+  const me = await requireRecurringExpenseManager();
+  if ("error" in me) return { ok: false, error: me.error };
+  try {
+    const prepared = await prepareRecurringExpense(me.orgId, formData);
+    if ("error" in prepared) return { ok: false, error: prepared.error };
+    await getDb()
+      .update(recurringExpenses)
+      .set({ ...prepared.columns, updatedAt: new Date().toISOString() })
+      .where(
+        and(
+          eq(recurringExpenses.organizationId, me.orgId),
+          eq(recurringExpenses.id, id),
+          isNull(recurringExpenses.deletedAt),
+        ),
+      );
+    await logWeb(me.orgId, "update", "recurring_expense", id, prepared.columns.name);
+    revalidatePath("/dashboard/recurring-expenses");
+    if (prepared.partyCreated) revalidatePath("/dashboard/parties");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
+  }
+}
+
+export async function deleteRecurringExpense(id: number): Promise<ActionState> {
+  const t = await getTranslations("errors");
+  const me = await requireRecurringExpenseManager();
+  if ("error" in me) return { ok: false, error: me.error };
+  try {
+    await getDb()
+      .update(recurringExpenses)
+      .set({ deletedAt: new Date().toISOString() })
+      .where(and(eq(recurringExpenses.organizationId, me.orgId), eq(recurringExpenses.id, id)));
+    await logWeb(me.orgId, "delete", "recurring_expense", id);
+    revalidatePath("/dashboard/recurring-expenses");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
