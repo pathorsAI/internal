@@ -3,9 +3,10 @@ import { wiseProvider } from "./wise";
 import { simpanyProvider } from "./simpany";
 import { azureProvider } from "./azure";
 import { gcpProvider } from "./gcp";
+import { discordProvider } from "./discord";
 
 /**
- * 已實作的整合：Simpany、Wise、Azure 計費、GCP 計費（src/lib/integrations/<id>.ts）。
+ * 已實作的整合：Simpany、Wise、Azure 計費、GCP 計費、Discord（src/lib/integrations/<id>.ts）。
  *
  * ── 如何新增一個整合的實作 ──────────────────────────────────────────────
  * 1. 在 src/lib/integrations/<id>.ts 寫一個 IntegrationProvider：
@@ -37,6 +38,7 @@ const PROVIDERS: Partial<Record<IntegrationProviderId, IntegrationProvider>> = {
   simpany: simpanyProvider,
   azure: azureProvider,
   gcp: gcpProvider,
+  discord: discordProvider,
 };
 
 /** 取實作；還沒實作的回 null（設定頁據此停用「連接」）。 */

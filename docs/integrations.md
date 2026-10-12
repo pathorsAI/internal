@@ -1,7 +1,7 @@
 # Integrations framework
 
 Per-organization connections to external services (Simpany e-invoice, Wise, Azure
-billing, Google Cloud billing, …).
+billing, Google Cloud billing, Discord, …).
 Every integration is **off by default**: an owner/admin *connects* it (enters
 credentials, which are tested server-side before being stored), then *switches it
 on* separately. Disconnecting deletes the row, credentials included.
@@ -17,7 +17,7 @@ settings page just lists it alongside the others.
 | `migrations/0023_org_integrations.sql` / `orgIntegrations` in `src/db/schema.ts` | One row per (organization, provider). `credentials_enc` / `token_cache_enc` are ciphertext from `src/lib/crypto.ts` (`FIELD_ENCRYPTION_KEY`). `config` is non-secret jsonb. |
 | `src/lib/integrations/types.ts` | Provider ids, field/catalog/provider types, `IntegrationSummary` (the secret-free view). Client-safe. |
 | `src/lib/integrations/catalog.ts` | Static catalog: logo + credential/config fields per provider. Drives the settings UI. Client-safe. |
-| `src/lib/integrations/registry.ts` | Map of **implementations** (`testConnection`). Simpany, Wise, Azure and GCP are registered. Server only. |
+| `src/lib/integrations/registry.ts` | Map of **implementations** (`testConnection`). Simpany, Wise, Azure, GCP and Discord are registered. Server only. |
 | `src/lib/integrations/fields.ts` | Client-safe rules for connect-sheet fields: `select` fields, `when` (field only applies when another field has a given value), picking / required checks. Used by the Sheet and the server action alike. |
 | `src/lib/integrations/store.ts` | The only code that reads/writes `org_integrations`. Server only. |
 | `src/app/dashboard/settings/integrations/` | Settings page, server actions (owner/admin only), connect Sheet. |
@@ -67,8 +67,8 @@ deleteIntegration(orgId, provider): Promise<number>
 
 ## Adding a provider
 
-Simpany and Wise are already in the DB `CHECK`, in `INTEGRATION_PROVIDER_IDS`, in
-the catalog (Simpany: `account` email + `password`; Wise: `apiToken`) and in i18n.
+Simpany, Wise, Azure, GCP and Discord are already in the DB `CHECK`, in `INTEGRATION_PROVIDER_IDS`, in
+the catalog (e.g. Simpany: `account` email + `password`; Wise: `apiToken`; Discord: `webhookUrl`) and in i18n.
 To bring one to life:
 
 1. **Implementation** — `src/lib/integrations/<id>.ts`:
@@ -563,6 +563,74 @@ Simpany 上已不存在的表單 / 員工會從本地刪掉，所以重跑是冪
 →「送出給記帳士」→「寄送薪資單」。只對 owner / admin、整合可用、且月份不晚於本月時顯示。
 MCP：`simpany_prepare_salary_filing`、`simpany_apply_salary_filing`、`simpany_settle_salary_filing`、`simpany_send_payslips`。
 
+## Discord（固定支出通知）
+
+Discord 整合用頻道的 Incoming Webhook 發兩種訊息給團隊：扣款前的**提醒**，以及每月一次的**固定支出回顧**。
+資料來源是「固定支出」頁（`/dashboard/recurring-expenses`，MCP `*_recurring_expense`）登記的廠商與帳本交易。
+**只發訊息，不碰錢**：沒有任何付款、扣款或銀行 / 卡片的程式碼路徑。
+
+| Where | What |
+| --- | --- |
+| `migrations/0032_recurring_expenses_discord.sql` | `recurring_expenses`（`payment_method_id` 參照 0031 的 `payment_methods`）、`notification_deliveries`，`chk_org_integration_provider` 加 `discord` |
+| `src/lib/recurring-expenses.ts` | 純函式：扣款日推算、交易比對、回顧模型、Discord 訊息文字（有 `bun test`） |
+| `src/lib/billing-notify.ts` | `runBillingNotifications(now, { orgId?, dryRun?, kinds?, force?, audit? })`、`previewBillingNotifications` |
+| `src/lib/integrations/discord.ts` | `discordProvider`（連接測試）、`postDiscordMessage`、`sendDiscordMessages` |
+| `src/lib/integrations/discord-config.ts` | client-safe：`parseDiscordConfig(config)` |
+| `src/lib/mcp/tools-recurring-expenses.ts` | 固定支出 CRUD 與 `preview_billing_notifications` |
+
+**連接**：設定 › 整合 › Discord，貼上頻道的 webhook 網址（頻道設定 › 整合 › Webhook › 複製網址）。
+網址本身含 token，所以存在 `credentials_enc`，錯誤訊息與 log 都不會出現。`testConnection` 只接受
+`https://(discord.com|discordapp.com|ptb.discord.com|canary.discord.com)/api/webhooks/<id>/<token>`，
+再 `GET` 那個網址（Discord 只回 webhook 資訊，不會發訊息），把 `channelId` / `guildId` / `webhookName` 寫進 `config`。
+Discord 不是自動同步的整合，沒有「自動同步」開關。
+
+**設定**（連接 / 重新連接時一併輸入，存在 `config`；不合法的值在連接時就擋下）：
+
+| 欄位 | 意思 | 預設 |
+| --- | --- | --- |
+| `mentionRoleId` | 要 @ 的身分組 id（貼 `<@&123>` 也可以） | 不 @ 任何人 |
+| `recapDay` | 每月幾號發上個月的回顧，1–28 | 1 |
+| `reminderDays` | 扣款日前幾天提醒，0–14（0 = 當天） | 3 |
+
+訊息的 `allowed_mentions` 只放行這個身分組，內容裡出現 `@everyone` 或人名也不會真的 tag。
+
+**什麼時候發**：每日 cron（台北 06:00）在[每日自動同步](#每日自動同步)之後跑，所以回顧用的是剛同步進來的 Wise 交易。
+
+- **扣款提醒**：啟用中、`schedule = fixed` 的固定支出，下一次扣款日落在 [今天, 今天 + `reminderDays`]
+  內就提醒。同一天的扣款併成一段，每筆列出付款方式與它從哪個帳戶扣（`→ MasterCard •1234（公司戶 - A 銀行（台幣））`，
+  沒設付款方式就省略）、上個月對到的金額（沒有就用預估金額）與帳單頁連結。
+  用區間而不是「剛好今天 + N 天」，cron 漏跑一天或剛登記明天就扣的廠商，下一輪照樣會提醒。
+- **每月回顧**：台北日期 ≥ `recapDay` 時發上個月的回顧（漏跑也會補發）。一筆啟用中的固定支出都沒有的組織不發。
+
+**回顧內容**（`buildRecap`）：
+
+- 上個月的 `expense` / `advance` 交易，對象名稱或說明含有 `match_pattern` 任一段（`|` 分隔、不分大小寫；沒填就用名稱）
+  就算那筆固定支出。一筆交易同時對到多筆時，歸給 id 最小的那筆。對不到任何固定支出的交易不出現。
+- 依**實際付款**分組：交易的 `from_account_id` 帳戶；代墊另成一組「員工代墊 - 姓名」。
+- ⚠️ 預期有扣款但帳上沒看到：fixed、該月有扣款日、卻一筆都沒對到（`anchor_date` 之前的月份不算）。
+- ⚠️ 扣款帳戶跟設定不同：固定支出設了付款方式、付款方式設了 `settles_from_account_id`，對到的交易卻不是從那個帳戶付的（包括員工代墊）。
+- 🧾 待報帳代墊（與 MCP `list_outstanding_advances` 同一支查詢）、🔍 待確認的匯入交易筆數與連結。
+
+**付款方式與末四碼**：卡的身分（名稱、卡別、末四碼、卡費從哪個帳本帳戶扣）都在廠商計費的付款方式
+（`payment_methods`，`/dashboard/vendor-billing`，MCP `upsert_payment_method`）。固定支出只存 `payment_method_id`，
+預期扣款帳戶就是那個付款方式的 `settles_from_account_id`；固定支出與帳戶本身都不存卡號。
+帳戶標題的末四碼先用這組交易實際刷的卡（Wise 卡片交易 `transactions.external_meta` 的 `cardLastFour`，多張全列）；
+都沒有卡號時，用這組固定支出的付款方式中、`settles_from_account_id` 就是這個帳戶的那些卡的末四碼。
+付款方式被刪除時，指向它的固定支出改成「不指定」。
+
+**冪等**：每則通知有一個去重鍵，`reminder:<固定支出 id>:<扣款日>` 或 `recap:<YYYY-MM>`。送出前先
+`INSERT … ON CONFLICT DO NOTHING RETURNING` 搶 `notification_deliveries (organization_id, channel, dedupe_key)`，
+搶到的才送；Discord 失敗就刪掉自己搶的列，下一輪再送。重跑、手動觸發都不會重複發。一份回顧超過 2000 字會在換行處拆成多則，
+送到一半失敗時下一輪整份重送（寧可重複，不要漏）。
+
+**失敗處理**：Discord 回 401 / 404（webhook 被刪或重設）→ `markNeedsReauth`，整合轉成「需要重新連接」；
+429 照 `retry_after` 等一次再試；其他錯誤 → `recordSyncFailure`；成功 → `recordSyncSuccess`。每個組織、提醒與回顧各自
+try/catch。有發送或失敗時在操作紀錄記一筆（cron 記成 system，MCP 手動發送記成那位成員）。通知整個失敗時，
+cron 回應仍帶著自動同步的結果，但回 500 讓 Cloudflare 把這次 cron 標成失敗。
+
+**手動**：MCP `preview_billing_notifications`（`period?`、`send?`）。預設只預覽，接 Discord 之前也能用；
+`send: true`（owner / admin、整合可用）立刻把那個月的回顧發到頻道，即使已經發過。提醒只由每日 cron 發。
+
 ## 每日自動同步
 
 已連接、已開啟、狀態正常的整合每天自動同步一次，不用再有人去按「同步」。
@@ -606,6 +674,8 @@ MCP：`simpany_prepare_salary_filing`、`simpany_apply_salary_filing`、`simpany
 存成 `config.autoSync`（沒有這個欄位 = 開，預設開）；下面一行顯示
 「上次自動同步：YYYY-MM-DD HH:mm · 成功 / 失敗：…」（台北時間）。
 關掉自動同步不影響手動同步與 MCP 工具。
+
+同一個 cron 在自動同步之後接著發固定支出的 Discord 通知（見 [Discord（固定支出通知）](#discord固定支出通知)）。
 
 **手動觸發**（測試用，只跑目前組織、同一條程式碼路徑 `runScheduledSync(now, { orgId, trigger: "manual" })`）：
 

@@ -16,6 +16,7 @@ import {
   Tags,
   FolderKanban,
   Repeat,
+  CalendarSync,
   FileSignature,
   CalendarClock,
   Receipt,
@@ -61,6 +62,7 @@ export type NavItemKey =
   | "reconciliation"
   | "projects"
   | "subscriptions"
+  | "recurringExpenses"
   | "contracts"
   | "invoices"
   | "reports"
@@ -91,6 +93,7 @@ const nav = [
 const clients = [
   { key: "projects", href: "/dashboard/projects", icon: FolderKanban },
   { key: "subscriptions", href: "/dashboard/subscriptions", icon: Repeat },
+  { key: "recurringExpenses", href: "/dashboard/recurring-expenses", icon: CalendarSync },
   { key: "contracts", href: "/dashboard/contracts", icon: FileSignature },
   { key: "invoices", href: "/dashboard/invoices", icon: Receipt },
   { key: "reports", href: "/dashboard/reports", icon: BarChart3 },

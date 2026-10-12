@@ -711,7 +711,7 @@ export const orgIntegrations = pgTable("org_integrations", {
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	unique("uq_org_integration").on(table.organizationId, table.provider),
-	check("chk_org_integration_provider", sql`provider = ANY (ARRAY['simpany'::text, 'wise'::text, 'azure'::text, 'gcp'::text])`),
+	check("chk_org_integration_provider", sql`provider = ANY (ARRAY['simpany'::text, 'wise'::text, 'azure'::text, 'gcp'::text, 'discord'::text])`),
 	check("chk_org_integration_status", sql`status = ANY (ARRAY['connected'::text, 'needs_reauth'::text, 'error'::text])`),
 ]);
 
@@ -999,4 +999,56 @@ export const vendorCostLines = pgTable("vendor_cost_lines", {
 	check("chk_vendor_cost_line_source", sql`source = ANY (ARRAY['azure_cost'::text, 'gcp_bigquery'::text])`),
 	check("chk_vendor_cost_line_month", sql`EXTRACT(day FROM month) = (1)::numeric`),
 	check("chk_vendor_cost_line_currency", sql`currency ~ '^[A-Z]{3}$'::text`),
+]);
+
+// ---- 固定支出（migrations/0032，src/lib/recurring-expenses.ts）。公司定期付給廠商的費用，
+// Discord 扣款提醒與每月回顧的來源。交易不綁這張表：靠 match_pattern 比對對象名稱 / 說明。----
+export const recurringExpenses = pgTable("recurring_expenses", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "recurring_expenses_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id").notNull(),
+	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	name: text().notNull(),
+	partyId: bigint("party_id", { mode: "number" }),
+	// | 分隔、不分大小寫的子字串；NULL = 用 name 比對
+	matchPattern: text("match_pattern"),
+	// 預期的付款方式；預期扣款的帳本帳戶 = 它的 settles_from_account_id
+	paymentMethodId: bigint("payment_method_id", { mode: "number" }),
+	schedule: text().notNull(),
+	anchorDate: date("anchor_date"),
+	intervalMonths: integer("interval_months").default(1).notNull(),
+	expectedAmount: numeric("expected_amount", { precision: 18, scale: 2 }),
+	currency: char({ length: 3 }),
+	billingUrl: text("billing_url"),
+	note: text(),
+	isActive: boolean("is_active").default(true).notNull(),
+}, (table) => [
+	index("idx_recurring_expense_org").using("btree", table.organizationId.asc().nullsLast().op("text_ops")),
+	foreignKey({
+			columns: [table.partyId],
+			foreignColumns: [parties.id],
+			name: "recurring_expenses_party_id_fkey"
+		}),
+	foreignKey({
+			columns: [table.paymentMethodId],
+			foreignColumns: [paymentMethods.id],
+			name: "recurring_expenses_payment_method_id_fkey"
+		}).onDelete("set null"),
+	check("chk_recurring_expense_schedule", sql`schedule = ANY (ARRAY['fixed'::text, 'usage'::text])`),
+	check("chk_recurring_expense_anchor", sql`(schedule = 'usage'::text) OR (anchor_date IS NOT NULL)`),
+	check("chk_recurring_expense_interval", sql`(interval_months >= 1) AND (interval_months <= 36)`),
+]);
+
+// ---- 對外通知的冪等紀錄（migrations/0032，src/lib/billing-notify.ts）：先搶到
+// (org, channel, dedupe_key) 才送，送失敗就刪掉讓下一輪重試。----
+export const notificationDeliveries = pgTable("notification_deliveries", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "notification_deliveries_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id").notNull(),
+	channel: text().notNull(),
+	// reminder:<recurringExpenseId>:<chargeDate>、recap:<YYYY-MM>
+	dedupeKey: text("dedupe_key").notNull(),
+	sentAt: timestamp("sent_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	unique("uq_notification_delivery").on(table.organizationId, table.channel, table.dedupeKey),
 ]);

@@ -32,6 +32,7 @@ const common = {
       reconciliation: { "zh-TW": "對帳", en: "Reconciliation" },
       projects: { "zh-TW": "專案", en: "Project" },
       subscriptions: { "zh-TW": "訂閱 / 月費", en: "Subscription" },
+      recurringExpenses: { "zh-TW": "固定支出", en: "Recurring expenses" },
       contracts: { "zh-TW": "合約", en: "Contract" },
       invoices: { "zh-TW": "發票", en: "Invoice" },
       reports: { "zh-TW": "報表", en: "Reports" },

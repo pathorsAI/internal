@@ -205,6 +205,9 @@ async function stepsFor(
     case "azure":
     case "gcp":
       return syncCloud(orgId, provider, now);
+    case "discord":
+      // 沒有東西要同步：Discord 只送通知（src/lib/billing-notify.ts），也不在 AUTO_SYNC_PROVIDERS 裡。
+      return [];
   }
 }
 

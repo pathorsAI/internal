@@ -80,7 +80,7 @@ function deriveMcpAudit(name: string, out: unknown): McpAudit | null {
 
 /** Bump on every published change to tools, schemas or instructions. Clients
  *  (and OpenAI's plugin "Scan Tools") key their cached snapshot off this. */
-export const SERVER_VERSION = "1.10.0";
+export const SERVER_VERSION = "1.11.0";
 
 /** Public base URL of this deployment; doubles as the OAuth issuer.
  *  Keep in sync with the `resource` passed to `mcp()` in src/lib/auth.ts. */
@@ -301,6 +301,9 @@ const OPENWORLD_OVERRIDES: Record<string, Partial<ToolAnnotations>> = {
   // (GET-only for this path), Wise transaction sync (GET-only) and Azure / GCP billing
   // sync (read-only allowlists); writes only our books.
   run_integration_sync: { openWorldHint: true },
+  // Dry run by default; send=true posts the recurring-expense recap to the org's
+  // Discord channel via its webhook (src/lib/billing-notify.ts).
+  preview_billing_notifications: { openWorldHint: true },
 };
 
 // Writes that are irreversible from MCP even though the verb isn't "delete".
@@ -352,6 +355,7 @@ const TITLE_OVERRIDES: Record<string, string> = {
   mark_accountant_notified: "Mark as sent to the accountant",
   salary_arrears: "Salary arrears by employee",
   pay_employee_salary: "Record a salary payslip",
+  preview_billing_notifications: "Preview or post the vendor charge notifications",
   run_integration_sync: "Run the integration auto-sync now",
   list_vendor_billing_accounts: "List vendor billing accounts",
   get_vendor_billing_account: "Vendor billing account detail",

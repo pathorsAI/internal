@@ -104,7 +104,8 @@ the `tools-*.ts` modules):
   derived from the verb, plus `openWorldHint`, which is `false` for everything
   except the tools that reach a third-party system: `sync_billing_calendar`
   (writes to Google Calendar), the three `wise_*` tools (read-only GETs to
-  Wise) and the `simpany_*` tools (`salary_arrears` reads only our own tables
+  Wise), `preview_billing_notifications` (with `send: true` it posts to the
+  org's Discord channel) and the `simpany_*` tools (`salary_arrears` reads only our own tables
   and stays closed-world). The overrides that correct the verb heuristic:
   `sync_billing_calendar`, every `wise_*` and every `simpany_*` tool get `openWorldHint: true`;
   `simpany_void_invoice` gets `destructiveHint: true` (voiding a legal e-invoice
@@ -124,8 +125,8 @@ the `tools-*.ts` modules):
 - `_meta["openai/toolInvocation/invoking" | "invoked"]`, the status line ChatGPT
   shows while a call is in flight.
 
-**Output schemas.** Every tool declares an `outputSchema` — all 100 of them, as of
-server version 1.10.0 (the Simpany tools whose result shape comes from Simpany's
+**Output schemas.** Every tool declares an `outputSchema` — all 105 of them, as of
+server version 1.11.0 (the Simpany tools whose result shape comes from Simpany's
 unofficial API declare an open object schema). When a tool declares one the handler additionally returns
 the result as MCP `structuredContent` (the JSON text block stays, per MCP's
 back-compat recommendation), which is what ChatGPT and Codex prefer over parsing
@@ -244,7 +245,7 @@ reconciliations: `list_reconciliations` +
 `mark_accountant_notified`, `unmark_accountant_notified`.
 
 **Integrations** — `list_integrations` shows, per external integration
-(Simpany e-invoice, Wise, Azure billing, Google Cloud billing), whether it is available on this server, connected,
+(Simpany e-invoice, Wise, Azure billing, Google Cloud billing, Discord), whether it is available on this server, connected,
 switched on, and healthy (`status`, `lastError`, `lastSyncedAt`,
 `tokenExpiresAt`) plus its non-secret `config`, the daily auto-sync switch
 (`autoSync`) and the last auto-sync result (`lastAutoSync`). It never returns
@@ -253,6 +254,17 @@ auto-sync right now for the current organization only — the same code path as 
 06:00 Taipei Cron Trigger (Simpany invoices + salary declarations, Wise
 transactions, Azure / GCP billing within the ticked scope + reconciliation; never
 issues or voids invoices).
+**Recurring expenses (固定支出)** — `list_recurring_expenses` (with the next
+charge date on the Asia/Taipei calendar) and owner/admin-only
+`create_`/`update_`/`delete_recurring_expense` record which vendor charges on
+which schedule and with which payment method (`paymentMethodId`, from
+`list_payment_methods`). The list returns the payment method's label and last
+four digits and the ledger account it settles from (`expectedAccountId`),
+read-only; edit those with `upsert_payment_method`. They are bookkeeping metadata; nothing pays or charges anything. `preview_billing_notifications`
+(`period?`, `send?`) renders the Discord charge reminders due now and a month's
+recap without posting, even before Discord is connected; `send: true`
+(owner/admin, Discord integration on) posts that recap now. See
+[`integrations.md`](integrations.md#discord固定支出通知).
 Integration business tools live in their own `tools-<provider>.ts` and stay in
 `tools/list` whether or not the org has connected the integration; at call time
 they go through `requireIntegrationForTool()` and fail with a clear zh-TW message

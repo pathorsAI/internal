@@ -100,10 +100,25 @@ export const INTEGRATION_CATALOG: Record<IntegrationProviderId, IntegrationCatal
     ],
     website: "https://console.cloud.google.com/billing",
   },
+  discord: {
+    id: "discord",
+    logo: { letter: "D", className: "bg-indigo-500 text-white" },
+    // webhook 網址本身就是憑證（含 token），所以放 credentialFields 加密存放。
+    credentialFields: [
+      { key: "webhookUrl", labelKey: "webhookUrl", type: "token", required: true, autoComplete: "off" },
+    ],
+    // 解析與預設值見 discord-config.ts；不合法的值在連接時就擋下。
+    configFields: [
+      { key: "mentionRoleId", labelKey: "mentionRoleId", type: "text", required: false, autoComplete: "off" },
+      { key: "recapDay", labelKey: "recapDay", type: "text", required: false, autoComplete: "off" },
+      { key: "reminderDays", labelKey: "reminderDays", type: "text", required: false, autoComplete: "off" },
+    ],
+    website: "https://discord.com",
+  },
 };
 
 /** 設定頁的排列順序。 */
-export const INTEGRATION_ORDER: readonly IntegrationProviderId[] = ["simpany", "wise", "azure", "gcp"];
+export const INTEGRATION_ORDER: readonly IntegrationProviderId[] = ["simpany", "wise", "azure", "gcp", "discord"];
 
 export function getCatalogEntry(id: IntegrationProviderId): IntegrationCatalogEntry {
   return INTEGRATION_CATALOG[id];

@@ -190,6 +190,16 @@ and overview pages select these columns. Avatars live in the same `STORAGE` buck
 Deploying before running it is safe — those log inserts are silently dropped by
 the CHECK until it runs; the sync itself is unaffected.
 
+The same route then posts the recurring-expense Discord notifications
+(`src/lib/billing-notify.ts`, see
+[integrations.md](integrations.md#discord固定支出通知)), so the local
+`__scheduled` check above **also posts to Discord** for any org whose Discord
+integration is on. `migrations/0032_recurring_expenses_discord.sql` (run it after
+`0031`; it references `payment_methods`) adds the tables and allows
+`provider = 'discord'`. Run it before deploying: until it
+runs, the 固定支出 page fails, and Discord cannot be connected (the CHECK rejects
+it), so the cron finds no Discord rows and the notification step does nothing.
+
 ### Useful scripts
 
 | Script | What it does |

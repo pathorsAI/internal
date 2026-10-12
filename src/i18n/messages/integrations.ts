@@ -45,6 +45,13 @@ const integrations = {
         en: "Read-only sync of GCP billing accounts and their projects; with a BigQuery billing export it also reads monthly costs and reconciles them against the ledger.",
       },
     },
+    discord: {
+      name: { "zh-TW": "Discord", en: "Discord" },
+      description: {
+        "zh-TW": "在 Discord 頻道發固定支出的扣款提醒，並每月發上個月的支出回顧。",
+        en: "Posts reminders before recurring vendor charges and a monthly recap of last month's spend to a Discord channel.",
+      },
+    },
     googleCalendar: {
       name: { "zh-TW": "Google 日曆", en: "Google Calendar" },
       description: {
@@ -76,6 +83,10 @@ const integrations = {
     },
     serviceAccountEmail: { "zh-TW": "要 impersonate 的 service account", en: "Service account to impersonate" },
     billingAccountId: { "zh-TW": "Billing account ID（計費範圍 › 屬性）", en: "Billing account ID (billing scope › Properties)" },
+    webhookUrl: { "zh-TW": "Webhook 網址", en: "Webhook URL" },
+    mentionRoleId: { "zh-TW": "要 @ 的身分組 ID（選填）", en: "Role ID to mention (optional)" },
+    recapDay: { "zh-TW": "每月回顧日（1–28，預設 1）", en: "Monthly recap day (1–28, default 1)" },
+    reminderDays: { "zh-TW": "扣款前幾天提醒（0–14，預設 3）", en: "Days before a charge to remind (0–14, default 3)" },
   },
   status: {
     notConnected: { "zh-TW": "未連接", en: "Not connected" },
