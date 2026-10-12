@@ -421,7 +421,7 @@ function paidFromExpectedAccount(expense: RecurringExpense, payer: Payer): boole
 }
 
 function distinctSorted(values: readonly (string | null)[]): string[] {
-  return [...new Set(values.filter((v): v is string => !!v))].sort();
+  return [...new Set(values.filter((v): v is string => !!v))].sort((a, b) => a.localeCompare(b));
 }
 
 /** 退回付款方式時只算設定從這個帳戶扣的卡：設定成別的帳戶扣的卡出現在這組，代表扣錯帳戶，不是這個帳戶的卡。 */
@@ -440,6 +440,57 @@ function groupLast4s(
 
 /** 公司帳戶在前（依名稱），員工代墊其次，沒填帳戶的最後。 */
 const PAYER_ORDER: Record<Payer["kind"], number> = { account: 0, advance: 1, unassigned: 2 };
+
+function toRecapGroup(
+  payer: Payer,
+  lines: Map<number, LedgerTransaction[]>,
+  expenseById: Map<number, RecurringExpense>,
+): RecapGroup {
+  const recapLines = [...lines.entries()]
+    .map(([expenseId, txns]): RecapLine => {
+      const expense = expenseById.get(expenseId)!;
+      const fees = txns.filter((t) => isBankFee(expense, t));
+      return {
+        expenseId,
+        name: expense.name,
+        transactionIds: txns.map((t) => t.id).sort((a, b) => a - b),
+        count: txns.length - fees.length,
+        feeCount: fees.length,
+        totals: sumByCurrency(txns),
+        fees: sumByCurrency(fees),
+      };
+    })
+    .sort((a, b) => leadingAmount(b.totals) - leadingAmount(a.totals) || a.expenseId - b.expenseId);
+  return {
+    label: payerLabel(payer),
+    payer,
+    last4s: groupLast4s(
+      payer,
+      [...lines.values()].flat(),
+      [...lines.keys()].map((id) => expenseById.get(id)!),
+    ),
+    subtotals: sumByCurrency(recapLines.flatMap((l) => l.totals)),
+    lines: recapLines,
+  };
+}
+
+/** 期間內的代墊依員工分組；期間之前的歸「更早」；期間之後的不列。 */
+function splitAdvances(
+  advances: readonly OutstandingAdvance[],
+  period: string,
+): { newByEmployee: Map<string, Money[]>; older: OutstandingAdvance[] } {
+  const { start, endExclusive } = periodRange(period);
+  const newByEmployee = new Map<string, Money[]>();
+  const older: OutstandingAdvance[] = [];
+  for (const a of advances) {
+    if (a.txnDate < start) older.push(a);
+    else if (a.txnDate < endExclusive) {
+      const name = a.employeeName ?? "（未指定員工）";
+      newByEmployee.set(name, [...(newByEmployee.get(name) ?? []), a]);
+    }
+  }
+  return { newByEmployee, older };
+}
 
 export function buildRecap(input: RecapInput): RecapModel {
   const assigned = assignTransactions(input.expenses, input.transactions);
@@ -475,46 +526,10 @@ export function buildRecap(input: RecapInput): RecapModel {
 
   const expenseById = new Map(input.expenses.map((e) => [e.id, e]));
   const recapGroups: RecapGroup[] = [...groups.values()]
-    .map(({ payer, lines }) => {
-      const recapLines = [...lines.entries()]
-        .map(([expenseId, txns]): RecapLine => {
-          const expense = expenseById.get(expenseId)!;
-          const fees = txns.filter((t) => isBankFee(expense, t));
-          return {
-            expenseId,
-            name: expense.name,
-            transactionIds: txns.map((t) => t.id).sort((a, b) => a - b),
-            count: txns.length - fees.length,
-            feeCount: fees.length,
-            totals: sumByCurrency(txns),
-            fees: sumByCurrency(fees),
-          };
-        })
-        .sort((a, b) => leadingAmount(b.totals) - leadingAmount(a.totals) || a.expenseId - b.expenseId);
-      return {
-        label: payerLabel(payer),
-        payer,
-        last4s: groupLast4s(
-          payer,
-          [...lines.values()].flat(),
-          [...lines.keys()].map((id) => expenseById.get(id)!),
-        ),
-        subtotals: sumByCurrency(recapLines.flatMap((l) => l.totals)),
-        lines: recapLines,
-      };
-    })
+    .map(({ payer, lines }) => toRecapGroup(payer, lines, expenseById))
     .sort((a, b) => PAYER_ORDER[a.payer.kind] - PAYER_ORDER[b.payer.kind] || a.label.localeCompare(b.label));
 
-  const { start, endExclusive } = periodRange(input.period);
-  const newByEmployee = new Map<string, Money[]>();
-  const older: OutstandingAdvance[] = [];
-  for (const a of input.outstandingAdvances) {
-    if (a.txnDate < start) older.push(a);
-    else if (a.txnDate < endExclusive) {
-      const name = a.employeeName ?? "（未指定員工）";
-      newByEmployee.set(name, [...(newByEmployee.get(name) ?? []), a]);
-    }
-  }
+  const { newByEmployee, older } = splitAdvances(input.outstandingAdvances, input.period);
 
   return {
     period: input.period,
@@ -552,7 +567,8 @@ function mention(roleId: string | null): string {
 }
 
 function last4Suffix(last4s: readonly string[]): string {
-  return last4s.length > 0 ? ` ${last4s.map((l) => `••••${l}`).join(" / ")}` : "";
+  const cards = last4s.map((l) => "••••" + l).join(" / ");
+  return last4s.length > 0 ? ` ${cards}` : "";
 }
 
 /** Discord 的遮罩連結；角括號讓 Discord 不展開成預覽卡片。沒有 appUrl 就只留文字。 */
@@ -607,7 +623,8 @@ function groupHeader(group: RecapGroup, period: string, appUrl: string | undefin
   if (payer.kind === "advance") return `### 👤 ${group.label}`;
   const text = `${group.label}${last4Suffix(group.last4s)}`;
   if (payer.kind === "unassigned") return `### 💳 ${text}`;
-  return `### 💳 ${appLink(text, `/dashboard/transactions?account=${payer.accountId}&period=${period}`, appUrl)}`;
+  const href = `/dashboard/transactions?account=${payer.accountId}&period=${period}`;
+  return `### 💳 ${appLink(text, href, appUrl)}`;
 }
 
 function countNote(line: RecapLine): string {
@@ -649,7 +666,8 @@ export function renderRecapMessages(model: RecapModel, opts: RenderOptions): str
     }
     if (model.olderAdvances) {
       const { count, totals } = model.olderAdvances;
-      lines.push(`- ${appLink(`更早未報帳 共 ${formatTotals(totals, " + ")}（${count} 筆）`, "/dashboard/advances", appUrl)}`);
+      const label = `更早未報帳 共 ${formatTotals(totals, " + ")}（${count} 筆）`;
+      lines.push(`- ${appLink(label, "/dashboard/advances", appUrl)}`);
     }
   }
 
