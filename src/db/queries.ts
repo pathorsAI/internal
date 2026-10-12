@@ -716,6 +716,7 @@ export async function listParties(orgId: string) {
       typicalAmount: parties.typicalAmount,
       contact: parties.contact,
       note: parties.note,
+      aliases: parties.aliases,
       isActive: parties.isActive,
       accountName: bankAccounts.name,
       // 頭像：只給「有沒有」與版本（cache buster），不給 R2 key —— key 是內部細節，

@@ -120,6 +120,7 @@ export default async function PartiesPage() {
                       typicalAmount: s.typicalAmount,
                       contact: s.contact,
                       note: s.note,
+                      aliases: s.aliases,
                       isActive: s.isActive,
                       avatarVersion: s.avatarVersion,
                     }}

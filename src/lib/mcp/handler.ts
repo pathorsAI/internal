@@ -38,6 +38,8 @@ const AUDIT_BY_NAME: Record<string, Pick<McpAudit, "action" | "entityType">> = {
   upsert_vendor_billing_account: { action: "update", entityType: "vendor_billing_account" },
   upsert_payment_method: { action: "update", entityType: "payment_method" },
   resolve_vendor_invoice: { action: "update", entityType: "vendor_invoice" },
+  // 合併交易對象：記在目標上（結果的 id）；來源同時被軟刪除。
+  merge_parties: { action: "update", entityType: "party" },
 };
 
 /** The numeric entity id a tool result names, if any (`id`, else first of `ids`). */
@@ -80,7 +82,7 @@ function deriveMcpAudit(name: string, out: unknown): McpAudit | null {
 
 /** Bump on every published change to tools, schemas or instructions. Clients
  *  (and OpenAI's plugin "Scan Tools") key their cached snapshot off this. */
-export const SERVER_VERSION = "1.11.0";
+export const SERVER_VERSION = "1.12.0";
 
 /** Public base URL of this deployment; doubles as the OAuth issuer.
  *  Keep in sync with the `resource` passed to `mcp()` in src/lib/auth.ts. */
@@ -316,6 +318,8 @@ const DESTRUCTIVE_OVERRIDES: Record<string, Partial<ToolAnnotations>> = {
   // Writes the payslip AND the matching salary-expense ledger entry; the month
   // cannot be recorded twice and there is no tool that reverses the entry.
   pay_employee_salary: { destructiveHint: true },
+  // Moves every record off the source parties and deletes them; no unmerge tool.
+  merge_parties: { destructiveHint: true },
 };
 
 // Writes that are safe to repeat with the same arguments, but whose verb isn't
@@ -353,6 +357,7 @@ const TITLE_OVERRIDES: Record<string, string> = {
   list_salary_status: "Salary status by month",
   list_upcoming_billing: "Upcoming billing",
   mark_accountant_notified: "Mark as sent to the accountant",
+  merge_parties: "Merge duplicate counterparties",
   salary_arrears: "Salary arrears by employee",
   pay_employee_salary: "Record a salary payslip",
   preview_billing_notifications: "Preview or post the vendor charge notifications",

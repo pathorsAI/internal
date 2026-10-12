@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl";
 import { Field, SelectField, TextField } from "@/components/form-field";
 import { CurrencySelect } from "@/components/currency-select";
 import { SelectItem } from "@/components/ui/select";
+import { textareaClass } from "@/app/dashboard/vendor-billing/shared";
 
 export type AccountOption = { id: number; name: string; currency: string };
 
@@ -16,6 +17,7 @@ export type PartyFormValues = {
   typicalAmount: string | null;
   contact: string | null;
   note: string | null;
+  aliases: string[];
   isActive: boolean;
 };
 
@@ -88,6 +90,18 @@ export function PartyFields({
         placeholder={t("form.notePlaceholder")}
         defaultValue={values?.note ?? ""}
       />
+      {/* 別名：一行一個。匯入（Wise 等）時名稱或別名對得上就歸到這個對象，見 src/lib/party-aliases.ts。 */}
+      <Field label={t("form.aliases")} htmlFor="aliases" wide>
+        <textarea
+          id="aliases"
+          name="aliases"
+          rows={3}
+          placeholder={t("form.aliasesPlaceholder")}
+          defaultValue={values?.aliases.join("\n") ?? ""}
+          className={textareaClass}
+        />
+        <p className="text-xs text-muted-foreground">{t("form.aliasesHint")}</p>
+      </Field>
       {/* 啟用狀態只有編輯時能改，新增一律是啟用。 */}
       {values && (
         <label className="flex items-center gap-2 text-sm sm:col-span-2">

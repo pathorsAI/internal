@@ -41,6 +41,12 @@ const parties = {
     contactPlaceholder: { "zh-TW": "選填", en: "Optional" },
     note: { "zh-TW": "備註", en: "Note" },
     notePlaceholder: { "zh-TW": "選填", en: "Optional" },
+    aliases: { "zh-TW": "別名", en: "Aliases" },
+    aliasesPlaceholder: { "zh-TW": "一行一個，例：\nGithub, Inc.\nFacebk *", en: "One per line, e.g.\nGithub, Inc.\nFacebk *" },
+    aliasesHint: {
+      "zh-TW": "匯入的對象名稱跟別名相同（不分大小寫）就歸到這裡；結尾加 * 代表開頭相同就算，例如「Grab*」。",
+      en: "Imported names that equal an alias (case-insensitive) are filed here; end with * to match by prefix, e.g. \"Grab*\".",
+    },
     isActive: { "zh-TW": "啟用", en: "Active" },
     cancel: { "zh-TW": "取消", en: "Cancel" },
     save: { "zh-TW": "儲存", en: "Save" },

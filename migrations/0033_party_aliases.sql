@@ -1,0 +1,25 @@
+-- 0033: 交易對象別名（parties.aliases），讓同一家廠商的不同寫法對到同一個交易對象。
+--
+-- 問題：Wise 每天自動匯入交易，對象（party）原本只用「名稱完全相同」比對，查無就自動新建。
+-- 信用卡帳單上的商家字串每筆都不一樣（`Facebk *26qx2aj6e4`、`Grab* A-9p4ckuhgwjnpav`），
+-- 或同一家有多種拼法（`ElevenLabs` / `Elevenlabs.io`、`GitHub` / `Github, Inc.`），
+-- 結果同一家廠商被拆成一堆交易對象。
+--
+-- - aliases   這個交易對象的其他名稱。比對一律不分大小寫、前後空白不算：
+--             一般別名 = 名稱完全相同才算；以 `*` 結尾的別名 = 前綴比對（`Facebk *`、`Grab*`）。
+--             優先順序：名稱完全相同 > 別名完全相同 > 最長的前綴別名；同分取 id 最小的
+--             （src/lib/party-aliases.ts matchParty，Wise 匯入、MCP 建交易、表單客戶欄、Simpany 同步共用）。
+--             只比對未刪除的交易對象 —— 軟刪除的對象不再吃掉新匯入的交易。
+--
+-- 合併交易對象（src/lib/party-merge.ts，MCP merge_parties）會把來源的名稱與別名併進目標的 aliases，
+-- 所有指向來源的外鍵改指目標，來源軟刪除；之後新匯入的同名交易會直接對到目標。
+--
+-- 不加索引：比對要做前綴與不分大小寫，GIN(text[]) 幫不上忙；每次只撈「名稱相符或有別名」的
+-- 未刪除對象（每個組織頂多數百筆），走既有的 idx_parties_org 就夠。
+--
+-- ⚠️ 部署順序：先跑這支 migration 再部署程式碼。listParties / getParty / 匯入比對都會 select 這一欄，
+-- 欄位不存在時交易對象頁、MCP 與 Wise 同步都會壞。
+--
+-- Forward-only，全部 additive（NOT NULL 但有預設值 '{}'，既有列直接是空陣列）。Run AFTER 0032。
+
+ALTER TABLE parties ADD COLUMN aliases text[] NOT NULL DEFAULT '{}';

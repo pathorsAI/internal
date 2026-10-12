@@ -28,6 +28,9 @@ import {
   rowSchema,
   type ToolDef,
 } from "./shared";
+import { normalizeAliases } from "@/lib/party-aliases";
+import { isMergeGuardFailure, mergeParties } from "@/lib/party-merge";
+import { partyMergeDeps } from "@/lib/party-merge-deps";
 
 const PARTY_LABELS = ["vendor", "customer", "gov", "other"] as const;
 const CATEGORY_KINDS = [
@@ -57,6 +60,13 @@ const DELETED_RESULT: JsonSchemaObject = {
   additionalProperties: false,
 };
 
+const ALIASES_PROP = {
+  type: "array",
+  items: { type: "string" },
+  description:
+    "Other names this party is matched by when importing (Wise, create_transaction partyName, …). Case-insensitive exact match; an alias ending in * is a prefix match (e.g. 'Facebk *', 'Grab*').",
+} as const;
+
 const PARTY_ROW_PROPS = {
   id: { type: "number" },
   deletedAt: { type: ["string", "null"], description: "Soft-delete timestamp; null while active." },
@@ -71,6 +81,7 @@ const PARTY_ROW_PROPS = {
   note: { type: ["string", "null"] },
   isActive: { type: "boolean" },
   createdAt: { type: "string" },
+  aliases: ALIASES_PROP,
   hasAvatar: { type: "boolean", description: "Whether a logo/avatar image has been uploaded (managed in the web app; not exposed over MCP)." },
 } as const;
 
@@ -208,6 +219,7 @@ const PARTY_LIST_ROW: JsonSchemaObject = rowSchema({
   typicalAmount: { type: ["string", "null"], description: "Decimal as a string." },
   contact: { type: ["string", "null"] },
   note: { type: ["string", "null"] },
+  aliases: ALIASES_PROP,
   isActive: { type: "boolean" },
   accountName: { type: ["string", "null"], description: "Name of defaultAccountId, when set." },
   hasAvatar: { type: "boolean", description: "Whether a logo/avatar image has been uploaded (managed in the web app; not exposed over MCP)." },
@@ -223,11 +235,62 @@ const PARTY_LIST_ROW: JsonSchemaObject = rowSchema({
   },
 });
 
+const MERGE_COUNT = { type: "number" } as const;
+
+const MERGE_RESULT: JsonSchemaObject = {
+  type: "object",
+  properties: {
+    id: { type: "number", description: "The target party id." },
+    name: { type: "string", description: "The target party name." },
+    mergedIds: { type: "array", items: { type: "number" }, description: "Source party ids, now deleted." },
+    mergedNames: { type: "array", items: { type: "string" } },
+    aliases: { ...ALIASES_PROP, description: "The target's aliases after the merge." },
+    moved: {
+      type: "object",
+      description: "Rows moved from the sources to the target, per table.",
+      properties: {
+        transactions: MERGE_COUNT,
+        projects: MERGE_COUNT,
+        subscriptions: MERGE_COUNT,
+        contracts: MERGE_COUNT,
+        billingItems: MERGE_COUNT,
+        invoices: MERGE_COUNT,
+        vendorBillingAccounts: MERGE_COUNT,
+        vendorBillingMatchParties: { type: "number", description: "Vendor billing accounts whose extra match parties were updated." },
+        recurringExpenses: MERGE_COUNT,
+      },
+      required: [
+        "transactions",
+        "projects",
+        "subscriptions",
+        "contracts",
+        "billingItems",
+        "invoices",
+        "vendorBillingAccounts",
+        "vendorBillingMatchParties",
+        "recurringExpenses",
+      ],
+      additionalProperties: false,
+    },
+  },
+  required: ["id", "name", "mergedIds", "mergedNames", "aliases", "moved"],
+  additionalProperties: false,
+};
+
 const CATEGORY_LIST_ROW: JsonSchemaObject = rowSchema({
   id: { type: "number" },
   name: { type: "string" },
   kind: { type: "string", enum: [...CATEGORY_KINDS] },
 });
+
+function optAliases(args: Record<string, unknown>): string[] | undefined {
+  const v = args.aliases;
+  if (v === undefined || v === null) return undefined;
+  if (!Array.isArray(v) || v.some((a) => typeof a !== "string")) {
+    throw new Error('"aliases" must be an array of strings.');
+  }
+  return v as string[];
+}
 
 function optLabel(args: Record<string, unknown>): string | undefined {
   const v = optString(args, "label");
@@ -295,6 +358,7 @@ export const accountingTools: Record<string, ToolDef> = {
         typicalAmount: { type: "number" },
         contact: { type: "string" },
         note: { type: "string" },
+        aliases: ALIASES_PROP,
         ...ORG_ARG,
       },
       required: ["name"],
@@ -308,12 +372,14 @@ export const accountingTools: Record<string, ToolDef> = {
       if (defaultAccountId !== undefined) {
         await assertInOrg(db, bankAccounts, defaultAccountId, orgId, "Bank account");
       }
+      const name = requireString(args, "name");
+      const aliases = optAliases(args);
       try {
         const [row] = await db
           .insert(parties)
           .values({
             organizationId: orgId,
-            name: requireString(args, "name"),
+            name,
             label: optLabel(args) ?? "vendor",
             taxId: optString(args, "taxId") ?? null,
             defaultCurrency: optString(args, "defaultCurrency")
@@ -323,6 +389,7 @@ export const accountingTools: Record<string, ToolDef> = {
             typicalAmount: optDecimal(args, "typicalAmount") ?? null,
             contact: optString(args, "contact") ?? null,
             note: optString(args, "note") ?? null,
+            aliases: aliases ? normalizeAliases(aliases, name) : [],
           })
           .returning();
         return partyOut(row);
@@ -334,7 +401,7 @@ export const accountingTools: Record<string, ToolDef> = {
 
   update_party: {
     description:
-      "Update a counterparty. Only provided fields change. Set isActive=false to deactivate (soft-delete).",
+      "Update a counterparty. Only provided fields change. Set isActive=false to deactivate (soft-delete). Use aliases to file differently spelled imports under this party (e.g. card statement merchants like 'Facebk *'); to fold existing duplicate parties into one, use merge_parties.",
     inputSchema: {
       type: "object",
       properties: {
@@ -347,6 +414,7 @@ export const accountingTools: Record<string, ToolDef> = {
         typicalAmount: { type: "number" },
         contact: { type: "string" },
         note: { type: "string" },
+        aliases: { ...ALIASES_PROP, description: `${ALIASES_PROP.description} Replaces the whole list; pass [] to clear.` },
         isActive: { type: "boolean" },
         ...ORG_ARG,
       },
@@ -374,6 +442,11 @@ export const accountingTools: Record<string, ToolDef> = {
       if (optString(args, "contact") !== undefined) patch.contact = optString(args, "contact");
       if (optString(args, "note") !== undefined) patch.note = optString(args, "note");
       if (optBoolean(args, "isActive") !== undefined) patch.isActive = optBoolean(args, "isActive");
+      const aliases = optAliases(args);
+      if (aliases) {
+        const ownName = (patch.name as string | undefined) ?? (await getParty(orgId, id))?.name;
+        patch.aliases = normalizeAliases(aliases, ownName);
+      }
       if (Object.keys(patch).length === 0) throw new Error("Nothing to update.");
       try {
         const [row] = await db
@@ -409,6 +482,40 @@ export const accountingTools: Record<string, ToolDef> = {
         .set({ deletedAt: new Date().toISOString() })
         .where(and(eq(parties.organizationId, orgId), eq(parties.id, id)));
       return { deleted: true, id };
+    },
+  },
+
+  merge_parties: {
+    description:
+      "Merge duplicate counterparties into one. Every record pointing at a source party (transactions, projects, subscriptions, contracts, billing items, invoices, vendor billing accounts incl. their extra match parties, recurring expenses) is moved to the target; each source's name and aliases are added to the target's aliases so future imports (Wise, partyName) land on the target; the sources are then deleted. Runs in one database transaction. Cannot be undone from MCP — confirm the target and sources with the user (list_parties) before calling. Typical use: card-statement merchants split per charge, e.g. 'Facebk *26qx2aj6e4' + 'Facebk *9kq…' → 'Meta Ads' with alias 'Facebk *' (add prefix aliases afterwards with update_party).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targetId: { type: "number", description: "Party that is kept; see list_parties." },
+        sourceIds: {
+          type: "array",
+          items: { type: "number" },
+          minItems: 1,
+          description: "Parties folded into the target and then deleted. Must not include targetId.",
+        },
+        ...ORG_ARG,
+      },
+      required: ["targetId", "sourceIds"],
+      additionalProperties: false,
+    },
+    outputSchema: MERGE_RESULT,
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      const sourceIds = args.sourceIds;
+      if (!Array.isArray(sourceIds)) throw new Error('"sourceIds" must be an array of party ids.');
+      try {
+        return await mergeParties(partyMergeDeps(), orgId, requireNumber(args, "targetId"), sourceIds);
+      } catch (e) {
+        if (isMergeGuardFailure(e)) {
+          throw new Error("A party changed while merging (deleted or moved). Nothing was changed; list_parties and try again.");
+        }
+        throw e;
+      }
     },
   },
 

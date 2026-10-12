@@ -279,6 +279,8 @@ export const parties = pgTable("parties", {
 	// 讀取走 /api/parties/[id]/avatar（驗證組織後才從 R2 串流）。avatarUpdatedAt 是網址的 cache buster。
 	avatarR2Key: text("avatar_r2_key"),
 	avatarUpdatedAt: timestamp("avatar_updated_at", { withTimezone: true, mode: 'string' }),
+	// 別名（migrations/0033）：不分大小寫；以 * 結尾 = 前綴比對。比對邏輯在 src/lib/party-aliases.ts。
+	aliases: text().array().default(sql`'{}'::text[]`).notNull(),
 }, (table) => [
 	foreignKey({
 			columns: [table.defaultAccountId],

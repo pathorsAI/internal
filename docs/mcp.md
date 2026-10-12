@@ -125,8 +125,8 @@ the `tools-*.ts` modules):
 - `_meta["openai/toolInvocation/invoking" | "invoked"]`, the status line ChatGPT
   shows while a call is in flight.
 
-**Output schemas.** Every tool declares an `outputSchema` — all 105 of them, as of
-server version 1.11.0 (the Simpany tools whose result shape comes from Simpany's
+**Output schemas.** Every tool declares an `outputSchema` — all 106 of them, as of
+server version 1.12.0 (the Simpany tools whose result shape comes from Simpany's
 unofficial API declare an open object schema). When a tool declares one the handler additionally returns
 the result as MCP `structuredContent` (the JSON text block stays, per MCP's
 back-compat recommendation), which is what ChatGPT and Codex prefer over parsing
@@ -196,13 +196,25 @@ those, and `update_transaction` clears the flag when it sets a category (or pass
 `needsReview: false` explicitly).
 
 **Accounting master data** — parties: `list_parties`/`get_party`/`create_party`/
-`update_party`/`delete_party`; categories: `list_categories`/`create_category`/
+`update_party`/`delete_party`/`merge_parties`; categories: `list_categories`/`create_category`/
 `update_category`/`delete_category`; bank accounts: `list_bank_accounts`/
 `get_bank_account`/`create_bank_account`/`update_bank_account`/`delete_bank_account`;
 invoices: `list_invoices`/`get_invoice`/`create_invoice`/`delete_invoice`.
 `create_invoice` takes `partyId` / `contractId` / `billingItemId`; binding an
 invoice to a scheduled charge fills that charge's 開發票日, which clears it from
 the 待開發票 list.
+A party carries `aliases` (migrations/0033): other names it is matched by when a
+name comes in from an import — Wise sync, `create_transaction` /
+`bulk_create_transactions` `partyName`, the web forms' customer field, Simpany
+sync. Matching is case-insensitive; an alias ending in `*` is a prefix match
+(`Facebk *`, `Grab*`). Priority: exact name > exact alias > longest prefix alias,
+ties → lowest id; deleted parties never match (src/lib/party-aliases.ts).
+`merge_parties` (`targetId`, `sourceIds[]`) folds duplicates into one party in a
+single transaction: every FK pointing at a source (transactions, projects,
+subscriptions, contracts, billing items, invoices, vendor billing accounts and
+their `matchPartyIds`, recurring expenses) moves to the target, the sources'
+names and aliases are appended to the target's aliases, and the sources are
+soft-deleted. It is annotated destructive (no unmerge).
 
 **Client ops** — projects/subscriptions/contracts each have `list_*` +
 `create_*`/`update_*`/`delete_*` (`list_customers` is a convenience filter of

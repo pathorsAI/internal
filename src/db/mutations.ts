@@ -32,6 +32,8 @@ import { uploadDocument } from "@/lib/storage";
 import { validateAvatarBytes } from "@/lib/party-avatar";
 import { removePartyAvatar, replacePartyAvatar } from "@/lib/party-avatar-store";
 import { partyAvatarDeps } from "@/lib/party-avatar-deps";
+import { resolveOrCreateParty } from "@/lib/party-resolve";
+import { parseAliasesText } from "@/lib/party-aliases";
 import { canManageOrg, requireOrg, requireOrgWithRole } from "@/lib/session";
 import { auth } from "@/lib/auth";
 import { logWeb } from "@/db/activity";
@@ -217,6 +219,7 @@ export async function createParty(
         typicalAmount: str(formData.get("typicalAmount")),
         contact: str(formData.get("contact")),
         note: str(formData.get("note")),
+        aliases: parseAliasesText(str(formData.get("aliases")), name),
       })
       .returning({ id: parties.id });
     await logWeb(orgId, "create", "party", inserted.id, name);
@@ -269,28 +272,19 @@ export async function createReconciliation(
   }
 }
 
+/** 名稱 → 交易對象 id（比對名稱 / 別名，只看未刪除的；查無就新建）。 */
 async function getOrCreateParty(
   db: ReturnType<typeof getDb>,
   orgId: string,
   name: string,
   label: string,
 ): Promise<number> {
-  const found = await db
-    .select({ id: parties.id })
-    .from(parties)
-    .where(and(eq(parties.organizationId, orgId), eq(parties.name, name)))
-    .limit(1);
-  if (found.length) return found[0].id;
-  const [created] = await db
-    .insert(parties)
-    .values({ organizationId: orgId, name, label })
-    .returning({ id: parties.id });
-  return created.id;
+  return (await resolveOrCreateParty(db, orgId, name, label)).id;
 }
 
 /**
  * 表單上的「客戶」欄一律收名稱而不是 id：使用者可以直接打一個新客戶，存檔時才
- * 建立，不必先跳去「交易對象」頁建好再回來。名稱已存在就連到既有那筆。
+ * 建立，不必先跳去「交易對象」頁建好再回來。名稱或別名已存在就連到既有那筆（src/lib/party-aliases.ts）。
  *
  * 回傳 `created` 讓呼叫端決定要不要 revalidate /parties —— 沒新建就不用。
  */
@@ -301,13 +295,7 @@ async function resolvePartyName(
   label = "customer",
 ): Promise<{ id: number | null; created: boolean }> {
   if (!name) return { id: null, created: false };
-  const [found] = await db
-    .select({ id: parties.id })
-    .from(parties)
-    .where(and(eq(parties.organizationId, orgId), eq(parties.name, name)))
-    .limit(1);
-  if (found) return { id: found.id, created: false };
-  return { id: await getOrCreateParty(db, orgId, name, label), created: true };
+  return resolveOrCreateParty(db, orgId, name, label);
 }
 
 /**
@@ -707,6 +695,8 @@ export async function updateParty(
         typicalAmount: str(formData.get("typicalAmount")),
         contact: str(formData.get("contact")),
         note: str(formData.get("note")),
+        // 沒帶這個欄位（舊版表單）就不動別名，免得一存就清空。
+        ...(formData.has("aliases") ? { aliases: parseAliasesText(str(formData.get("aliases")), name) } : {}),
         isActive: formData.get("isActive") === "on",
       })
       .where(and(eq(parties.organizationId, orgId), eq(parties.id, id)));
