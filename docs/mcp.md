@@ -389,8 +389,9 @@ Two commands produce that account. Run them against the environment you are
 submitting (`bun` picks up `.env.local`; use `bun --env-file=… ` for another):
 
 ```sh
-# 1. the sign-in credentials themselves (email + password, server-side only —
-#    HTTP sign-up is disabled on purpose).
+# 1. the sign-in credentials themselves (email + password). Created server-side
+#    so the reviewer gets a password right away, without the /signup email
+#    confirmation round-trip.
 bun scripts/create-user.ts \
   --email reviewer@example.com \
   --password '<a long passphrase>' \

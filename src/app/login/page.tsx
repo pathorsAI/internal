@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
@@ -11,7 +12,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useHydrated } from "@/hooks/use-hydrated";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { formText } from "@/components/auth/form-text";
 import { afterSsoLookup, type AfterSsoLookupNote, type SsoLookupResult } from "./sso-lookup";
+import { authPageHref, resolveRedirectTarget } from "./redirect-target";
+import { loginNotice } from "./login-notice";
 
 function GoogleIcon() {
   return (
@@ -36,21 +40,6 @@ function GoogleIcon() {
   );
 }
 
-// When better-auth's MCP plugin sends an unauthenticated user here, it appends
-// the original OAuth query (client_id, redirect_uri, code_challenge, …). After
-// sign-in we must return to the authorize endpoint so the flow can issue a code.
-function mcpAuthorizeCallback(params: URLSearchParams): string | null {
-  if (!params.get("client_id") || params.get("response_type") !== "code") {
-    return null;
-  }
-  return `/api/auth/mcp/authorize?${params.toString()}`;
-}
-
-function formText(form: FormData, name: string): string {
-  const value = form.get(name);
-  return typeof value === "string" ? value : "";
-}
-
 /**
  * Identifier-first：卡片先只問 email。email 的網域有註冊 SSO provider 就直接導去
  * IdP；其他結果一律換到密碼那一步（見 afterSsoLookup）。分支只看網域，不看帳號
@@ -61,7 +50,10 @@ function SignInMethods() {
   const params = useSearchParams();
   // ⚠️ 三種登入方式共用同一個 redirectTo。MCP 的 authorize query 只要有一條路徑
   // 沒接上，ChatGPT / Claude / Codex 的 OAuth 流程就會在登入後斷在這裡。
-  const redirectTo = mcpAuthorizeCallback(params) || params.get("redirect") || "/dashboard";
+  // 解析規則（含 ?redirect= 的 open redirect 防護）在 redirect-target.ts，
+  // 註冊、忘記密碼頁用的是同一份。
+  const redirectTo = resolveRedirectTarget(params);
+  const notice = loginNotice(params);
   const [step, setStep] = useState<"email" | "password">("email");
   const [note, setNote] = useState<AfterSsoLookupNote>(null);
   const [email, setEmail] = useState("");
@@ -73,6 +65,13 @@ function SignInMethods() {
     const { error } = await signIn.social({
       provider: "google",
       callbackURL: redirectTo,
+      // OAuth callback 出錯時導回這一頁（連同原本的 MCP query），而不是 better-auth
+      // 內建的 /api/auth/error 頁。主要是為了 SSO 網域的人第一次用 Google 登入：
+      // databaseHooks.user.create 擋下時，這裡會收到 ?error=SSO_REQUIRED，上方
+      // 顯示「請改用公司 SSO」，人就留在可以接著輸入 email 的地方。
+      // 只對 Google 設：SSO 那條 callback 自己用 `?` 硬接錯誤參數（@better-auth/sso
+      // 的 handleOIDCCallback），帶 query 的 errorCallbackURL 會被它接壞。
+      errorCallbackURL: authPageHref("/login", params),
     });
     if (error) {
       setPending(false);
@@ -154,12 +153,41 @@ function SignInMethods() {
         <Button type="submit" className="w-full" disabled={pending || !hydrated}>
           {pending ? t("password.submitting") : t("password.submit")}
         </Button>
+        {/* 兩個連結都會出現，不管這個 email 有沒有帳號——依帳號存在與否切換畫面
+            就成了帳號探測。原本的 query（MCP 的 OAuth 參數或 redirect）一起帶過去，
+            在那邊完成註冊／重設後才回得到原本的流程。 */}
+        <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+          <Link
+            href={authPageHref("/forgot-password", params, { email })}
+            className="text-muted-foreground underline-offset-4 hover:underline"
+          >
+            {t("password.forgot")}
+          </Link>
+          <Link
+            href={authPageHref("/signup", params, { email })}
+            className="text-muted-foreground underline-offset-4 hover:underline"
+          >
+            {t("password.signup")}
+          </Link>
+        </div>
       </form>
     );
   }
 
   return (
     <div className="space-y-4">
+      {notice && (
+        <p
+          role={notice === "passwordUpdated" ? "status" : "alert"}
+          className={
+            notice === "passwordUpdated"
+              ? "rounded-md border px-3 py-2 text-sm"
+              : "rounded-md border border-destructive/50 px-3 py-2 text-sm text-destructive"
+          }
+        >
+          {t(`notice.${notice}`)}
+        </p>
+      )}
       <form method="post" onSubmit={onEmail} className="space-y-3">
         <div className="space-y-1.5">
           <Label htmlFor="email">{t("email.label")}</Label>
