@@ -275,6 +275,10 @@ export const parties = pgTable("parties", {
 	note: text(),
 	isActive: boolean("is_active").default(true).notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	// 頭像 / logo（migrations/0030）。key 一律 org 命名空間：orgs/<org>/parties/<id>/avatar-<ts>.<ext>；
+	// 讀取走 /api/parties/[id]/avatar（驗證組織後才從 R2 串流）。avatarUpdatedAt 是網址的 cache buster。
+	avatarR2Key: text("avatar_r2_key"),
+	avatarUpdatedAt: timestamp("avatar_updated_at", { withTimezone: true, mode: 'string' }),
 }, (table) => [
 	foreignKey({
 			columns: [table.defaultAccountId],

@@ -168,6 +168,11 @@ integrations. On production, the owner-facing way to test is 設定 › 整合 �
 「立即執行自動同步」 (or MCP `run_integration_sync`), which runs the same code for
 one organization.
 
+**Migration 0030** (`migrations/0030_party_avatars.sql`) adds `parties.avatar_r2_key` /
+`avatar_updated_at`. Run it **before** deploying that code: the parties, transactions
+and overview pages select these columns. Avatars live in the same `STORAGE` bucket under
+`orgs/<organizationId>/parties/<partyId>/`.
+
 **Migration**: `migrations/0028_activity_channel_system.sql` allows
 `activity_log.channel = 'system'` (the auto-sync's audit entries, no human actor).
 Deploying before running it is safe — those log inserts are silently dropped by
@@ -263,10 +268,12 @@ plain Drizzle/Postgres.
 
 ## Storage portability
 
-Document uploads currently depend on Cloudflare R2 through the Workers binding:
+Document uploads and counterparty avatars currently depend on Cloudflare R2 through
+the Workers binding:
 
 - [`src/lib/storage.ts`](../src/lib/storage.ts) — `getCloudflareContext().env.STORAGE`
-  for `put` / `delete`.
+  for `put` / `get` / `delete` (avatars stream through `getObjectStream`, served by
+  `src/app/api/parties/[id]/avatar/route.ts`).
 - [`src/app/api/documents/[id]/route.ts`](../src/app/api/documents/[id]/route.ts) —
   `getCloudflareContext().env.STORAGE.get(...)` to stream files back.
 

@@ -27,3 +27,14 @@ export async function uploadDocument(
 export async function deleteDocument(key: string): Promise<void> {
   await bucket().delete(key);
 }
+
+/** 寫入一個 R2 物件（key 由呼叫端決定；失敗會 throw）。 */
+export async function putObject(key: string, body: Uint8Array, contentType: string): Promise<void> {
+  await bucket().put(key, body, { httpMetadata: { contentType } });
+}
+
+/** 讀取一個 R2 物件的串流；不存在回 null。 */
+export async function getObjectStream(key: string): Promise<ReadableStream | null> {
+  const obj = await bucket().get(key);
+  return obj ? obj.body : null;
+}

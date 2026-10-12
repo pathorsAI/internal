@@ -21,6 +21,7 @@ import { CurrencyFlag } from "@/components/currency-flag";
 import { cn } from "@/lib/utils";
 import { NewPartyDialog } from "./new-party-dialog";
 import { requireOrg } from "@/lib/session";
+import { PartyAvatar } from "@/components/party-avatar";
 
 export const dynamic = "force-dynamic";
 
@@ -88,7 +89,12 @@ export default async function PartiesPage() {
                   description={t("rowDialogDescription")}
                   cells={
                     <>
-                      <TableCell className="font-medium">{s.name}</TableCell>
+                      <TableCell className="font-medium">
+                        <div className="flex min-w-0 items-center gap-2.5">
+                          <PartyAvatar name={s.name} partyId={s.id} avatarVersion={s.avatarVersion} />
+                          <span className="truncate">{s.name}</span>
+                        </div>
+                      </TableCell>
                       <TableCell>
                         <Badge variant="outline">{labelMap[s.label] ?? s.label}</Badge>
                       </TableCell>
@@ -115,6 +121,7 @@ export default async function PartiesPage() {
                       contact: s.contact,
                       note: s.note,
                       isActive: s.isActive,
+                      avatarVersion: s.avatarVersion,
                     }}
                     accounts={accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }))}
                     footer={<DeleteButton action={deleteParty} id={s.id} />}

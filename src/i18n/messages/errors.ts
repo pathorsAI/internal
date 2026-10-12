@@ -72,6 +72,7 @@ const errors = {
     payslip: { "zh-TW": "找不到該薪資單", en: "Payslip not found" },
     billingItem: { "zh-TW": "找不到這筆請款項目", en: "Billing item not found" },
     subscription: { "zh-TW": "找不到這張訂閱", en: "Subscription not found" },
+    party: { "zh-TW": "找不到這個交易對象", en: "Counterparty not found" },
     // 表單送上來的外鍵 id 不屬於這個組織（或已刪除）時的統一訊息。刻意含糊：
     // 說「那筆屬於別的組織」等於幫人確認該 id 存在，本身就是一種洩漏。
     referencedRecord: { "zh-TW": "找不到選取的資料，請重新選擇", en: "A selected record was not found. Please choose again." },
@@ -93,6 +94,12 @@ const errors = {
     wrongEmployee: { "zh-TW": "這個帳戶不屬於該員工", en: "That account belongs to a different employee" },
     revealFailed: { "zh-TW": "無法顯示完整帳號（加密金鑰未設定或密文損壞）", en: "Could not reveal the account number (encryption key missing or data corrupted)" },
     nothingToConvert: { "zh-TW": "沒有可轉換的舊薪資帳戶，或這位員工已經有帳戶了", en: "There is no legacy salary account to convert, or this employee already has accounts" },
+  },
+  avatar: {
+    empty: { "zh-TW": "沒有收到圖片，請重新選擇", en: "No image was received. Please choose it again." },
+    tooLarge: { "zh-TW": "圖片太大（縮圖後須在 200 KB 以內）", en: "The image is too large (must be under 200 KB after resizing)" },
+    type: { "zh-TW": "只支援 PNG、JPEG、WebP 圖片", en: "Only PNG, JPEG and WebP images are supported" },
+    uploadFailed: { "zh-TW": "其他欄位已儲存，但頭像上傳失敗，請再試一次", en: "Other fields were saved, but the avatar upload failed. Please try again." },
   },
   unsupported: {
     transactionType: { "zh-TW": "不支援的交易類型", en: "Unsupported transaction type" },

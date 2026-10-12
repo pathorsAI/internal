@@ -71,7 +71,21 @@ const PARTY_ROW_PROPS = {
   note: { type: ["string", "null"] },
   isActive: { type: "boolean" },
   createdAt: { type: "string" },
+  hasAvatar: { type: "boolean", description: "Whether a logo/avatar image has been uploaded (managed in the web app; not exposed over MCP)." },
 } as const;
+
+/**
+ * 整列 parties → MCP 回傳的形狀：頭像的 R2 key 與更新時間是 web 內部細節（key 透露儲存
+ * 結構、MCP 也拿不到圖），只換成 hasAvatar。get / create / update_party 共用。
+ */
+function partyOut<T extends { avatarR2Key: string | null; avatarUpdatedAt: string | null }>(
+  row: T,
+): Omit<T, "avatarR2Key" | "avatarUpdatedAt"> & { hasAvatar: boolean } {
+  const out: Record<string, unknown> = { ...row, hasAvatar: row.avatarR2Key !== null };
+  delete out.avatarR2Key;
+  delete out.avatarUpdatedAt;
+  return out as Omit<T, "avatarR2Key" | "avatarUpdatedAt"> & { hasAvatar: boolean };
+}
 
 const PARTY_ROW: JsonSchemaObject = {
   type: "object",
@@ -182,7 +196,7 @@ function orNotFound(row: JsonSchemaObject): JsonSchemaObject {
   };
 }
 
-// list_parties 是自己組的 select（不是整列）：多了 accountName / txnCount / totals，
+// list_parties 是自己組的 select（不是整列）：多了 accountName / hasAvatar / txnCount / totals，
 // 少了 deletedAt / organizationId / createdAt。
 const PARTY_LIST_ROW: JsonSchemaObject = rowSchema({
   id: { type: "number" },
@@ -196,6 +210,7 @@ const PARTY_LIST_ROW: JsonSchemaObject = rowSchema({
   note: { type: ["string", "null"] },
   isActive: { type: "boolean" },
   accountName: { type: ["string", "null"], description: "Name of defaultAccountId, when set." },
+  hasAvatar: { type: "boolean", description: "Whether a logo/avatar image has been uploaded (managed in the web app; not exposed over MCP)." },
   txnCount: { type: "number" },
   totals: {
     type: "array",
@@ -239,8 +254,14 @@ export const accountingTools: Record<string, ToolDef> = {
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       const label = optLabel(args);
-      const rows = await listParties(orgId);
-      return listResult(label ? rows.filter((p) => p.label === label) : rows);
+      // 頭像只回「有沒有」：版本號 / R2 key / 網址都是 web 內部細節，MCP 用不到也不該拿到。
+      const all = await listParties(orgId);
+      const rows = (label ? all.filter((p) => p.label === label) : all).map((p) => {
+        const out: Record<string, unknown> = { ...p };
+        delete out.avatarVersion;
+        return out;
+      });
+      return listResult(rows);
     },
   },
 
@@ -255,7 +276,8 @@ export const accountingTools: Record<string, ToolDef> = {
     outputSchema: orNotFound(PARTY_ROW),
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
-      return (await getParty(orgId, requireNumber(args, "id"))) ?? { error: "Not found." };
+      const row = await getParty(orgId, requireNumber(args, "id"));
+      return row ? partyOut(row) : { error: "Not found." };
     },
   },
 
@@ -303,7 +325,7 @@ export const accountingTools: Record<string, ToolDef> = {
             note: optString(args, "note") ?? null,
           })
           .returning();
-        return row;
+        return partyOut(row);
       } catch (e) {
         throw fkError(e, "A party with this name already exists in your org.");
       }
@@ -360,7 +382,7 @@ export const accountingTools: Record<string, ToolDef> = {
           .where(and(eq(parties.organizationId, orgId), eq(parties.id, id)))
           .returning();
         if (!row) throw new Error(`Party ${id} not found in your organization.`);
-        return row;
+        return partyOut(row);
       } catch (e) {
         throw fkError(e, "A party with this name already exists in your org.");
       }

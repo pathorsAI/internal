@@ -49,6 +49,32 @@ const dashboard = {
       balance: { "zh-TW": "餘額", en: "Balance" },
     },
   },
+  spend: {
+    title: { "zh-TW": "支出去向", en: "Where the money went" },
+    byParty: { "zh-TW": "依廠商", en: "By vendor" },
+    byCategory: { "zh-TW": "依分類", en: "By category" },
+    range: {
+      month: { "zh-TW": "本月", en: "This month" },
+      "3m": { "zh-TW": "近 3 個月", en: "Last 3 months" },
+      "12m": { "zh-TW": "近 12 個月", en: "Last 12 months" },
+    },
+    total: { "zh-TW": "{range}支出合計（台幣）", en: "{range} · total spend (TWD)" },
+    other: { "zh-TW": "其他", en: "Other" },
+    unassignedParty: { "zh-TW": "未指定對象", en: "No counterparty" },
+    uncategorized: { "zh-TW": "未分類", en: "Uncategorized" },
+    empty: { "zh-TW": "這段期間沒有支出", en: "No spending in this period" },
+    unconverted: {
+      "zh-TW": "另有 {count} 筆外幣支出沒有台幣金額，未計入",
+      en: "{count, plural, one {# foreign-currency expense has} other {# foreign-currency expenses have}} no TWD amount and {count, plural, one {is} other {are}} not included",
+    },
+    tooltip: {
+      amount: { "zh-TW": "金額", en: "Amount" },
+      share: { "zh-TW": "占比", en: "Share" },
+      count: { "zh-TW": "筆數", en: "Transactions" },
+      otherParties: { "zh-TW": "共 {count} 個交易對象", en: "{count, plural, one {# counterparty} other {# counterparties}}" },
+      otherCategories: { "zh-TW": "共 {count} 個分類", en: "{count, plural, one {# category} other {# categories}}" },
+    },
+  },
   error: {
     message: { "zh-TW": "載入失敗，請重試。", en: "Failed to load. Please try again." },
     retry: { "zh-TW": "重新載入", en: "Reload" },
