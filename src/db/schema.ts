@@ -1,4 +1,4 @@
-import { pgTable, check, bigint, text, boolean, char, numeric, timestamp, date, unique, integer, foreignKey, index, uniqueIndex, jsonb } from "drizzle-orm/pg-core"
+import { pgTable, check, bigint, text, boolean, char, numeric, timestamp, date, unique, integer, foreignKey, index, uniqueIndex, jsonb, smallint } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 
@@ -688,7 +688,7 @@ export const calendarEventLinks = pgTable("calendar_event_links", {
 	check("chk_calendar_event_kind", sql`kind = ANY (ARRAY['due'::text, 'payment'::text, 'invoice'::text])`),
 ]);
 
-// ---- 組織層級外部整合（migrations/0023）。一列 = 一個組織的一個 provider，
+// ---- 組織層級外部整合（migrations/0023；azure / gcp 由 0031 加入）。一列 = 一個組織的一個 provider，
 // 框架在 src/lib/integrations。連接後預設關閉；中斷連接即刪列。----
 // credentials_enc / token_cache_enc 是 src/lib/crypto.ts 的密文，絕不存明文、
 // 絕不回傳給 client 或 MCP —— 讀取一律走 src/lib/integrations/store.ts。
@@ -711,7 +711,7 @@ export const orgIntegrations = pgTable("org_integrations", {
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	unique("uq_org_integration").on(table.organizationId, table.provider),
-	check("chk_org_integration_provider", sql`provider = ANY (ARRAY['simpany'::text, 'wise'::text])`),
+	check("chk_org_integration_provider", sql`provider = ANY (ARRAY['simpany'::text, 'wise'::text, 'azure'::text, 'gcp'::text])`),
 	check("chk_org_integration_status", sql`status = ANY (ARRAY['connected'::text, 'needs_reauth'::text, 'error'::text])`),
 ]);
 
@@ -820,4 +820,183 @@ export const simpanySalaryDrafts = pgTable("simpany_salary_drafts", {
 	index("idx_simpany_salary_draft_org_month").using("btree", table.organizationId.asc().nullsLast().op("text_ops"), table.year.asc().nullsLast().op("int4_ops"), table.month.asc().nullsLast().op("int4_ops"), table.createdAt.desc().nullsFirst().op("timestamptz_ops")),
 	check("chk_simpany_salary_draft_status", sql`status = ANY (ARRAY['pending'::text, 'applied'::text, 'settled'::text, 'cancelled'::text, 'expired'::text])`),
 	check("chk_simpany_salary_draft_month", sql`(month >= 1) AND (month <= 12)`),
+]);
+
+// ---- 廠商計費帳號追蹤（migrations/0031，src/lib/vendor-billing）。
+// 付款方式 → 平台計費帳號 → 底下資源；雲端帳單先比對既有交易，不重複記帳。
+// 每張表都有 organization_id；跨表參照的同組織驗證在 src/lib/vendor-billing/guards.ts。
+// owner_user_id → "user"(id) 的 FK 在 DB 端建立（user 表在 auth-schema.ts）。----
+
+export const paymentMethods = pgTable("payment_methods", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "payment_methods_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id").notNull(),
+	kind: text().notNull(),
+	label: text().notNull(),
+	brand: text(),
+	// 只存末四碼，絕不存完整卡號
+	last4: char({ length: 4 }),
+	expiryMonth: smallint("expiry_month"),
+	expiryYear: smallint("expiry_year"),
+	holderName: text("holder_name"),
+	settlesFromAccountId: bigint("settles_from_account_id", { mode: "number" }),
+	source: text().default('manual').notNull(),
+	externalRef: text("external_ref"),
+	isActive: boolean("is_active").default(true).notNull(),
+	note: text(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+	index("idx_payment_method_org").using("btree", table.organizationId.asc().nullsLast().op("text_ops")).where(sql`deleted_at IS NULL`),
+	uniqueIndex("uq_payment_method_external_ref").on(table.organizationId, table.source, table.externalRef).where(sql`external_ref IS NOT NULL`),
+	foreignKey({
+			columns: [table.settlesFromAccountId],
+			foreignColumns: [bankAccounts.id],
+			name: "payment_methods_settles_from_account_id_fkey"
+		}).onDelete("set null"),
+	check("chk_payment_method_kind", sql`kind = ANY (ARRAY['card'::text, 'reseller_invoice'::text, 'bank_transfer'::text, 'wise_card'::text, 'other'::text])`),
+	check("chk_payment_method_source", sql`source = ANY (ARRAY['manual'::text, 'azure'::text])`),
+	check("chk_payment_method_last4", sql`(last4 IS NULL) OR (last4 ~ '^[0-9]{4}$'::text)`),
+	check("chk_payment_method_expiry_month", sql`(expiry_month IS NULL) OR ((expiry_month >= 1) AND (expiry_month <= 12))`),
+	check("chk_payment_method_expiry_year", sql`(expiry_year IS NULL) OR ((expiry_year >= 2000) AND (expiry_year <= 2100))`),
+	check("chk_payment_method_external_ref", sql`(external_ref IS NULL) OR (source <> 'manual'::text)`),
+]);
+
+export const vendorBillingAccounts = pgTable("vendor_billing_accounts", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "vendor_billing_accounts_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id").notNull(),
+	partyId: bigint("party_id", { mode: "number" }),
+	provider: text().notNull(),
+	externalId: text("external_id"),
+	displayName: text("display_name").notNull(),
+	paymentMethodId: bigint("payment_method_id", { mode: "number" }),
+	ownerUserId: text("owner_user_id"),
+	source: text().default('manual').notNull(),
+	status: text().default('active').notNull(),
+	ledgerMode: text("ledger_mode").default('match_only').notNull(),
+	lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true, mode: 'string' }),
+	lastSeenAt: timestamp("last_seen_at", { withTimezone: true, mode: 'string' }),
+	// { masterBillingAccount, currency, reseller, billingAccountId … }
+	meta: jsonb().$type<Record<string, unknown>>().default({}).notNull(),
+	note: text(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+	index("idx_vendor_billing_account_org").using("btree", table.organizationId.asc().nullsLast().op("text_ops")).where(sql`deleted_at IS NULL`),
+	index("idx_vendor_billing_account_payment_method").using("btree", table.paymentMethodId.asc().nullsLast().op("int8_ops")).where(sql`payment_method_id IS NOT NULL`),
+	index("idx_vendor_billing_account_party").using("btree", table.partyId.asc().nullsLast().op("int8_ops")).where(sql`party_id IS NOT NULL`),
+	uniqueIndex("uq_vendor_billing_account_external").on(table.organizationId, table.provider, table.externalId).where(sql`external_id IS NOT NULL`),
+	foreignKey({
+			columns: [table.partyId],
+			foreignColumns: [parties.id],
+			name: "vendor_billing_accounts_party_id_fkey"
+		}).onDelete("set null"),
+	foreignKey({
+			columns: [table.paymentMethodId],
+			foreignColumns: [paymentMethods.id],
+			name: "vendor_billing_accounts_payment_method_id_fkey"
+		}).onDelete("set null"),
+	check("chk_vendor_billing_account_provider", sql`provider = ANY (ARRAY['azure'::text, 'gcp'::text, 'aws'::text, 'cloudflare'::text, 'other'::text])`),
+	check("chk_vendor_billing_account_source", sql`source = ANY (ARRAY['manual'::text, 'synced'::text])`),
+	check("chk_vendor_billing_account_status", sql`status = ANY (ARRAY['active'::text, 'closed'::text, 'missing'::text])`),
+	check("chk_vendor_billing_account_ledger_mode", sql`ledger_mode = ANY (ARRAY['match_only'::text, 'create_unmatched'::text])`),
+	check("chk_vendor_billing_account_synced_external_id", sql`(source = 'manual'::text) OR (external_id IS NOT NULL)`),
+]);
+
+export const vendorBillingResources = pgTable("vendor_billing_resources", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "vendor_billing_resources_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id").notNull(),
+	billingAccountId: bigint("billing_account_id", { mode: "number" }).notNull(),
+	kind: text().notNull(),
+	externalId: text("external_id").notNull(),
+	name: text(),
+	labels: jsonb().$type<Record<string, string>>().default({}).notNull(),
+	status: text().default('active').notNull(),
+	lastSeenAt: timestamp("last_seen_at", { withTimezone: true, mode: 'string' }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	unique("uq_vendor_billing_resource").on(table.billingAccountId, table.externalId),
+	index("idx_vendor_billing_resource_org").using("btree", table.organizationId.asc().nullsLast().op("text_ops")),
+	foreignKey({
+			columns: [table.billingAccountId],
+			foreignColumns: [vendorBillingAccounts.id],
+			name: "vendor_billing_resources_billing_account_id_fkey"
+		}).onDelete("cascade"),
+	check("chk_vendor_billing_resource_kind", sql`kind = ANY (ARRAY['azure_subscription'::text, 'gcp_project'::text, 'other'::text])`),
+	check("chk_vendor_billing_resource_status", sql`status = ANY (ARRAY['active'::text, 'missing'::text])`),
+]);
+
+export const vendorInvoices = pgTable("vendor_invoices", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "vendor_invoices_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id").notNull(),
+	billingAccountId: bigint("billing_account_id", { mode: "number" }).notNull(),
+	// Azure：發票號碼；GCP：`<billingAccountId>:<YYYYMM>`
+	externalRef: text("external_ref").notNull(),
+	source: text().notNull(),
+	periodStart: date("period_start"),
+	periodEnd: date("period_end"),
+	invoiceDate: date("invoice_date").notNull(),
+	amount: numeric({ precision: 18, scale: 2 }).notNull(),
+	currency: char({ length: 3 }).notNull(),
+	status: text(),
+	matchStatus: text("match_status").default('unmatched').notNull(),
+	// 多張發票可以指向同一筆交易（卡費帳單合併列）
+	matchedTransactionId: bigint("matched_transaction_id", { mode: "number" }),
+	suggestedTransactionId: bigint("suggested_transaction_id", { mode: "number" }),
+	matchedAt: timestamp("matched_at", { withTimezone: true, mode: 'string' }),
+	meta: jsonb().$type<Record<string, unknown>>().default({}).notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	unique("uq_vendor_invoice").on(table.organizationId, table.source, table.externalRef),
+	index("idx_vendor_invoice_org_status").using("btree", table.organizationId.asc().nullsLast().op("text_ops"), table.matchStatus.asc().nullsLast().op("text_ops")),
+	index("idx_vendor_invoice_account").using("btree", table.billingAccountId.asc().nullsLast().op("int8_ops"), table.invoiceDate.desc().nullsFirst().op("date_ops")),
+	index("idx_vendor_invoice_matched_txn").using("btree", table.matchedTransactionId.asc().nullsLast().op("int8_ops")).where(sql`matched_transaction_id IS NOT NULL`),
+	foreignKey({
+			columns: [table.billingAccountId],
+			foreignColumns: [vendorBillingAccounts.id],
+			name: "vendor_invoices_billing_account_id_fkey"
+		}),
+	foreignKey({
+			columns: [table.matchedTransactionId],
+			foreignColumns: [transactions.id],
+			name: "vendor_invoices_matched_transaction_id_fkey"
+		}).onDelete("set null"),
+	foreignKey({
+			columns: [table.suggestedTransactionId],
+			foreignColumns: [transactions.id],
+			name: "vendor_invoices_suggested_transaction_id_fkey"
+		}).onDelete("set null"),
+	check("chk_vendor_invoice_source", sql`source = ANY (ARRAY['azure_invoice'::text, 'gcp_bigquery'::text])`),
+	check("chk_vendor_invoice_match_status", sql`match_status = ANY (ARRAY['unmatched'::text, 'suggested'::text, 'matched'::text, 'manual'::text, 'created'::text, 'ignored'::text])`),
+	check("chk_vendor_invoice_currency", sql`currency ~ '^[A-Z]{3}$'::text`),
+]);
+
+export const vendorCostLines = pgTable("vendor_cost_lines", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "vendor_cost_lines_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id").notNull(),
+	billingAccountId: bigint("billing_account_id", { mode: "number" }).notNull(),
+	// 該月 1 號
+	month: date().notNull(),
+	resourceExternalId: text("resource_external_id").default('').notNull(),
+	resourceName: text("resource_name"),
+	service: text().default('').notNull(),
+	amount: numeric({ precision: 18, scale: 4 }).notNull(),
+	currency: char({ length: 3 }).notNull(),
+	source: text().notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	unique("uq_vendor_cost_line").on(table.billingAccountId, table.month, table.resourceExternalId, table.service, table.source),
+	index("idx_vendor_cost_line_org_month").using("btree", table.organizationId.asc().nullsLast().op("text_ops"), table.month.asc().nullsLast().op("date_ops")),
+	foreignKey({
+			columns: [table.billingAccountId],
+			foreignColumns: [vendorBillingAccounts.id],
+			name: "vendor_cost_lines_billing_account_id_fkey"
+		}).onDelete("cascade"),
+	check("chk_vendor_cost_line_source", sql`source = ANY (ARRAY['azure_cost'::text, 'gcp_bigquery'::text])`),
+	check("chk_vendor_cost_line_month", sql`EXTRACT(day FROM month) = (1)::numeric`),
+	check("chk_vendor_cost_line_currency", sql`currency ~ '^[A-Z]{3}$'::text`),
 ]);

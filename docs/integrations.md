@@ -1,6 +1,7 @@
 # Integrations framework
 
-Per-organization connections to external services (Simpany e-invoice, Wise, …).
+Per-organization connections to external services (Simpany e-invoice, Wise, Azure
+billing, Google Cloud billing, …).
 Every integration is **off by default**: an owner/admin *connects* it (enters
 credentials, which are tested server-side before being stored), then *switches it
 on* separately. Disconnecting deletes the row, credentials included.
@@ -16,7 +17,8 @@ settings page just lists it alongside the others.
 | `migrations/0023_org_integrations.sql` / `orgIntegrations` in `src/db/schema.ts` | One row per (organization, provider). `credentials_enc` / `token_cache_enc` are ciphertext from `src/lib/crypto.ts` (`FIELD_ENCRYPTION_KEY`). `config` is non-secret jsonb. |
 | `src/lib/integrations/types.ts` | Provider ids, field/catalog/provider types, `IntegrationSummary` (the secret-free view). Client-safe. |
 | `src/lib/integrations/catalog.ts` | Static catalog: logo + credential/config fields per provider. Drives the settings UI. Client-safe. |
-| `src/lib/integrations/registry.ts` | Map of **implementations** (`testConnection`). Simpany and Wise are registered. Server only. |
+| `src/lib/integrations/registry.ts` | Map of **implementations** (`testConnection`). Simpany, Wise, Azure and GCP are registered. Server only. |
+| `src/lib/integrations/fields.ts` | Client-safe rules for connect-sheet fields: `select` fields, `when` (field only applies when another field has a given value), picking / required checks. Used by the Sheet and the server action alike. |
 | `src/lib/integrations/store.ts` | The only code that reads/writes `org_integrations`. Server only. |
 | `src/app/dashboard/settings/integrations/` | Settings page, server actions (owner/admin only), connect Sheet. |
 | `src/lib/mcp/tools-integrations.ts` | `list_integrations` (incl. `autoSync` / `lastAutoSync`), `run_integration_sync`, plus `requireIntegrationForTool` and `auditIntegrationCall` for provider tools. |
@@ -93,6 +95,9 @@ To bring one to life:
      failures (the framework turns it into a message).
    - Return discovered non-secret settings in `config`; return a session token in
      `tokenCache` if the service hands one out (it is encrypted).
+   - The third argument `ctx.orgId` is the caller's organization from the server-side
+     session (never user input) — for providers that act *as the organization*
+     (GCP workload identity).
    - Use `fetch` only — this runs on Cloudflare Workers.
 
 2. **Register** it: one line in `PROVIDERS` in `registry.ts`
@@ -131,6 +136,11 @@ To bring one to life:
 5. **Extra settings** — declare `configFields` in the catalog entry (same shape as
    `credentialFields`, stored in plain `config`) and add labels under
    `integrations.fields` in `src/i18n/messages/integrations.ts` (zh-TW + en).
+   A field can be `type: "select"` with `options` + `defaultValue`, and any field can
+   carry `when: { key, equals }` so it only applies (is shown, required and stored)
+   when another field has that value — e.g. GCP's `serviceAccountJson` only when
+   `authMode = key`. Fields that don't apply are dropped server-side, so a key pasted
+   in the wrong mode is never stored.
 
 ### A brand-new provider (not simpany/wise)
 
@@ -222,6 +232,137 @@ Wise 是**唯讀**整合：只把 Wise 對帳單的交易匯入本組織的帳�
   按「寫入 N 筆」才寫。對應到 Wise 的帳戶名稱旁有「Wise」標記。
 - MCP：`wise_list_balances`、`wise_get_statement`、`wise_sync_transactions`（`dryRun` 預設 true，
   工具說明要求模型先給使用者看試算、取得同意才以 `dryRun: false` 寫入）。見 [mcp.md](mcp.md)。
+
+## Azure / GCP 計費（唯讀）+ 廠商計費帳號
+
+記下「哪個平台的哪個計費帳號，用哪個付款方式在付」，Azure 與 GCP 每天唯讀同步，並把雲端帳單跟帳本
+**對帳而不重複記帳**。頁面在 會計 › 廠商計費（`/dashboard/vendor-billing`），設計見 pathors-docs 的
+`docs/internal/cloud-billing-accounts.html`。
+
+| Where | What |
+| --- | --- |
+| `migrations/0031_vendor_billing.sql` | `payment_methods`、`vendor_billing_accounts`、`vendor_billing_resources`、`vendor_invoices`、`vendor_cost_lines`；`chk_org_integration_provider` 加 azure / gcp |
+| `src/lib/integrations/azure.ts`、`gcp.ts` | provider（testConnection）、唯讀 client、回應解析 |
+| `src/lib/oidc.ts` | 平台 OIDC 簽章（GCP workload identity 用）；`/.well-known/jwks.json`、`/.well-known/openid-configuration` |
+| `src/lib/vendor-billing/scope.ts` | 每個組織的「計費範圍」勾選（client-safe） |
+| `src/lib/vendor-billing/sync.ts` | 同步：upsert 帳號 / 資源 / 付款卡 / 帳單 / 費用明細 → 對帳 |
+| `src/lib/vendor-billing/match.ts`、`reconcile.ts` | 對帳規則（純函式）與 DB 端 |
+| `src/lib/vendor-billing/guards.ts` | 同組織參照驗證（web 與 MCP 共用） |
+| `src/lib/vendor-billing/service.ts`、`inputs.ts` | 讀寫（web actions 與 MCP 共用）、輸入驗證 |
+| `src/app/dashboard/vendor-billing/` | 頁面與 server actions |
+| `src/app/dashboard/settings/integrations/cloud-billing-*` | 設定頁的「計費範圍」區塊 |
+| `src/lib/mcp/tools-vendor-billing.ts` | MCP 工具（見 [mcp.md](mcp.md)） |
+
+### 為什麼要先對帳
+
+各組織本來就每月照信用卡帳單手動記「每家廠商一筆」支出（台幣、含國外手續費，from_account = 卡費扣款
+帳戶），而且一列常常涵蓋好幾張雲端發票：東蜂 2026-04-13 的 8,964 = 3 月 4,626 + 4 月 4,338 兩張 Azure 發票；
+「Google Cloud（5 個帳號合併，含國外手續費）1,722」是五個 GCP billing account 同月的費用；同一個 Azure
+帳號在帳本上有時記「Azure」、有時記「Microsoft」。所以：
+
+- 匯入的帳單一律**先找既有交易**（`match.ts`）。候選 = 同組織、未刪除、`expense`、對象 ∈ 帳號的
+  `party_id ∪ meta.matchPartyIds`（頁面上的「也比對這些廠商」）。
+- 單張：交易日在 [發票日, +45 天]、同幣別、金額比 0.98～1.06；完全相等優先。不同幣別永遠不自動綁，
+  視窗內只有一筆時標「建議」。
+- 合併：對每筆還沒用到的交易，從「發票日 ≤ 交易日 ≤ 發票日 + 75 天、同幣別」的未綁帳單裡（**跨帳號**，
+  只要帳號的比對廠商含這筆交易的對象）找 2～5 張加總落在比例內的組合；唯一 → 全部綁上，多組 → 只建議。
+- 單張與合併交替跑到沒有新配對為止。matched / manual / created / ignored 是定案，不會被重算。
+- `ledger_mode = match_only`（預設）**永遠不寫帳本**。`create_unmatched` 的帳號：發票日過 45 天仍
+  unmatched 的帳單，新建一筆支出（對象、帳單金額 / 幣別、from = 付款方式的扣款帳戶、book internal、
+  分類空白、`needs_review`、`external_source` = azure / gcp、`external_ref` = 帳單號），用 0026 的唯一索引
+  `ON CONFLICT DO NOTHING`；之前建過又被刪掉的不會長回來（帳單改標 ignored）。
+- 人工動作（頁面與 MCP `resolve_vendor_invoice`）：確認建議、綁到指定交易（同組織檢查）、解除、不對帳、立即建立。
+- 解除綁定會把那筆交易（與當時的建議）記進帳單 `meta.rejectedTransactionIds`：之後單張、合併、建議都不會再把它
+  自動配給這張帳單（合併時，組合裡任何一張拒絕過就不能湊進那筆交易）；別的候選照樣可以自動配。人工再綁回去可以，
+  綁上時就從清單拿掉。
+
+### 多租戶
+
+- 每個查詢 / 寫入都帶 server 端的 orgId；寫入帶進來的 party / 付款方式 / 扣款帳戶 / 計費帳號 / 交易 /
+  負責人，一律先 `assertOrgRefs` 驗證同組織、未刪除（`guards.ts`，有單元測試），否則整筆拒絕，錯誤只說「找不到」。
+- 一個外部計費範圍可能混著別的組織或個人的東西（Azure MCA billing account 裡有公司與個人的 billing
+  profile；一個 GCP 身分看得到兩家公司的 billing account）。所以每個整合有**組織自己的勾選範圍**：
+  Azure `config.billingProfileIds`、GCP `config.billingAccountIds`。`testConnection` 與每次同步把候選寫進
+  `config.discovered`，owner / admin 在 設定 › 整合 下方的「計費範圍」勾選後按「儲存」（只接受發現過的 id）。
+  **沒勾任何一個就什麼都不同步**，頁面會講。
+- 平台上消失的帳號 / 資源標 `missing`，不刪除；`updated_at` 只在狀態改變時更新（「最近變成 missing」的提醒靠它）。
+- 任何 action、MCP 工具、log 都不回傳憑證或密文。
+
+### Azure
+
+憑證：app registration 的 `tenantId`、`clientId`、`clientSecret`（client credentials 換 ARM token，快取在
+`token_cache_enc`）。非機密設定：`billingAccountId`（MCA billing account id）——service principal 只有
+**Billing profile reader**（profile 層級）時 `GET billingAccounts` 會回 0 筆，所以要人在連接時填。
+
+權限：在要同步的 **billing profile** 指派「Billing profile reader」給這個 service principal。
+
+唯讀保證：所有請求走 `makeAzureClient()` 的 `call()` → `assertAzureReadOnly()`，method + host + path 逐條比對：
+
+| Method | Path（`management.azure.com`，api-version 2024-04-01；Cost 2023-11-01） | 用途 |
+| --- | --- | --- |
+| POST | `login.microsoftonline.com/{tenant}/oauth2/v2.0/token` | 換 token |
+| GET | `/providers/Microsoft.Billing/billingAccounts/{ba}/billingProfiles` | 候選 profile |
+| GET | `…/billingProfiles/{bp}/billingSubscriptions` | 資源（`status: Deleted` 等 → missing） |
+| GET | `…/billingProfiles/{bp}/paymentMethodLinks` | 付款卡（卡別、末四碼、到期、持卡人） |
+| GET | `…/billingProfiles/{bp}/invoices?periodStartDate&periodEndDate` | 帳單（`totalAmount`、`amountDue`、status） |
+| POST | `…/billingProfiles/{bp}/providers/Microsoft.CostManagement/query` | ActualCost，Monthly，依 SubscriptionName × ServiceName（讀取，只是 API 設計成 POST） |
+
+nextLink 也要過白名單。付款卡以 payment method id upsert（同一張卡掛在多個 profile 只算一張；沒有才用 link
+name）。還沒有這個 Azure id 的卡時，先找同組織、未刪除、`kind = card`、`external_ref` 空的手動卡，卡別（不分大小寫）、
+末四碼、到期月 / 年都相同：剛好一張就**收編**（改成 source azure、填上 Azure id，名稱 / 扣款帳戶 / 備註保留人填的）；
+沒有就新建；多張就不新建、帳號也不綁，頁面提醒「多張卡資料相同，請合併」（記在帳號 `meta.paymentMethodConflict`，
+下次同步解開就清掉）。`src/lib/vendor-billing/card-dedupe.ts`。帳號的付款方式只在「沒設」或「原本就是同步來的」時改，
+不覆寫人工指定。期間：第一次同步抓 13 個月，
+之後從最後一張發票日 − 60 天；費用查詢每段最多 12 個月。SubscriptionName 空白的負數列（折扣 / 調整）
+歸到資源「(未分配)」。401 → 換新 token 重試一次 → `markNeedsReauth`；其他錯誤 → `recordSyncFailure`，
+單一步驟（例如費用 429）失敗只記在摘要的警告，其他步驟照跑。帳單平台狀態 OverDue（或發票日 30 天後仍有
+amountDue）會出現在頁面上方的提醒。
+
+### GCP
+
+兩種驗證方式（`config.authMode`，連接 Sheet 的「驗證方式」）：
+
+- `key`：貼整份 service account JSON key（加密存放）。自己用 WebCrypto 簽 RS256 JWT 換 token（不用 Google SDK）。
+- `workload_identity`：**不存任何金鑰**（pathors.com 的 GCP org 禁止建立 SA key）。見下一節。
+
+權限：每個要同步的 billing account 給 SA `roles/billing.viewer`；要讀費用另外在 export 所在專案給
+`roles/bigquery.dataViewer` + `roles/bigquery.jobUser`。GCP API 讀不到付款卡，付款方式要手動設；有
+`masterBillingAccount` 的是經銷商子帳號（`meta.reseller = true`，頁面會提示用「經銷商帳單」）。
+
+唯讀白名單（`assertGcpReadOnly`）：POST `oauth2.googleapis.com/token`、POST `sts.googleapis.com/v1/token`、
+POST `iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{sa}:generateAccessToken`；GET
+`cloudbilling.googleapis.com/v1/billingAccounts[/{id}[/projects]]`、GET
+`cloudresourcemanager.googleapis.com/v1/projects/{id}`（補名稱 / labels，403 忽略）、GET
+`bigquery.googleapis.com/bigquery/v2/projects/{p}/datasets/{d}/tables`、POST `…/projects/{p}/queries`
+（jobs.query，SELECT）與 GET `…/queries/{jobId}`（取結果）。
+
+費用（選填）：設定頁填 BigQuery export 的專案 ID 與 dataset（例如 `billing_export`）。每個勾選的帳號自動找
+`gcp_billing_export_v1_<帳號 id，- 換成 _>` 表（一個帳號一張），以參數化的標準 SQL 依 `invoice.month × project ×
+service × currency` 加總 `cost + credits` → `vendor_cost_lines`，並為**已結束的月份**各建一張月帳
+（`external_ref = <帳號>:<YYYYMM>`，發票日 = 月底）拿去對帳。
+
+### Workload Identity Federation（GCP，不存金鑰）
+
+- 平台有一把**整個部署共用**的 RSA 私鑰 `OIDC_SIGNING_KEY`（Worker secret；PKCS#8 DER 一行 base64，也接受 PEM），
+  選填 `OIDC_SIGNING_KID`（預設 `internal-2026-10b`）、`OIDC_ISSUER`（預設 `https://internal.pathors.com`）。
+- 同步時以 WebCrypto 簽一個 JWT：`iss`、`sub` = **server 端 org context 的 organization id**（絕不取自使用者輸入
+  或 config）、`aud = internal-billing`、`iat`、`exp = iat + 300`，header `kid`。
+- → `POST sts.googleapis.com/v1/token`（token-exchange，audience = config `wifAudience`，即
+  `//iam.googleapis.com/projects/<專案編號>/locations/global/workloadIdentityPools/<pool>/providers/<provider>`）
+  → `POST iamcredentials…:generateAccessToken` impersonate config `serviceAccountEmail`（唯讀 scopes，3600s），
+  token 存進 `token_cache_enc`。
+- 組織隔離 = JWT 的 `sub`：GCP 只把 `principal://iam.googleapis.com/projects/<n>/locations/global/workloadIdentityPools/<pool>/subject/<orgId>`
+  綁到 SA 的 `roles/iam.workloadIdentityUser`。別的組織的 sub 會在 impersonation 拿到 403 →
+  `markNeedsReauth`，訊息說明缺少這個組織 subject 的綁定。
+- 設定頁（workload identity 模式）顯示本組織的 subject 與可直接複製的綁定指令：
+  `gcloud iam service-accounts add-iam-policy-binding <SA> --role=roles/iam.workloadIdentityUser --member="principal://…/subject/<orgId>"`。
+- 公鑰由私鑰推導，公開在 `/.well-known/jwks.json` 與 `/.well-known/openid-configuration`（可快取，給之後輪替用；
+  GCP 目前用的是上傳到 provider 的 JWKS）。
+
+### 自動同步
+
+`AUTO_SYNC_PROVIDERS` 含 azure / gcp：每天 06:00（台北）跑一次「勾選範圍內同步 → 對帳」，摘要寫進
+`config.lastAutoSync`。頁面上的「立即同步」與 MCP `run_integration_sync` 走同一條路。
 
 ## Simpany（電子發票）
 
@@ -437,6 +578,7 @@ MCP：`simpany_prepare_salary_filing`、`simpany_apply_salary_filing`、`simpany
 | --- | --- | --- |
 | Simpany | `syncSimpanyInvoices(org, 最近 90 天～今天)`（台北日期）→ `syncSalaryDeclarations(org, 今年)`；一月時另外跑去年 | 發票頁「從 Simpany 同步」+ 薪資頁「Simpany 薪資申報」同步 |
 | Wise | `syncWiseTransactions(org, { dryRun: false })`；還沒設帳戶對應就略過（不算失敗、不打 Wise） | 帳戶頁「從 Wise 同步」按「寫入」 |
+| Azure / GCP | `syncCloudBilling(org, provider)`：勾選範圍內的帳號 / 資源 / 付款卡 / 帳單 / 費用 → 對帳；沒勾範圍就略過 | 廠商計費頁「立即同步」 |
 
 **安全**：
 

@@ -35,6 +35,7 @@ import { orgTools } from "./tools-org";
 import { integrationTools } from "./tools-integrations";
 import { wiseTools } from "./tools-wise";
 import { simpanyTools } from "./tools-simpany";
+import { vendorBillingTools } from "./tools-vendor-billing";
 
 export type { ToolContext, ToolDef } from "./shared";
 
@@ -727,4 +728,5 @@ export const tools: Record<string, ToolDef> = {
   ...employeeAccountTools,
   ...wiseTools,
   ...simpanyTools,
+  ...vendorBillingTools,
 };

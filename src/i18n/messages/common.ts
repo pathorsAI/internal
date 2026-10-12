@@ -28,6 +28,7 @@ const common = {
       advances: { "zh-TW": "代墊", en: "Advance" },
       accountantNotices: { "zh-TW": "待通知會計師", en: "Accountant notices" },
       bankAccounts: { "zh-TW": "銀行帳戶", en: "Bank account" },
+      vendorBilling: { "zh-TW": "廠商計費", en: "Vendor billing" },
       reconciliation: { "zh-TW": "對帳", en: "Reconciliation" },
       projects: { "zh-TW": "專案", en: "Project" },
       subscriptions: { "zh-TW": "訂閱 / 月費", en: "Subscription" },

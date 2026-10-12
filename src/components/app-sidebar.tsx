@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   ArrowLeftRight,
   Landmark,
+  CreditCard,
   Truck,
   Scale,
   Users,
@@ -56,6 +57,7 @@ export type NavItemKey =
   | "advances"
   | "accountantNotices"
   | "bankAccounts"
+  | "vendorBilling"
   | "reconciliation"
   | "projects"
   | "subscriptions"
@@ -82,6 +84,7 @@ const nav = [
   { key: "advances", href: "/dashboard/advances", icon: ReceiptText },
   { key: "accountantNotices", href: "/dashboard/accountant-notices", icon: BellRing },
   { key: "bankAccounts", href: "/dashboard/bank-accounts", icon: Landmark },
+  { key: "vendorBilling", href: "/dashboard/vendor-billing", icon: CreditCard },
   { key: "reconciliation", href: "/dashboard/reconciliation", icon: Scale },
 ] as const satisfies { key: NavItemKey; href: string; icon: typeof LayoutDashboard }[];
 

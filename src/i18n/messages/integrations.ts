@@ -31,6 +31,20 @@ const integrations = {
         en: "Read Wise balances and transactions for reconciliation.",
       },
     },
+    azure: {
+      name: { "zh-TW": "Azure 計費", en: "Azure billing" },
+      description: {
+        "zh-TW": "唯讀同步 Azure billing profile、底下的 subscription、付款卡、發票與每月費用，並和帳本對帳。",
+        en: "Read-only sync of Azure billing profiles, their subscriptions, payment cards, invoices and monthly costs, reconciled against the ledger.",
+      },
+    },
+    gcp: {
+      name: { "zh-TW": "Google Cloud 計費", en: "Google Cloud billing" },
+      description: {
+        "zh-TW": "唯讀同步 GCP billing account 與底下的專案；有開 BigQuery billing export 時另外讀每月費用並和帳本對帳。",
+        en: "Read-only sync of GCP billing accounts and their projects; with a BigQuery billing export it also reads monthly costs and reconciles them against the ledger.",
+      },
+    },
     googleCalendar: {
       name: { "zh-TW": "Google 日曆", en: "Google Calendar" },
       description: {
@@ -44,6 +58,24 @@ const integrations = {
     password: { "zh-TW": "密碼", en: "Password" },
     apiToken: { "zh-TW": "API Token", en: "API token" },
     companyId: { "zh-TW": "公司 ID（選填，帳號有多家公司時才需要）", en: "Company ID (optional; only if the account has several companies)" },
+    tenantId: { "zh-TW": "Tenant ID（目錄識別碼）", en: "Tenant ID (directory ID)" },
+    clientId: { "zh-TW": "Client ID（應用程式識別碼）", en: "Client ID (application ID)" },
+    clientSecret: { "zh-TW": "Client secret", en: "Client secret" },
+    serviceAccountJson: { "zh-TW": "Service account JSON key（整份貼上）", en: "Service account JSON key (paste the whole file)" },
+    bigQueryProjectId: { "zh-TW": "BigQuery export 專案 ID（選填）", en: "BigQuery export project ID (optional)" },
+    bigQueryDataset: { "zh-TW": "BigQuery export dataset（選填，例如 billing_export）", en: "BigQuery export dataset (optional, e.g. billing_export)" },
+    authMode: { "zh-TW": "驗證方式", en: "Authentication" },
+    authModeKey: { "zh-TW": "Service account JSON key", en: "Service account JSON key" },
+    authModeWorkloadIdentity: {
+      "zh-TW": "Workload Identity Federation（不存金鑰）",
+      en: "Workload Identity Federation (keyless)",
+    },
+    wifAudience: {
+      "zh-TW": "Workload identity provider（//iam.googleapis.com/projects/…/providers/…）",
+      en: "Workload identity provider (//iam.googleapis.com/projects/…/providers/…)",
+    },
+    serviceAccountEmail: { "zh-TW": "要 impersonate 的 service account", en: "Service account to impersonate" },
+    billingAccountId: { "zh-TW": "Billing account ID（計費範圍 › 屬性）", en: "Billing account ID (billing scope › Properties)" },
   },
   status: {
     notConnected: { "zh-TW": "未連接", en: "Not connected" },
@@ -69,8 +101,8 @@ const integrations = {
     label: { "zh-TW": "自動同步", en: "Auto-sync" },
     toggleLabel: { "zh-TW": "{name} 每日自動同步", en: "Daily auto-sync for {name}" },
     schedule: {
-      "zh-TW": "已開啟、狀態正常且沒關掉「自動同步」的整合，每天台北時間 06:00 會自動同步一次（Simpany：最近 90 天發票 + 今年薪資申報；Wise：交易，新列標為待確認）。",
-      en: "Every day at 06:00 Taipei time, each integration that is switched on, healthy and has auto-sync on is synced once (Simpany: last 90 days of invoices + this year's salary declarations; Wise: transactions, new rows flagged for review).",
+      "zh-TW": "已開啟、狀態正常且沒關掉「自動同步」的整合，每天台北時間 06:00 會自動同步一次（Simpany：最近 90 天發票 + 今年薪資申報；Wise：交易，新列標為待確認；Azure / GCP：勾選範圍內的計費帳號、資源與帳單，並和帳本對帳）。",
+      en: "Every day at 06:00 Taipei time, each integration that is switched on, healthy and has auto-sync on is synced once (Simpany: last 90 days of invoices + this year's salary declarations; Wise: transactions, new rows flagged for review; Azure / GCP: billing accounts, resources and invoices within the selected scope, reconciled against the ledger).",
     },
     last: {
       "zh-TW": "上次自動同步：{date} · {result}",
@@ -165,6 +197,67 @@ const integrations = {
     needsReauth: {
       "zh-TW": "{name} 的憑證已失效（{error}），請 owner 或 admin 到 設定 › 整合 重新連接",
       en: "The {name} credentials no longer work ({error}). An owner or admin can reconnect it under Settings › Integrations.",
+    },
+  },
+  scope: {
+    title: {
+      azure: { "zh-TW": "Azure 計費範圍", en: "Azure billing scope" },
+      gcp: { "zh-TW": "Google Cloud 計費範圍", en: "Google Cloud billing scope" },
+    },
+    description: {
+      "zh-TW": "勾選屬於這個組織的計費帳號；同步只會讀取勾選的項目。",
+      en: "Tick the billing accounts that belong to this organization; sync only reads the ticked ones.",
+    },
+    empty: {
+      "zh-TW": "沒有勾選任何範圍，同步不會讀取任何計費資料。",
+      en: "Nothing is ticked, so sync reads no billing data.",
+    },
+    noCandidates: {
+      "zh-TW": "還沒有探索到候選。開啟整合後按「重新探索」。",
+      en: "No candidates discovered yet. Switch the integration on, then press Rediscover.",
+    },
+    billingAccount: { "zh-TW": "Billing account：{id}", en: "Billing account: {id}" },
+    discoveredAt: { "zh-TW": "探索時間：{date}", en: "Discovered: {date}" },
+    reseller: { "zh-TW": "經銷商子帳號", en: "Reseller sub-account" },
+    closed: { "zh-TW": "已關閉", en: "Closed" },
+    refresh: { "zh-TW": "重新探索", en: "Rediscover" },
+    refreshed: { "zh-TW": "已重新探索", en: "Rediscovered" },
+    refreshNeedsEnabled: { "zh-TW": "整合開啟後才能重新探索", en: "Switch the integration on to rediscover" },
+    save: { "zh-TW": "儲存", en: "Save" },
+    saving: { "zh-TW": "儲存中…", en: "Saving…" },
+    saved: { "zh-TW": "已儲存計費範圍", en: "Billing scope saved" },
+    readOnly: { "zh-TW": "只有擁有者或管理員可以修改範圍。", en: "Only owners or admins can change the scope." },
+    bigQuery: {
+      title: { "zh-TW": "BigQuery billing export（選填，用來讀每月費用）", en: "BigQuery billing export (optional, for monthly costs)" },
+      projectId: { "zh-TW": "專案 ID", en: "Project ID" },
+      dataset: { "zh-TW": "Dataset", en: "Dataset" },
+      hint: {
+        "zh-TW": "每個帳號的資料表 gcp_billing_export_v1_<帳號> 會自動偵測。",
+        en: "Each account's table gcp_billing_export_v1_<account> is detected automatically.",
+      },
+    },
+    auth: {
+      key: { "zh-TW": "驗證方式：Service account key（{email}）", en: "Authentication: service account key ({email})" },
+      workloadIdentity: {
+        "zh-TW": "驗證方式：Workload Identity Federation，impersonate {email}",
+        en: "Authentication: Workload Identity Federation, impersonating {email}",
+      },
+      subject: { "zh-TW": "這個組織的 subject", en: "This organization's subject" },
+      command: { "zh-TW": "授權指令（交給 GCP 管理員執行）", en: "Binding command (for the GCP admin)" },
+      invalid: {
+        "zh-TW": "Workload identity 設定不完整，請重新連接。",
+        en: "The workload identity settings are incomplete; reconnect.",
+      },
+    },
+    errors: {
+      bigQuery: { "zh-TW": "BigQuery 專案 ID 或 dataset 格式不對", en: "Invalid BigQuery project ID or dataset" },
+      noBillingAccount: {
+        "zh-TW": "沒有 billing account ID，請重新連接並填寫",
+        en: "No billing account ID; reconnect and fill it in",
+      },
+    },
+    activity: {
+      saved: { "zh-TW": "更新 {name} 計費範圍（{count} 個）", en: "Updated the {name} billing scope ({count})" },
     },
   },
   activity: {

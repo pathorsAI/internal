@@ -7,7 +7,7 @@ import type { IntegrationConfig, IntegrationProviderId } from "./types";
 //   config.lastAutoSync  最近一次自動同步的結果（見 LastAutoSync），由 autosync.ts 寫入。
 
 /** 有自動同步可跑的整合（其他整合的列不顯示開關）。 */
-export const AUTO_SYNC_PROVIDERS: readonly IntegrationProviderId[] = ["simpany", "wise"];
+export const AUTO_SYNC_PROVIDERS: readonly IntegrationProviderId[] = ["simpany", "wise", "azure", "gcp"];
 
 export function supportsAutoSync(provider: IntegrationProviderId): boolean {
   return AUTO_SYNC_PROVIDERS.includes(provider);

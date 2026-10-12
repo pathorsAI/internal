@@ -4,10 +4,11 @@ import type integrationsMessages from "@/i18n/messages/integrations";
 // 型別與純常數，不能碰 DB 或 crypto。
 
 /**
- * 系統認得的整合代號。必須與 migrations/0023 的 chk_org_integration_provider 一致 ——
- * 新增一家要同時：寫新 migration 擴充 CHECK、在這裡加代號、在 catalog.ts 補一筆。
+ * 系統認得的整合代號。必須與 chk_org_integration_provider 一致（migrations/0023，
+ * azure / gcp 由 0031 加入）—— 新增一家要同時：寫新 migration 擴充 CHECK、在這裡加代號、
+ * 在 catalog.ts 補一筆。
  */
-export const INTEGRATION_PROVIDER_IDS = ["simpany", "wise"] as const;
+export const INTEGRATION_PROVIDER_IDS = ["simpany", "wise", "azure", "gcp"] as const;
 export type IntegrationProviderId = (typeof INTEGRATION_PROVIDER_IDS)[number];
 
 export function isIntegrationProviderId(v: unknown): v is IntegrationProviderId {
@@ -21,9 +22,9 @@ export type IntegrationStatus = "connected" | "needs_reauth" | "error";
 
 /**
  * 欄位的輸入型態。password / token 在 UI 以遮罩輸入、且永遠不回填；
- * text / email 是一般輸入。
+ * text / email 是一般輸入；select 是固定選項（options），沒選時用 defaultValue。
  */
-export type IntegrationFieldType = "text" | "email" | "password" | "token";
+export type IntegrationFieldType = "text" | "email" | "password" | "token" | "select";
 
 /** 欄位標籤的 i18n key（integrations.fields.<key>）；新增欄位要先補字串。 */
 export type IntegrationFieldLabelKey = keyof (typeof integrationsMessages)["fields"];
@@ -36,6 +37,15 @@ export type IntegrationField = {
   required: boolean;
   /** 瀏覽器自動填入提示；帳密類整合填了能讓密碼管理器幫忙。 */
   autoComplete?: string;
+  /** type = select 的選項；標籤同樣走 integrations.fields.<labelKey>。 */
+  options?: readonly { value: string; labelKey: IntegrationFieldLabelKey }[];
+  /** 沒填時的值（select 的預設選項）。 */
+  defaultValue?: string;
+  /**
+   * 只有在另一個欄位等於某個值時才適用（顯示、必填、儲存）。例如 GCP 的 service account key
+   * 只在 authMode = key 時需要。判斷規則在 fields.ts。
+   */
+  when?: { key: string; equals: string };
 };
 
 /** 解密後的憑證：key 就是 credentialFields 的 key。只存在 server 記憶體中。 */
@@ -80,9 +90,14 @@ export type TestConnectionResult =
  */
 export interface IntegrationProvider {
   id: IntegrationProviderId;
+  /**
+   * ctx.orgId 是 server 端 org context（設定頁 action 的 requireOrg），不是使用者輸入。
+   * 需要「以這個組織的身分」測試的 provider（GCP workload identity）才用得到。
+   */
   testConnection(
     creds: IntegrationCredentials,
     config: IntegrationConfig,
+    ctx: { orgId: string },
   ): Promise<TestConnectionResult>;
 }
 

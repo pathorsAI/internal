@@ -31,6 +31,7 @@ This document describes two paths:
 | A Postgres driver that matches your runtime | On serverless/edge you need an **HTTP** driver (e.g. Neon). On a normal Node server you can use a regular TCP driver (`pg`). See [Database driver](#database-driver). |
 | Object storage *(only for document uploads)* | Cloudflare R2 by default. Swappable — see [Storage portability](#storage-portability). |
 | Env vars | `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `FIELD_ENCRYPTION_KEY`. See [`.env.example`](../.env.example). |
+| `OIDC_SIGNING_KEY` | Optional. RSA private key (PKCS#8, base64 one line or PEM) used to sign per-organization OIDC JWTs for GCP Workload Identity Federation (keyless GCP billing). Without it, GCP can only be connected with a service account key. |
 | `FIELD_ENCRYPTION_KEY` | 32 random bytes, base64 (`openssl rand -base64 32`). AES-256-GCM key for field-level encryption of integration credentials (Simpany, Wise — see [integrations.md](integrations.md)) and other high-sensitivity fields. Without it, connecting an integration fails with a clear error. **Losing or rotating it makes stored credentials unreadable** — every integration must be reconnected. |
 
 ---
@@ -112,8 +113,19 @@ echo "$BETTER_AUTH_SECRET" | bunx wrangler secret put BETTER_AUTH_SECRET
 echo "$DATABASE_URL"       | bunx wrangler secret put DATABASE_URL
 echo "$GOOGLE_CLIENT_ID"   | bunx wrangler secret put GOOGLE_CLIENT_ID
 echo "$FIELD_ENCRYPTION_KEY" | bunx wrangler secret put FIELD_ENCRYPTION_KEY
+echo "$OIDC_SIGNING_KEY"     | bunx wrangler secret put OIDC_SIGNING_KEY
 # …and GOOGLE_CLIENT_SECRET, BETTER_AUTH_URL
 ```
+
+`OIDC_SIGNING_KEY` is the platform's RSA signing key (PKCS#8 DER, one line of
+base64; a full PEM also works) for GCP Workload Identity Federation — see
+[integrations.md](integrations.md) (Workload Identity Federation). It is
+one key for the whole deployment; organizations are told apart by the JWT `sub`
+(= organization id). Optional plain vars: `OIDC_SIGNING_KID` (default
+`internal-2026-10b`, must match the `kid` in the JWKS uploaded to GCP) and
+`OIDC_ISSUER` (default `https://internal.pathors.com`). The public key is served
+unauthenticated at `/.well-known/jwks.json` (and `/.well-known/openid-configuration`)
+for future rotation; GCP currently uses the JWKS uploaded to the provider.
 
 ### Custom worker entry + Cron Trigger (daily integration auto-sync)
 

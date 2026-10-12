@@ -16,12 +16,11 @@ import {
 } from "@/lib/integrations/store";
 import { supportsAutoSync } from "@/lib/integrations/autosync-config";
 import { runScheduledSync } from "@/lib/integrations/autosync";
+import { findMissingRequiredField, pickFields } from "@/lib/integrations/fields";
 import {
   isIntegrationProviderId,
-  type IntegrationCatalogEntry,
   type IntegrationConfig,
   type IntegrationCredentials,
-  type IntegrationField,
   type IntegrationProvider,
   type IntegrationProviderId,
   type TestConnectionResult,
@@ -51,34 +50,6 @@ async function requireManager(): Promise<Manager | { error: string }> {
   return { orgId, userId };
 }
 
-/** 只收目錄裡宣告過的欄位；其他 key 一律丟掉，不讓 client 塞東西進憑證或 config。 */
-function pickFields(
-  fields: readonly IntegrationField[] | undefined,
-  values: Record<string, unknown>,
-): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const f of fields ?? []) {
-    const raw = values[f.key];
-    if (typeof raw !== "string") continue;
-    // 密碼不修剪（前後空白可能是密碼的一部分）；其餘欄位修掉貼上時夾帶的空白。
-    const v = f.type === "password" ? raw : raw.trim();
-    if (v !== "") out[f.key] = v;
-  }
-  return out;
-}
-
-/** 回傳第一個沒填的必填欄位；都有填就回 null。 */
-function findMissingRequiredField(
-  entry: IntegrationCatalogEntry,
-  credentials: IntegrationCredentials,
-  configInput: IntegrationConfig,
-): IntegrationField | null {
-  for (const f of [...entry.credentialFields, ...(entry.configFields ?? [])]) {
-    if (f.required && !(f.key in credentials) && !(f.key in configInput)) return f;
-  }
-  return null;
-}
-
 type TestOutcome =
   | { ok: true; result: Extract<TestConnectionResult, { ok: true }> }
   | { ok: false; error: string };
@@ -88,10 +59,12 @@ async function runConnectionTest(
   impl: IntegrationProvider,
   credentials: IntegrationCredentials,
   config: IntegrationConfig,
+  orgId: string,
 ): Promise<TestOutcome> {
   let result: TestConnectionResult;
   try {
-    result = await impl.testConnection(credentials, config);
+    // orgId 來自 requireManager()（server 端 session），不是 client 傳來的值。
+    result = await impl.testConnection(credentials, config, { orgId });
   } catch (e) {
     // provider 自己沒處理好的例外（網路錯之類）。訊息照樣給人看，provider 有責任
     // 不把憑證放進錯誤訊息裡。
@@ -120,9 +93,11 @@ async function connectOrReconnect(
     if (!impl) return { ok: false, error: t("errors.notImplemented", { name }) };
 
     const entry = getCatalogEntry(provider);
-    const credentials: IntegrationCredentials = pickFields(entry.credentialFields, values);
-    const configInput: IntegrationConfig = pickFields(entry.configFields, values);
-    const missing = findMissingRequiredField(entry, credentials, configInput);
+    // 欄位可能依別的欄位（例如 GCP 的 authMode）決定適不適用：不適用的不檢查、也不存。
+    const allFields = [...entry.credentialFields, ...(entry.configFields ?? [])];
+    const credentials: IntegrationCredentials = pickFields(entry.credentialFields, allFields, values);
+    const configInput: IntegrationConfig = pickFields(entry.configFields, allFields, values);
+    const missing = findMissingRequiredField(allFields, { ...credentials, ...(configInput as Record<string, string>) });
     if (missing) {
       return { ok: false, error: t("errors.requiredField", { field: t(`fields.${missing.labelKey}`) }) };
     }
@@ -131,7 +106,7 @@ async function connectOrReconnect(
     const existing = await getIntegration(me.orgId, provider);
     const config: IntegrationConfig = { ...existing?.config, ...configInput };
 
-    const outcome = await runConnectionTest(impl, credentials, config);
+    const outcome = await runConnectionTest(impl, credentials, config, me.orgId);
     if (!outcome.ok) return { ok: false, error: t("errors.testFailed", { error: outcome.error }) };
     const { result } = outcome;
 
