@@ -31,6 +31,20 @@ const integrations = {
         en: "Read Wise balances and transactions for reconciliation.",
       },
     },
+    azure: {
+      name: { "zh-TW": "Azure 計費", en: "Azure billing" },
+      description: {
+        "zh-TW": "唯讀同步 Azure billing profile、底下的 subscription、付款卡、發票與每月費用，並和帳本對帳。",
+        en: "Read-only sync of Azure billing profiles, their subscriptions, payment cards, invoices and monthly costs, reconciled against the ledger.",
+      },
+    },
+    gcp: {
+      name: { "zh-TW": "Google Cloud 計費", en: "Google Cloud billing" },
+      description: {
+        "zh-TW": "唯讀同步 GCP billing account 與底下的專案；有開 BigQuery billing export 時另外讀每月費用並和帳本對帳。",
+        en: "Read-only sync of GCP billing accounts and their projects; with a BigQuery billing export it also reads monthly costs and reconciles them against the ledger.",
+      },
+    },
     googleCalendar: {
       name: { "zh-TW": "Google 日曆", en: "Google Calendar" },
       description: {
@@ -44,6 +58,24 @@ const integrations = {
     password: { "zh-TW": "密碼", en: "Password" },
     apiToken: { "zh-TW": "API Token", en: "API token" },
     companyId: { "zh-TW": "公司 ID（選填，帳號有多家公司時才需要）", en: "Company ID (optional; only if the account has several companies)" },
+    tenantId: { "zh-TW": "Tenant ID（目錄識別碼）", en: "Tenant ID (directory ID)" },
+    clientId: { "zh-TW": "Client ID（應用程式識別碼）", en: "Client ID (application ID)" },
+    clientSecret: { "zh-TW": "Client secret", en: "Client secret" },
+    serviceAccountJson: { "zh-TW": "Service account JSON key（整份貼上）", en: "Service account JSON key (paste the whole file)" },
+    bigQueryProjectId: { "zh-TW": "BigQuery export 專案 ID（選填）", en: "BigQuery export project ID (optional)" },
+    bigQueryDataset: { "zh-TW": "BigQuery export dataset（選填，例如 billing_export）", en: "BigQuery export dataset (optional, e.g. billing_export)" },
+    authMode: { "zh-TW": "驗證方式", en: "Authentication" },
+    authModeKey: { "zh-TW": "Service account JSON key", en: "Service account JSON key" },
+    authModeWorkloadIdentity: {
+      "zh-TW": "Workload Identity Federation（不存金鑰）",
+      en: "Workload Identity Federation (keyless)",
+    },
+    wifAudience: {
+      "zh-TW": "Workload identity provider（//iam.googleapis.com/projects/…/providers/…）",
+      en: "Workload identity provider (//iam.googleapis.com/projects/…/providers/…)",
+    },
+    serviceAccountEmail: { "zh-TW": "要 impersonate 的 service account", en: "Service account to impersonate" },
+    billingAccountId: { "zh-TW": "Billing account ID（計費範圍 › 屬性）", en: "Billing account ID (billing scope › Properties)" },
   },
   status: {
     notConnected: { "zh-TW": "未連接", en: "Not connected" },
@@ -69,8 +101,8 @@ const integrations = {
     label: { "zh-TW": "自動同步", en: "Auto-sync" },
     toggleLabel: { "zh-TW": "{name} 每日自動同步", en: "Daily auto-sync for {name}" },
     schedule: {
-      "zh-TW": "已開啟、狀態正常且沒關掉「自動同步」的整合，每天台北時間 06:00 會自動同步一次（Simpany：最近 90 天發票 + 今年薪資申報；Wise：交易，新列標為待確認）。",
-      en: "Every day at 06:00 Taipei time, each integration that is switched on, healthy and has auto-sync on is synced once (Simpany: last 90 days of invoices + this year's salary declarations; Wise: transactions, new rows flagged for review).",
+      "zh-TW": "已開啟、狀態正常且沒關掉「自動同步」的整合，每天台北時間 06:00 會自動同步一次（Simpany：最近 90 天發票 + 今年薪資申報；Wise：交易，新列標為待確認；Azure / GCP：勾選範圍內的計費帳號、資源與帳單，並和帳本對帳）。",
+      en: "Every day at 06:00 Taipei time, each integration that is switched on, healthy and has auto-sync on is synced once (Simpany: last 90 days of invoices + this year's salary declarations; Wise: transactions, new rows flagged for review; Azure / GCP: billing accounts, resources and invoices within the selected scope, reconciled against the ledger).",
     },
     last: {
       "zh-TW": "上次自動同步：{date} · {result}",

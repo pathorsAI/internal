@@ -31,10 +31,79 @@ export const INTEGRATION_CATALOG: Record<IntegrationProviderId, IntegrationCatal
       { key: "apiToken", labelKey: "apiToken", type: "token", required: true, autoComplete: "off" },
     ],
   },
+  // 唯讀：billing profile、subscription、付款卡、發票、Cost Management 費用。
+  // 要同步哪些 billing profile 由設定頁的「計費範圍」勾選（config.billingProfileIds）。
+  azure: {
+    id: "azure",
+    logo: { letter: "A", className: "bg-sky-600 text-white" },
+    credentialFields: [
+      { key: "tenantId", labelKey: "tenantId", type: "text", required: true, autoComplete: "off" },
+      { key: "clientId", labelKey: "clientId", type: "text", required: true, autoComplete: "off" },
+      { key: "clientSecret", labelKey: "clientSecret", type: "password", required: true, autoComplete: "off" },
+    ],
+    // service principal 只有 profile 層級角色時列不出 billing account，所以要人填。
+    configFields: [
+      { key: "billingAccountId", labelKey: "billingAccountId", type: "text", required: true, autoComplete: "off" },
+    ],
+    website: "https://portal.azure.com",
+  },
+  // 唯讀：billing account、底下專案；費用要另外開 BigQuery billing export（選填，填專案 + dataset，
+  // 資料表 gcp_billing_export_v1_<帳號> 自動偵測）。
+  // 要同步哪些 billing account 由設定頁的「計費範圍」勾選（config.billingAccountIds）。
+  gcp: {
+    id: "gcp",
+    logo: { letter: "G", className: "bg-amber-400 text-amber-950" },
+    // 兩種驗證方式（config.authMode）：
+    //   key               貼 service account JSON key（加密存放）
+    //   workload_identity 不存任何金鑰：平台用 OIDC_SIGNING_KEY 簽「這個組織」的 JWT，
+    //                     經 GCP Workload Identity Federation 換 token 再 impersonate SA（src/lib/oidc.ts）
+    credentialFields: [
+      {
+        key: "serviceAccountJson",
+        labelKey: "serviceAccountJson",
+        type: "token",
+        required: true,
+        autoComplete: "off",
+        when: { key: "authMode", equals: "key" },
+      },
+    ],
+    configFields: [
+      {
+        key: "authMode",
+        labelKey: "authMode",
+        type: "select",
+        required: true,
+        defaultValue: "key",
+        options: [
+          { value: "key", labelKey: "authModeKey" },
+          { value: "workload_identity", labelKey: "authModeWorkloadIdentity" },
+        ],
+      },
+      {
+        key: "wifAudience",
+        labelKey: "wifAudience",
+        type: "text",
+        required: true,
+        autoComplete: "off",
+        when: { key: "authMode", equals: "workload_identity" },
+      },
+      {
+        key: "serviceAccountEmail",
+        labelKey: "serviceAccountEmail",
+        type: "email",
+        required: true,
+        autoComplete: "off",
+        when: { key: "authMode", equals: "workload_identity" },
+      },
+      { key: "bigQueryProjectId", labelKey: "bigQueryProjectId", type: "text", required: false, autoComplete: "off" },
+      { key: "bigQueryDataset", labelKey: "bigQueryDataset", type: "text", required: false, autoComplete: "off" },
+    ],
+    website: "https://console.cloud.google.com/billing",
+  },
 };
 
 /** 設定頁的排列順序。 */
-export const INTEGRATION_ORDER: readonly IntegrationProviderId[] = ["simpany", "wise"];
+export const INTEGRATION_ORDER: readonly IntegrationProviderId[] = ["simpany", "wise", "azure", "gcp"];
 
 export function getCatalogEntry(id: IntegrationProviderId): IntegrationCatalogEntry {
   return INTEGRATION_CATALOG[id];

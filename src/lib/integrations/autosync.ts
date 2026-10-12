@@ -7,6 +7,7 @@ import { runAsSystem } from "@/i18n/server-t";
 import { syncSalaryDeclarations } from "@/lib/simpany-salary";
 import { syncSimpanyInvoices, taipeiDate } from "@/lib/simpany-sync";
 import { parseWiseConfig, syncWiseTransactions } from "@/lib/wise-sync";
+import { summarizeCloudSync, syncCloudBilling } from "@/lib/vendor-billing/sync";
 import {
   isAutoSyncOn,
   supportsAutoSync,
@@ -29,6 +30,9 @@ import type { IntegrationConfig, IntegrationProviderId } from "./types";
  *   - simpany → 發票同步（最近 90 天，台北日期）+ 薪資申報同步（今年；一月時連去年也跑）
  *   - wise    → 交易同步（dryRun: false）。去重靠 referenceNumber、永遠不早於切換日、
  *               新列一律標「待確認」，所以每天跑是安全的。
+ *   - azure / gcp → 勾選範圍內的計費帳號、資源、付款卡、帳單、費用明細，然後對帳
+ *               （src/lib/vendor-billing/sync.ts）。只讀雲端，只寫本組織的 vendor_* 表；
+ *               帳本只有設成 create_unmatched 的帳號、過了寬限期才會新增待確認支出。
  *
  * 安全：這裡只呼叫「同步」—— 對 Simpany 只有讀（列表 / 明細 / 薪資申報 GET），
  * 永遠不開立、不作廢發票，也不碰任何 Simpany 寫入端點；對 Wise 只有 GET。
@@ -183,6 +187,27 @@ async function syncWise(orgId: string, config: IntegrationConfig): Promise<StepO
   ];
 }
 
+async function syncCloud(orgId: string, provider: "azure" | "gcp", now: Date): Promise<StepOutcome[]> {
+  return [await step("計費", async () => summarizeCloudSync(await syncCloudBilling(orgId, provider, now)))];
+}
+
+async function stepsFor(
+  orgId: string,
+  provider: IntegrationProviderId,
+  config: IntegrationConfig,
+  now: Date,
+): Promise<StepOutcome[]> {
+  switch (provider) {
+    case "simpany":
+      return syncSimpany(orgId, now);
+    case "wise":
+      return syncWise(orgId, config);
+    case "azure":
+    case "gcp":
+      return syncCloud(orgId, provider, now);
+  }
+}
+
 async function runOne(
   orgId: string,
   provider: IntegrationProviderId,
@@ -194,7 +219,7 @@ async function runOne(
   const started = Date.now();
   let steps: StepOutcome[];
   try {
-    steps = provider === "simpany" ? await syncSimpany(orgId, now) : await syncWise(orgId, config);
+    steps = await stepsFor(orgId, provider, config, now);
   } catch (e) {
     // step() 已經各自收斂錯誤，這裡只會接到真正意外的例外（例如 config 解析炸掉）。
     const msg = errorMessage(e);
