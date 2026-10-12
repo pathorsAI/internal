@@ -13,6 +13,7 @@ import {
   transactions,
 } from "@/db/schema";
 import {
+  getMonthlySpendBreakdown,
   getOverview,
   getTransaction,
   listOutstandingAdvances,
@@ -38,6 +39,7 @@ import {
   type ToolDef,
 } from "./shared";
 import { resolvePayoutAccount } from "@/db/employee-accounts";
+import { summarizeSpendTrend } from "@/lib/spend-trend";
 import { PAYOUT_ACCOUNT_SCHEMA, payoutAccountOutput } from "./tools-employee-accounts";
 import { externalSingleLegSide } from "@/lib/external-transfer";
 import {
@@ -179,6 +181,36 @@ const TXN_LIST_ROW = rowSchema({
 });
 
 // getOverview 已經把聚合結果轉成 number。
+const SPEND_BREAKDOWN_ITEM = rowSchema({
+  key: { type: "string", description: "category:<id>, party:<id>, category:none (未分類) or party:none (no counterparty)." },
+  kind: { type: "string", enum: ["category", "party", "none"] },
+  id: { type: ["number", "null"], description: "Category or party id; null for the unassigned bucket." },
+  name: { type: ["string", "null"], description: "null for the unassigned bucket." },
+  total: { type: "number", description: "TWD, whole period." },
+  average: { type: "number", description: "TWD per month over the period." },
+  lastMonth: { type: "number", description: "TWD in the current (partial) month." },
+  previousMonth: { type: "number" },
+  change: { type: "number", description: "lastMonth − previousMonth." },
+  changePct: { type: ["number", "null"], description: "Ratio (0.25 = +25%); null when previousMonth ≤ 0." },
+  firstSpendMonth: { type: ["string", "null"], description: "YYYY-MM of the first expense ever (same definition)." },
+  isNew: { type: "boolean", description: "First expense falls inside the period." },
+  monthly: {
+    type: "array",
+    items: rowSchema({ month: { type: "string", description: "YYYY-MM." }, amount: { type: "number" } }),
+  },
+});
+
+const SPEND_BREAKDOWN_RESULT = rowSchema({
+  dimension: { type: "string", enum: ["category", "vendor"] },
+  currency: { type: "string", enum: ["TWD"] },
+  months: { type: "array", items: { type: "string" }, description: "YYYY-MM, oldest first; the last is the current month (Asia/Taipei)." },
+  monthTotals: { type: "array", items: { type: "number" }, description: "TWD per month, aligned with months." },
+  periodTotal: { type: "number" },
+  unconvertedCount: { type: "number", description: "Foreign-currency expenses with no TWD amount; excluded from all totals." },
+  items: { type: "array", items: SPEND_BREAKDOWN_ITEM },
+  count: { type: "number" },
+});
+
 const OVERVIEW_ROW = rowSchema({
   currency: { type: "string", description: "3-letter code." },
   income: { type: "number" },
@@ -685,6 +717,70 @@ export const transactionTools: Record<string, ToolDef> = {
     inputSchema: { type: "object", properties: { ...ORG_ARG }, additionalProperties: false },
     outputSchema: listSchema(OVERVIEW_ROW),
     execute: async (args, ctx) => listResult(await getOverview(await resolveOrg(args, ctx))),
+  },
+
+  monthly_spend_breakdown: {
+    description:
+      "Monthly spend (支出分析) broken down by transaction category or by vendor (counterparty), in TWD, for the last N months ending with the current month (Asia/Taipei). Same definition as the dashboard's 支出去向 and the 報表 > 支出分析 page: type=expense only; transfers, owner/equity and income-categorised rows, advances and reimbursements excluded; foreign currency counted at its booked TWD amount (rows without one are reported in unconvertedCount and left out). Items are sorted by period total, include the 未分類 / no-counterparty bucket, and carry month-over-month change and whether the item is new in the period. Filter to one vendor or category with partyId / categoryId.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...ORG_ARG,
+        dimension: { type: "string", enum: ["category", "vendor"], description: "Default category." },
+        months: { type: "number", description: "1–24, default 12." },
+        partyId: { type: "number", description: "Only this vendor (see list_parties)." },
+        categoryId: { type: "number", description: "Only this category (see list_categories)." },
+      },
+      additionalProperties: false,
+    },
+    outputSchema: SPEND_BREAKDOWN_RESULT,
+    // 名稱不是 list_/get_ 開頭，handler 不會自動判成唯讀；這支只讀帳本。
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      const dimension = optString(args, "dimension") ?? "category";
+      if (dimension !== "category" && dimension !== "vendor") {
+        throw new Error('"dimension" must be "category" or "vendor".');
+      }
+      const months = Math.trunc(optNumber(args, "months") ?? 12);
+      if (months < 1 || months > 24) throw new Error('"months" must be between 1 and 24.');
+      const data = await getMonthlySpendBreakdown(orgId, months, {
+        partyId: optNumber(args, "partyId"),
+        categoryId: optNumber(args, "categoryId"),
+      });
+      const trend = summarizeSpendTrend(
+        data.rows,
+        data.months,
+        months,
+        dimension === "vendor" ? "party" : "category",
+        Number.POSITIVE_INFINITY,
+      );
+      const items = trend.items.map((it) => ({
+        key: it.key,
+        kind: it.kind,
+        id: it.id,
+        name: it.name,
+        total: it.total,
+        average: it.average,
+        lastMonth: it.last,
+        previousMonth: it.prev,
+        change: it.change,
+        changePct: it.changePct,
+        firstSpendMonth: it.firstMonth,
+        isNew: it.isNew,
+        monthly: trend.months.map((month, i) => ({ month, amount: it.monthly[i] })),
+      }));
+      return {
+        dimension,
+        currency: "TWD",
+        months: trend.months,
+        monthTotals: trend.monthTotals,
+        periodTotal: trend.summary.periodTotal,
+        unconvertedCount: trend.unconverted,
+        items,
+        count: items.length,
+      };
+    },
   },
 
   list_outstanding_advances: {

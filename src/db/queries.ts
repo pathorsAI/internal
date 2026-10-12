@@ -3,6 +3,7 @@ import { sql, eq, desc, and, or, lte, gte, lt, inArray, isNull, isNotNull, alias
 import { getDb } from "./index";
 import { nextChargeDate, todayStr } from "@/lib/mcp/shared";
 import { periodRange, type LedgerTransaction } from "@/lib/recurring-expenses";
+import { monthWindow, shiftMonth, yearMonthIn } from "@/lib/spend-trend";
 import {
   transactions,
   categories,
@@ -75,17 +76,24 @@ export async function getOverview(orgId: string) {
 
 export type TxnFilters = {
   book?: Book;
-  categoryId?: number;
+  /** "none" = 未分類 */
+  categoryId?: number | "none";
   accountId?: number;
   projectId?: number;
   period?: string; // YYYY-MM
   /** 只看自動匯入、還沒人確認的列（Wise 同步）。 */
   needsReview?: boolean;
-  /** 只看某個交易對象（總覽「支出去向」點進來的）。 */
-  partyId?: number;
+  /** 只看某個交易對象（總覽「支出去向」點進來的）；"none" = 未指定對象。 */
+  partyId?: number | "none";
   /** 只看指定的交易 id（Discord 通知連結用）；仍受 organization 範圍限制。 */
   ids?: number[];
 };
+
+/** id 篩選："none" = 沒有指定（IS NULL），數字 = 等於，沒給 = 不篩。 */
+function idFilter(column: typeof transactions.categoryId | typeof transactions.partyId, v?: number | "none") {
+  if (v === undefined) return undefined;
+  return v === "none" ? isNull(column) : eq(column, v);
+}
 
 // 內外帳列表與筆數共用的 where（篩選條件的 single source of truth）
 function txnWhere(orgId: string, filters: TxnFilters) {
@@ -93,7 +101,7 @@ function txnWhere(orgId: string, filters: TxnFilters) {
   return and(
     eq(transactions.organizationId, orgId),
     book ? eq(transactions.book, book) : undefined,
-    categoryId ? eq(transactions.categoryId, categoryId) : undefined,
+    idFilter(transactions.categoryId, categoryId),
     accountId
       ? or(
           eq(transactions.fromAccountId, accountId),
@@ -101,7 +109,7 @@ function txnWhere(orgId: string, filters: TxnFilters) {
         )
       : undefined,
     projectId ? eq(transactions.projectId, projectId) : undefined,
-    partyId ? eq(transactions.partyId, partyId) : undefined,
+    idFilter(transactions.partyId, partyId),
     period ? sql`to_char(${transactions.txnDate}, 'YYYY-MM') = ${period}` : undefined,
     needsReview === undefined ? undefined : eq(transactions.needsReview, needsReview),
     ids && ids.length > 0 ? inArray(transactions.id, ids) : undefined,
@@ -325,6 +333,32 @@ export async function getMonthlyTrends(
   };
 }
 
+// ---- 支出口徑（總覽「支出去向」與報表「支出分析」共用）----
+
+/** 台幣金額：amount_twd，沒有的話台幣交易用 amount；外幣又沒換算的是 NULL（不計入、只計筆數）。 */
+function spendTwdSql() {
+  return sql`coalesce(${transactions.amountTwd}, case when ${transactions.currency} = 'TWD' then ${transactions.amount} end)`;
+}
+
+/**
+ * 「支出」的定義。查詢須 leftJoin categories（條件裡會用到 categories.kind）。
+ * - 只算真正花出去的錢：type = expense（含成本類分類）。
+ *   不算：收入、轉帳、代墊（advance）與撥款（reimbursement）這類結算列。
+ * - 型別是 expense 但被歸到轉帳 / 業主往來 / 收入分類的，是記錯的列，也不算進支出。
+ */
+function spendConditions(
+  orgId: string,
+  t: typeof transactions = transactions,
+  c: typeof categories = categories,
+) {
+  return [
+    eq(t.organizationId, orgId),
+    isNull(t.deletedAt),
+    eq(t.type, "expense"),
+    sql`(${c.kind} is null or ${c.kind} not in ('transfer','equity','income'))`,
+  ];
+}
+
 // ---- 總覽頁「支出去向」：近 12 個月的支出，依 交易對象 × 分類 × 月 彙總 ----
 
 /**
@@ -358,7 +392,7 @@ export async function getSpendBreakdown(orgId: string, monthsBack = 12): Promise
   );
   const windowStart = `${months[0]}-01`;
   const txnMonth = sql<string>`to_char(${transactions.txnDate}, 'YYYY-MM')`;
-  const twd = sql`coalesce(${transactions.amountTwd}, case when ${transactions.currency} = 'TWD' then ${transactions.amount} end)`;
+  const twd = spendTwdSql();
 
   const rows = await db
     .select({
@@ -384,15 +418,107 @@ export async function getSpendBreakdown(orgId: string, monthsBack = 12): Promise
       and(eq(categories.id, transactions.categoryId), eq(categories.organizationId, orgId)),
     )
     .where(
+      and(...spendConditions(orgId), sql`${transactions.txnDate} >= ${windowStart}`),
+    )
+    .groupBy(
+      sql`1`,
+      transactions.partyId,
+      parties.name,
+      parties.avatarR2Key,
+      parties.avatarUpdatedAt,
+      transactions.categoryId,
+      categories.name,
+    );
+
+  return {
+    months,
+    rows: rows.map((r) => ({
+      month: r.month,
+      partyId: r.partyId,
+      partyName: r.partyName,
+      partyAvatarVersion: r.partyAvatarVersion,
+      categoryId: r.categoryId,
+      categoryName: r.categoryName,
+      totalTwd: Number(r.totalTwd),
+      count: Number(r.count),
+      unconverted: Number(r.unconverted),
+    })),
+  };
+}
+
+// ---- 報表「支出分析」：依 類別 / 廠商 的月趨勢（台幣）----
+
+/**
+ * 一列 = 某個月、某個交易對象、某個分類的支出合計，形狀同 SpendRow 再多兩個「第一次出現的月份」。
+ * 口徑同 getSpendBreakdown（spendConditions），未指定對象 / 未分類照樣保留（party/category 為 null）。
+ */
+export type MonthlySpendRow = SpendRow & {
+  /** 這個交易對象有史以來第一筆支出的月份（同一個支出口徑）；未指定對象為 null */
+  partyFirstMonth: string | null;
+  /** 這個分類有史以來第一筆支出的月份；未分類為 null */
+  categoryFirstMonth: string | null;
+};
+
+export type MonthlySpendBreakdown = { months: string[]; rows: MonthlySpendRow[] };
+
+/**
+ * 近 monthsBack 個月（以台北時間的「本月」結尾）的支出，依 月 × 交易對象 × 分類 一支 group by 查詢。
+ * 維度（類別 / 廠商）、6 / 12 個月與前 8 名 + 其他都在 src/lib/spend-trend.ts 切。
+ * partyId / categoryId 給了就只看那一個（"none" = 未指定 / 未分類），給 MCP 工具用。
+ */
+export async function getMonthlySpendBreakdown(
+  orgId: string,
+  monthsBack = 12,
+  opts: { partyId?: number | "none"; categoryId?: number | "none"; now?: Date } = {},
+): Promise<MonthlySpendBreakdown> {
+  const db = getDb();
+  const months = monthWindow(yearMonthIn(opts.now ?? new Date()), monthsBack);
+  const windowStart = `${months[0]}-01`;
+  const windowEnd = `${shiftMonth(months.at(-1)!, 1)}-01`;
+  const twd = spendTwdSql();
+
+  // 同一個支出口徑下，某個交易對象 / 分類最早的一筆（不限視窗），判斷「本期新出現」用
+  const firstMonthOf = (column: "partyId" | "categoryId", prefix: string) => {
+    const tName = `${prefix}_txn`;
+    const cName = `${prefix}_cat`;
+    const t = aliasedTable(transactions, tName);
+    const c = aliasedTable(categories, cName);
+    // 內插 aliasedTable 只會印出別名，所以 from / join 要自己寫「表 as 別名」
+    return sql<string | null>`(
+      select to_char(min(${t.txnDate}), 'YYYY-MM')
+      from ${transactions} as ${sql.identifier(tName)}
+      left join ${categories} as ${sql.identifier(cName)} on ${c.id} = ${t.categoryId} and ${c.organizationId} = ${orgId}
+      where ${and(...spendConditions(orgId, t, c), eq(t[column], transactions[column]))}
+    )`;
+  };
+
+  const rows = await db
+    .select({
+      month: sql<string>`to_char(${transactions.txnDate}, 'YYYY-MM')`.as("month"),
+      partyId: transactions.partyId,
+      partyName: parties.name,
+      partyAvatarVersion: avatarVersionSql(),
+      categoryId: transactions.categoryId,
+      categoryName: categories.name,
+      totalTwd: sql<string>`coalesce(sum(${twd}), 0)`,
+      count: sql<number>`(count(*) filter (where ${twd} is not null))::int`,
+      unconverted: sql<number>`(count(*) filter (where ${twd} is null))::int`,
+      partyFirstMonth: firstMonthOf("partyId", "first_party"),
+      categoryFirstMonth: firstMonthOf("categoryId", "first_category"),
+    })
+    .from(transactions)
+    .leftJoin(parties, and(eq(parties.id, transactions.partyId), eq(parties.organizationId, orgId)))
+    .leftJoin(
+      categories,
+      and(eq(categories.id, transactions.categoryId), eq(categories.organizationId, orgId)),
+    )
+    .where(
       and(
-        eq(transactions.organizationId, orgId),
-        isNull(transactions.deletedAt),
+        ...spendConditions(orgId),
         sql`${transactions.txnDate} >= ${windowStart}`,
-        // 只算真正花出去的錢：type = expense（含成本類分類）。
-        // 不算：收入、轉帳、代墊（advance）與撥款（reimbursement）這類結算列。
-        eq(transactions.type, "expense"),
-        // 型別是 expense 但被歸到轉帳 / 業主往來 / 收入分類的，是記錯的列，也不算進支出
-        sql`(${categories.kind} is null or ${categories.kind} not in ('transfer','equity','income'))`,
+        sql`${transactions.txnDate} < ${windowEnd}`,
+        idFilter(transactions.partyId, opts.partyId),
+        idFilter(transactions.categoryId, opts.categoryId),
       ),
     )
     .groupBy(
@@ -417,6 +543,8 @@ export async function getSpendBreakdown(orgId: string, monthsBack = 12): Promise
       totalTwd: Number(r.totalTwd),
       count: Number(r.count),
       unconverted: Number(r.unconverted),
+      partyFirstMonth: r.partyFirstMonth,
+      categoryFirstMonth: r.categoryFirstMonth,
     })),
   };
 }

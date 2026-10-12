@@ -66,6 +66,7 @@ export type NavItemKey =
   | "contracts"
   | "invoices"
   | "reports"
+  | "spendAnalysis"
   | "employees"
   | "payroll"
   | "members"

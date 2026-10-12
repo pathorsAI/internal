@@ -11,7 +11,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { Bar, BarChart, Cell, LabelList, XAxis, YAxis } from "recharts";
-import { HandCoins } from "lucide-react";
+import { ArrowUpRight, HandCoins } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChartContainer, ChartTooltip, type ChartConfig } from "@/components/ui/chart";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -321,11 +321,21 @@ export function SpendChart({
               </BarChart>
             </ChartContainer>
           )}
-          {summary.unconverted > 0 ? (
-            <p className="mt-2 text-xs text-muted-foreground">
-              {t("unconverted", { count: summary.unconverted })}
-            </p>
-          ) : null}
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+            {summary.unconverted > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                {t("unconverted", { count: summary.unconverted })}
+              </p>
+            ) : (
+              <span />
+            )}
+            <Link
+              href="/dashboard/reports/spend"
+              className="inline-flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground hover:underline"
+            >
+              {t("trendLink")} <ArrowUpRight className="size-3.5" />
+            </Link>
+          </div>
         </CardContent>
       </Card>
     </section>

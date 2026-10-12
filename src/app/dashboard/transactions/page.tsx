@@ -232,6 +232,11 @@ function idParam(v: string | undefined): number | undefined {
   return v && Number.isFinite(Number(v)) ? Number(v) : undefined;
 }
 
+/** 同 idParam，另外接受 none（未分類 / 未指定對象；報表「支出分析」連過來的）。 */
+function idOrNoneParam(v: string | undefined): number | "none" | undefined {
+  return v === "none" ? "none" : idParam(v);
+}
+
 export default async function TransactionsPage({
   searchParams,
 }: Readonly<{
@@ -274,9 +279,9 @@ export default async function TransactionsPage({
   const active = (["internal", "external", "both"].includes(book ?? "") ? book : undefined) as
     | Book
     | undefined;
-  const categoryId = idParam(category);
+  const categoryId = idOrNoneParam(category);
   const accountId = idParam(account);
-  const partyId = idParam(party);
+  const partyId = idOrNoneParam(party);
   const page = Math.max(1, Math.trunc(Number(pageParam)) || 1);
   const needsReview = review === "1" ? true : undefined;
   const ids = parseIdsParam(idsParam) ?? undefined;

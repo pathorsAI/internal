@@ -64,12 +64,14 @@ const transactions = {
     },
     category: {
       all: { "zh-TW": "全部分類", en: "All categories" },
+      none: { "zh-TW": "未分類", en: "Uncategorized" },
     },
     account: {
       all: { "zh-TW": "全部帳戶", en: "All accounts" },
     },
     party: {
       all: { "zh-TW": "全部對象", en: "All counterparties" },
+      none: { "zh-TW": "未指定對象", en: "No counterparty" },
     },
     month: {
       all: { "zh-TW": "全部月份", en: "All months" },

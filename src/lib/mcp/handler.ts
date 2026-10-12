@@ -363,6 +363,7 @@ const TITLE_OVERRIDES: Record<string, string> = {
   list_payment_methods: "List payment methods",
   upsert_payment_method: "Save a payment method record",
   list_vendor_invoices: "List cloud invoices and reconciliation",
+  monthly_spend_breakdown: "Monthly spend by category or vendor",
   resolve_vendor_invoice: "Reconcile a cloud invoice",
   sync_billing_calendar: "Sync the billing calendar",
   simpany_get_invoice: "Simpany e-invoice detail",
