@@ -124,8 +124,8 @@ the `tools-*.ts` modules):
 - `_meta["openai/toolInvocation/invoking" | "invoked"]`, the status line ChatGPT
   shows while a call is in flight.
 
-**Output schemas.** Every tool declares an `outputSchema` — all 93 of them, as of
-server version 1.9.0 (the Simpany tools whose result shape comes from Simpany's
+**Output schemas.** Every tool declares an `outputSchema` — all 100 of them, as of
+server version 1.10.0 (the Simpany tools whose result shape comes from Simpany's
 unofficial API declare an open object schema). When a tool declares one the handler additionally returns
 the result as MCP `structuredContent` (the JSON text block stays, per MCP's
 back-compat recommendation), which is what ChatGPT and Codex prefer over parsing
@@ -244,14 +244,15 @@ reconciliations: `list_reconciliations` +
 `mark_accountant_notified`, `unmark_accountant_notified`.
 
 **Integrations** — `list_integrations` shows, per external integration
-(Simpany e-invoice, Wise), whether it is available on this server, connected,
+(Simpany e-invoice, Wise, Azure billing, Google Cloud billing), whether it is available on this server, connected,
 switched on, and healthy (`status`, `lastError`, `lastSyncedAt`,
 `tokenExpiresAt`) plus its non-secret `config`, the daily auto-sync switch
 (`autoSync`) and the last auto-sync result (`lastAutoSync`). It never returns
 credentials. `run_integration_sync` (owner/admin, write, open world) runs the daily
 auto-sync right now for the current organization only — the same code path as the
 06:00 Taipei Cron Trigger (Simpany invoices + salary declarations, Wise
-transactions; never issues or voids invoices).
+transactions, Azure / GCP billing within the ticked scope + reconciliation; never
+issues or voids invoices).
 Integration business tools live in their own `tools-<provider>.ts` and stay in
 `tools/list` whether or not the org has connected the integration; at call time
 they go through `requireIntegrationForTool()` and fail with a clear zh-TW message
@@ -302,6 +303,19 @@ employees (national-id data) is deliberately not possible. Shareholder loan
 repayments (股東往來還款) are not salary and never go into a declaration. The write
 endpoints were read from Simpany's frontend and have not been exercised live —
 see integrations.md.
+
+**Vendor billing** (`src/lib/mcp/tools-vendor-billing.ts`, our tables only — closed
+world; syncing Azure / GCP is `run_integration_sync`):
+
+| Tool | Inputs | Notes |
+| --- | --- | --- |
+| `list_vendor_billing_accounts` | `provider?`, `status?`, `needsAttention?` | Which platform account is paid by which payment method, with party, owner, resource count, latest invoice and `attention` reasons (expiring card, no payment method, manual data unconfirmed > 180 days, invoice unmatched > 45 days or overdue at the provider, gone missing at the provider). |
+| `get_vendor_billing_account` | `id` | + resources (Azure subscriptions / GCP projects), recent invoices with linked / suggested ledger transactions, monthly cost totals (analytics only). |
+| `upsert_vendor_billing_account` | `id?`, `provider`, `externalId?`, `displayName`, `partyId?`, `matchPartyIds?`, `paymentMethodId?`, `ownerUserId?`, `ledgerMode?`, `status?`, `note?` | Owner/admin. Synced accounts only accept party / match parties / payment method / owner / ledger mode / note. Every referenced id must belong to the org. |
+| `list_payment_methods` | — | Cards (brand, last 4, expiry, holder — never full numbers), reseller invoices, bank transfers, Wise cards; settles-from ledger account; the accounts each pays. |
+| `upsert_payment_method` | `id?`, `kind`, `label`, `brand?`, `last4?`, `expiryMonth?`, `expiryYear?`, `holderName?`, `settlesFromAccountId?`, `isActive?`, `note?` | Owner/admin. `last4` must be exactly 4 digits (longer input is rejected). Azure-synced cards only accept label / settles-from / active / note. |
+| `list_vendor_invoices` | `matchStatus?`, `billingAccountId?`, `limit?` | Azure invoices and GCP monthly totals (BigQuery export) with their reconciliation status. |
+| `resolve_vendor_invoice` | `id`, `action` (`confirm` / `link` / `unlink` / `ignore` / `create`), `transactionId?` | Owner/admin. `link` checks the transaction is in the org; several invoices may share one transaction. `create` books a needs-review expense (internal book) — ask the user first. |
 
 **Not exposed (do in the app):** creating an organization, uploading
 invoice/receipt **files** (R2), multi-currency FX entry, and *connecting* Google
