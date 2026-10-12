@@ -20,6 +20,27 @@ const auth = {
       },
       submit: { "zh-TW": "登入", en: "Sign in" },
       submitting: { "zh-TW": "登入中…", en: "Signing in…" },
+      forgot: { "zh-TW": "忘記密碼？", en: "Forgot password?" },
+      signup: { "zh-TW": "第一次使用？建立帳號", en: "New here? Create an account" },
+    },
+    // 網址上帶 ?error= / ?notice= 回到登入頁時的說明，見 src/app/login/login-notice.ts。
+    notice: {
+      ssoRequired: {
+        "zh-TW": "這個 email 的網域已設定公司單一登入（SSO），不能用 Google 或 email 自行註冊。請在下方輸入公司 email，按「繼續」改用 SSO 登入。",
+        en: "This email's domain uses your company's single sign-on (SSO), so it can't sign up with Google or email. Enter your work email below and press Continue to sign in with SSO.",
+      },
+      linkInvalid: {
+        "zh-TW": "這個連結已失效或已經用過，請重新申請。",
+        en: "This link has expired or has already been used. Please request a new one.",
+      },
+      passwordUpdated: {
+        "zh-TW": "密碼已更新，請用新密碼登入。",
+        en: "Your password has been updated. Sign in with your new password.",
+      },
+      failed: {
+        "zh-TW": "登入沒有完成，請再試一次。",
+        en: "Sign-in didn't complete. Please try again.",
+      },
     },
     toast: {
       failed: { "zh-TW": "登入失敗", en: "Sign-in failed" },
@@ -28,6 +49,100 @@ const auth = {
         en: "Incorrect email or password",
       },
     },
+  },
+  // 註冊／忘記密碼／重設密碼／設定密碼這幾頁共用的錯誤訊息與連結。
+  shared: {
+    backToLogin: { "zh-TW": "回到登入", en: "Back to sign in" },
+    emailLabel: { "zh-TW": "Email", en: "Email" },
+    emailPlaceholder: { "zh-TW": "you@company.com", en: "you@company.com" },
+    rateLimited: {
+      "zh-TW": "嘗試次數太多，請稍後再試。",
+      en: "Too many attempts. Please try again later.",
+    },
+    ssoRequired: {
+      "zh-TW": "這個 email 的網域必須使用公司的單一登入（SSO）。請回到登入頁輸入 email，按「繼續」用 SSO 登入。",
+      en: "This email's domain must use your company's single sign-on (SSO). Go back to sign in, enter your email and press Continue to sign in with SSO.",
+    },
+    network: {
+      "zh-TW": "連線失敗，請檢查網路後再試一次。",
+      en: "Couldn't connect. Check your connection and try again.",
+    },
+  },
+  signup: {
+    title: { "zh-TW": "建立帳號", en: "Create an account" },
+    description: {
+      "zh-TW": "我們會寄一封確認信到你的 email，點信裡的連結就能完成註冊並設定密碼。",
+      en: "We'll email you a confirmation link. Click it to finish signing up and set a password.",
+    },
+    nameLabel: { "zh-TW": "名字", en: "Name" },
+    namePlaceholder: { "zh-TW": "王小明", en: "Jane Doe" },
+    submit: { "zh-TW": "寄送確認信", en: "Send confirmation email" },
+    submitting: { "zh-TW": "寄送中…", en: "Sending…" },
+    sent: {
+      title: { "zh-TW": "請到信箱收信", en: "Check your inbox" },
+      body: {
+        "zh-TW": "請到 {email} 收信，連結 15 分鐘內有效。",
+        en: "Check {email} for a link. It's valid for 15 minutes.",
+      },
+      hint: {
+        "zh-TW": "沒收到的話，先看一下垃圾郵件匣；同一個 email 一分鐘內只會寄一封。",
+        en: "If it doesn't arrive, check your spam folder. We send at most one email per minute to the same address.",
+      },
+      retry: { "zh-TW": "改用其他 email", en: "Use a different email" },
+    },
+    haveAccount: { "zh-TW": "已經有帳號？登入", en: "Already have an account? Sign in" },
+  },
+  forgotPassword: {
+    title: { "zh-TW": "忘記密碼", en: "Forgot your password?" },
+    description: {
+      "zh-TW": "輸入帳號的 email，我們會寄一封重設密碼的信給你。",
+      en: "Enter your account's email and we'll send you a link to reset your password.",
+    },
+    submit: { "zh-TW": "寄送重設連結", en: "Send reset link" },
+    submitting: { "zh-TW": "寄送中…", en: "Sending…" },
+    sent: {
+      title: { "zh-TW": "請到信箱收信", en: "Check your inbox" },
+      body: {
+        "zh-TW": "如果這個 email 有帳號，會收到重設密碼的信。連結 1 小時內有效。",
+        en: "If this email has an account, you'll receive a password reset email. The link is valid for 1 hour.",
+      },
+    },
+  },
+  // 重設密碼（/reset-password）與新帳號設定密碼（/signup/password）共用的欄位與檢查訊息。
+  passwordForm: {
+    password: { "zh-TW": "新密碼", en: "New password" },
+    confirm: { "zh-TW": "再輸入一次", en: "Confirm password" },
+    hint: { "zh-TW": "至少 {min} 個字元", en: "At least {min} characters" },
+    tooShort: { "zh-TW": "密碼至少要 {min} 個字元。", en: "Password must be at least {min} characters." },
+    mismatch: { "zh-TW": "兩次輸入的密碼不一樣。", en: "The passwords don't match." },
+  },
+  resetPassword: {
+    title: { "zh-TW": "設定新密碼", en: "Set a new password" },
+    description: {
+      "zh-TW": "設定完成後，所有裝置上的登入都會被登出。",
+      en: "Once it's set, you'll be signed out on every device.",
+    },
+    submit: { "zh-TW": "更新密碼", en: "Update password" },
+    submitting: { "zh-TW": "更新中…", en: "Updating…" },
+    failed: { "zh-TW": "更新密碼失敗，請再試一次。", en: "Couldn't update the password. Please try again." },
+    invalid: {
+      title: { "zh-TW": "連結已失效", en: "This link has expired" },
+      body: {
+        "zh-TW": "這個重設密碼連結已過期或已經用過。請重新申請一次。",
+        en: "This password reset link has expired or has already been used. Please request a new one.",
+      },
+      action: { "zh-TW": "重新申請重設密碼", en: "Request a new link" },
+    },
+  },
+  setPassword: {
+    title: { "zh-TW": "設定登入密碼", en: "Set your password" },
+    description: {
+      "zh-TW": "帳號已建立。設定一組密碼，之後就能用 email 和密碼登入。",
+      en: "Your account is ready. Set a password so you can sign in with your email and password.",
+    },
+    submit: { "zh-TW": "設定密碼並繼續", en: "Set password and continue" },
+    submitting: { "zh-TW": "設定中…", en: "Saving…" },
+    failed: { "zh-TW": "設定密碼失敗，請再試一次。", en: "Couldn't set the password. Please try again." },
   },
   // 邀請清單是 onboarding 與側邊欄 user menu 的邀請對話框共用的（元件也是同一個），
   // 所以字串放在 auth.invites 這層，而不是埋在 auth.onboarding 底下。

@@ -40,8 +40,15 @@ export function proxy(request: NextRequest) {
 // 這裡 —— Cloudflare 的 assets binding 會在 Worker 之前就把 public/ 的檔案送出去 ——
 // 但 `next dev` 沒有那一層，於是同一張圖在本機會被導去 /login，公開頁面的語系切換器
 // 在開發時就少了旗子。列進來讓本機跟線上看到的是同一件事。
+//
+// signup / forgot-password / reset-password 是公開註冊與忘記密碼的頁面，給還沒有
+// （或登不進）帳號的人用，當然不能要求 session。注意這裡的排除是**前綴**比對：
+// `signup` 也把 /signup/password（新帳號設密碼）排除在外了。那一頁確實需要登入，
+// 但它自己在 server component 裡檢查 session 並導去 /login（見
+// src/app/signup/password/page.tsx），刻意不靠這裡——這層只看 cookie 存不存在，
+// 那頁要的是真的去查 session 與 credential account。
 export const config = {
   matcher: [
-    "/((?!login|signup|landing|privacy|terms|flags|api/auth|api/cron|mcp|.well-known|_next/static|_next/image|favicon.ico).*)",
+    "/((?!login|signup|forgot-password|reset-password|landing|privacy|terms|flags|api/auth|api/cron|mcp|.well-known|_next/static|_next/image|favicon.ico).*)",
   ],
 };

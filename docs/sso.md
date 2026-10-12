@@ -18,6 +18,29 @@ the normal invitation flow, exactly like a first-time Google user.
 Implemented with better-auth's [`@better-auth/sso`](https://www.better-auth.com/docs/plugins/sso)
 plugin (see `src/lib/auth.ts`). SAML is supported by the plugin but not used here.
 
+## SSO domains cannot self-register
+
+Once a domain has a registered provider (with `domain_verified = true`), people at that
+domain can only get an account **through the IdP**. The customer's IdP owns the account
+lifecycle: someone deactivated there must not keep a door we opened for them.
+
+- **Public sign-up (`/signup`)** runs the same SSO lookup as the login page and sends SSO
+  domains to the IdP. Calling the API directly is refused too: `POST /sign-in/magic-link`
+  and `POST /request-password-reset` answer `403` with `code: "SSO_REQUIRED"`.
+- **First-time Google sign-in** is refused when the user would be created. The browser
+  lands back on `/login?error=SSO_REQUIRED`, which explains that the address must use SSO.
+- **Server-side provisioning** (`scripts/create-user.ts`) and the SSO callback itself are
+  not affected.
+
+The match uses the same algorithm as the plugin's home realm discovery (comma-separated
+list, case-insensitive, subdomains included), so "cannot self-register" covers exactly the
+addresses the login page would send to the IdP. See `src/lib/sso-domain.ts`.
+
+**Existing accounts are not forced onto SSO yet.** Someone at the domain who already signed
+in with Google or a password before the provider was registered can keep doing so. Forcing
+existing accounts onto SSO is a deliberate follow-up: it locks out people who are using the
+app today, so it needs a cut-over date agreed with the customer.
+
 ## Endpoints
 
 | Purpose | URL |
@@ -144,4 +167,4 @@ at the IdP (or delete the sessions) if you need the users out immediately.
 - `migrations/0020_sso_provider.sql` — the table and why each column exists.
 - `src/lib/auth.ts` — plugin configuration and the registration lockdown.
 - Password sign-in, the other non-Google method, is documented in the README; accounts
-  are provisioned with `scripts/create-user.ts`.
+  come from public sign-up (`/signup`, email verified first) or `scripts/create-user.ts`.

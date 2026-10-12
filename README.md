@@ -135,10 +135,17 @@ and run it against your database.
 Google is the primary method, but it is not the only one.
 
 **Email + password.** Useful if you self-host and do not want to wire up Google at all.
-Public password *signup* is deliberately off: better-auth links accounts by email
-address, and an unverified self-registered password account on someone else's email
-would let an attacker sit and wait for the real owner to arrive via Google. So accounts
-are created server-side instead:
+Anyone can create an account at `/signup`, but the email is verified **before** a password
+exists: the form sends a confirmation link (via Resend — set `RESEND_API_KEY`), the account
+is created when the link is clicked, and only then does the user choose a password. Signing
+up with a password first is deliberately impossible: better-auth links accounts by email
+address, and an unverified self-registered password account on someone else's email would
+let an attacker sit and wait for the real owner to arrive via Google (or, with better-auth's
+default `requireLocalEmailVerified`, lock the real owner out of Google sign-in). Forgotten
+passwords are reset from `/forgot-password`. Email domains with a registered SSO provider
+cannot self-register — see [`docs/sso.md`](docs/sso.md).
+
+Accounts can also be created server-side, e.g. for a reviewer or straight into an org:
 
 ```bash
 bun scripts/create-user.ts --email you@example.com \
@@ -160,6 +167,8 @@ only. See [`docs/sso.md`](docs/sso.md).
 | `BETTER_AUTH_SECRET` | Session signing secret (`openssl rand -base64 32`) |
 | `BETTER_AUTH_URL` | App base URL, no trailing slash |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth credentials (sign-in **and** the optional Google Calendar integration) |
+| `RESEND_API_KEY` | Resend API key for sign-up confirmation and password reset emails. Required in production; in dev a missing key prints the emails to the console |
+| `RESEND_FROM` | Optional sender, default `Pathors Internal <noreply@pathors.com>` |
 
 See [`.env.example`](.env.example) for the full template.
 

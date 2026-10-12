@@ -1,15 +1,63 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { genericOAuth, mcp, organization } from "better-auth/plugins";
+import { APIError, createAuthMiddleware } from "better-auth/api";
+import { genericOAuth, magicLink, mcp, organization } from "better-auth/plugins";
 import { sso } from "@better-auth/sso";
 import { nextCookies } from "better-auth/next-js";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
+import { completeSignupEmail, resetPasswordEmail, signInLinkEmail } from "@/lib/auth-emails";
 import { publicBaseUrl } from "@/lib/base-url";
+import { sendEmail, type EmailMessage } from "@/lib/email";
+import { claimEmailCooldown } from "@/lib/email-cooldown";
+import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
+import { isSsoDomain } from "@/lib/sso-domain";
 import * as authSchema from "@/db/auth-schema";
 
 /** better-auth 的 provider id，用來取日曆的 access token。 */
 export const GOOGLE_CALENDAR_PROVIDER_ID = "google-calendar";
+
+/**
+ * email 的網域註冊了 SSO provider，這個人不准自助註冊／自助重設密碼，必須走公司 IdP。
+ *
+ * message 刻意跟 code 一樣是 `SSO_REQUIRED`，不是一句人話：Google 登入的 OAuth
+ * callback 擋下建立 user 時，better-auth 只把 **message**（空白換成底線）接到
+ * `?error=` 上（handleOAuthUserInfo 把 APIError 收成 `{ error: e.message }`，
+ * callback 再 redirectOnError），code 在那條路上會被丟掉。message 等於 code，
+ * 登入頁收到的就是穩定的 `?error=SSO_REQUIRED`，能顯示對應的說明；JSON API
+ * （magic link、忘記密碼）則照常帶 `code: "SSO_REQUIRED"`，前端看 code 決定訊息，
+ * 不會把 message 秀給使用者。
+ */
+const SSO_REQUIRED = "SSO_REQUIRED";
+
+function ssoRequiredError() {
+  return new APIError("FORBIDDEN", { code: SSO_REQUIRED, message: SSO_REQUIRED });
+}
+
+/**
+ * 寄出驗證／重設信。失敗只記 log、不往外丟：
+ *
+ * 重設密碼只對「存在的帳號」呼叫 sendResetPassword，寄信失敗若變成 500，回應
+ * 就會因帳號存不存在而不同——等於把帳號探測接回去。magic link 雖然兩種情況都會
+ * 呼叫，也一樣吞掉，讓「回應永遠只取決於 email 網域與限流」這件事單純成立。
+ * 寄不出去是我們的維運問題（多半是 RESEND_API_KEY 沒設），看 Worker log 會看到。
+ */
+async function deliver(to: string, message: Omit<EmailMessage, "to">) {
+  try {
+    await sendEmail({ to, ...message });
+  } catch (error) {
+    console.error(`[auth-email] failed to send "${message.subject}"`, error);
+  }
+}
+
+async function userExists(email: string): Promise<boolean> {
+  const rows = await getDb()
+    .select({ id: authSchema.user.id })
+    .from(authSchema.user)
+    .where(eq(authSchema.user.email, email.toLowerCase()))
+    .limit(1);
+  return rows.length > 0;
+}
 
 export const auth = betterAuth({
   secret: process.env.BETTER_AUTH_SECRET,
@@ -59,10 +107,32 @@ export const auth = betterAuth({
     max: 100,
     // 路徑是去掉 basePath 後的相對路徑（/api/auth/sign-in/social → /sign-in/social），
     // 支援 `*` 萬用字元。這裡只針對「被濫用會有實際代價」的端點加嚴。
+    //
+    // ⚠️ 規則的先後順序（better-auth api/rate-limiter 的 resolveRateLimitConfig）：
+    //   1. 內建特別規則：/sign-in*、/sign-up* 10 秒 3 次；/request-password-reset
+    //      60 秒 3 次。
+    //   2. plugin 自帶的 rateLimit 蓋掉 1。magic-link plugin 對 /sign-in/magic-link
+    //      與 /magic-link/verify 是 60 秒 5 次。
+    //   3. 這裡的 customRules 最後套用、蓋掉前兩者——但它取的是**物件裡第一個
+    //      符合的 key**（Object.keys().find()），精確路徑與萬用字元一視同仁、
+    //      按寫入順序比。所以 "/sign-in/magic-link" 一定要寫在 "/sign-in/*" 前面，
+    //      不然 magic link 會被萬用字元那條吃掉，拿到的是 60 秒 20 次。
+    // 計數的 key 是 IP × 路徑，各端點的配額互不相干。
     customRules: {
+      // 公開註冊的寄信入口：每送一次就寄一封信到使用者填的地址。一小時 10 次對
+      // 「寄錯地址再寄一次」很夠；擋單一來源拿它大量寄信。單一收件人的轟炸由
+      // src/lib/email-cooldown.ts 另外擋（那個跨 isolate）。
+      "/sign-in/magic-link": { window: 3600, max: 10 },
       // 登入入口。better-auth 內建的特別規則是 10 秒 3 次；換成 60 秒 20 次，
       // 對同一個 IP 的長時間打點更有效，又留得下整間辦公室早上一起登入的空間。
       "/sign-in/*": { window: 60, max: 20 },
+      // 點信裡的連結。token 是 32 字元隨機字串、單次有效，暴力猜不實際；放寬是
+      // 因為公司信箱的連結掃描器（Outlook Safe Links 之類）也會打這支。
+      "/magic-link/verify": { window: 60, max: 20 },
+      // 忘記密碼：跟 magic link 一樣是「填一個地址就寄一封信」。
+      "/request-password-reset": { window: 3600, max: 10 },
+      // 送出新密碼。token 是 24 字元隨機字串；限流擋的是對 token 的盲猜。
+      "/reset-password": { window: 3600, max: 20 },
       // RFC 7591 動態註冊：不需要任何憑證就能建一筆 oauth_application。這是整個
       // MCP 表面唯一「匿名可寫 DB」的端點，也就是最該限流的一個。正常的 MCP
       // client（ChatGPT / Claude / Codex）一條連線只註冊一次。
@@ -81,23 +151,48 @@ export const auth = betterAuth({
   // ---------------------------------------------------------------------
   // Email + password
   // ---------------------------------------------------------------------
-  // 開著是為了兩種人：目錄審核用的測試帳號（審核者沒有我們的 Google 網域），
-  // 以及自架這套系統、不想接 Google 的人。
+  // 開著是為了三種人：目錄審核用的測試帳號（審核者沒有我們的 Google 網域）、
+  // 自架這套系統不想接 Google 的人，以及從 /signup 自助註冊的外部使用者。
   //
-  // ⚠️ disableSignUp 必須維持 true。公開的密碼註冊會開出一條帳號預劫持
-  // （account pre-hijacking）的路：better-auth 的帳號連結是以 email 為鍵，
-  // 而密碼註冊的 email **沒有任何人驗證過**。攻擊者可以先用 victim@company.com
-  // 註冊一組密碼帳號，等真正的擁有者之後用 Google 登入時，那個 provider 已驗證
-  // 的身分就被連到攻擊者早就建好的 user 上，攻擊者的密碼從此能登進對方的帳號。
-  // Google 登入本來就會自動建 user（email 由 provider 驗證過），所以我們不需要
-  // 公開註冊；密碼帳號一律由伺服器端開（scripts/create-user.ts）。
+  // ⚠️ disableSignUp 必須維持 true——即使現在有公開註冊。公開註冊走的是
+  // 「先驗證 email、再設密碼」：/signup 寄 magic link（下面 plugins 的 magicLink），
+  // 點了信裡的連結才會建 user，接著在 /signup/password 用 setPassword 補上密碼。
+  // 所以系統裡**永遠不會出現一個 email 沒驗證過的密碼帳號**，這正是要的性質：
   //
-  // minPasswordLength 拉到 12：這些帳號是人工發的、數量少，沒有「使用者嫌長」
-  // 的問題，而 better-auth 的預設 8 對一個能看到全部帳務的後台太短。
+  // - 帳號預劫持（account pre-hijacking）：better-auth 的帳號連結以 email 為鍵。
+  //   若開放先設密碼的註冊，攻擊者可以先用 victim@company.com 註冊密碼帳號，
+  //   等真正的擁有者之後用 Google 登入，provider 已驗證的身分就被連到攻擊者早就
+  //   建好的 user 上，攻擊者的密碼從此能登進對方的帳號。
+  // - email 佔位（squatting）：better-auth 1.6.14 的 accountLinking.requireLocalEmailVerified
+  //   預設 true（oauth2/link-account），本機 user 沒驗證過 email 時拒絕連結 Google。
+  //   上面的劫持因此被擋下，但換來另一個問題：攻擊者先註冊一個不驗證的密碼帳號，
+  //   真正的主人就**永遠用不了 Google 登入**（callback 回 account_not_linked）。
+  //
+  // 先驗證再設密碼，兩條路都不存在。伺服器端開帳號（scripts/create-user.ts）
+  // 不經過 HTTP，不受這個開關影響。
+  //
+  // minPasswordLength 12：better-auth 的預設 8 對一個能看到全部帳務的後台太短。
+  // 數字放在 src/lib/password-policy.ts，表單的即時檢查用同一個常數。
+  //
+  // sendResetPassword：忘記密碼（/forgot-password → /reset-password）。
+  // ⚠️ 只有 Google 登入、從沒設過密碼的人也能走這條：better-auth 的 resetPassword
+  // 找不到 credential account 時會直接**建一個**（api/routes/password 的
+  // resetPassword：findAccounts 沒有 providerId "credential" 就 createAccount），
+  // 而不是報錯。這是我們要的——能收到那個信箱的信，就是那個帳號的主人，等於
+  // 「替 Google 帳號加一組密碼」——但要知道它會發生。SSO 網域的人在 hooks 那裡
+  // 就被擋掉，不會走到這裡。
+  //
+  // revokeSessionsOnPasswordReset：重設密碼最常見的理由是「懷疑密碼外流」，
+  // 這時候所有既有 session 都該作廢，不然改了密碼，對方手上的 session 照樣能用。
   emailAndPassword: {
     enabled: true,
     disableSignUp: true,
-    minPasswordLength: 12,
+    minPasswordLength: MIN_PASSWORD_LENGTH,
+    revokeSessionsOnPasswordReset: true,
+    sendResetPassword: async ({ user, url }) => {
+      if (!(await claimEmailCooldown("reset-password", user.email))) return;
+      await deliver(user.email, resetPasswordEmail(url));
+    },
   },
   socialProviders: {
     google: {
@@ -125,7 +220,54 @@ export const auth = betterAuth({
       overrideUserInfoOnSignIn: true,
     },
   },
+  // ---------------------------------------------------------------------
+  // SSO 網域：禁止自助註冊、禁止自助重設密碼
+  // ---------------------------------------------------------------------
+  // email 網域有（已驗證的）SSO provider 的人，帳號生命週期歸客戶的 IdP 管：
+  // 離職的人在 IdP 被停權，就該進不來。讓他們自己用 email 註冊或重設出一組密碼，
+  // 等於在 IdP 之外開了一扇 IdP 關不掉的門。
+  //
+  // 這裡擋「發信」那一步（JSON API，前端看 error.code 顯示「請改用公司 SSO」）。
+  // 一般流程裡註冊頁會先做 SSO 查詢、直接導去 IdP，根本不會打到這兩支；這層是給
+  // 直接打 API、或 SSO 查詢那一下剛好失敗的情況。建立 user 那一步另外在
+  // databaseHooks.user.create 擋（涵蓋 Google 第一次登入）。
+  //
+  // hooks.before 在 endpoint 的 body 驗證之前跑，ctx.body.email 可能不是字串，
+  // isSsoDomain 自己會處理。
+  hooks: {
+    before: createAuthMiddleware(async (ctx) => {
+      if (ctx.path !== "/sign-in/magic-link" && ctx.path !== "/request-password-reset") return;
+      if (await isSsoDomain(ctx.body?.email)) throw ssoRequiredError();
+    }),
+  },
   databaseHooks: {
+    user: {
+      create: {
+        // 建立 user 的最後一道關卡：SSO 網域的人只能由 SSO 建立。
+        //
+        // 擋到的路徑：Google 第一次登入（/callback/:id）與 magic link 註冊
+        // （/magic-link/verify；正常情況在發信時就被上面的 hooks 擋了，這裡是
+        // 「信寄出後網域才註冊 SSO」的情況）。Google 被擋時，瀏覽器會被導回
+        // 登入頁的 errorCallbackURL 並帶 ?error=SSO_REQUIRED（見 SSO_REQUIRED 的註解），
+        // 登入頁顯示「請改用公司 SSO」。magic link 被擋時是 /magic-link/verify
+        // 直接回 403 JSON——那條路只在上述的時間差裡才會發生，不另外做畫面。
+        //
+        // 放行的情況：
+        // - 沒有 endpoint context：伺服器端直接呼叫 internalAdapter，例如
+        //   scripts/create-user.ts。能跑那支腳本的人本來就能直接寫 DB。
+        // - ctx.path 以 /sso/ 開頭：SSO 的 OIDC callback（/sso/callback/:providerId）
+        //   與 SAML ACS 本身，就是我們要他們走的那條路。
+        //
+        // ⚠️ 只擋「新建」，不動既有帳號：已經用 Google 或密碼登入過的 SSO 網域使用者
+        // 照樣能用原本的方式登入。要把既有帳號也強制導去 SSO（擋 /sign-in/email、
+        // Google callback 的既有 user）是刻意留到之後的另一件事——那會直接把現在
+        // 正在用的人關在門外，需要先跟客戶對好切換時間。
+        before: async (user, ctx) => {
+          if (!ctx || ctx.path.startsWith("/sso/")) return;
+          if (await isSsoDomain(user.email)) throw ssoRequiredError();
+        },
+      },
+    },
     session: {
       create: {
         // Default a new session's active org to the user's first membership,
@@ -210,6 +352,27 @@ export const auth = betterAuth({
     // 老用戶會拿到 ?error=UNKNOWN（2026-08-28 實際發生過）。我們不用它附帶的
     // DNS TXT 驗證流程 —— 註冊走腳本、domain_verified 由腳本直接寫 true。
     sso({ providersLimit: 0, domainVerification: { enabled: true } }),
+    // 公開註冊（/signup）：email 先驗證、再設密碼。理由見上面 emailAndPassword 的註解。
+    //
+    // 不設 disableSignUp：magic link 點下去時 email 不存在就建 user，這**就是**
+    // 公開註冊。註冊頁送出 newUserCallbackURL=/signup/password，新 user 會被帶去
+    // 設密碼；既有 user 走 callbackURL 直接登入。
+    //
+    // storeToken "hashed"：verification 表裡只存 token 的 SHA-256，DB 外流或被
+    // 唯讀查到時，拿到的值點不開任何人的帳號。
+    //
+    // sendMagicLink 依「這個 email 有沒有帳號」挑信的內容：註冊頁對兩種情況一律
+    // 顯示同一個「請去收信」畫面（不洩漏帳號存在與否），所以「你已經有帳號了，這個
+    // 連結會直接登入」只能寫在信裡。冷卻中（同地址 60 秒內）就默默不寄。
+    magicLink({
+      expiresIn: 15 * 60,
+      storeToken: "hashed",
+      sendMagicLink: async ({ email, url }) => {
+        if (!(await claimEmailCooldown("magic-link", email))) return;
+        const message = (await userExists(email)) ? signInLinkEmail(url) : completeSignupEmail(url);
+        await deliver(email, message);
+      },
+    }),
     // OAuth 2.0 / OIDC provider for MCP clients. Adds /api/auth/mcp/* endpoints
     // (authorize, token, register, get-session) + OAuth discovery. Unauthenticated
     // authorize requests are sent to loginPage, which redirects back after sign-in.

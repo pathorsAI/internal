@@ -30,8 +30,10 @@ This document describes two paths:
 | Postgres | Any Postgres. Schema is introspect-only (`bun run db:pull`); migrations under [`migrations/`](../migrations) are plain forward-only SQL. |
 | A Postgres driver that matches your runtime | On serverless/edge you need an **HTTP** driver (e.g. Neon). On a normal Node server you can use a regular TCP driver (`pg`). See [Database driver](#database-driver). |
 | Object storage *(only for document uploads)* | Cloudflare R2 by default. Swappable — see [Storage portability](#storage-portability). |
-| Env vars | `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `FIELD_ENCRYPTION_KEY`. See [`.env.example`](../.env.example). |
+| Env vars | `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `FIELD_ENCRYPTION_KEY`, `RESEND_API_KEY` (optional: `RESEND_FROM`). See [`.env.example`](../.env.example). |
 | `OIDC_SIGNING_KEY` | Optional. RSA private key (PKCS#8, base64 one line or PEM) used to sign per-organization OIDC JWTs for GCP Workload Identity Federation (keyless GCP billing). Without it, GCP can only be connected with a service account key. |
+| `RESEND_API_KEY` | [Resend](https://resend.com) API key. **Required in production** for public sign-up (`/signup` sends a confirmation link) and forgot-password (`/reset-password` links). Without it those emails are not sent — the pages still say "check your inbox", and the Worker log shows `[auth-email] failed to send …`. In development (`NODE_ENV !== "production"`) a missing key prints each email, link included, to the server console instead. |
+| `RESEND_FROM` *(optional)* | Sender, default `Pathors Internal <noreply@pathors.com>`. The domain must be verified in Resend. Self-hosters set this to their own domain. |
 | `FIELD_ENCRYPTION_KEY` | 32 random bytes, base64 (`openssl rand -base64 32`). AES-256-GCM key for field-level encryption of integration credentials (Simpany, Wise — see [integrations.md](integrations.md)) and other high-sensitivity fields. Without it, connecting an integration fails with a clear error. **Losing or rotating it makes stored credentials unreadable** — every integration must be reconnected. |
 
 ---
@@ -114,7 +116,8 @@ echo "$DATABASE_URL"       | bunx wrangler secret put DATABASE_URL
 echo "$GOOGLE_CLIENT_ID"   | bunx wrangler secret put GOOGLE_CLIENT_ID
 echo "$FIELD_ENCRYPTION_KEY" | bunx wrangler secret put FIELD_ENCRYPTION_KEY
 echo "$OIDC_SIGNING_KEY"     | bunx wrangler secret put OIDC_SIGNING_KEY
-# …and GOOGLE_CLIENT_SECRET, BETTER_AUTH_URL
+echo "$RESEND_API_KEY"     | bunx wrangler secret put RESEND_API_KEY
+# …and GOOGLE_CLIENT_SECRET, BETTER_AUTH_URL (and RESEND_FROM if you override the sender)
 ```
 
 `OIDC_SIGNING_KEY` is the platform's RSA signing key (PKCS#8 DER, one line of
