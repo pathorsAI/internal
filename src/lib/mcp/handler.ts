@@ -34,6 +34,10 @@ const AUDIT_BY_NAME: Record<string, Pick<McpAudit, "action" | "entityType">> = {
   get_employee: { action: "read", entityType: "employee" },
   list_employee_bank_accounts: { action: "read", entityType: "employee_bank_account" },
   accept_invitation: { action: "create", entityType: "member" },
+  // 廠商計費（tools-vendor-billing.ts）：entity type 與網頁端一致
+  upsert_vendor_billing_account: { action: "update", entityType: "vendor_billing_account" },
+  upsert_payment_method: { action: "update", entityType: "payment_method" },
+  resolve_vendor_invoice: { action: "update", entityType: "vendor_invoice" },
 };
 
 /** The numeric entity id a tool result names, if any (`id`, else first of `ids`). */
@@ -76,7 +80,7 @@ function deriveMcpAudit(name: string, out: unknown): McpAudit | null {
 
 /** Bump on every published change to tools, schemas or instructions. Clients
  *  (and OpenAI's plugin "Scan Tools") key their cached snapshot off this. */
-export const SERVER_VERSION = "1.9.0";
+export const SERVER_VERSION = "1.10.0";
 
 /** Public base URL of this deployment; doubles as the OAuth issuer.
  *  Keep in sync with the `resource` passed to `mcp()` in src/lib/auth.ts. */
@@ -116,7 +120,7 @@ const LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0];
 // belong to multiple organizations and we never guess.
 const INSTRUCTIONS = [
   "This server is the operational surface for one organization's bookkeeping: ledger transactions (內外帳), parties, categories, bank accounts, invoices, projects, subscriptions, contracts, employees, payroll records, and reconciliations.",
-  "It is a bookkeeping system and nothing else. Every write creates or edits a record in this organization's own books. No tool moves money: none of them initiates, authorizes or executes a payment, transfer, payout or trade, and the server cannot instruct any bank, card or payment provider — the only bank link is an optional, read-only Wise integration (wise_* tools) that reads balances and statements and can import them into the ledger. Words like pay, payment, transfer, salary, reimbursement and advance always describe an entry being recorded, never money being sent.",
+  "It is a bookkeeping system and nothing else. Every write creates or edits a record in this organization's own books. No tool moves money: none of them initiates, authorizes or executes a payment, transfer, payout or trade, and the server cannot instruct any bank, card or payment provider — the only bank link is an optional, read-only Wise integration (wise_* tools) that reads balances and statements and can import them into the ledger. The Azure / GCP billing integrations are read-only too: they record which platform account is paid by which card or invoice and reconcile cloud invoices against existing ledger rows (vendor billing tools). Words like pay, payment, transfer, salary, reimbursement and advance always describe an entry being recorded, never money being sent.",
   "The signed-in account may belong to multiple organizations.",
   "At the start of each session, before calling any org-scoped tool, call list_organizations and ask the user which organization to work in.",
   "If list_organizations is empty, or the user says they were invited to an organization, call list_my_invitations and offer to accept the right one with accept_invitation after the user confirms — invitations are sent from the web app, and this is the only way to join an organization over MCP.",
@@ -294,7 +298,8 @@ const OPENWORLD_OVERRIDES: Record<string, Partial<ToolAnnotations>> = {
   simpany_settle_salary_filing: { openWorldHint: true },
   simpany_send_payslips: { openWorldHint: true },
   // Runs the daily auto-sync for the caller's org: Simpany invoice + salary sync
-  // (GET-only for this path) and Wise transaction sync (GET-only); writes only our books.
+  // (GET-only for this path), Wise transaction sync (GET-only) and Azure / GCP billing
+  // sync (read-only allowlists); writes only our books.
   run_integration_sync: { openWorldHint: true },
 };
 
@@ -348,6 +353,13 @@ const TITLE_OVERRIDES: Record<string, string> = {
   salary_arrears: "Salary arrears by employee",
   pay_employee_salary: "Record a salary payslip",
   run_integration_sync: "Run the integration auto-sync now",
+  list_vendor_billing_accounts: "List vendor billing accounts",
+  get_vendor_billing_account: "Vendor billing account detail",
+  upsert_vendor_billing_account: "Save a vendor billing account",
+  list_payment_methods: "List payment methods",
+  upsert_payment_method: "Save a payment method record",
+  list_vendor_invoices: "List cloud invoices and reconciliation",
+  resolve_vendor_invoice: "Reconcile a cloud invoice",
   sync_billing_calendar: "Sync the billing calendar",
   simpany_get_invoice: "Simpany e-invoice detail",
   simpany_issue_invoice: "Issue a Simpany e-invoice",

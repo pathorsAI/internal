@@ -20,6 +20,8 @@ import { IntegrationsList, type IntegrationRowData } from "./integrations-client
 import { CalendarSettingsClient } from "./calendar-settings-client";
 import { WiseMappingSection } from "./wise-mapping-client";
 import { loadWiseMappingView } from "./wise-mapping-data";
+import { CloudBillingScopeSection } from "./cloud-billing-scope-client";
+import { loadCloudScopeView } from "./cloud-billing-scope-data";
 
 export const dynamic = "force-dynamic";
 
@@ -98,6 +100,11 @@ export default async function IntegrationsPage() {
   const calendarConnected = Boolean(calendar?.ownerUserId && calendar?.googleCalendarId);
   const wiseSummary = summaries.find((x) => x.provider === "wise") ?? null;
   const wiseView = wiseSummary ? await loadWiseMappingView(orgId, wiseSummary) : null;
+  const cloudViews = (["azure", "gcp"] as const).flatMap((p) => {
+    const s = summaries.find((x) => x.provider === p);
+    const view = s ? loadCloudScopeView(orgId, s) : null;
+    return view ? [view] : [];
+  });
 
   return (
     <>
@@ -120,6 +127,16 @@ export default async function IntegrationsPage() {
           />
         </section>
       ) : null}
+      {cloudViews.map((view) => (
+        <section key={view.provider} id={view.provider} className="scroll-mt-20">
+          {/* 存檔 / 重新探索後重掛，讓勾選回到存檔後的狀態 */}
+          <CloudBillingScopeSection
+            key={JSON.stringify([view.selected, view.candidates.map((c) => c.id), view.bigQuery])}
+            view={view}
+            canManage={canManage}
+          />
+        </section>
+      ))}
       <section id="google-calendar" className="scroll-mt-20">
         <CalendarSettingsClient
           connected={calendarConnected}

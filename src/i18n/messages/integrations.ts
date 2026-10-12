@@ -199,6 +199,67 @@ const integrations = {
       en: "The {name} credentials no longer work ({error}). An owner or admin can reconnect it under Settings › Integrations.",
     },
   },
+  scope: {
+    title: {
+      azure: { "zh-TW": "Azure 計費範圍", en: "Azure billing scope" },
+      gcp: { "zh-TW": "Google Cloud 計費範圍", en: "Google Cloud billing scope" },
+    },
+    description: {
+      "zh-TW": "勾選屬於這個組織的計費帳號；同步只會讀取勾選的項目。",
+      en: "Tick the billing accounts that belong to this organization; sync only reads the ticked ones.",
+    },
+    empty: {
+      "zh-TW": "沒有勾選任何範圍，同步不會讀取任何計費資料。",
+      en: "Nothing is ticked, so sync reads no billing data.",
+    },
+    noCandidates: {
+      "zh-TW": "還沒有探索到候選。開啟整合後按「重新探索」。",
+      en: "No candidates discovered yet. Switch the integration on, then press Rediscover.",
+    },
+    billingAccount: { "zh-TW": "Billing account：{id}", en: "Billing account: {id}" },
+    discoveredAt: { "zh-TW": "探索時間：{date}", en: "Discovered: {date}" },
+    reseller: { "zh-TW": "經銷商子帳號", en: "Reseller sub-account" },
+    closed: { "zh-TW": "已關閉", en: "Closed" },
+    refresh: { "zh-TW": "重新探索", en: "Rediscover" },
+    refreshed: { "zh-TW": "已重新探索", en: "Rediscovered" },
+    refreshNeedsEnabled: { "zh-TW": "整合開啟後才能重新探索", en: "Switch the integration on to rediscover" },
+    save: { "zh-TW": "儲存", en: "Save" },
+    saving: { "zh-TW": "儲存中…", en: "Saving…" },
+    saved: { "zh-TW": "已儲存計費範圍", en: "Billing scope saved" },
+    readOnly: { "zh-TW": "只有擁有者或管理員可以修改範圍。", en: "Only owners or admins can change the scope." },
+    bigQuery: {
+      title: { "zh-TW": "BigQuery billing export（選填，用來讀每月費用）", en: "BigQuery billing export (optional, for monthly costs)" },
+      projectId: { "zh-TW": "專案 ID", en: "Project ID" },
+      dataset: { "zh-TW": "Dataset", en: "Dataset" },
+      hint: {
+        "zh-TW": "每個帳號的資料表 gcp_billing_export_v1_<帳號> 會自動偵測。",
+        en: "Each account's table gcp_billing_export_v1_<account> is detected automatically.",
+      },
+    },
+    auth: {
+      key: { "zh-TW": "驗證方式：Service account key（{email}）", en: "Authentication: service account key ({email})" },
+      workloadIdentity: {
+        "zh-TW": "驗證方式：Workload Identity Federation，impersonate {email}",
+        en: "Authentication: Workload Identity Federation, impersonating {email}",
+      },
+      subject: { "zh-TW": "這個組織的 subject", en: "This organization's subject" },
+      command: { "zh-TW": "授權指令（交給 GCP 管理員執行）", en: "Binding command (for the GCP admin)" },
+      invalid: {
+        "zh-TW": "Workload identity 設定不完整，請重新連接。",
+        en: "The workload identity settings are incomplete; reconnect.",
+      },
+    },
+    errors: {
+      bigQuery: { "zh-TW": "BigQuery 專案 ID 或 dataset 格式不對", en: "Invalid BigQuery project ID or dataset" },
+      noBillingAccount: {
+        "zh-TW": "沒有 billing account ID，請重新連接並填寫",
+        en: "No billing account ID; reconnect and fill it in",
+      },
+    },
+    activity: {
+      saved: { "zh-TW": "更新 {name} 計費範圍（{count} 個）", en: "Updated the {name} billing scope ({count})" },
+    },
+  },
   activity: {
     connected: { "zh-TW": "連接 {name}", en: "{name} connected" },
     reconnected: { "zh-TW": "重新連接 {name}", en: "{name} reconnected" },

@@ -8,6 +8,14 @@ import { CalendarClock, Info, Link2, Play, RefreshCw, Unlink } from "lucide-reac
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { fieldApplies, fieldValue } from "@/lib/integrations/fields";
 import { Field } from "@/components/form-field";
 import {
   Sheet,
@@ -448,7 +456,9 @@ function ConnectSheet({
   const t = useTranslations("integrations");
   const { row, mode } = target;
   const name = t(`providers.${row.id}.name`);
-  const fields = [...row.credentialFields, ...row.configFields];
+  const allFields = [...row.credentialFields, ...row.configFields];
+  // 選項欄位（例如 GCP 的驗證方式）放最上面：它決定下面哪些欄位要填。
+  const ordered = [...allFields.filter((f) => f.type === "select"), ...allFields.filter((f) => f.type !== "select")];
   const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -497,8 +507,32 @@ function ConnectSheet({
           </SheetHeader>
           <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col" autoComplete="off">
             <div className="flex-1 space-y-4 overflow-y-auto px-4">
-              {fields.map((f) => {
+              {ordered.map((f) => {
                 const id = `integration-${row.id}-${f.key}`;
+                // 不適用的欄位（依別的欄位而定）不顯示，server 端也不會檢查或儲存。
+                if (!fieldApplies(f, allFields, values)) return null;
+                if (f.type === "select") {
+                  return (
+                    <Field key={f.key} label={t(`fields.${f.labelKey}`)} htmlFor={id} required={f.required}>
+                      <Select
+                        value={fieldValue(f, values)}
+                        onValueChange={(v) => setValues((prev) => ({ ...prev, [f.key]: v }))}
+                        disabled={pending}
+                      >
+                        <SelectTrigger id={id} className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(f.options ?? []).map((o) => (
+                            <SelectItem key={o.value} value={o.value}>
+                              {t(`fields.${o.labelKey}`)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  );
+                }
                 return (
                   <Field key={f.key} label={t(`fields.${f.labelKey}`)} htmlFor={id} required={f.required}>
                     <Input
