@@ -235,9 +235,18 @@ cp .env.example .env
 docker compose up --build -d
 
 # 3. Apply the schema to the fresh database (one-time)
-#    Pipe the SQL in migrations/ into the db container, e.g.:
-cat migrations/*.sql | docker compose exec -T db psql -U app -d app
+#    Pipe the SQL in migrations/ into the db container, in filename order.
+#    0000_baseline.sql creates the tables that predate migrations/; the rest
+#    build on it. ON_ERROR_STOP makes a failure stop the run instead of
+#    carrying on with a half-built schema.
+cat migrations/*.sql | docker compose exec -T db psql -U app -d app -v ON_ERROR_STOP=1
 ```
+
+The same works for any empty Postgres (e.g. a new Neon project): apply every
+file in `migrations/` in order, starting with `0000_baseline.sql`. The baseline
+is idempotent (`CREATE … IF NOT EXISTS`), so it is a no-op on a database that
+already has those tables. Afterwards `bun run db:pull` against it should
+produce the same tables and columns as `src/db/schema.ts`.
 
 The app is then on `http://localhost:3000` (map/route it behind your own TLS
 proxy for production).
