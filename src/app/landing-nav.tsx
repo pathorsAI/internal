@@ -1,5 +1,7 @@
 import { getTranslations } from "next-intl/server";
 
+import { LogoMark } from "@/components/logo";
+
 import { PublicLocaleSwitcher } from "./public-locale-switcher";
 
 /**
@@ -10,7 +12,8 @@ import { PublicLocaleSwitcher } from "./public-locale-switcher";
  * LANDING_SCRIPT 靠 `#nav` 在捲動時加上 `.stuck`（分隔線），LANDING_CSS 的 .nav / .logo /
  * .mark / .hide-s 等選擇器也要繼續命中。
  *
- * wordmark 是品牌名，兩種語言都是 Internal，所以寫死不進字典。
+ * wordmark 是品牌名，兩種語言都是 Internal，所以寫死不進字典。標誌直接用系統側欄的
+ * LogoMark（同一個 SVG、同一個藍），landing 與產品才不會長得像兩家公司；.mark 只管尺寸。
  */
 export async function LandingNav({ signedIn }: { readonly signedIn: boolean }) {
   const t = await getTranslations("landing");
@@ -19,11 +22,8 @@ export async function LandingNav({ signedIn }: { readonly signedIn: boolean }) {
     <header className="nav" id="nav">
       <div className="wrap">
         <a className="logo" href="#top">
-          <span className="mark">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <polyline points="4,17 10,11 14,15 20,6" />
-            </svg>
-          </span>Internal
+          <LogoMark className="mark" />
+          Internal
         </a>
         <nav>
           <a href="#books" className="hide-s">

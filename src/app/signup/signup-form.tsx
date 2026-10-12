@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { authClient } from "@/lib/auth-client";
-import { AuthCard } from "@/components/auth/auth-card";
+import { AuthShell } from "@/components/auth/auth-shell";
 import { emailRequestError, type EmailRequestError } from "@/components/auth/email-request-error";
 import { formText } from "@/components/auth/form-text";
 import { Button } from "@/components/ui/button";
@@ -81,7 +81,7 @@ export function SignupForm({ query }: Readonly<{ query: string }>) {
 
   if (sentTo) {
     return (
-      <AuthCard title={t("sent.title")}>
+      <AuthShell title={t("sent.title")}>
         <div className="space-y-4">
           <p className="text-sm">{t("sent.body", { email: sentTo })}</p>
           <p className="text-sm text-muted-foreground">{t("sent.hint")}</p>
@@ -100,16 +100,17 @@ export function SignupForm({ query }: Readonly<{ query: string }>) {
             </Link>
           </div>
         </div>
-      </AuthCard>
+      </AuthShell>
     );
   }
 
   return (
-    <AuthCard title={t("title")} description={t("description")}>
-      <form method="post" onSubmit={onSubmit} className="space-y-3">
+    <AuthShell title={t("title")} description={t("description")}>
+      <form method="post" onSubmit={onSubmit} className="space-y-4">
         <div className="space-y-1.5">
           <Label htmlFor="email">{ts("emailLabel")}</Label>
           <Input
+            className="h-11"
             id="email"
             name="email"
             type="email"
@@ -122,6 +123,7 @@ export function SignupForm({ query }: Readonly<{ query: string }>) {
         <div className="space-y-1.5">
           <Label htmlFor="name">{t("nameLabel")}</Label>
           <Input
+            className="h-11"
             id="name"
             name="name"
             type="text"
@@ -135,7 +137,7 @@ export function SignupForm({ query }: Readonly<{ query: string }>) {
             {ts(error)}
           </p>
         )}
-        <Button type="submit" className="w-full" disabled={pending || !hydrated}>
+        <Button type="submit" className="h-11 w-full" disabled={pending || !hydrated}>
           {pending ? t("submitting") : t("submit")}
         </Button>
         <div className="text-center text-sm">
@@ -144,6 +146,6 @@ export function SignupForm({ query }: Readonly<{ query: string }>) {
           </Link>
         </div>
       </form>
-    </AuthCard>
+    </AuthShell>
   );
 }

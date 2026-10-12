@@ -50,6 +50,48 @@ const auth = {
       },
     },
   },
+  // 帳號頁面右半邊的產品展示輪播（src/components/auth/auth-showcase.tsx）。
+  // 專案名稱、廠商名稱與金額是示意資料，寫在元件裡；這裡只放會跟著語系變的字。
+  showcase: {
+    label: { "zh-TW": "產品特色", en: "Product highlights" },
+    goTo: { "zh-TW": "顯示第 {index} 張，共 {total} 張", en: "Show slide {index} of {total}" },
+    billing: {
+      headline: { "zh-TW": "項目款項一鍵追蹤", en: "Every project's payments, tracked at a glance" },
+      title: { "zh-TW": "請款", en: "Billing" },
+      stage: {
+        phase1: { "zh-TW": "第一期", en: "Phase 1" },
+        phase2: { "zh-TW": "第二期", en: "Phase 2" },
+        monthly: { "zh-TW": "月費", en: "Monthly" },
+        final: { "zh-TW": "尾款", en: "Final" },
+      },
+      status: {
+        due: { "zh-TW": "該請款", en: "Time to bill" },
+        billed: { "zh-TW": "已請款", en: "Billed" },
+        overdue: { "zh-TW": "逾期", en: "Overdue" },
+        paid: { "zh-TW": "已收款", en: "Paid" },
+      },
+    },
+    spending: {
+      headline: { "zh-TW": "花費分布一看便知", en: "See where the money goes at a glance" },
+      title: { "zh-TW": "花費 · 近三個月", en: "Spending · last 3 months" },
+      officeRent: { "zh-TW": "辦公室租金", en: "Office rent" },
+      other: { "zh-TW": "其他", en: "Other" },
+    },
+    statement: {
+      headline: {
+        "zh-TW": "對帳單丟給 AI，它問清楚再入帳",
+        en: "Hand the statement to your AI. It asks, then books it.",
+      },
+      title: { "zh-TW": "AI 助理", en: "AI assistant" },
+      upload: { "zh-TW": "這是上個月的對帳單，幫我入帳", en: "Here is last month's statement, book it for me" },
+      read: { "zh-TW": "讀到 23 筆，有 3 筆我不確定", en: "23 transactions read — 3 I'm not sure about" },
+      ask: {
+        "zh-TW": "顧問費 NT$45,000：只進內帳，還是外帳也認？",
+        en: "Consulting fee NT$45,000 — internal books only, or external too?",
+      },
+      answer: { "zh-TW": "外帳也要", en: "External too" },
+    },
+  },
   // 註冊／忘記密碼／重設密碼／設定密碼這幾頁共用的錯誤訊息與連結。
   shared: {
     backToLogin: { "zh-TW": "回到登入", en: "Back to sign in" },

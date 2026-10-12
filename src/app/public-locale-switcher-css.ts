@@ -5,8 +5,7 @@
  * 法律文件（LEGAL_CSS）。兩份 CSS 都定義了同一組 token（--surface / --line / --sh-2 /
  * --r-s / --ink-2 / --brand …），所以這段只吃 token、不自帶顏色，接到哪一邊都成立。
  *
- * docs/index.html 那份沒有這塊 —— GitHub Pages 上的 landing 維持英文，只有站內的公開
- * 頁面要切語言。刻意不搬 shadcn 的 DropdownMenu 過來：那會把 Radix 的樣式脈絡帶進這幾頁
+ * 當初 GitHub Pages 上的英文版 landing 沒有這塊，是搬進站內、要切語言之後才加的。刻意不搬 shadcn 的 DropdownMenu 過來：那會把 Radix 的樣式脈絡帶進這幾頁
  * 自成一格的 CSS。
  *
  * 注意這顆沒有 .hide-s：窄螢幕藏掉的是導覽連結，切語言不該只有桌機有。

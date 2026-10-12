@@ -19,6 +19,7 @@ export function NewPasswordFields({ problem }: Readonly<{ problem: NewPasswordPr
       <div className="space-y-1.5">
         <Label htmlFor="password">{t("password")}</Label>
         <Input
+          className="h-11"
           id="password"
           name="password"
           type="password"
@@ -35,6 +36,7 @@ export function NewPasswordFields({ problem }: Readonly<{ problem: NewPasswordPr
       <div className="space-y-1.5">
         <Label htmlFor="confirm">{t("confirm")}</Label>
         <Input
+          className="h-11"
           id="confirm"
           name="confirm"
           type="password"

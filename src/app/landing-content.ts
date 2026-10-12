@@ -1,74 +1,92 @@
-// 這頁的 markup / CSS / JS 是從 docs/index.html「原樣搬過來」的，不是手轉 JSX。
+// 這頁的 markup / CSS / JS 最早是從 docs/index.html（GitHub Pages 上的原版 landing）
+// 「原樣搬過來」的，不是手轉 JSX。
 //
 // 為什麼不轉 JSX：那份 landing 有 899 行，手工把 class→className、補 self-closing、
-// 跳脫 {} 的出錯率遠高於它帶來的好處，而且之後 docs/index.html 一改，兩邊就會分岔。
-// 內容全是靜態文案與插圖，沒有任何使用者輸入會流進來；文案本身走字典（見下面第 5 點），
-// 代入時一律 HTML escape，所以用 dangerouslySetInnerHTML 渲染沒有 XSS 風險。
+// 跳脫 {} 的出錯率遠高於它帶來的好處。內容全是靜態文案與插圖，沒有任何使用者輸入會
+// 流進來；文案本身走字典（見下面第 5 點），代入時一律 HTML escape，所以用
+// dangerouslySetInnerHTML 渲染沒有 XSS 風險。
 //
-// docs/index.html 仍然是 GitHub Pages 在用的原件，請把它當唯一真實來源：
-// 那邊改了，就重跑一次搬移（見下方三個常數的差異）並同步資產：圖片在 public/landing/images/，
-// 字體的 @font-face（原 docs/fonts.css）在 src/app/landing-fonts.css，由 page.tsx import。
+// ⚠️ 現在這個檔案才是唯一真實來源。docs/index.html 已在 #51 縮成一張導向
+// internal.pathors.com 的票根（裡面沒有 landing 的結構或 CSS），不用再往那邊同步。
+// 資產：圖片在 public/landing/images/；中文字體的 @font-face 在 src/app/landing-fonts.css
+// （由 page.tsx import）；拉丁字體直接用產品的 Open Sans／Geist Mono（layout.tsx 的 next/font）。
 //
-// 與原檔的差異有六處，都是為了讓它變成站內路由、並且能切語言：
+// 與當初原檔相比的差異（留著當紀錄）：
 //   1. src="images/…"                        → src="/landing/images/…"
 //   2. https://internal.pathors.com/login    → /login（兩處：結尾、頁尾）
 //   3. CTA 層級重排：主行動一律是登入／進入系統（見下方 AUTH_* 佔位符，由
 //      page.tsx 依登入狀態換成對應的按鈕），GitHub 降為次要連結。
 //   4. 頁尾多兩個連結：/privacy 與 /terms（站內的法律文件，見 src/app/legal-doc.tsx）
 //   5. 人看得到的文字全部換成 `{{key}}` 佔位符，字串在 src/i18n/messages/landing.ts，
-//      由 src/app/landing-template.ts 代入並逐一 escape。docs/index.html 那份維持英文，
-//      所以要同步的是「結構」而不是「文案」：那邊改了句子，這邊改字典。
+//      由 src/app/landing-template.ts 代入並逐一 escape。
 //   6. <header class="nav"> 整塊搬到 src/app/landing-nav.tsx（JSX），因為它要放兩個真的
 //      React 元件：語言切換器與依登入狀態變化的按鈕。class 與 id="nav" 都原樣保留。
-//      wordmark 順帶從 Pathors Internal 縮成 Internal（頁尾同步）。
+//      wordmark 順帶從 Pathors Internal 縮成 Internal（頁尾同步），標誌換成產品的 LogoMark。
+//
+// 之後的改版（2026-10）：
+//   - 視覺跟產品對齊：色票改成 globals.css 的產品主題（冷灰中性色 + 產品藍，深色是純黑），
+//     字體改用產品的 Open Sans／Geist Mono。legal-doc.tsx 的 token 是這組的子集，要一起改。
+//   - 文案改成「先講頭痛」：功能區塊的 badge 是以前的頭痛（.badge.pain，刻意壓低），
+//     h2 是現在的結果；hero 的 badge 維持品牌色。
+//   - 「其他」那格從 8 格變 12 格（多了固定扣款、雲端帳單、電子發票、Wise）。
 
 import { LOCALE_SWITCHER_CSS } from "./public-locale-switcher-css";
 
 /**
- * docs/index.html <style> 的內容，一字未改，後面接上語言切換器的樣式 ——
- * 那塊是站內限定的（docs/index.html 沒有），而且法律文件也要用，所以住在
+ * landing 的樣式，後面接上語言切換器的樣式 —— 那塊法律文件也要用，所以住在
  * ./public-locale-switcher-css.ts。
+ *
+ * 色票取自 src/app/globals.css 的 oklch token（轉成 hex）：--bg/--surface ← background、
+ * --surface-2 ← card、--ink ← foreground、--ink-2/--ink-3 ← muted-foreground 上下一階、
+ * --line ← border、--brand ← primary、--brand-wash ← accent、--deep* ← 深色主題。
+ * --brand-text 是 landing 自己加的：產品藍在白底只有 2.9:1，小字（badge、chip、標籤）
+ * 改用同色相壓暗的版本，對比 > 4.5:1。
+ *
+ * 字體刻意寫字面名稱 "Open Sans"／"Geist Mono"（next/font 註冊的 family 名），而不是
+ * var(--font-sans)：globals.css 把 --font-sans 設成 `Open Sans, sans-serif`，結尾的
+ * generic family 會搶在中文字體前面，中文就落到系統預設字。中文依序是 PingFang TC
+ * （Mac／iOS 原生、不用下載）→ Noto Sans TC（其他平台，來自 landing-fonts.css）。
  */
 export const LANDING_CSS = `:root{
-  --bg:#FBFAFA; --surface:#FFFFFF; --surface-2:#F4F3F1; --surface-3:#EDECE9;
-  --ink:#141318; --ink-2:#55525E; --ink-3:#8A8794;
-  --line:#E6E3DF; --line-soft:#F0EEEB;
-  --brand:#2947F0; --brand-2:#5C77FF; --brand-wash:#EAEDFF; --brand-ink:#FFFFFF;
+  --bg:#FFFFFF; --surface:#FFFFFF; --surface-2:#F7F8F8; --surface-3:#EEF0F2;
+  --ink:#0F1419; --ink-2:#5E656D; --ink-3:#81878D;
+  --line:#E1EAEF; --line-soft:#EEF3F6;
+  --brand:#1E9DF1; --brand-2:#4DACF6; --brand-wash:#E3ECF6; --brand-ink:#FFFFFF; --brand-text:#006EB3;
   --amber:#A96500; --amber-wash:#FBEFDA;
   --rose:#C0264D; --rose-wash:#FCE7EC;
-  --deep:#0F0F16; --deep-2:#1A1A24; --deep-ink:#E9E8EE; --deep-line:#2A2A36;
-  --sh-1:0 1px 2px rgba(20,19,24,.05);
-  --sh-2:0 2px 6px rgba(20,19,24,.05), 0 12px 28px -12px rgba(20,19,24,.16);
-  --sh-3:0 4px 12px rgba(20,19,24,.06), 0 32px 64px -24px rgba(20,19,24,.28);
-  --display:"Bricolage Grotesque","Instrument Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-  --sans:"Instrument Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-  --mono:"DM Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
-  --cjk:"Noto Sans TC","PingFang TC",sans-serif;
+  --deep:#000000; --deep-2:#17181C; --deep-ink:#E7E9EA; --deep-line:#242628;
+  --sh-1:0 1px 2px rgba(15,20,25,.05);
+  --sh-2:0 2px 6px rgba(15,20,25,.05), 0 12px 28px -12px rgba(15,20,25,.16);
+  --sh-3:0 4px 12px rgba(15,20,25,.06), 0 32px 64px -24px rgba(15,20,25,.26);
+  --sans:"Open Sans","Open Sans Fallback","PingFang TC","Noto Sans TC","Microsoft JhengHei",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --display:var(--sans);
+  --mono:"Geist Mono","Geist Mono Fallback",ui-monospace,SFMono-Regular,Menlo,"PingFang TC","Noto Sans TC",monospace;
+  --cjk:"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;
   --pad:clamp(1.25rem,5vw,3rem);
-  --r-s:10px; --r-m:16px; --r-l:22px;
+  --r-s:.78rem; --r-m:1.04rem; --r-l:1.3rem;
 }
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
-    --bg:#0C0C11; --surface:#16161D; --surface-2:#1D1D26; --surface-3:#24242F;
-    --ink:#F1F0F4; --ink-2:#ACA9B8; --ink-3:#827F92;
-    --line:#292933; --line-soft:#1F1F28;
-    --brand:#8098FF; --brand-2:#B0C0FF; --brand-wash:#191E3E; --brand-ink:#0C0C11;
+    --bg:#000000; --surface:#17181C; --surface-2:#0F0F12; --surface-3:#1F2024;
+    --ink:#E7E9EA; --ink-2:#AEB2B4; --ink-3:#72767A;
+    --line:#242628; --line-soft:#191B1C;
+    --brand:#1C9CF0; --brand-2:#60B6FA; --brand-wash:#061622; --brand-ink:#FFFFFF; --brand-text:#1C9CF0;
     --amber:#E0A44A; --amber-wash:#2B2314;
     --rose:#F5798F; --rose-wash:#2D1620;
-    --deep:#08080C; --deep-2:#14141C; --deep-ink:#E9E8EE; --deep-line:#23232E;
+    --deep:#000000; --deep-2:#17181C; --deep-ink:#E7E9EA; --deep-line:#242628;
     --sh-1:0 1px 2px rgba(0,0,0,.4);
     --sh-2:0 2px 6px rgba(0,0,0,.4), 0 14px 30px -14px rgba(0,0,0,.7);
     --sh-3:0 4px 14px rgba(0,0,0,.5), 0 36px 70px -28px rgba(0,0,0,.9);
   }
 }
 :root[data-theme="dark"]{
-  --bg:#0C0C11; --surface:#16161D; --surface-2:#1D1D26; --surface-3:#24242F;
-  --ink:#F1F0F4; --ink-2:#ACA9B8; --ink-3:#827F92;
-  --line:#292933; --line-soft:#1F1F28;
-  --brand:#8098FF; --brand-2:#B0C0FF; --brand-wash:#191E3E; --brand-ink:#0C0C11;
+  --bg:#000000; --surface:#17181C; --surface-2:#0F0F12; --surface-3:#1F2024;
+  --ink:#E7E9EA; --ink-2:#AEB2B4; --ink-3:#72767A;
+  --line:#242628; --line-soft:#191B1C;
+  --brand:#1C9CF0; --brand-2:#60B6FA; --brand-wash:#061622; --brand-ink:#FFFFFF; --brand-text:#1C9CF0;
   --amber:#E0A44A; --amber-wash:#2B2314;
   --rose:#F5798F; --rose-wash:#2D1620;
-  --deep:#08080C; --deep-2:#14141C; --deep-ink:#E9E8EE; --deep-line:#23232E;
+  --deep:#000000; --deep-2:#17181C; --deep-ink:#E7E9EA; --deep-line:#242628;
   --sh-1:0 1px 2px rgba(0,0,0,.4);
   --sh-2:0 2px 6px rgba(0,0,0,.4), 0 14px 30px -14px rgba(0,0,0,.7);
   --sh-3:0 4px 14px rgba(0,0,0,.5), 0 36px 70px -28px rgba(0,0,0,.9);
@@ -95,6 +113,8 @@ h2{font-size:clamp(2rem,4.2vw,3.15rem); line-height:1.05; letter-spacing:-.033em
 h3{font-size:1.22rem; line-height:1.25; letter-spacing:-.02em}
 p{margin:0 0 1em}
 .lede{font-size:clamp(1.1rem,1.75vw,1.32rem); line-height:1.5; color:var(--ink-2); text-wrap:pretty}
+/* 中文標題與導言只在標點、空白處換行，不會把「訂閱」拆成「訂／閱」；真的塞不下才硬斷 */
+:lang(zh) :is(h1,h2,h3,.lede){word-break:keep-all; overflow-wrap:anywhere}
 .sub{color:var(--ink-2)}
 .num{font-family:var(--mono); font-variant-numeric:tabular-nums; letter-spacing:-.02em}
 
@@ -108,11 +128,22 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
 .badge{
   display:inline-flex; align-items:center; gap:.5rem; margin-bottom:1.1rem;
   padding:.36rem .8rem .36rem .55rem; border-radius:999px;
-  background:var(--brand-wash); color:var(--brand);
+  background:var(--brand-wash); color:var(--brand-text);
   font-size:.78rem; font-weight:600; letter-spacing:-.005em; line-height:1.4;
 }
 .badge .dot{width:6px; height:6px; border-radius:50%; background:currentColor; flex:none}
 .badge.plain{background:var(--surface-2); color:var(--ink-2); border:1px solid var(--line)}
+/* pain label: the headache the section retires, set quieter than the h2 that answers it.
+   The marker is a small "no" sign; long phrases wrap inside the label instead of overflowing. */
+.badge.pain{
+  align-items:flex-start; max-width:100%; text-align:left;
+  padding:.34rem .8rem .34rem .62rem; border-radius:.9rem;
+  background:color-mix(in srgb,var(--ink) 4%,transparent); color:var(--ink-2);
+  border:1px solid var(--line); font-weight:500;
+}
+.badge.pain > span:last-child{min-width:0; text-wrap:balance}
+.badge.pain .x{position:relative; width:10px; height:10px; margin-top:.3em; border-radius:50%; border:1.5px solid var(--ink-3); flex:none}
+.badge.pain .x::after{content:""; position:absolute; left:50%; top:50%; width:1.5px; height:10px; background:var(--ink-3); transform:translate(-50%,-50%) rotate(-45deg)}
 
 .btn{
   display:inline-flex; align-items:center; gap:.5rem; text-decoration:none; cursor:pointer;
@@ -123,7 +154,7 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
 .btn.primary{background:var(--brand); color:var(--brand-ink); box-shadow:var(--sh-2)}
 .btn.primary:hover{background:var(--brand-2); transform:translateY(-2px)}
 .btn.ghost{background:var(--surface); color:var(--ink); border-color:var(--line); box-shadow:var(--sh-1)}
-.btn.ghost:hover{border-color:var(--brand); color:var(--brand); transform:translateY(-2px)}
+.btn.ghost:hover{border-color:var(--brand); color:var(--brand-text); transform:translateY(-2px)}
 .btn.sm{padding:.5rem 1rem; font-size:.88rem}
 .btn svg{width:17px; height:17px; fill:currentColor; flex:none}
 .btn.sm svg{width:15px; height:15px}
@@ -138,8 +169,7 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
 .nav.stuck{border-bottom-color:var(--line)}
 .nav .wrap{display:flex; align-items:center; gap:1.2rem; height:66px}
 .logo{display:flex; align-items:center; gap:.55rem; text-decoration:none; font-weight:600; font-size:.98rem; letter-spacing:-.02em}
-.logo .mark{width:28px; height:28px; border-radius:8px; background:var(--brand); display:grid; place-items:center; flex:none}
-.logo .mark svg{width:17px; height:17px; fill:none; stroke:var(--brand-ink); stroke-width:2.4; stroke-linecap:round; stroke-linejoin:round}
+.logo .mark{width:28px; height:28px; flex:none}
 .nav nav{margin-left:auto; display:flex; align-items:center; gap:1.6rem}
 .nav nav a{text-decoration:none; font-size:.93rem; font-weight:500; color:var(--ink-2); transition:color .16s}
 .nav nav a:hover{color:var(--ink)}
@@ -186,7 +216,7 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
   max-height:100px; overflow:hidden;
   transition:opacity .45s ease, transform .45s ease, max-height .45s ease, margin .45s ease, padding .45s ease, border-color .45s;
 }
-.src .tag{font-size:.72rem; font-weight:600; color:var(--brand); letter-spacing:-.005em; flex:none}
+.src .tag{font-size:.72rem; font-weight:600; color:var(--brand-text); letter-spacing:-.005em; flex:none}
 .src .desc{font-size:.92rem; font-weight:500; flex:1; min-width:150px}
 .src .amt{font-family:var(--mono); font-size:.95rem; font-weight:500; font-variant-numeric:tabular-nums; flex:none}
 .split[data-mode="two"] .src{opacity:0; max-height:0; padding-block:0; margin-bottom:-1rem; transform:translateY(-10px); border-color:transparent}
@@ -238,7 +268,7 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
   padding:.26rem .68rem; border-radius:999px; line-height:1.45;
 }
 .chip .dot{width:6px; height:6px; border-radius:50%; background:currentColor}
-.chip.ok{background:var(--brand-wash); color:var(--brand)}
+.chip.ok{background:var(--brand-wash); color:var(--brand-text)}
 .chip.bad{background:var(--rose-wash); color:var(--rose)}
 .chip.warn{background:var(--amber-wash); color:var(--amber)}
 .chip.flat{background:var(--surface-2); color:var(--ink-2); border:1px solid var(--line)}
@@ -299,7 +329,7 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
 @media(min-width:820px){ .merge{grid-template-columns:minmax(0,1fr) 60px minmax(0,1fr); align-items:center} }
 .stackcol{display:grid; gap:.9rem}
 .mini{border:1px solid var(--line); border-radius:var(--r-s); background:var(--surface-2); overflow:hidden}
-.mini .mh{padding:.5rem .8rem; border-bottom:1px solid var(--line); font-size:.8rem; font-weight:600; letter-spacing:-.01em; color:var(--ink-2); white-space:nowrap}
+.mini .mh, .out .mh{padding:.5rem .8rem; border-bottom:1px solid var(--line); font-size:.8rem; font-weight:600; letter-spacing:-.01em; color:var(--ink-2); white-space:nowrap}
 .mini .mh span{font-weight:400; color:var(--ink-3)}
 .ticks{display:flex; gap:6px; padding:1.5rem .8rem .8rem; align-items:flex-end; min-height:64px}
 .tick{flex:1; border-radius:4px; background:var(--line); position:relative; transform:scaleY(.2); transform-origin:bottom; transition:transform .55s cubic-bezier(.34,1.4,.64,1)}
@@ -311,8 +341,9 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
 .arrows path{fill:none; stroke:var(--line); stroke-width:1.6; stroke-linecap:round; stroke-dasharray:100; stroke-dashoffset:100; transition:stroke-dashoffset 1s ease .3s, stroke .6s}
 .play .arrows path{stroke-dashoffset:0; stroke:var(--brand)}
 @media(max-width:819px){ .arrows{transform:rotate(90deg); height:56px} }
-.out{border:1px solid var(--brand); border-radius:var(--r-s); background:var(--surface); overflow:hidden}
-.out .mh{background:var(--brand-wash); color:var(--brand); border-color:transparent; white-space:nowrap}
+/* scoped: a bare .out also matched the calendar's .day.out cells */
+.merge .out{border:1px solid var(--brand); border-radius:var(--r-s); background:var(--surface); overflow:hidden}
+.out .mh{background:var(--brand-wash); color:var(--brand-text); border-color:transparent; white-space:nowrap}
 .out .row{opacity:0; transform:translateX(-12px); transition:.45s ease}
 .play .out .row{opacity:1; transform:none}
 .play .out .row:nth-child(2){transition-delay:.35s} .play .out .row:nth-child(3){transition-delay:.5s}
@@ -341,14 +372,14 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
 /* ---------- assistant panel ---------- */
 .term{background:var(--deep); border:1px solid var(--deep-line); border-radius:var(--r-m); overflow:hidden; box-shadow:var(--sh-3)}
 .term .th{padding:.75rem 1rem; background:var(--deep-2); border-bottom:1px solid var(--deep-line); font-size:.83rem; font-weight:600; color:var(--deep-ink); opacity:.65; display:flex; align-items:center; gap:.5rem}
-.term .th::before{content:""; width:7px; height:7px; border-radius:50%; background:#5C77FF}
+.term .th::before{content:""; width:7px; height:7px; border-radius:50%; background:var(--brand)}
 .term .tb{padding:1.15rem 1.1rem; font-family:var(--mono); font-size:.82rem; line-height:1.85; color:var(--deep-ink)}
 .term .l{opacity:0; transform:translateY(5px); transition:.4s ease}
 .term.play .l{opacity:1; transform:none}
 .term.play .l:nth-child(2){transition-delay:.4s} .term.play .l:nth-child(3){transition-delay:.9s}
 .term.play .l:nth-child(4){transition-delay:1.2s} .term.play .l:nth-child(5){transition-delay:1.4s}
 .term.play .l:nth-child(6){transition-delay:1.6s} .term.play .l:nth-child(7){transition-delay:1.9s}
-.term .q{color:#B0C0FF} .term .k{color:#E0A44A} .term .r{color:#F5798F} .term .c{opacity:.42}
+.term .q{color:#94CFF9} .term .k{color:#E0A44A} .term .r{color:#F5798F} .term .c{opacity:.42}
 
 /* ---------- tiles ---------- */
 .tiles{display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(255px,1fr))}
@@ -361,22 +392,24 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
 /* ---------- closing ---------- */
 .finale{
   border-radius:var(--r-l); padding:clamp(2.5rem,6vw,4.5rem) clamp(1.5rem,4vw,3rem); text-align:center;
-  background:var(--brand); color:var(--brand-ink); position:relative; overflow:hidden;
+  /* a deeper shade of the product blue: white copy on the raw brand blue is under 3:1 */
+  --finale:color-mix(in srgb,var(--brand) 72%,#000);
+  background:var(--finale); color:var(--brand-ink); position:relative; overflow:hidden;
 }
 .finale h2{color:var(--brand-ink); margin-bottom:.9rem; max-width:17ch; margin-inline:auto}
 .finale p{color:var(--brand-ink); opacity:.82; max-width:44ch; margin:0 auto 2rem; font-size:1.08rem}
-.finale .btn.primary{background:var(--brand-ink); color:var(--brand)}
+.finale .btn.primary{background:var(--brand-ink); color:var(--finale)}
 .finale .btn.primary:hover{background:var(--brand-ink); opacity:.9}
 .finale .btn.ghost{background:transparent; color:var(--brand-ink); border-color:color-mix(in srgb,var(--brand-ink) 40%,transparent); box-shadow:none}
 .finale .btn.ghost:hover{border-color:var(--brand-ink); color:var(--brand-ink)}
 .finale .btns{justify-content:center}
-.finale .already{margin:1.6rem 0 0; font-size:.95rem; opacity:.75}
+.finale .already{margin:1.6rem auto 0; font-size:.95rem; opacity:.75}
 .finale .already a{color:var(--brand-ink); text-decoration:underline; text-underline-offset:3px}
 
 footer{border-top:1px solid var(--line); padding-block:2.5rem; margin-top:clamp(4rem,8vw,7rem)}
 footer .wrap{display:flex; gap:.8rem 2rem; flex-wrap:wrap; align-items:center; font-size:.88rem; color:var(--ink-3)}
 footer a{color:var(--ink-2); text-decoration:none}
-footer a:hover{color:var(--brand)}
+footer a:hover{color:var(--brand-text)}
 footer .ghlink{display:inline-flex; align-items:center; gap:.45rem}
 footer .ghlink svg{width:15px; height:15px; fill:currentColor}
 footer .sp{margin-left:auto}
@@ -395,7 +428,7 @@ footer .sp{margin-left:auto}
 ` + LOCALE_SWITCHER_CSS;
 
 /**
- * docs/index.html <body> 的內容（不含 <header> 與 <script>），改動見檔頭。
+ * landing 的 <body> 內容（不含 <header> 與 <script>），改動見檔頭。
  * `{{…}}` 是文案佔位符，由 page.tsx 透過 renderLandingTemplate() 代入。
  */
 export const LANDING_HTML = `<main id="top">
@@ -479,7 +512,7 @@ export const LANDING_HTML = `<main id="top">
   <div class="wrap feat">
     <div class="fx rv">
       <div class="sec-head">
-        <span class="badge"><span class="dot"></span>{{books.badge}}</span>
+        <span class="badge pain"><span class="x" aria-hidden="true"></span><span>{{books.badge}}</span></span>
         <h2>{{books.heading}}</h2>
         <p class="lede">{{books.lede}}</p>
       </div>
@@ -500,7 +533,7 @@ export const LANDING_HTML = `<main id="top">
   <div class="wrap feat">
     <div class="fx rv">
       <div class="sec-head">
-        <span class="badge"><span class="dot"></span>{{assistant.badge}}</span>
+        <span class="badge pain"><span class="x" aria-hidden="true"></span><span>{{assistant.badge}}</span></span>
         <h2>{{assistant.heading}}</h2>
         <p class="lede">{{assistant.lede}}</p>
       </div>
@@ -525,7 +558,7 @@ export const LANDING_HTML = `<main id="top">
 <section class="band" id="billing">
   <div class="wrap">
     <div class="sec-head center rv">
-      <span class="badge"><span class="dot"></span>{{billing.badge}}</span>
+      <span class="badge pain"><span class="x" aria-hidden="true"></span><span>{{billing.badge}}</span></span>
       <h2>{{billing.heading}}</h2>
       <p class="lede">{{billing.lede}}</p>
     </div>
@@ -603,7 +636,7 @@ export const LANDING_HTML = `<main id="top">
   <div class="wrap feat flip">
     <div class="fx rv" data-d="1">
       <div class="sec-head">
-        <span class="badge"><span class="dot"></span>{{reminders.badge}}</span>
+        <span class="badge pain"><span class="x" aria-hidden="true"></span><span>{{reminders.badge}}</span></span>
         <h2>{{reminders.heading}}</h2>
         <p class="lede">{{reminders.lede}}</p>
       </div>
@@ -632,7 +665,7 @@ export const LANDING_HTML = `<main id="top">
 <section class="band" id="reports">
   <div class="wrap">
     <div class="sec-head center rv">
-      <span class="badge"><span class="dot"></span>{{reports.badge}}</span>
+      <span class="badge pain"><span class="x" aria-hidden="true"></span><span>{{reports.badge}}</span></span>
       <h2>{{reports.heading}}</h2>
       <p class="lede">{{reports.lede}}</p>
     </div>
@@ -642,6 +675,7 @@ export const LANDING_HTML = `<main id="top">
           <p class="shot-label">{{reports.overviewLabel}}</p>
           <div class="shot"><img src="/landing/images/dashboard.png" alt="{{reports.overviewAlt}}"></div>
           <ul class="pts" style="margin-top:1.2rem">
+            <li><b>{{reports.spendLead}}</b> {{reports.spendBody}}</li>
             <li><b>{{reports.balancesLead}}</b> {{reports.balancesBody}}</li>
             <li><b>{{reports.cashflowLead}}</b> {{reports.cashflowBody}}</li>
           </ul>
@@ -683,18 +717,34 @@ export const LANDING_HTML = `<main id="top">
         <p>{{more.payrollBody}}</p>
       </div>
       <div class="tile rv" data-d="1">
+        <h3>{{more.recurringTitle}}</h3>
+        <p>{{more.recurringBody}}</p>
+      </div>
+      <div class="tile rv" data-d="2">
+        <h3>{{more.cloudBillingTitle}}</h3>
+        <p>{{more.cloudBillingBody}}</p>
+      </div>
+      <div class="tile rv">
+        <h3>{{more.einvoiceTitle}}</h3>
+        <p>{{more.einvoiceBody}}</p>
+      </div>
+      <div class="tile rv" data-d="1">
+        <h3>{{more.wiseTitle}}</h3>
+        <p>{{more.wiseBody}}</p>
+      </div>
+      <div class="tile rv" data-d="2">
         <h3>{{more.filesTitle}}</h3>
         <p>{{more.filesBody}}</p>
       </div>
-      <div class="tile rv" data-d="2">
+      <div class="tile rv">
         <h3>{{more.orgsTitle}}</h3>
         <p>{{more.orgsBody}}</p>
       </div>
-      <div class="tile rv">
+      <div class="tile rv" data-d="1">
         <h3>{{more.currencyTitle}}</h3>
         <p>{{more.currencyBody}}</p>
       </div>
-      <div class="tile rv" data-d="1">
+      <div class="tile rv" data-d="2">
         <h3>{{more.languagesTitle}}</h3>
         <p>{{more.languagesBody}}</p>
       </div>
@@ -731,7 +781,7 @@ export const LANDING_HTML = `<main id="top">
 `;
 
 /**
- * docs/index.html <script> 的內容，一字未改。
+ * landing 的互動腳本（捲動揭露、導覽列分隔線、demo 的分頁切換）。
  * dangerouslySetInnerHTML 不會執行 <script>，所以這段是靠 next/script 以
  * afterInteractive 注入的（見 page.tsx）。
  */

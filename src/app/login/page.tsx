@@ -5,13 +5,13 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
+import { Mail } from "lucide-react";
 import { authClient, signIn } from "@/lib/auth-client";
-import { LogoMark } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useHydrated } from "@/hooks/use-hydrated";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AuthShell } from "@/components/auth/auth-shell";
 import { formText } from "@/components/auth/form-text";
 import { afterSsoLookup, type AfterSsoLookupNote, type SsoLookupResult } from "./sso-lookup";
 import { authPageHref, resolveRedirectTarget } from "./redirect-target";
@@ -123,9 +123,10 @@ function SignInMethods() {
 
   if (step === "password") {
     return (
-      <form method="post" onSubmit={onPassword} className="space-y-3">
-        <div className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm">
-          <span className="min-w-0 truncate">{email}</span>
+      <form method="post" onSubmit={onPassword} className="space-y-4">
+        <div className="flex items-center gap-2.5 rounded-lg border bg-muted/40 px-3 py-2.5 text-sm">
+          <Mail className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate">{email}</span>
           <input type="hidden" name="email" value={email} />
           <Button
             type="button"
@@ -139,9 +140,22 @@ function SignInMethods() {
           </Button>
         </div>
         {note && <p className="text-sm text-muted-foreground">{t(`password.${note}`)}</p>}
+        {/* 兩個連結都會出現，不管這個 email 有沒有帳號——依帳號存在與否切換畫面
+            就成了帳號探測。原本的 query（MCP 的 OAuth 參數或 redirect）一起帶過去，
+            在那邊完成註冊／重設後才回得到原本的流程。
+            （「忘記密碼」在密碼欄的標籤列右邊，「建立帳號」在送出鈕下面。） */}
         <div className="space-y-1.5">
-          <Label htmlFor="password">{t("password.label")}</Label>
+          <div className="flex items-center justify-between gap-2">
+            <Label htmlFor="password">{t("password.label")}</Label>
+            <Link
+              href={authPageHref("/forgot-password", params, { email })}
+              className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+            >
+              {t("password.forgot")}
+            </Link>
+          </div>
           <Input
+            className="h-11"
             id="password"
             name="password"
             type="password"
@@ -150,48 +164,40 @@ function SignInMethods() {
             autoFocus
           />
         </div>
-        <Button type="submit" className="w-full" disabled={pending || !hydrated}>
+        <Button type="submit" className="h-11 w-full" disabled={pending || !hydrated}>
           {pending ? t("password.submitting") : t("password.submit")}
         </Button>
-        {/* 兩個連結都會出現，不管這個 email 有沒有帳號——依帳號存在與否切換畫面
-            就成了帳號探測。原本的 query（MCP 的 OAuth 參數或 redirect）一起帶過去，
-            在那邊完成註冊／重設後才回得到原本的流程。 */}
-        <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-          <Link
-            href={authPageHref("/forgot-password", params, { email })}
-            className="text-muted-foreground underline-offset-4 hover:underline"
-          >
-            {t("password.forgot")}
-          </Link>
+        <p className="text-center text-sm">
           <Link
             href={authPageHref("/signup", params, { email })}
-            className="text-muted-foreground underline-offset-4 hover:underline"
+            className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
           >
             {t("password.signup")}
           </Link>
-        </div>
+        </p>
       </form>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {notice && (
         <p
           role={notice === "passwordUpdated" ? "status" : "alert"}
           className={
             notice === "passwordUpdated"
-              ? "rounded-md border px-3 py-2 text-sm"
-              : "rounded-md border border-destructive/50 px-3 py-2 text-sm text-destructive"
+              ? "rounded-lg border bg-muted/40 px-3 py-2.5 text-sm"
+              : "rounded-lg border border-destructive/50 bg-destructive/5 px-3 py-2.5 text-sm text-destructive"
           }
         >
           {t(`notice.${notice}`)}
         </p>
       )}
-      <form method="post" onSubmit={onEmail} className="space-y-3">
+      <form method="post" onSubmit={onEmail} className="space-y-4">
         <div className="space-y-1.5">
           <Label htmlFor="email">{t("email.label")}</Label>
           <Input
+            className="h-11"
             id="email"
             name="email"
             type="email"
@@ -201,21 +207,21 @@ function SignInMethods() {
             placeholder={t("email.placeholder")}
           />
         </div>
-        <Button type="submit" className="w-full" disabled={pending || !hydrated}>
+        <Button type="submit" className="h-11 w-full" disabled={pending || !hydrated}>
           {pending ? t("email.checking") : t("email.continue")}
         </Button>
       </form>
 
       <div className="flex items-center gap-3">
         <span className="h-px flex-1 bg-border" />
-        <span className="text-xs text-muted-foreground">{t("or")}</span>
+        <span className="text-xs tracking-wide text-muted-foreground uppercase">{t("or")}</span>
         <span className="h-px flex-1 bg-border" />
       </div>
 
       <Button
         type="button"
         variant="outline"
-        className="w-full"
+        className="h-11 w-full"
         onClick={onGoogle}
         disabled={pending}
       >
@@ -229,18 +235,10 @@ function SignInMethods() {
 export default function LoginPage() {
   const t = useTranslations("auth.login");
   return (
-    <div className="flex min-h-full flex-1 items-center justify-center p-6">
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <LogoMark className="size-10 mb-2" />
-          <CardTitle>{t("title")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Suspense fallback={null}>
-            <SignInMethods />
-          </Suspense>
-        </CardContent>
-      </Card>
-    </div>
+    <AuthShell title={t("title")}>
+      <Suspense fallback={null}>
+        <SignInMethods />
+      </Suspense>
+    </AuthShell>
   );
 }

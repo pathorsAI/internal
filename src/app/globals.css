@@ -227,3 +227,14 @@
     transform: translateX(400%);
   }
 }
+
+/* 帳號頁面右半邊輪播底下的進度條：一條填滿（animationend）就換下一張，見
+   src/components/auth/auth-showcase.tsx。 */
+@keyframes auth-showcase-progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
