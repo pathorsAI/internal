@@ -10,6 +10,8 @@ import {
   type LedgerMode,
   type MatchInvoice,
   type MatchStatus,
+  type MatchTransaction,
+  type MatchUpdate,
 } from "./match";
 import { taipeiToday } from "./sync-plan";
 
@@ -162,18 +164,9 @@ export async function createLedgerTransactionForInvoice(
   return { status, transactionId: txnId };
 }
 
-/** 跑一次對帳（today 預設台北今天）。 */
-export async function reconcileVendorInvoices(orgId: string, opts: { today?: string } = {}): Promise<ReconcileResult> {
-  const db = getDb();
-  const today = opts.today ?? taipeiToday();
-  const result: ReconcileResult = { matched: 0, suggested: 0, unmatched: 0, created: 0 };
+type LoadedInvoice = MatchInvoice & InvoiceForLedger;
 
-  const accounts = await loadAccounts(db, orgId);
-  const accountById = new Map(accounts.map((a) => [a.id, a]));
-  const partiesOf = new Map(accounts.map((a) => [a.id, matchPartiesOf(a)]));
-  const allParties = [...new Set([...partiesOf.values()].flat())];
-  if (accounts.length === 0) return result;
-
+async function loadInvoices(db: Db, orgId: string, partiesOf: Map<number, number[]>): Promise<LoadedInvoice[]> {
   const rows = await db
     .select({
       id: vendorInvoices.id,
@@ -190,97 +183,116 @@ export async function reconcileVendorInvoices(orgId: string, opts: { today?: str
       suggestedTransactionId: vendorInvoices.suggestedTransactionId,
     })
     .from(vendorInvoices)
-    .where(
-      and(
-        eq(vendorInvoices.organizationId, orgId),
-        inArray(
-          vendorInvoices.billingAccountId,
-          accounts.map((a) => a.id),
-        ),
-      ),
-    );
-
-  const invoices = rows.map((r) => ({
+    .where(and(eq(vendorInvoices.organizationId, orgId), inArray(vendorInvoices.billingAccountId, [...partiesOf.keys()])));
+  return rows.map((r) => ({
     ...r,
     amount: Number(r.amount),
     currency: r.currency.trim().toUpperCase(),
     matchStatus: r.matchStatus as MatchStatus,
     partyIds: partiesOf.get(r.billingAccountId) ?? [],
-  })) satisfies (MatchInvoice & Record<string, unknown>)[];
+  }));
+}
 
-  const open = invoices.filter((i) => (i.matchStatus === "unmatched" || i.matchStatus === "suggested") && i.partyIds.length > 0);
-  if (open.length > 0 && allParties.length > 0) {
-    const from = open.reduce((m, i) => (i.invoiceDate < m ? i.invoiceDate : m), open[0].invoiceDate);
-    const to = addDays(
-      open.reduce((m, i) => (i.invoiceDate > m ? i.invoiceDate : m), open[0].invoiceDate),
-      GROUP_WINDOW_DAYS,
+/** 候選交易：比對廠商的未刪除支出，日期涵蓋所有未定發票的視窗（含合併比對的 75 天）。 */
+async function loadCandidateTransactions(db: Db, orgId: string, open: LoadedInvoice[], parties: number[]): Promise<MatchTransaction[]> {
+  const dates = open.map((i) => i.invoiceDate).sort((a, b) => a.localeCompare(b));
+  const rows = await db
+    .select({
+      id: transactions.id,
+      partyId: transactions.partyId,
+      txnDate: transactions.txnDate,
+      amount: transactions.amount,
+      currency: transactions.currency,
+    })
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.organizationId, orgId),
+        eq(transactions.type, "expense"),
+        isNull(transactions.deletedAt),
+        inArray(transactions.partyId, parties),
+        gte(transactions.txnDate, dates[0]),
+        lte(transactions.txnDate, addDays(dates.at(-1) as string, GROUP_WINDOW_DAYS)),
+      ),
     );
-    const txnRows = await db
-      .select({
-        id: transactions.id,
-        partyId: transactions.partyId,
-        txnDate: transactions.txnDate,
-        amount: transactions.amount,
-        currency: transactions.currency,
+  return rows.map((t) => ({ ...t, amount: Number(t.amount), currency: t.currency.trim().toUpperCase() }));
+}
+
+/** 寫回狀態有變的發票（跑的途中有人手動處理過的不蓋掉），並同步更新記憶體裡的發票。 */
+async function applyUpdates(
+  db: Db,
+  orgId: string,
+  invoices: LoadedInvoice[],
+  updates: MatchUpdate[],
+  result: ReconcileResult,
+): Promise<void> {
+  const byId = new Map(invoices.map((i) => [i.id, i]));
+  for (const u of updates) {
+    await db
+      .update(vendorInvoices)
+      .set({
+        matchStatus: u.matchStatus,
+        matchedTransactionId: u.matchedTransactionId,
+        suggestedTransactionId: u.suggestedTransactionId,
+        matchedAt: u.matchStatus === "matched" ? sql`now()` : null,
+        meta: sql`${vendorInvoices.meta} || ${JSON.stringify({ matchReason: u.reason })}::jsonb`,
+        updatedAt: sql`now()`,
       })
-      .from(transactions)
       .where(
         and(
-          eq(transactions.organizationId, orgId),
-          eq(transactions.type, "expense"),
-          isNull(transactions.deletedAt),
-          inArray(transactions.partyId, allParties),
-          gte(transactions.txnDate, from),
-          lte(transactions.txnDate, to),
+          eq(vendorInvoices.id, u.invoiceId),
+          eq(vendorInvoices.organizationId, orgId),
+          inArray(vendorInvoices.matchStatus, ["unmatched", "suggested"]),
         ),
       );
-    const updates = reconcileInvoices(
-      invoices,
-      txnRows.map((t) => ({ ...t, amount: Number(t.amount), currency: t.currency.trim().toUpperCase() })),
-    );
-    for (const u of updates) {
-      await db
-        .update(vendorInvoices)
-        .set({
-          matchStatus: u.matchStatus,
-          matchedTransactionId: u.matchedTransactionId,
-          suggestedTransactionId: u.suggestedTransactionId,
-          matchedAt: u.matchStatus === "matched" ? sql`now()` : null,
-          meta: sql`${vendorInvoices.meta} || ${JSON.stringify({ matchReason: u.reason })}::jsonb`,
-          updatedAt: sql`now()`,
-        })
-        .where(
-          and(
-            eq(vendorInvoices.id, u.invoiceId),
-            eq(vendorInvoices.organizationId, orgId),
-            // 跑的途中有人手動處理過就不蓋掉
-            inArray(vendorInvoices.matchStatus, ["unmatched", "suggested"]),
-          ),
-        );
-      const inv = invoices.find((i) => i.id === u.invoiceId);
-      if (inv) {
-        inv.matchStatus = u.matchStatus;
-        inv.matchedTransactionId = u.matchedTransactionId;
-        inv.suggestedTransactionId = u.suggestedTransactionId;
-      }
-      if (u.matchStatus === "matched") result.matched++;
-      else if (u.matchStatus === "suggested") result.suggested++;
-      else result.unmatched++;
+    const inv = byId.get(u.invoiceId);
+    if (inv) {
+      inv.matchStatus = u.matchStatus;
+      inv.matchedTransactionId = u.matchedTransactionId;
+      inv.suggestedTransactionId = u.suggestedTransactionId;
     }
+    result[u.matchStatus]++;
   }
+}
 
-  // create_unmatched：過了寬限期仍對不到 → 建待確認支出（match_only 永遠不會走到這裡）
-  const due = invoicesDueForCreation(
-    invoices,
-    (id) => (accountById.get(id)?.ledgerMode as LedgerMode) ?? "match_only",
-    today,
-  );
+/** create_unmatched：過了寬限期仍對不到 → 建待確認支出（match_only 永遠不會走到這裡）。 */
+async function createDueTransactions(
+  db: Db,
+  orgId: string,
+  invoices: LoadedInvoice[],
+  accountById: Map<number, AccountRow>,
+  today: string,
+): Promise<number> {
+  const due = invoicesDueForCreation(invoices, (id) => (accountById.get(id)?.ledgerMode as LedgerMode) ?? "match_only", today);
+  let created = 0;
   for (const inv of due) {
     const account = accountById.get(inv.billingAccountId);
     const partyId = account?.partyId ?? inv.partyIds[0];
     if (!account || !partyId) continue;
     const r = await createLedgerTransactionForInvoice(db, orgId, inv, account, partyId);
-    if (r.status === "created") result.created++;
+    if (r.status === "created") created++;
+  }
+  return created;
+}
+
+/** 跑一次對帳（today 預設台北今天）。 */
+export async function reconcileVendorInvoices(orgId: string, opts: { today?: string } = {}): Promise<ReconcileResult> {
+  const db = getDb();
+  const today = opts.today ?? taipeiToday();
+  const result: ReconcileResult = { matched: 0, suggested: 0, unmatched: 0, created: 0 };
+
+  const accounts = await loadAccounts(db, orgId);
+  if (accounts.length > 0) {
+    const accountById = new Map(accounts.map((a) => [a.id, a]));
+    const partiesOf = new Map(accounts.map((a) => [a.id, matchPartiesOf(a)]));
+    const allParties = [...new Set([...partiesOf.values()].flat())];
+    const invoices = await loadInvoices(db, orgId, partiesOf);
+    const open = invoices.filter((i) => (i.matchStatus === "unmatched" || i.matchStatus === "suggested") && i.partyIds.length > 0);
+    if (open.length > 0 && allParties.length > 0) {
+      const txns = await loadCandidateTransactions(db, orgId, open, allParties);
+      await applyUpdates(db, orgId, invoices, reconcileInvoices(invoices, txns), result);
+    }
+    result.created = await createDueTransactions(db, orgId, invoices, accountById, today);
   }
   return result;
 }

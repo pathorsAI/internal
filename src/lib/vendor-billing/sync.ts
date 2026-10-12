@@ -18,10 +18,26 @@ import {
   type ParsedAzureInvoice,
   type ParsedPaymentMethod,
 } from "@/lib/integrations/azure";
-import { GcpApiError, GcpAuthError, monthlyInvoicesFromCosts, withGcpClient, type GcpMonthlyInvoice } from "@/lib/integrations/gcp";
+import {
+  GcpApiError,
+  GcpAuthError,
+  monthlyInvoicesFromCosts,
+  withGcpClient,
+  type GcpClient,
+  type GcpMonthlyInvoice,
+  type GcpProjectBilling,
+  type GcpProjectInfo,
+} from "@/lib/integrations/gcp";
 import { updateConfig } from "@/lib/integrations/store";
 import { reconcileVendorInvoices, type ReconcileResult } from "./reconcile";
-import { filterAllowlisted, matchExportTables, parseAzureScope, parseGcpScope } from "./scope";
+import {
+  filterAllowlisted,
+  matchExportTables,
+  parseAzureScope,
+  parseGcpScope,
+  type BigQueryExport,
+  type GcpDiscoveredAccount,
+} from "./scope";
 import {
   aggregateCostLines,
   azureCostResource,
@@ -79,23 +95,31 @@ function emptyResult(provider: Provider): CloudSyncResult {
   };
 }
 
+/** 「帳單 12（新 3）」：有新的才加括號。 */
+function countWithNew(label: string, total: number, created: number): string {
+  const suffix = created ? "（新 " + created + "）" : "";
+  return `${label} ${total}${suffix}`;
+}
+
+function reconcileSummary(r: ReconcileResult): string {
+  const parts = [`自動綁定 ${r.matched}`, `建議 ${r.suggested}`];
+  if (r.created) parts.push(`新建交易 ${r.created}`);
+  return `對帳：${parts.join("、")}`;
+}
+
 /** 一行 zh-TW 摘要（自動同步的 lastAutoSync、操作紀錄、web toast 共用）。 */
 export function summarizeCloudSync(r: CloudSyncResult): string {
   if (r.scopeEmpty) return "尚未勾選要同步的計費範圍，略過";
   const parts = [
-    `計費帳號 ${r.accounts.synced}${r.accounts.created ? `（新 ${r.accounts.created}）` : ""}`,
-    `資源 ${r.resources.synced}${r.resources.created ? `（新 ${r.resources.created}）` : ""}`,
+    countWithNew("計費帳號", r.accounts.synced, r.accounts.created),
+    countWithNew("資源", r.resources.synced, r.resources.created),
   ];
   const missing = r.accounts.missing + r.resources.missing;
   if (missing > 0) parts.push(`平台上找不到 ${missing}`);
   if (r.provider === "azure") parts.push(`付款卡 ${r.paymentMethods}`);
-  parts.push(`帳單 ${r.invoices.synced}${r.invoices.created ? `（新 ${r.invoices.created}）` : ""}`);
+  parts.push(countWithNew("帳單", r.invoices.synced, r.invoices.created));
   if (r.costLines > 0) parts.push(`費用明細 ${r.costLines} 列`);
-  if (r.reconcile) {
-    parts.push(
-      `對帳：自動綁定 ${r.reconcile.matched}、建議 ${r.reconcile.suggested}${r.reconcile.created ? `、新建交易 ${r.reconcile.created}` : ""}`,
-    );
-  }
+  if (r.reconcile) parts.push(reconcileSummary(r.reconcile));
   if (r.warnings.length > 0) parts.push(`警告：${r.warnings.join("；")}`);
   return parts.join("、");
 }
@@ -525,10 +549,119 @@ function gcpInvoiceInput(i: GcpMonthlyInvoice): InvoiceInput {
   };
 }
 
+type GcpRun = {
+  db: Db;
+  orgId: string;
+  client: GcpClient;
+  r: CloudSyncResult;
+  today: string;
+  currentMonth: string;
+  /** 這次已經補過幾個專案名稱（上限 MAX_PROJECT_LOOKUPS）。 */
+  lookups: number;
+};
+
+type GcpSyncedAccount = { id: string; accountRowId: number; from: string };
+
+/** 一個專案 → 資源列：名稱 / labels 盡量補（有上限、403 忽略），生命週期不是 ACTIVE 的視為不在了。 */
+async function gcpProjectResource(run: GcpRun, p: GcpProjectBilling): Promise<ResourceInput> {
+  let info: GcpProjectInfo | null = null;
+  if (run.lookups < MAX_PROJECT_LOOKUPS) {
+    run.lookups++;
+    info = await soft(run.r.warnings, `專案 ${p.projectId}`, () => run.client.getProject(p.projectId));
+  }
+  const lifecycle = info?.lifecycleState ?? null;
+  const labels: Record<string, string> = { ...info?.labels };
+  if (!p.billingEnabled) labels.billingEnabled = "false";
+  return {
+    kind: "gcp_project",
+    externalId: p.projectId,
+    name: info?.name ?? null,
+    labels,
+    status: lifecycle && lifecycle !== "ACTIVE" ? "missing" : "active",
+  };
+}
+
+async function syncGcpProjects(run: GcpRun, accountRowId: number, acc: GcpDiscoveredAccount): Promise<void> {
+  const projects = await soft(run.r.warnings, `${acc.displayName} 專案`, () => run.client.listProjects(acc.id));
+  if (!projects) return;
+  const items: ResourceInput[] = [];
+  for (const p of projects) items.push(await gcpProjectResource(run, p));
+  const res = await upsertResources(run.db, run.orgId, accountRowId, items);
+  run.r.resources.synced += res.synced;
+  run.r.resources.created += res.created;
+  run.r.resources.missing += res.missing;
+}
+
+/** 一個勾選的 billing account；平台上找不到回 null（呼叫端標 missing）。 */
+async function syncGcpAccount(
+  run: GcpRun,
+  discovered: GcpDiscoveredAccount[],
+  id: string,
+): Promise<GcpSyncedAccount | null> {
+  const acc = discovered.find((d) => d.id === id) ?? (await run.client.getBillingAccount(id));
+  if (!acc) return null;
+  const meta: Record<string, unknown> = {
+    masterBillingAccount: acc.masterBillingAccount,
+    currency: acc.currencyCode,
+    reseller: Boolean(acc.masterBillingAccount),
+  };
+  const acct = await upsertSyncedAccount(run.db, run.orgId, "gcp", acc.id, acc.displayName, acc.open ? "active" : "closed", meta);
+  run.r.accounts.synced++;
+  if (acct.created) run.r.accounts.created++;
+  await syncGcpProjects(run, acct.id, acc);
+  return { id: acc.id, accountRowId: acct.id, from: syncWindowStart(acct.lastInvoiceDate, run.today) };
+}
+
+/** 一個帳號的 export 表 → 費用明細 + 已結束月份的月帳。 */
+async function syncGcpAccountCosts(run: GcpRun, bq: BigQueryExport, table: string, a: GcpSyncedAccount): Promise<void> {
+  const rows = await soft(run.r.warnings, `${a.id} 費用`, () =>
+    run.client.queryCosts(bq.projectId, bq.dataset, table, a.id, yyyymm(firstOfMonth(a.from))),
+  );
+  if (!rows) return;
+  run.r.costLines += await upsertCostLines(
+    run.db,
+    run.orgId,
+    a.accountRowId,
+    "gcp_bigquery",
+    rows.map((c) => ({
+      month: c.month,
+      resourceExternalId: c.projectId,
+      resourceName: c.projectName,
+      service: c.service,
+      amount: c.amount,
+      currency: c.currency,
+    })),
+  );
+  const up = await upsertInvoices(
+    run.db,
+    run.orgId,
+    a.accountRowId,
+    "gcp_bigquery",
+    monthlyInvoicesFromCosts(a.id, rows, run.currentMonth).map(gcpInvoiceInput),
+  );
+  run.r.invoices.synced += up.synced;
+  run.r.invoices.created += up.created;
+}
+
+/** 費用（選填）：每個勾選的帳號找自己的 export 表。 */
+async function syncGcpCosts(run: GcpRun, bq: BigQueryExport, synced: GcpSyncedAccount[]): Promise<void> {
+  const tables = await soft(run.r.warnings, `BigQuery ${bq.projectId}.${bq.dataset}`, () =>
+    run.client.listTables(bq.projectId, bq.dataset),
+  );
+  if (!tables) return;
+  const tableOf = matchExportTables(
+    tables,
+    synced.map((x) => x.id),
+  );
+  for (const a of synced) {
+    const table = tableOf.get(a.id);
+    if (table) await syncGcpAccountCosts(run, bq, table, a);
+    else run.r.warnings.push(`${a.id}：${bq.dataset} 裡沒有它的 export 表`);
+  }
+}
+
 export async function syncGcpBilling(orgId: string, now: Date = new Date()): Promise<CloudSyncResult> {
-  const db = getDb();
   const today = taipeiToday(now);
-  const currentMonth = firstOfMonth(today);
   const r = emptyResult("gcp");
 
   await withGcpClient(orgId, async (client, row) => {
@@ -539,94 +672,16 @@ export async function syncGcpBilling(orgId: string, now: Date = new Date()): Pro
       r.scopeEmpty = true;
       return;
     }
-
+    const run: GcpRun = { db: getDb(), orgId, client, r, today, currentMonth: firstOfMonth(today), lookups: 0 };
     const missingIds: string[] = [];
-    const synced: { id: string; accountRowId: number; from: string }[] = [];
-    let lookups = 0;
+    const synced: GcpSyncedAccount[] = [];
     for (const id of scope.billingAccountIds) {
-      const acc = discovered.find((d) => d.id === id) ?? (await client.getBillingAccount(id));
-      if (!acc) {
-        missingIds.push(id);
-        continue;
-      }
-      const meta: Record<string, unknown> = {
-        masterBillingAccount: acc.masterBillingAccount,
-        currency: acc.currencyCode,
-        reseller: Boolean(acc.masterBillingAccount),
-      };
-      const acct = await upsertSyncedAccount(db, orgId, "gcp", acc.id, acc.displayName, acc.open ? "active" : "closed", meta);
-      r.accounts.synced++;
-      if (acct.created) r.accounts.created++;
-
-      const projects = await soft(r.warnings, `${acc.displayName} 專案`, () => client.listProjects(acc.id));
-      if (projects) {
-        const items: ResourceInput[] = [];
-        for (const p of projects) {
-          let info = null;
-          if (lookups < MAX_PROJECT_LOOKUPS) {
-            lookups++;
-            info = await soft(r.warnings, `專案 ${p.projectId}`, () => client.getProject(p.projectId));
-          }
-          const lifecycle = info?.lifecycleState ?? null;
-          items.push({
-            kind: "gcp_project",
-            externalId: p.projectId,
-            name: info?.name ?? null,
-            labels: { ...(info?.labels ?? {}), ...(p.billingEnabled ? {} : { billingEnabled: "false" }) },
-            status: lifecycle && lifecycle !== "ACTIVE" ? "missing" : "active",
-          });
-        }
-        const res = await upsertResources(db, orgId, acct.id, items);
-        r.resources.synced += res.synced;
-        r.resources.created += res.created;
-        r.resources.missing += res.missing;
-      }
-      synced.push({ id: acc.id, accountRowId: acct.id, from: syncWindowStart(acct.lastInvoiceDate, today) });
+      const a = await syncGcpAccount(run, discovered, id);
+      if (a) synced.push(a);
+      else missingIds.push(id);
     }
-    r.accounts.missing += await markAccountsMissing(db, orgId, "gcp", missingIds);
-
-    // 費用（選填）：每個勾選的帳號找自己的 export 表
-    const bq = scope.bigQueryExport;
-    if (bq && synced.length > 0) {
-      const tables = await soft(r.warnings, `BigQuery ${bq.projectId}.${bq.dataset}`, () =>
-        client.listTables(bq.projectId, bq.dataset),
-      );
-      const tableOf = matchExportTables(tables ?? [], synced.map((x) => x.id));
-      for (const a of synced) {
-        const table = tableOf.get(a.id);
-        if (!table) {
-          if (tables) r.warnings.push(`${a.id}：${bq.dataset} 裡沒有它的 export 表`);
-          continue;
-        }
-        const rows = await soft(r.warnings, `${a.id} 費用`, () =>
-          client.queryCosts(bq.projectId, bq.dataset, table, a.id, yyyymm(firstOfMonth(a.from))),
-        );
-        if (!rows) continue;
-        r.costLines += await upsertCostLines(
-          db,
-          orgId,
-          a.accountRowId,
-          "gcp_bigquery",
-          rows.map((c) => ({
-            month: c.month,
-            resourceExternalId: c.projectId,
-            resourceName: c.projectName,
-            service: c.service,
-            amount: c.amount,
-            currency: c.currency,
-          })),
-        );
-        const up = await upsertInvoices(
-          db,
-          orgId,
-          a.accountRowId,
-          "gcp_bigquery",
-          monthlyInvoicesFromCosts(a.id, rows, currentMonth).map(gcpInvoiceInput),
-        );
-        r.invoices.synced += up.synced;
-        r.invoices.created += up.created;
-      }
-    }
+    r.accounts.missing += await markAccountsMissing(run.db, orgId, "gcp", missingIds);
+    if (scope.bigQueryExport && synced.length > 0) await syncGcpCosts(run, scope.bigQueryExport, synced);
   });
 
   if (!r.scopeEmpty) r.reconcile = await reconcileVendorInvoices(orgId, { today });

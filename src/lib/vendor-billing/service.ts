@@ -39,6 +39,9 @@ type Db = ReturnType<typeof getDb>;
 
 const num = (v: string | number | null | undefined) => (v === null || v === undefined ? null : Number(v));
 
+/** `in ()` 不能是空的：空清單換成一個不存在的 id（0），查不到任何列。 */
+const nonEmptyIds = (ids: number[]) => (ids.length > 0 ? ids : [0]);
+
 // ---------------------------------------------------------------------------
 // 型別
 // ---------------------------------------------------------------------------
@@ -175,7 +178,7 @@ export async function listBillingAccounts(
         isNull(vendorBillingAccounts.deletedAt),
         filter.provider ? eq(vendorBillingAccounts.provider, filter.provider) : undefined,
         filter.status ? eq(vendorBillingAccounts.status, filter.status) : undefined,
-        filter.ids ? inArray(vendorBillingAccounts.id, filter.ids.length ? filter.ids : [0]) : undefined,
+        filter.ids ? inArray(vendorBillingAccounts.id, nonEmptyIds(filter.ids)) : undefined,
       ),
     )
     .orderBy(vendorBillingAccounts.provider, vendorBillingAccounts.displayName);
@@ -265,7 +268,7 @@ export async function listResources(orgId: string, billingAccountIds?: number[])
     .where(
       and(
         eq(vendorBillingResources.organizationId, orgId),
-        billingAccountIds ? inArray(vendorBillingResources.billingAccountId, billingAccountIds.length ? billingAccountIds : [0]) : undefined,
+        billingAccountIds ? inArray(vendorBillingResources.billingAccountId, nonEmptyIds(billingAccountIds)) : undefined,
       ),
     )
     .orderBy(vendorBillingResources.status, vendorBillingResources.name);
@@ -534,6 +537,52 @@ async function loadAccount(db: Db, orgId: string, id: number) {
   return row;
 }
 
+async function insertBillingAccount(db: Db, orgId: string, patch: BillingAccountPatch): Promise<number> {
+  const [row] = await db
+    .insert(vendorBillingAccounts)
+    .values({
+      organizationId: orgId,
+      provider: patch.provider as string,
+      externalId: patch.externalId ?? null,
+      displayName: patch.displayName as string,
+      partyId: patch.partyId ?? null,
+      paymentMethodId: patch.paymentMethodId ?? null,
+      ownerUserId: patch.ownerUserId ?? null,
+      ledgerMode: patch.ledgerMode ?? "match_only",
+      status: patch.status ?? "active",
+      source: "manual",
+      lastVerifiedAt: sql`now()`,
+      meta: patch.matchPartyIds ? { matchPartyIds: patch.matchPartyIds } : {},
+      note: patch.note ?? null,
+    })
+    .onConflictDoNothing()
+    .returning({ id: vendorBillingAccounts.id });
+  if (!row) throw new VendorBillingInputError("這個平台上的帳號 ID 已經登記過了");
+  return row.id;
+}
+
+const ACCOUNT_COLUMNS = [
+  "provider",
+  "externalId",
+  "displayName",
+  "partyId",
+  "paymentMethodId",
+  "ownerUserId",
+  "ledgerMode",
+  "status",
+  "note",
+] as const;
+
+/** 只放有傳的欄位；matchPartyIds 寫進 meta（jsonb 合併，不動 meta 的其他鍵）。 */
+function accountUpdateSet(patch: BillingAccountPatch): Record<string, unknown> {
+  const set: Record<string, unknown> = { updatedAt: sql`now()` };
+  for (const k of ACCOUNT_COLUMNS) if (patch[k] !== undefined) set[k] = patch[k];
+  if (patch.matchPartyIds !== undefined) {
+    set.meta = sql`${vendorBillingAccounts.meta} || ${JSON.stringify({ matchPartyIds: patch.matchPartyIds })}::jsonb`;
+  }
+  return set;
+}
+
 /** 新增或修改計費帳號，回傳 id。同步來的帳號只能改 party / 比對廠商 / 付款方式 / 負責人 / 入帳模式 / 備註。 */
 export async function upsertBillingAccount(orgId: string, patch: BillingAccountPatch): Promise<{ id: number; created: boolean }> {
   const db = getDb();
@@ -541,52 +590,16 @@ export async function upsertBillingAccount(orgId: string, patch: BillingAccountP
     ...billingAccountRefs(patch),
     party: [patch.partyId, ...(patch.matchPartyIds ?? [])],
   });
-
-  if (patch.id === null) {
-    const [row] = await db
-      .insert(vendorBillingAccounts)
-      .values({
-        organizationId: orgId,
-        provider: patch.provider as string,
-        externalId: patch.externalId ?? null,
-        displayName: patch.displayName as string,
-        partyId: patch.partyId ?? null,
-        paymentMethodId: patch.paymentMethodId ?? null,
-        ownerUserId: patch.ownerUserId ?? null,
-        ledgerMode: patch.ledgerMode ?? "match_only",
-        status: patch.status ?? "active",
-        source: "manual",
-        lastVerifiedAt: sql`now()`,
-        meta: patch.matchPartyIds ? { matchPartyIds: patch.matchPartyIds } : {},
-        note: patch.note ?? null,
-      })
-      .onConflictDoNothing()
-      .returning({ id: vendorBillingAccounts.id });
-    if (!row) throw new VendorBillingInputError("這個平台上的帳號 ID 已經登記過了");
-    return { id: row.id, created: true };
-  }
+  if (patch.id === null) return { id: await insertBillingAccount(db, orgId, patch), created: true };
 
   const current = await loadAccount(db, orgId, patch.id);
   if (current.source === "synced") {
     const bad = forbiddenSyncedFields(patch, SYNCED_ACCOUNT_EDITABLE);
     if (bad.length) throw new VendorBillingInputError(`同步來的帳號不能修改：${bad.join(", ")}（由平台同步決定）`);
   }
-  const set: Partial<typeof vendorBillingAccounts.$inferInsert> = { updatedAt: sql`now()` as unknown as string };
-  if (patch.provider !== undefined) set.provider = patch.provider;
-  if (patch.externalId !== undefined) set.externalId = patch.externalId;
-  if (patch.displayName !== undefined) set.displayName = patch.displayName;
-  if (patch.partyId !== undefined) set.partyId = patch.partyId;
-  if (patch.paymentMethodId !== undefined) set.paymentMethodId = patch.paymentMethodId;
-  if (patch.ownerUserId !== undefined) set.ownerUserId = patch.ownerUserId;
-  if (patch.ledgerMode !== undefined) set.ledgerMode = patch.ledgerMode;
-  if (patch.status !== undefined) set.status = patch.status;
-  if (patch.note !== undefined) set.note = patch.note;
-  if (patch.matchPartyIds !== undefined) {
-    set.meta = sql`${vendorBillingAccounts.meta} || ${JSON.stringify({ matchPartyIds: patch.matchPartyIds })}::jsonb` as unknown as Record<string, unknown>;
-  }
   await db
     .update(vendorBillingAccounts)
-    .set(set)
+    .set(accountUpdateSet(patch))
     .where(and(eq(vendorBillingAccounts.id, patch.id), eq(vendorBillingAccounts.organizationId, orgId)));
   return { id: patch.id, created: false };
 }
@@ -759,7 +772,7 @@ export async function resolveVendorInvoice(
       }
       const partyId = account.partyId ?? matchPartiesOf(account)[0];
       if (!partyId) throw new VendorBillingInputError("請先幫這個計費帳號設定交易對象，才能建立交易");
-      if (!(Number(inv.amount) > 0)) throw new VendorBillingInputError("金額為 0 或負數的帳單不建立交易");
+      if (Number(inv.amount) <= 0) throw new VendorBillingInputError("金額為 0 或負數的帳單不建立交易");
       const r = await createLedgerTransactionForInvoice(
         db,
         orgId,

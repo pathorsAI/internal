@@ -100,7 +100,7 @@ export function inWindow(invoiceDate: string, txnDate: string, days = MATCH_WIND
 
 /** 交易金額 / 發票金額 是否在可接受的比例內（含手續費）。 */
 export function ratioOk(invoiceAmount: number, txnAmount: number): boolean {
-  if (!(invoiceAmount > 0) || !(txnAmount > 0)) return false;
+  if (Number.isNaN(invoiceAmount) || Number.isNaN(txnAmount) || invoiceAmount <= 0 || txnAmount <= 0) return false;
   const r = txnAmount / invoiceAmount;
   // 浮點誤差：邊界值不要因為 1e-12 掉出去
   return r >= RATIO_MIN - 1e-9 && r <= RATIO_MAX + 1e-9;
@@ -223,7 +223,7 @@ function groupFits(ctx: Ctx): { proposals: GroupFit[]; suggestions: GroupFit[] }
   const proposals: GroupFit[] = [];
   const suggestions: GroupFit[] = [];
   for (const t of ctx.txns) {
-    if (ctx.used.has(t.id) || t.partyId === null || !(t.amount > 0)) continue;
+    if (ctx.used.has(t.id) || t.partyId === null || t.amount <= 0) continue;
     const pool = groupPool(ctx, t);
     if (pool.length < 2) continue;
     const fits = findSubsets(pool, t.amount);
@@ -256,20 +256,45 @@ function groupRound(ctx: Ctx): boolean {
   return changed;
 }
 
-/**
- * 跑一次對帳，回傳「狀態有變的」發票。只會產生 unmatched / suggested / matched；
- * 定案狀態（matched / manual / created / ignored）的發票不會出現在結果裡。
- */
-export function reconcileInvoices(invoices: readonly MatchInvoice[], txns: readonly MatchTransaction[]): MatchUpdate[] {
+type Decision = Omit<MatchUpdate, "invoiceId">;
+
+const UNMATCHED: Decision = { matchStatus: "unmatched", matchedTransactionId: null, suggestedTransactionId: null, reason: "none" };
+
+function suggested(txnId: number, reason: MatchReason): Decision {
+  return { matchStatus: "suggested", matchedTransactionId: null, suggestedTransactionId: txnId, reason };
+}
+
+/** 沒配到的發票給建議：同幣別比例內（取最接近的）→ 合併組合的建議 → 不同幣別且視窗內只有一筆。 */
+function suggestionFor(ctx: Ctx, inv: MatchInvoice, groupSuggestion: Map<number, number>): Decision {
+  const same = singleCandidates(ctx, inv);
+  if (same.length > 0) return suggested(best(inv.amount, same).id, "ambiguous");
+  const group = groupSuggestion.get(inv.id);
+  if (group !== undefined) return suggested(group, "ambiguous");
+  const inWin = ctx.txns.filter(
+    (t) => !ctx.used.has(t.id) && t.partyId !== null && inv.partyIds.includes(t.partyId) && inWindow(inv.invoiceDate, t.txnDate),
+  );
+  if (inWin.length === 1 && !sameCurrency(inWin[0].currency, inv.currency)) return suggested(inWin[0].id, "currency");
+  return UNMATCHED;
+}
+
+function unchanged(inv: MatchInvoice, d: Decision): boolean {
+  return (
+    d.matchStatus === inv.matchStatus &&
+    d.matchedTransactionId === inv.matchedTransactionId &&
+    d.suggestedTransactionId === inv.suggestedTransactionId
+  );
+}
+
+function buildContext(invoices: readonly MatchInvoice[], txns: readonly MatchTransaction[]): Ctx {
+  // 已經綁給別的發票組合的交易不能再用
   const used = new Set<number>();
   for (const inv of invoices) {
     if (FINAL.has(inv.matchStatus) && inv.matchedTransactionId !== null) used.add(inv.matchedTransactionId);
   }
-  const ctx: Ctx = {
+  const isOpenStatus = (i: MatchInvoice) => i.matchStatus === "unmatched" || i.matchStatus === "suggested";
+  return {
     open: invoices
-      .filter(
-        (i) => (i.matchStatus === "unmatched" || i.matchStatus === "suggested") && i.partyIds.length > 0 && i.amount > 0,
-      )
+      .filter((i) => isOpenStatus(i) && i.partyIds.length > 0 && i.amount > 0)
       .sort((a, b) => a.invoiceDate.localeCompare(b.invoiceDate) || a.id - b.id),
     txns: txns
       .filter((t) => t.partyId !== null && t.amount > 0)
@@ -277,51 +302,39 @@ export function reconcileInvoices(invoices: readonly MatchInvoice[], txns: reado
     used,
     matched: new Map(),
   };
+}
 
+/** 單張（先完全相等、再比例內）與合併交替跑到沒有新配對為止。 */
+function runToFixpoint(ctx: Ctx): void {
   for (let guard = 0; guard < 100; guard++) {
     let changed = false;
     while (singleRound(ctx, true)) changed = true;
     while (singleRound(ctx, false)) changed = true;
     if (groupRound(ctx)) changed = true;
-    if (!changed) break;
+    if (!changed) return;
   }
+}
 
-  // 建議：同幣別比例內（取最接近的）→ 合併組合的建議 → 不同幣別且視窗內只有一筆
+/**
+ * 跑一次對帳，回傳「狀態有變的」發票。只會產生 unmatched / suggested / matched；
+ * 定案狀態（matched / manual / created / ignored）的發票不會出現在結果裡。
+ */
+export function reconcileInvoices(invoices: readonly MatchInvoice[], txns: readonly MatchTransaction[]): MatchUpdate[] {
+  const ctx = buildContext(invoices, txns);
+  runToFixpoint(ctx);
+
   const groupSuggestion = new Map<number, number>();
-  for (const s of groupFits(ctx).suggestions) {
-    for (const id of s.ids) if (!groupSuggestion.has(id)) groupSuggestion.set(id, s.txn.id);
+  for (const sug of groupFits(ctx).suggestions) {
+    for (const id of sug.ids) if (!groupSuggestion.has(id)) groupSuggestion.set(id, sug.txn.id);
   }
 
   const updates: MatchUpdate[] = [];
   for (const inv of ctx.open) {
-    let next: Omit<MatchUpdate, "invoiceId">;
     const m = ctx.matched.get(inv.id);
-    if (m) {
-      next = { matchStatus: "matched", matchedTransactionId: m.txn, suggestedTransactionId: null, reason: m.reason };
-    } else {
-      const same = singleCandidates(ctx, inv);
-      const window = ctx.txns.filter(
-        (t) =>
-          !ctx.used.has(t.id) && t.partyId !== null && inv.partyIds.includes(t.partyId) && inWindow(inv.invoiceDate, t.txnDate),
-      );
-      if (same.length > 0) {
-        next = { matchStatus: "suggested", matchedTransactionId: null, suggestedTransactionId: best(inv.amount, same).id, reason: "ambiguous" };
-      } else if (groupSuggestion.has(inv.id)) {
-        next = { matchStatus: "suggested", matchedTransactionId: null, suggestedTransactionId: groupSuggestion.get(inv.id) ?? null, reason: "ambiguous" };
-      } else if (window.length === 1 && !sameCurrency(window[0].currency, inv.currency)) {
-        next = { matchStatus: "suggested", matchedTransactionId: null, suggestedTransactionId: window[0].id, reason: "currency" };
-      } else {
-        next = { matchStatus: "unmatched", matchedTransactionId: null, suggestedTransactionId: null, reason: "none" };
-      }
-    }
-    if (
-      next.matchStatus === inv.matchStatus &&
-      next.matchedTransactionId === inv.matchedTransactionId &&
-      next.suggestedTransactionId === inv.suggestedTransactionId
-    ) {
-      continue;
-    }
-    updates.push({ invoiceId: inv.id, ...next });
+    const d: Decision = m
+      ? { matchStatus: "matched", matchedTransactionId: m.txn, suggestedTransactionId: null, reason: m.reason }
+      : suggestionFor(ctx, inv, groupSuggestion);
+    if (!unchanged(inv, d)) updates.push({ invoiceId: inv.id, ...d });
   }
   return updates;
 }

@@ -1,5 +1,5 @@
 import type { GcpDiscoveredAccount } from "@/lib/vendor-billing/scope";
-import { OidcConfigError, signOrgAssertion, signRs256Jwt } from "@/lib/oidc";
+import { OidcConfigError, pemBody, signOrgAssertion, signRs256Jwt } from "@/lib/oidc";
 import {
   clearTokenCache,
   loadTokenCache,
@@ -101,7 +101,8 @@ export class GcpAuthError extends GcpApiError {
     /** 存進 last_error 給成員看的版本（不含任何金鑰）。 */
     readonly reauthMessage = "Google 拒絕了 GCP 的憑證",
   ) {
-    super(401, `Google 拒絕了 GCP 的憑證${detail ? `（${detail}）` : ""}，請 owner / admin 到 設定 › 整合 重新連接 GCP`);
+    const why = detail ? "（" + detail + "）" : "";
+    super(401, `Google 拒絕了 GCP 的憑證${why}，請 owner / admin 到 設定 › 整合 重新連接 GCP`);
     this.name = "GcpAuthError";
   }
 }
@@ -167,12 +168,7 @@ export function parseServiceAccountJson(raw: string | undefined): ServiceAccount
 
 /** PEM（`-----BEGIN PRIVATE KEY-----`）→ PKCS#8 DER bytes。JSON 裡的 `\n` 已被 JSON.parse 還原。 */
 export function pemToDer(pem: string): ArrayBuffer {
-  const b64 = pem
-    .replace(/-----BEGIN [A-Z ]+-----/g, "")
-    .replace(/-----END [A-Z ]+-----/g, "")
-    .replaceAll("\\n", "")
-    .replace(/\s+/g, "");
-  const bin = atob(b64);
+  const bin = atob(pemBody(pem));
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out.buffer;
@@ -266,6 +262,69 @@ async function postForm(url: string, body: URLSearchParams, fetchImpl: typeof fe
   }
 }
 
+/** 簽本組織的 assertion；平台沒設簽章金鑰是伺服器設定問題（500），不是憑證錯。 */
+async function orgAssertion(orgId: string): Promise<string> {
+  try {
+    return await signOrgAssertion(orgId);
+  } catch (e) {
+    if (e instanceof OidcConfigError) throw new GcpApiError(500, e.message);
+    throw e;
+  }
+}
+
+/** STS token exchange：本組織的 JWT → federated access token。 */
+async function stsExchange(audience: string, assertion: string, fetchImpl: typeof fetch): Promise<string> {
+  const res = await postForm(
+    `https://${STS_HOST}/v1/token`,
+    new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
+      audience,
+      scope: "https://www.googleapis.com/auth/cloud-platform",
+      requested_token_type: "urn:ietf:params:oauth:token-type:access_token",
+      subject_token_type: "urn:ietf:params:oauth:token-type:jwt",
+      subject_token: assertion,
+    }),
+    fetchImpl,
+  );
+  if (!res.ok) {
+    const detail = await errorDetail(res);
+    if ([400, 401, 403].includes(res.status)) {
+      throw new GcpAuthError(`STS：${detail}`, `GCP workload identity 換 token 失敗（${detail}）`);
+    }
+    throw new GcpApiError(res.status, `GCP STS 回應 ${res.status}：${detail}`);
+  }
+  const token = ((await res.json()) as { access_token?: string }).access_token;
+  if (!token) throw new GcpApiError(res.status, "GCP STS 沒有回傳 access token");
+  return token;
+}
+
+/** 用 federated token impersonate SA。403 = 這個組織的 subject 沒被授權。 */
+async function impersonate(serviceAccountEmail: string, federated: string, fetchImpl: typeof fetch): Promise<TokenCache> {
+  const url = `https://${IAM_CREDENTIALS_HOST}/v1/projects/-/serviceAccounts/${serviceAccountEmail}:generateAccessToken`;
+  assertGcpReadOnly("POST", url);
+  let res: Response;
+  try {
+    res = await fetchImpl(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${federated}`, "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ scope: GCP_SCOPES.split(" "), lifetime: "3600s" }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch (e) {
+    throw new GcpApiError(0, `無法連線到 Google IAM：${e instanceof Error ? e.message : String(e)}`);
+  }
+  if (res.status === 403) throw new GcpBindingMissingError(serviceAccountEmail);
+  if (!res.ok) {
+    const detail = await errorDetail(res);
+    if (res.status === 401) throw new GcpAuthError(`impersonation：${detail}`);
+    throw new GcpApiError(res.status, `Google IAM 回應 ${res.status}：${detail}`);
+  }
+  const j = (await res.json()) as { accessToken?: string; expireTime?: string };
+  if (!j.accessToken) throw new GcpApiError(res.status, "Google IAM 沒有回傳 access token");
+  const exp = new Date(j.expireTime ?? Date.now() + 3600_000);
+  return { value: j.accessToken, expiresAt: Number.isNaN(exp.getTime()) ? new Date(Date.now() + 3600_000) : exp };
+}
+
 /**
  * Workload identity：簽本組織的 JWT → STS 換 federated token → impersonate SA。
  * orgId 一定來自 server 端 org context（同步的 orgId、設定頁 action 的 requireOrg）。
@@ -277,59 +336,8 @@ async function fetchWifToken(
 ): Promise<TokenCache> {
   const wif = wifSettings(config);
   if ("error" in wif) throw new GcpAuthError(wif.error);
-  let assertion: string;
-  try {
-    assertion = await signOrgAssertion(orgId);
-  } catch (e) {
-    if (e instanceof OidcConfigError) throw new GcpApiError(500, e.message);
-    throw e;
-  }
-  const stsUrl = `https://${STS_HOST}/v1/token`;
-  const sts = await postForm(
-    stsUrl,
-    new URLSearchParams({
-      grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
-      audience: wif.audience,
-      scope: "https://www.googleapis.com/auth/cloud-platform",
-      requested_token_type: "urn:ietf:params:oauth:token-type:access_token",
-      subject_token_type: "urn:ietf:params:oauth:token-type:jwt",
-      subject_token: assertion,
-    }),
-    fetchImpl,
-  );
-  if (!sts.ok) {
-    const detail = await errorDetail(sts);
-    if (sts.status === 400 || sts.status === 401 || sts.status === 403) {
-      throw new GcpAuthError(`STS：${detail}`, `GCP workload identity 換 token 失敗（${detail}）`);
-    }
-    throw new GcpApiError(sts.status, `GCP STS 回應 ${sts.status}：${detail}`);
-  }
-  const federated = ((await sts.json()) as { access_token?: string }).access_token;
-  if (!federated) throw new GcpApiError(sts.status, "GCP STS 沒有回傳 access token");
-
-  const iamUrl = `https://${IAM_CREDENTIALS_HOST}/v1/projects/-/serviceAccounts/${wif.serviceAccountEmail}:generateAccessToken`;
-  assertGcpReadOnly("POST", iamUrl);
-  let res: Response;
-  try {
-    res = await fetchImpl(iamUrl, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${federated}`, "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ scope: GCP_SCOPES.split(" "), lifetime: "3600s" }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-  } catch (e) {
-    throw new GcpApiError(0, `無法連線到 Google IAM：${e instanceof Error ? e.message : String(e)}`);
-  }
-  if (res.status === 403) throw new GcpBindingMissingError(wif.serviceAccountEmail);
-  if (!res.ok) {
-    const detail = await errorDetail(res);
-    if (res.status === 401) throw new GcpAuthError(`impersonation：${detail}`);
-    throw new GcpApiError(res.status, `Google IAM 回應 ${res.status}：${detail}`);
-  }
-  const j = (await res.json()) as { accessToken?: string; expireTime?: string };
-  if (!j.accessToken) throw new GcpApiError(res.status, "Google IAM 沒有回傳 access token");
-  const exp = j.expireTime ? new Date(j.expireTime) : new Date(Date.now() + 3600_000);
-  return { value: j.accessToken, expiresAt: Number.isNaN(exp.getTime()) ? new Date(Date.now() + 3600_000) : exp };
+  const federated = await stsExchange(wif.audience, await orgAssertion(orgId), fetchImpl);
+  return impersonate(wif.serviceAccountEmail, federated, fetchImpl);
 }
 
 /**
@@ -406,6 +414,12 @@ export function parseProject(json: unknown): GcpProjectInfo {
   return { name: s(j.name), labels, lifecycleState: s(j.lifecycleState) };
 }
 
+function cellText(v: unknown): string | null {
+  if (typeof v === "string") return v;
+  if (v === null || v === undefined) return null;
+  return typeof v === "number" || typeof v === "boolean" ? String(v) : JSON.stringify(v);
+}
+
 /** BigQuery `{schema:{fields}, rows:[{f:[{v}]}]}` → 每列一個 { 欄位名: 字串值 }。 */
 export function parseBigQueryRows(json: unknown): Record<string, string | null>[] {
   const j = obj(json);
@@ -414,8 +428,7 @@ export function parseBigQueryRows(json: unknown): Record<string, string | null>[
     const cells = list(r.f);
     const row: Record<string, string | null> = {};
     fields.forEach((name, i) => {
-      const v = cells[i]?.v;
-      row[name] = typeof v === "string" ? v : v == null ? null : String(v);
+      row[name] = cellText(cells[i]?.v);
     });
     return row;
   });

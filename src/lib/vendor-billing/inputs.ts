@@ -67,44 +67,78 @@ export type PaymentMethodPatch = {
   note?: string | null;
 };
 
+function requiredText(label: string, max: number, missing: string) {
+  return (v: unknown): string => {
+    const t = text(v, label, max);
+    if (!t) throw new VendorBillingInputError(missing);
+    return t;
+  };
+}
+
+/** 末四碼：空 → null；剛好 4 位數字才收；更長的數字視為有人貼了完整卡號，拒絕且不截斷。 */
+function parseLast4(v: unknown): string | null {
+  const s = v === null || v === undefined ? "" : String(v).replaceAll(/[\s•*-]/g, "");
+  if (s === "") return null;
+  if (/^\d{4}$/.test(s)) return s;
+  if (/^\d{5,}$/.test(s)) throw new VendorBillingInputError("只能存卡號末四碼，請勿輸入完整卡號");
+  throw new VendorBillingInputError("末四碼必須是 4 位數字");
+}
+
+function optNumber(v: unknown): number | null {
+  return v === null || v === undefined || v === "" ? null : Number(v);
+}
+
+function parseExpiryMonth(v: unknown): number | null {
+  const m = optNumber(v);
+  if (m !== null && (!Number.isInteger(m) || m < 1 || m > 12)) throw new VendorBillingInputError("到期月份必須是 1～12");
+  return m;
+}
+
+/** 兩位數年份當 20xx。 */
+function parseExpiryYear(v: unknown): number | null {
+  let y = optNumber(v);
+  if (y !== null && y >= 0 && y < 100) y += 2000;
+  if (y !== null && (!Number.isInteger(y) || y < 2000 || y > 2100)) throw new VendorBillingInputError("到期年份不對");
+  return y;
+}
+
+function parseBool(label: string) {
+  return (v: unknown): boolean => {
+    if (typeof v !== "boolean") throw new VendorBillingInputError(`${label} 必須是 true / false`);
+    return v;
+  };
+}
+
+type FieldParsers = Record<string, (v: unknown) => unknown>;
+
+/** 只處理有傳的欄位（PATCH 語意：沒傳 = 不動）。 */
+function applyFields(raw: Record<string, unknown>, parsers: FieldParsers): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, parse] of Object.entries(parsers)) {
+    if (has(raw, key)) out[key] = parse(raw[key]);
+  }
+  return out;
+}
+
+const PAYMENT_METHOD_FIELDS: FieldParsers = {
+  kind: (v) => oneOf(v, PAYMENT_METHOD_KINDS, "種類"),
+  label: requiredText("名稱", 120, "請填寫付款方式名稱"),
+  brand: (v) => text(v, "卡別", 60),
+  last4: parseLast4,
+  expiryMonth: parseExpiryMonth,
+  expiryYear: parseExpiryYear,
+  holderName: (v) => text(v, "持卡人", 120),
+  settlesFromAccountId: (v) => id(v, "扣款帳戶"),
+  isActive: parseBool("isActive"),
+  note: (v) => text(v, "備註", 2000),
+};
+
 /**
  * 只存卡別、末四碼、到期、持卡人 —— 末四碼欄位收到更長的數字（有人貼了完整卡號）直接拒絕，
  * 不截斷、不存。沒傳的欄位不動（PATCH 語意）；新增時 kind 與 label 必填。
  */
 export function normalizePaymentMethodInput(raw: Record<string, unknown>): PaymentMethodPatch {
-  const out: PaymentMethodPatch = { id: id(raw.id, "付款方式") };
-  if (has(raw, "kind")) out.kind = oneOf(raw.kind, PAYMENT_METHOD_KINDS, "種類");
-  if (has(raw, "label")) {
-    const l = text(raw.label, "名稱", 120);
-    if (!l) throw new VendorBillingInputError("請填寫付款方式名稱");
-    out.label = l;
-  }
-  if (has(raw, "brand")) out.brand = text(raw.brand, "卡別", 60);
-  if (has(raw, "last4")) {
-    const v = raw.last4 === null || raw.last4 === undefined ? "" : String(raw.last4).replace(/[\s•*-]/g, "");
-    if (v === "") out.last4 = null;
-    else if (/^\d{4}$/.test(v)) out.last4 = v;
-    else if (/^\d{5,}$/.test(v)) throw new VendorBillingInputError("只能存卡號末四碼，請勿輸入完整卡號");
-    else throw new VendorBillingInputError("末四碼必須是 4 位數字");
-  }
-  if (has(raw, "expiryMonth")) {
-    const m = raw.expiryMonth === null || raw.expiryMonth === "" || raw.expiryMonth === undefined ? null : Number(raw.expiryMonth);
-    if (m !== null && (!Number.isInteger(m) || m < 1 || m > 12)) throw new VendorBillingInputError("到期月份必須是 1～12");
-    out.expiryMonth = m;
-  }
-  if (has(raw, "expiryYear")) {
-    let y = raw.expiryYear === null || raw.expiryYear === "" || raw.expiryYear === undefined ? null : Number(raw.expiryYear);
-    if (y !== null && y >= 0 && y < 100) y += 2000;
-    if (y !== null && (!Number.isInteger(y) || y < 2000 || y > 2100)) throw new VendorBillingInputError("到期年份不對");
-    out.expiryYear = y;
-  }
-  if (has(raw, "holderName")) out.holderName = text(raw.holderName, "持卡人", 120);
-  if (has(raw, "settlesFromAccountId")) out.settlesFromAccountId = id(raw.settlesFromAccountId, "扣款帳戶");
-  if (has(raw, "isActive")) {
-    if (typeof raw.isActive !== "boolean") throw new VendorBillingInputError("isActive 必須是 true / false");
-    out.isActive = raw.isActive;
-  }
-  if (has(raw, "note")) out.note = text(raw.note, "備註", 2000);
+  const out = { id: id(raw.id, "付款方式"), ...applyFields(raw, PAYMENT_METHOD_FIELDS) } as PaymentMethodPatch;
   if (out.id === null && (!out.kind || !out.label)) {
     throw new VendorBillingInputError("新增付款方式要填種類與名稱");
   }
@@ -132,26 +166,27 @@ export type BillingAccountPatch = {
   note?: string | null;
 };
 
+function parseIdList(v: unknown): number[] {
+  if (!Array.isArray(v)) throw new VendorBillingInputError("matchPartyIds 必須是陣列");
+  const ids = v.map((x) => id(x, "比對廠商")).filter((x): x is number => x !== null);
+  return [...new Set(ids)].slice(0, 20);
+}
+
+const BILLING_ACCOUNT_FIELDS: FieldParsers = {
+  provider: (v) => oneOf(v, VENDOR_PROVIDERS, "平台"),
+  externalId: (v) => text(v, "平台上的帳號 ID", 200),
+  displayName: requiredText("名稱", 200, "請填寫計費帳號名稱"),
+  partyId: (v) => id(v, "交易對象"),
+  matchPartyIds: parseIdList,
+  paymentMethodId: (v) => id(v, "付款方式"),
+  ownerUserId: (v) => text(v, "負責人", 100),
+  ledgerMode: (v) => oneOf(v, LEDGER_MODES, "入帳模式"),
+  status: (v) => oneOf(v, ACCOUNT_STATUSES, "狀態"),
+  note: (v) => text(v, "備註", 2000),
+};
+
 export function normalizeBillingAccountInput(raw: Record<string, unknown>): BillingAccountPatch {
-  const out: BillingAccountPatch = { id: id(raw.id, "計費帳號") };
-  if (has(raw, "provider")) out.provider = oneOf(raw.provider, VENDOR_PROVIDERS, "平台");
-  if (has(raw, "externalId")) out.externalId = text(raw.externalId, "平台上的帳號 ID", 200);
-  if (has(raw, "displayName")) {
-    const d = text(raw.displayName, "名稱", 200);
-    if (!d) throw new VendorBillingInputError("請填寫計費帳號名稱");
-    out.displayName = d;
-  }
-  if (has(raw, "partyId")) out.partyId = id(raw.partyId, "交易對象");
-  if (has(raw, "matchPartyIds")) {
-    if (!Array.isArray(raw.matchPartyIds)) throw new VendorBillingInputError("matchPartyIds 必須是陣列");
-    const ids = raw.matchPartyIds.map((x) => id(x, "比對廠商")).filter((x): x is number => x !== null);
-    out.matchPartyIds = [...new Set(ids)].slice(0, 20);
-  }
-  if (has(raw, "paymentMethodId")) out.paymentMethodId = id(raw.paymentMethodId, "付款方式");
-  if (has(raw, "ownerUserId")) out.ownerUserId = text(raw.ownerUserId, "負責人", 100);
-  if (has(raw, "ledgerMode")) out.ledgerMode = oneOf(raw.ledgerMode, LEDGER_MODES, "入帳模式");
-  if (has(raw, "status")) out.status = oneOf(raw.status, ACCOUNT_STATUSES, "狀態");
-  if (has(raw, "note")) out.note = text(raw.note, "備註", 2000);
+  const out = { id: id(raw.id, "計費帳號"), ...applyFields(raw, BILLING_ACCOUNT_FIELDS) } as BillingAccountPatch;
   if (out.id === null && (!out.provider || !out.displayName)) {
     throw new VendorBillingInputError("新增計費帳號要填平台與名稱");
   }

@@ -100,7 +100,8 @@ export class AzureApiError extends Error {
 /** 憑證被拒（tenant / client id / secret 錯、secret 過期）。 */
 export class AzureAuthError extends AzureApiError {
   constructor(detail?: string) {
-    super(401, `Azure 拒絕了 service principal 的憑證${detail ? `（${detail}）` : ""}，請 owner / admin 到 設定 › 整合 重新連接 Azure`);
+    const why = detail ? "（" + detail + "）" : "";
+    super(401, `Azure 拒絕了 service principal 的憑證${why}，請 owner / admin 到 設定 › 整合 重新連接 Azure`);
     this.name = "AzureAuthError";
   }
 }
@@ -383,37 +384,57 @@ export type AzureCostRow = {
  * SubscriptionName、ServiceName、Currency）。月份可能是 '2026-09-01T00:00:00' 或數字 20260901。
  * 實測會有一列 SubscriptionName、ServiceName 都是空的負數（折扣 / 調整），照樣保留，名稱留空。
  */
+type CostColumns = { cost: number; month: number; subId: number; subName: number; service: number; currency: number };
+
+function costColumns(columns: unknown): CostColumns {
+  const cols = list(columns).map((c) => (s(c.name) ?? "").toLowerCase());
+  const idx = (...names: string[]) => cols.findIndex((c) => names.includes(c));
+  return {
+    cost: idx("cost", "pretaxcost", "costusd"),
+    month: idx("billingmonth", "usagedate"),
+    subId: idx("subscriptionid"),
+    subName: idx("subscriptionname"),
+    service: idx("servicename"),
+    currency: idx("currency", "billingcurrency"),
+  };
+}
+
+/** 欄位不存在（index -1）就當空值。 */
+function cell(row: unknown[], i: number): string | null {
+  return i >= 0 ? s(row[i]) : null;
+}
+
+/** '2026-09-01T00:00:00' 或 20260901 → '2026-09-01'；認不得回 null。 */
+function costMonth(raw: string | null): string | null {
+  const digits = (raw ?? "").replaceAll("-", "");
+  return /^\d{6}/.test(digits) ? `${digits.slice(0, 4)}-${digits.slice(4, 6)}-01` : null;
+}
+
+function costRow(r: unknown[], c: CostColumns): AzureCostRow | null {
+  const amount = n(r[c.cost]);
+  const month = costMonth(s(r[c.month]));
+  if (amount === null || !month) return null;
+  return {
+    month,
+    subscriptionId: cell(r, c.subId)?.toLowerCase() ?? "",
+    subscriptionName: cell(r, c.subName) ?? "",
+    service: cell(r, c.service) ?? "",
+    amount,
+    currency: cell(r, c.currency)?.toUpperCase() ?? "USD",
+  };
+}
+
 export function parseCostQuery(json: unknown): { rows: AzureCostRow[]; nextLink: string | null } {
   const p = obj(obj(json).properties);
-  const cols = list(p.columns).map((c) => (s(c.name) ?? "").toLowerCase());
-  const idx = (...names: string[]) => cols.findIndex((c) => names.includes(c));
-  const iCost = idx("cost", "pretaxcost", "costusd");
-  const iMonth = idx("billingmonth", "usagedate");
-  const iSub = idx("subscriptionid");
-  const iSubName = idx("subscriptionname");
-  const iSvc = idx("servicename");
-  const iCur = idx("currency", "billingcurrency");
-  const rows: AzureCostRow[] = [];
-  if (iCost >= 0 && iMonth >= 0) {
-    for (const r of Array.isArray(p.rows) ? (p.rows as unknown[][]) : []) {
-      if (!Array.isArray(r)) continue;
-      const amount = n(r[iCost]);
-      const rawMonth = s(r[iMonth]);
-      if (amount === null || !rawMonth) continue;
-      const digits = rawMonth.replaceAll("-", "");
-      if (!/^\d{6}/.test(digits)) continue;
-      const month = `${digits.slice(0, 4)}-${digits.slice(4, 6)}-01`;
-      const currency = (iCur >= 0 ? s(r[iCur]) : null)?.toUpperCase() ?? "USD";
-      rows.push({
-        month,
-        subscriptionId: (iSub >= 0 ? s(r[iSub]) : null)?.toLowerCase() ?? "",
-        subscriptionName: (iSubName >= 0 ? s(r[iSubName]) : null) ?? "",
-        service: (iSvc >= 0 ? s(r[iSvc]) : null) ?? "",
-        amount,
-        currency,
-      });
-    }
-  }
+  const c = costColumns(p.columns);
+  const raw = Array.isArray(p.rows) ? (p.rows as unknown[]) : [];
+  const rows =
+    c.cost >= 0 && c.month >= 0
+      ? raw.flatMap((r) => {
+          const row = Array.isArray(r) ? costRow(r, c) : null;
+          return row ? [row] : [];
+        })
+      : [];
   return { rows, nextLink: s(p.nextLink) };
 }
 
@@ -439,54 +460,76 @@ function billingUrl(path: string, apiVersion = AZURE_BILLING_API, query: Record<
   return u;
 }
 
+type AzureHttp = { getToken: () => Promise<string>; fetchImpl: typeof fetch };
+
+/** 非 2xx → 對應的錯誤（401 = 憑證、403 = 沒角色、429 = 太頻繁）。 */
+async function azureHttpError(res: Response): Promise<AzureApiError> {
+  const detail = await errorDetail(res);
+  if (res.status === 401) return new AzureAuthError(detail);
+  if (res.status === 403) {
+    return new AzureApiError(403, `Azure 拒絕存取（403）：service principal 沒有這個計費範圍的讀取角色。${detail}`);
+  }
+  if (res.status === 429) return new AzureApiError(429, `Azure 請求太頻繁（429），稍後再試：${detail}`);
+  return new AzureApiError(res.status, `Azure 回應 ${res.status}：${detail}`);
+}
+
+/** 唯一發請求的地方：先過白名單，再帶 token 送出。 */
+async function azureCall(http: AzureHttp, method: "GET" | "POST", url: URL, body?: unknown): Promise<unknown> {
+  assertAzureReadOnly(method, url);
+  const token = await http.getToken();
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}`, Accept: "application/json" };
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  let res: Response;
+  try {
+    res = await http.fetchImpl(url, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch (e) {
+    throw new AzureApiError(0, `無法連線到 Azure：${e instanceof Error ? e.message : String(e)}`);
+  }
+  if (!res.ok) throw await azureHttpError(res);
+  return res.json();
+}
+
+/** GET 一路跟著 nextLink 走完（nextLink 也要過白名單）。 */
+async function azureGetAll(http: AzureHttp, url: URL): Promise<Json[]> {
+  const out: Json[] = [];
+  let next: URL | null = url;
+  for (let page = 0; next && page < MAX_PAGES; page++) {
+    const json = obj(await azureCall(http, "GET", next));
+    out.push(...list(json.value));
+    const link = s(json.nextLink);
+    next = link ? new URL(link) : null;
+  }
+  return out;
+}
+
+function costQueryBody(from: string, to: string) {
+  return {
+    type: "ActualCost",
+    timeframe: "Custom",
+    timePeriod: { from: `${from}T00:00:00Z`, to: `${to}T23:59:59Z` },
+    dataset: {
+      granularity: "Monthly",
+      aggregation: { totalCost: { name: "Cost", function: "Sum" } },
+      grouping: [
+        { type: "Dimension", name: "SubscriptionName" },
+        { type: "Dimension", name: "ServiceName" },
+      ],
+    },
+  };
+}
+
 /**
  * 建立 client。getToken 由呼叫端提供（快取 / 換新）；fetchImpl 可注入（測試用）。
  * 401 → 丟 AzureAuthError（呼叫端決定要不要換 token 重試）。
  */
 export function makeAzureClient(getToken: () => Promise<string>, fetchImpl: typeof fetch = fetch): AzureClient {
-  async function call(method: "GET" | "POST", url: URL, body?: unknown): Promise<unknown> {
-    assertAzureReadOnly(method, url);
-    const token = await getToken();
-    let res: Response;
-    try {
-      res = await fetchImpl(url, {
-        method,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/json",
-          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-        },
-        body: body === undefined ? undefined : JSON.stringify(body),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      });
-    } catch (e) {
-      throw new AzureApiError(0, `無法連線到 Azure：${e instanceof Error ? e.message : String(e)}`);
-    }
-    if (res.status === 401) throw new AzureAuthError(await errorDetail(res));
-    if (!res.ok) {
-      const detail = await errorDetail(res);
-      if (res.status === 403) {
-        throw new AzureApiError(403, `Azure 拒絕存取（403）：service principal 沒有這個計費範圍的讀取角色。${detail}`);
-      }
-      if (res.status === 429) throw new AzureApiError(429, `Azure 請求太頻繁（429），稍後再試：${detail}`);
-      throw new AzureApiError(res.status, `Azure 回應 ${res.status}：${detail}`);
-    }
-    return res.json();
-  }
-
-  /** GET 一路跟著 nextLink 走完（nextLink 也要過白名單）。 */
-  async function getAll(url: URL): Promise<Json[]> {
-    const out: Json[] = [];
-    let next: URL | null = url;
-    for (let page = 0; next && page < MAX_PAGES; page++) {
-      const json = obj(await call("GET", next));
-      out.push(...list(json.value));
-      const link = s(json.nextLink);
-      next = link ? new URL(link) : null;
-    }
-    return out;
-  }
-
+  const http: AzureHttp = { getToken, fetchImpl };
+  const getAll = (url: URL) => azureGetAll(http, url);
   return {
     async listBillingAccounts() {
       return parseBillingAccounts({ value: await getAll(billingUrl("")) });
@@ -512,26 +555,14 @@ export function makeAzureClient(getToken: () => Promise<string>, fetchImpl: type
       return parseInvoices({ value: await getAll(url) });
     },
     async queryCosts(ba, bp, from, to) {
-      const body = {
-        type: "ActualCost",
-        timeframe: "Custom",
-        timePeriod: { from: `${from}T00:00:00Z`, to: `${to}T23:59:59Z` },
-        dataset: {
-          granularity: "Monthly",
-          aggregation: { totalCost: { name: "Cost", function: "Sum" } },
-          grouping: [
-            { type: "Dimension", name: "SubscriptionName" },
-            { type: "Dimension", name: "ServiceName" },
-          ],
-        },
-      };
+      const body = costQueryBody(from, to);
       const rows: AzureCostRow[] = [];
       let url: URL | null = billingUrl(
         `/${seg(ba)}/billingProfiles/${seg(bp)}/providers/Microsoft.CostManagement/query`,
         AZURE_COST_API,
       );
       for (let page = 0; url && page < MAX_PAGES; page++) {
-        const parsed = parseCostQuery(await call("POST", url, body));
+        const parsed = parseCostQuery(await azureCall(http, "POST", url, body));
         rows.push(...parsed.rows);
         url = parsed.nextLink ? new URL(parsed.nextLink) : null;
       }

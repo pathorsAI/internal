@@ -127,18 +127,9 @@ function dayOf(iso: string | null): string | null {
   }).format(d);
 }
 
-export function computeAttention(input: {
-  today: string;
-  paymentMethods: readonly AttentionPaymentMethod[];
-  accounts: readonly AttentionAccount[];
-  resources: readonly AttentionResource[];
-  invoices: readonly AttentionInvoice[];
-}): AttentionItem[] {
-  const { today } = input;
+function cardItems(today: string, pms: readonly AttentionPaymentMethod[]): AttentionItem[] {
   const out: AttentionItem[] = [];
-  const accountName = new Map(input.accounts.map((a) => [a.id, a.displayName]));
-
-  for (const pm of input.paymentMethods) {
+  for (const pm of pms) {
     if (!pm.isActive || !isCardKind(pm.kind)) continue;
     const exp = cardExpiry(pm.expiryMonth, pm.expiryYear, today);
     if (!exp || exp.state === "ok") continue;
@@ -149,62 +140,77 @@ export function computeAttention(input: {
       daysLeft: exp.daysLeft,
     });
   }
+  return out;
+}
 
-  for (const a of input.accounts) {
-    if (a.status === "active" && a.paymentMethodId === null) {
-      out.push({ kind: "no_payment_method", billingAccountId: a.id, label: a.displayName });
-    }
-    if (a.status === "active" && a.source === "manual") {
-      const verified = dayOf(a.lastVerifiedAt);
-      const days = verified ? daysBetween(verified, today) : null;
-      if (days === null || days > VERIFY_STALE_DAYS) {
-        out.push({ kind: "stale_verification", billingAccountId: a.id, label: a.displayName, days });
-      }
-    }
-    if (a.status === "missing" && a.source === "synced") {
-      const changed = dayOf(a.updatedAt);
-      if (changed && daysBetween(changed, today) <= MISSING_RECENT_DAYS) {
-        out.push({ kind: "account_missing", billingAccountId: a.id, label: a.displayName });
-      }
+/** 狀態最近（MISSING_RECENT_DAYS 內）才變的。 */
+function changedRecently(updatedAt: string, today: string): boolean {
+  const changed = dayOf(updatedAt);
+  return changed !== null && daysBetween(changed, today) <= MISSING_RECENT_DAYS;
+}
+
+function accountItems(today: string, a: AttentionAccount): AttentionItem[] {
+  const out: AttentionItem[] = [];
+  if (a.status === "active" && a.paymentMethodId === null) {
+    out.push({ kind: "no_payment_method", billingAccountId: a.id, label: a.displayName });
+  }
+  if (a.status === "active" && a.source === "manual") {
+    const verified = dayOf(a.lastVerifiedAt);
+    const days = verified ? daysBetween(verified, today) : null;
+    if (days === null || days > VERIFY_STALE_DAYS) {
+      out.push({ kind: "stale_verification", billingAccountId: a.id, label: a.displayName, days });
     }
   }
-
-  for (const r of input.resources) {
-    if (r.status !== "missing") continue;
-    const changed = dayOf(r.updatedAt);
-    if (changed && daysBetween(changed, today) <= MISSING_RECENT_DAYS) {
-      out.push({
-        kind: "resource_missing",
-        resourceId: r.id,
-        billingAccountId: r.billingAccountId,
-        label: `${accountName.get(r.billingAccountId) ?? ""} · ${r.name ?? r.externalId}`,
-      });
-    }
-  }
-
-  for (const inv of input.invoices) {
-    if (isProviderOverdue(inv, today)) {
-      out.push({
-        kind: "invoice_overdue",
-        invoiceId: inv.id,
-        billingAccountId: inv.billingAccountId,
-        label: `${accountName.get(inv.billingAccountId) ?? ""} · ${inv.externalRef}`,
-        amount: inv.amountDue && inv.amountDue > 0 ? inv.amountDue : inv.amount,
-        currency: inv.currency,
-      });
-    }
-    if (inv.matchStatus !== "unmatched" && inv.matchStatus !== "suggested") continue;
-    if (!(inv.amount > 0)) continue;
-    const days = daysBetween(inv.invoiceDate, today);
-    if (days > MATCH_WINDOW_DAYS) {
-      out.push({
-        kind: "invoice_unmatched",
-        invoiceId: inv.id,
-        billingAccountId: inv.billingAccountId,
-        label: `${accountName.get(inv.billingAccountId) ?? ""} · ${inv.externalRef}`,
-        days,
-      });
-    }
+  if (a.status === "missing" && a.source === "synced" && changedRecently(a.updatedAt, today)) {
+    out.push({ kind: "account_missing", billingAccountId: a.id, label: a.displayName });
   }
   return out;
+}
+
+function invoiceItems(today: string, inv: AttentionInvoice, accountName: string): AttentionItem[] {
+  const out: AttentionItem[] = [];
+  const label = `${accountName} · ${inv.externalRef}`;
+  if (isProviderOverdue(inv, today)) {
+    const due = inv.amountDue ?? 0;
+    out.push({
+      kind: "invoice_overdue",
+      invoiceId: inv.id,
+      billingAccountId: inv.billingAccountId,
+      label,
+      amount: due > 0 ? due : inv.amount,
+      currency: inv.currency,
+    });
+  }
+  const open = inv.matchStatus === "unmatched" || inv.matchStatus === "suggested";
+  const days = daysBetween(inv.invoiceDate, today);
+  if (open && inv.amount > 0 && days > MATCH_WINDOW_DAYS) {
+    out.push({ kind: "invoice_unmatched", invoiceId: inv.id, billingAccountId: inv.billingAccountId, label, days });
+  }
+  return out;
+}
+
+export function computeAttention(input: {
+  today: string;
+  paymentMethods: readonly AttentionPaymentMethod[];
+  accounts: readonly AttentionAccount[];
+  resources: readonly AttentionResource[];
+  invoices: readonly AttentionInvoice[];
+}): AttentionItem[] {
+  const { today } = input;
+  const accountName = new Map(input.accounts.map((a) => [a.id, a.displayName]));
+  const nameOf = (id: number) => accountName.get(id) ?? "";
+  const resources: AttentionItem[] = input.resources
+    .filter((r) => r.status === "missing" && changedRecently(r.updatedAt, today))
+    .map((r) => ({
+      kind: "resource_missing",
+      resourceId: r.id,
+      billingAccountId: r.billingAccountId,
+      label: `${nameOf(r.billingAccountId)} · ${r.name ?? r.externalId}`,
+    }));
+  return [
+    ...cardItems(today, input.paymentMethods),
+    ...input.accounts.flatMap((a) => accountItems(today, a)),
+    ...resources,
+    ...input.invoices.flatMap((inv) => invoiceItems(today, inv, nameOf(inv.billingAccountId))),
+  ];
 }

@@ -194,7 +194,7 @@ export async function reconcileNowAction(): Promise<VendorBillingActionState> {
     revalidatePath(PAGE);
     return {
       ok: true,
-      message: `自動綁定 ${r.matched}、建議 ${r.suggested}${r.created ? `、新建交易 ${r.created}` : ""}`,
+      message: [`自動綁定 ${r.matched}`, `建議 ${r.suggested}`, ...(r.created ? [`新建交易 ${r.created}`] : [])].join("、"),
     };
   } catch (e) {
     return { ok: false, error: errorMessage(e) };

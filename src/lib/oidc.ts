@@ -53,19 +53,33 @@ function b64ToBytes(b64: string): Uint8Array {
  *   - 只有 base64 本體（一行，Worker secret 的建議格式）
  * 傳統 RSA PEM（`BEGIN RSA PRIVATE KEY`，PKCS#1）不支援，要先轉成 PKCS#8。
  */
+/**
+ * PEM 或裸 base64 → base64 本體。`-----BEGIN …-----` / `-----END …-----` 用切 `-----` 的方式拿掉
+ * （偶數段是內容、奇數段是標頭），不用正規表示式，避免回溯；字面上的 `\n` 與空白一併去掉。
+ */
+export function pemBody(pem: string): string {
+  return pem
+    .split("-----")
+    .filter((_, i) => i % 2 === 0)
+    .join("")
+    .replaceAll(String.raw`\n`, "")
+    .replaceAll(/\s/g, "");
+}
+
 export function parsePkcs8(raw: string | undefined): ArrayBuffer {
   const v = (raw ?? "").trim();
   if (!v) throw new OidcConfigError("伺服器尚未設定 OIDC_SIGNING_KEY，無法用 workload identity 連接 GCP");
   if (v.includes("BEGIN RSA PRIVATE KEY")) {
     throw new OidcConfigError("OIDC_SIGNING_KEY 是 PKCS#1 格式；請轉成 PKCS#8（openssl pkcs8 -topk8 -nocrypt）");
   }
-  const body = v
-    .replace(/-----BEGIN [A-Z ]+-----/g, "")
-    .replace(/-----END [A-Z ]+-----/g, "")
-    .replaceAll("\\n", "")
-    .replace(/\s+/g, "");
-  if (!/^[A-Za-z0-9+/]+=*$/.test(body)) throw new OidcConfigError("OIDC_SIGNING_KEY 不是合法的 base64 / PEM");
-  const bytes = b64ToBytes(body);
+  const body = pemBody(v);
+  let bytes: Uint8Array;
+  try {
+    if (!/^[A-Za-z0-9+/=]+$/.test(body)) throw new Error("not base64");
+    bytes = b64ToBytes(body);
+  } catch {
+    throw new OidcConfigError("OIDC_SIGNING_KEY 不是合法的 base64 / PEM");
+  }
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
@@ -76,7 +90,8 @@ export function base64url(input: ArrayBuffer | Uint8Array | string): string {
   else bytes = new Uint8Array(input);
   let bin = "";
   for (const b of bytes) bin += String.fromCharCode(b);
-  return btoa(bin).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+  // padding 只會在結尾（最多兩個 =），直接拿掉所有 = 就好，不用正規表示式
+  return btoa(bin).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
 const RS256 = { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" } as const;
