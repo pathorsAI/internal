@@ -27,7 +27,7 @@
 //   - 視覺跟產品對齊：色票改成 globals.css 的產品主題（冷灰中性色 + 產品藍，深色是純黑），
 //     字體改用產品的 Open Sans／Geist Mono。legal-doc.tsx 的 token 是這組的子集，要一起改。
 //   - 文案改成「先講頭痛」：功能區塊的 badge 是以前的頭痛（.badge.pain，刻意壓低），
-//     h2 是現在的結果；hero 的 badge 維持品牌色。
+//     h2 是現在的結果。hero 不放 badge（開源與 GitHub 已經在導覽列和頁尾）。
 //   - 「其他」那格從 8 格變 12 格（多了固定扣款、雲端帳單、電子發票、Wise）。
 
 import { LOCALE_SWITCHER_CSS } from "./public-locale-switcher-css";
@@ -108,8 +108,8 @@ a{color:inherit}
 .tight{width:min(880px,100% - var(--pad)*2); margin-inline:auto}
 
 h1,h2,h3{font-family:var(--display); text-wrap:balance; margin:0; font-weight:600}
-h1{font-size:clamp(2rem,7.4vw,5.1rem); line-height:1.02; letter-spacing:-.04em; font-weight:700}
-h2{font-size:clamp(2rem,4.2vw,3.15rem); line-height:1.05; letter-spacing:-.033em}
+h1{font-size:clamp(2.2rem,5.2vw,3.8rem); line-height:1.08; letter-spacing:-.04em; font-weight:700}
+h2{font-size:clamp(1.8rem,3.4vw,2.6rem); line-height:1.05; letter-spacing:-.033em}
 h3{font-size:1.22rem; line-height:1.25; letter-spacing:-.02em}
 p{margin:0 0 1em}
 .lede{font-size:clamp(1.1rem,1.75vw,1.32rem); line-height:1.5; color:var(--ink-2); text-wrap:pretty}
@@ -175,6 +175,8 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
 .nav nav{margin-left:auto; display:flex; align-items:center; gap:1.6rem}
 .nav nav a{text-decoration:none; font-size:.93rem; font-weight:500; color:var(--ink-2); transition:color .16s}
 .nav nav a:hover{color:var(--ink)}
+.nav nav a.gh-icon{display:inline-flex; padding:.2rem}
+.nav nav a.gh-icon svg{width:20px; height:20px; fill:currentColor}
 @media(max-width:760px){ .nav nav a.hide-s{display:none} .nav nav{gap:.9rem} }
 
 /* ---------- hero ---------- */
@@ -439,7 +441,6 @@ export const LANDING_HTML = `<main id="top">
 <section class="hero">
   <div class="glow" aria-hidden="true"></div>
   <div class="tight">
-    <span class="badge"><span class="dot"></span>{{hero.badge}}</span>
     <h1>{{hero.titleA}} <br>{{hero.titleB}}</h1>
     <p class="lede">{{hero.lede}}</p>
     <div class="btns">

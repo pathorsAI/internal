@@ -36,12 +36,11 @@ const landing = {
   },
 
   hero: {
-    badge: { "zh-TW": "開源 · Apache 2.0", en: "Open source · Apache 2.0" },
     titleA: { "zh-TW": "你負責決定，", en: "You decide." },
     titleB: { "zh-TW": "AI 負責記帳。", en: "Your AI books it." },
     lede: {
-      "zh-TW": "一本總帳裝下所有帳戶 —— 台幣、美金、內帳、外帳。透過 MCP，你自己的 AI 讀得到也寫得進去；拿不準的帳，它會先問你再寫。",
-      en: "One ledger holds every account — TWD, USD, the internal books, the external books. Over MCP your own AI reads it and writes to it, and asks you before committing anything it is unsure about.",
+      "zh-TW": "一本總帳管所有帳戶。你的 AI 直接讀寫，拿不準的先問你。",
+      en: "One ledger for every account. Your AI reads and writes it, and asks when it\u2019s unsure.",
     },
     secondary: { "zh-TW": "看看怎麼運作", en: "See how it works" },
     trustSelfHost: { "zh-TW": "雲端直接用，或自己架", en: "Hosted, or run it yourself" },
