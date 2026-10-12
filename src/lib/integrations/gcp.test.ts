@@ -31,10 +31,10 @@ function decode(part: string) {
   return JSON.parse(atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4)));
 }
 
-function b64urlToBytes(part: string): Uint8Array {
+function b64urlToBytes(part: string): ArrayBuffer {
   const b64 = part.replaceAll("-", "+").replaceAll("_", "/");
   const bin = atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4));
-  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0)).buffer as ArrayBuffer;
 }
 
 describe("service account JWT (WebCrypto, no SDK)", () => {

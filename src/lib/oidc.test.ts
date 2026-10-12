@@ -53,7 +53,7 @@ describe("org assertion", () => {
     const jwk = await publicJwk(env);
     expect(Object.keys(jwk).sort()).toEqual(["alg", "e", "kid", "kty", "n", "use"]);
     const pub = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
-    const sig = Uint8Array.from(atob(s.replaceAll("-", "+").replaceAll("_", "/") + "==".slice(0, (4 - (s.length % 4)) % 4)), (x) => x.charCodeAt(0));
+    const sig = Uint8Array.from(atob(s.replaceAll("-", "+").replaceAll("_", "/") + "==".slice(0, (4 - (s.length % 4)) % 4)), (x) => x.charCodeAt(0)).buffer as ArrayBuffer;
     expect(await crypto.subtle.verify("RSASSA-PKCS1-v1_5", pub, sig, new TextEncoder().encode(`${h}.${c}`))).toBe(true);
   });
 
