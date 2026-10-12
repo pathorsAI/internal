@@ -168,7 +168,7 @@ export function RowDialog({
         {row}
         {deepLink}
         <Sheet open={open} onOpenChange={setOpen}>
-          <SheetContent className="data-[side=right]:sm:max-w-xl">
+          <SheetContent className="sm:max-w-xl">
             <SheetHeader className="shrink-0">
               <SheetTitle>{title}</SheetTitle>
               {description ? <SheetDescription>{description}</SheetDescription> : null}
