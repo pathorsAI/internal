@@ -39,8 +39,8 @@ const landing = {
     titleA: { "zh-TW": "你負責決定，", en: "You decide." },
     titleB: { "zh-TW": "AI 負責記帳。", en: "Your AI books it." },
     lede: {
-      "zh-TW": "一本總帳管所有帳戶。你的 AI 直接讀寫，拿不準的先問你。",
-      en: "One ledger for every account. Your AI reads and writes it, and asks when it\u2019s unsure.",
+      "zh-TW": "不用再自己 key 帳、對帳。AI 把帳記好，拿不準的才來問你。",
+      en: "No more keying in and reconciling by hand. Your AI keeps the books and only asks you when it\u2019s unsure.",
     },
     secondary: { "zh-TW": "看看怎麼運作", en: "See how it works" },
     trustSelfHost: { "zh-TW": "雲端直接用，或自己架", en: "Hosted, or run it yourself" },
