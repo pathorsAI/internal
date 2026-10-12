@@ -82,7 +82,7 @@ export function ArrearsDetailSheet({ employee }: Readonly<{ employee: ReconEmplo
           {t("button")}
         </Button>
       </SheetTrigger>
-      <SheetContent className="data-[side=right]:sm:max-w-xl">
+      <SheetContent className="sm:max-w-xl">
         <SheetHeader className="shrink-0">
           <SheetTitle>{t("title", { name: e.name })}</SheetTitle>
           <SheetDescription>{t("description")}</SheetDescription>
