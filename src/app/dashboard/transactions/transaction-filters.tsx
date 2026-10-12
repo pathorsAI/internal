@@ -53,6 +53,7 @@ export function TransactionFilters({
   };
   const categoryItems: Record<string, string> = {
     all: t("filters.category.all"),
+    none: t("filters.category.none"),
     ...Object.fromEntries(categories.map((c) => [String(c.id), c.name])),
   };
   const accountItems: Record<string, string> = {
@@ -61,6 +62,7 @@ export function TransactionFilters({
   };
   const partyItems: Record<string, string> = {
     all: t("filters.party.all"),
+    none: t("filters.party.none"),
     ...Object.fromEntries(parties.map((p) => [String(p.id), p.name])),
   };
   const monthItems: Record<string, string> = {

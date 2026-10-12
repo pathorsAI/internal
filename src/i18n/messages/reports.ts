@@ -90,6 +90,75 @@ const reports = {
     missing: { "zh-TW": "該開連紀錄都沒有", en: "Should issue, no record at all" },
     goReconcile: { "zh-TW": "去對帳", en: "Go to reconciliation" },
   },
+  nav: {
+    overview: { "zh-TW": "總覽", en: "Overview" },
+    spend: { "zh-TW": "支出分析", en: "Spend analysis" },
+  },
+  spendTrend: {
+    title: { "zh-TW": "支出分析", en: "Spend analysis" },
+    description: {
+      "zh-TW": "每個類別、每個廠商每個月花了多少，怎麼在變。金額一律以台幣計（外幣用入帳時的台幣金額）",
+      en: "How much each category and vendor costs per month, and how it changes. All amounts in TWD (foreign currency at its booked TWD amount)",
+    },
+    dimension: {
+      category: { "zh-TW": "依類別", en: "By category" },
+      party: { "zh-TW": "依廠商", en: "By vendor" },
+    },
+    period: {
+      "6": { "zh-TW": "最近 6 個月", en: "Last 6 months" },
+      "12": { "zh-TW": "最近 12 個月", en: "Last 12 months" },
+    },
+    twdNote: { "zh-TW": "台幣計價", en: "In TWD" },
+    other: { "zh-TW": "其他", en: "Other" },
+    uncategorized: { "zh-TW": "未分類", en: "Uncategorized" },
+    unassignedParty: { "zh-TW": "未指定對象", en: "No counterparty" },
+    otherMembers: {
+      "zh-TW": "共 {count} 項",
+      en: "{count, plural, one {# item} other {# items}}",
+    },
+    unconverted: {
+      "zh-TW": "另有 {count} 筆外幣支出沒有台幣金額，未計入",
+      en: "{count, plural, one {# foreign-currency expense has} other {# foreign-currency expenses have}} no TWD amount and {count, plural, one {is} other {are}} not included",
+    },
+    empty: { "zh-TW": "這段期間沒有支出", en: "No spending in this period" },
+    cards: {
+      thisMonth: { "zh-TW": "本月支出合計", en: "Spend this month" },
+      vsLastMonth: { "zh-TW": "較上月", en: "vs last month" },
+      lastMonthWas: { "zh-TW": "上月 {amount}", en: "Last month {amount}" },
+      noBase: { "zh-TW": "上月沒有支出", en: "No spend last month" },
+      topCategory: { "zh-TW": "本期最大類別", en: "Largest category" },
+      topParty: { "zh-TW": "本期最大廠商", en: "Largest vendor" },
+      shareOfPeriod: { "zh-TW": "占本期 {share}", en: "{share} of the period" },
+      newCategory: { "zh-TW": "近兩個月新出現的類別", en: "New categories (last 2 months)" },
+      newParty: { "zh-TW": "近兩個月新出現的廠商", en: "New vendors (last 2 months)" },
+      newHint: { "zh-TW": "第一筆支出在本月或上個月", en: "First expense this month or last month" },
+      partialMonth: { "zh-TW": "本月尚未結束", en: "Month in progress" },
+    },
+    stack: {
+      title: { "zh-TW": "每月支出（前 8 名 + 其他）", en: "Monthly spend (top 8 + other)" },
+      hint: { "zh-TW": "點圖例或下方表格的一列，看單一項目", en: "Click a legend item or a table row to focus on it" },
+      total: { "zh-TW": "合計", en: "Total" },
+    },
+    focus: {
+      periodTotal: { "zh-TW": "期間合計", en: "Period total" },
+      average: { "zh-TW": "月平均", en: "Monthly average" },
+      averageLine: { "zh-TW": "平均", en: "Avg" },
+      viewTransactions: { "zh-TW": "看交易", en: "View transactions" },
+      compositionCategory: { "zh-TW": "這個類別付給誰", en: "Who this category went to" },
+      compositionParty: { "zh-TW": "這家廠商花在哪些類別", en: "Categories for this vendor" },
+    },
+    table: {
+      title: { "zh-TW": "明細", en: "Detail" },
+      count: { "zh-TW": "{count} 項", en: "{count, plural, one {# item} other {# items}}" },
+      category: { "zh-TW": "類別", en: "Category" },
+      party: { "zh-TW": "廠商", en: "Vendor" },
+      trend: { "zh-TW": "走勢", en: "Trend" },
+      total: { "zh-TW": "期間合計", en: "Period total" },
+      change: { "zh-TW": "本月 vs 上月", en: "This vs last month" },
+      new: { "zh-TW": "新", en: "New" },
+      sortBy: { "zh-TW": "依{column}排序", en: "Sort by {column}" },
+    },
+  },
 } satisfies Dictionary;
 
 export default reports;

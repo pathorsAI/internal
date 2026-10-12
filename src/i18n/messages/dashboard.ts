@@ -63,6 +63,7 @@ const dashboard = {
     unassignedParty: { "zh-TW": "未指定對象", en: "No counterparty" },
     uncategorized: { "zh-TW": "未分類", en: "Uncategorized" },
     empty: { "zh-TW": "這段期間沒有支出", en: "No spending in this period" },
+    trendLink: { "zh-TW": "看各類別、各廠商月趨勢", en: "Monthly trend by category and vendor" },
     unconverted: {
       "zh-TW": "另有 {count} 筆外幣支出沒有台幣金額，未計入",
       en: "{count, plural, one {# foreign-currency expense has} other {# foreign-currency expenses have}} no TWD amount and {count, plural, one {is} other {are}} not included",

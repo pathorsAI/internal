@@ -28,6 +28,7 @@ import { todayStr } from "@/lib/mcp/shared";
 import { ReceivableAging } from "./receivable-aging";
 import { TaxPeriodCard } from "./tax-period-card";
 import { ContractCoverage } from "./contract-coverage";
+import { ReportsNav } from "./reports-nav";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +60,7 @@ export default async function ReportsPage() {
   return (
     <>
       <PageHeader title={t("title")} description={t("description")} />
+      <ReportsNav active="overview" />
 
       <div className="grid gap-6">
         <ReceivableAging rows={aging} />

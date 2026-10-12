@@ -195,6 +195,19 @@ integration (the Wise sync) carry `externalSource` / `externalRef` and
 those, and `update_transaction` clears the flag when it sets a category (or pass
 `needsReview: false` explicitly).
 
+**Spend analysis (支出分析)** — `monthly_spend_breakdown` (`dimension`:
+`category` | `vendor`, `months?` 1–24 default 12, `partyId?`, `categoryId?`).
+Read-only (annotated explicitly, since the name has no `list_`/`get_` verb).
+Returns TWD per item per month for the window ending with the current month in
+Asia/Taipei, using the same spend definition as the dashboard's 支出去向 and the
+報表 > 支出分析 page (`spendConditions` in `src/db/queries.ts`): `type =
+expense`, rows filed under transfer / equity / income categories excluded,
+foreign currency at its booked `amount_twd` (rows without one are counted in
+`unconvertedCount` only). Items include the 未分類 / no-counterparty bucket and
+carry month-over-month change and `isNew` (first expense ever falls in the
+window). The shaping is the same pure function the page uses
+(`src/lib/spend-trend.ts`).
+
 **Accounting master data** — parties: `list_parties`/`get_party`/`create_party`/
 `update_party`/`delete_party`/`merge_parties`; categories: `list_categories`/`create_category`/
 `update_category`/`delete_category`; bank accounts: `list_bank_accounts`/
