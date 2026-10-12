@@ -79,23 +79,23 @@ const landing = {
   problems: {
     heading: { "zh-TW": "這些狀況，你應該不陌生", en: "You already know how this goes wrong" },
     lede: {
-      "zh-TW": "每一家自己記帳的小公司，都會遇到這三件事。",
-      en: "Three things that happen to every small company that keeps its own books.",
+      "zh-TW": "以前這些都要等會計幫你做好。現在小團隊自己用 AI，就收得掉。",
+      en: "These used to wait for the accountant. A small team can now clear them with its own AI.",
     },
-    driftTitle: { "zh-TW": "兩份檔案對不起來了", en: "The two files stopped matching" },
+    driftTitle: { "zh-TW": "帳總是忘了記", en: "Entries never get made on time" },
     driftBody: {
-      "zh-TW": "有人在其中一邊改了數字，另一邊忘了改。等到三月才發現，早就想不起來哪一個才是對的。",
-      en: "Someone fixed a number in one place and not the other. You find out in March, when it is far too late to remember which one was right.",
+      "zh-TW": "錢進錢出的當下沒記，月底才翻對帳單一筆一筆補，補到一半已經不知道哪幾筆記過了。",
+      en: "Money moves and nobody writes it down. At month end you rebuild it from the bank statement, line by line, unsure which ones you already entered.",
     },
-    unbilledTitle: { "zh-TW": "請款單根本沒寄出去", en: "The invoice never went out" },
+    unbilledTitle: { "zh-TW": "合約走到哪一期，沒人說得清", en: "Nobody knows where each contract stands" },
     unbilledBody: {
-      "zh-TW": "東西五月就交付了，請款卻拖到八月，還是客戶先來問才想起來。中間那三個月沒有人在看。",
-      en: "The work shipped in May. The invoice went out in August, after the client asked about it. Nobody was watching the gap in between.",
+      "zh-TW": "哪個案子簽了、哪一期該請款、哪一期已經請了，散在信件和試算表裡，問一次就要翻半小時。",
+      en: "Which projects are signed, which stage is due, which one is already billed — it is scattered across email and spreadsheets, and every answer takes half an hour of digging.",
     },
-    unknownTitle: { "zh-TW": "沒人說得出來還有多少錢沒收", en: "Nobody can say what you are owed" },
+    unknownTitle: { "zh-TW": "收款日期對不起來", en: "Payment dates never line up" },
     unknownBody: {
-      "zh-TW": "除非打開四個檔案、一個一個篩選再手動加總 —— 而且每算一次答案都不太一樣。",
-      en: "Not without opening four files, filtering each one and adding it up by hand — and getting a slightly different answer every time.",
+      "zh-TW": "客戶說已經匯了，帳上卻找不到；哪筆款項對到哪張發票、哪一期，每次都要人工一筆一筆比。",
+      en: "The client says they paid and the books cannot find it. Matching each payment to its invoice and stage is done by hand, every time.",
     },
   },
 

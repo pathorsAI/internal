@@ -120,7 +120,7 @@ p{margin:0 0 1em}
 
 section{padding-block:clamp(4rem,8vw,7rem); position:relative}
 .sec-head{max-width:44ch; margin-bottom:clamp(2rem,4vw,3rem)}
-/* 44ch 是照英文字寬算的；中文大標字級大，9 個字就放不下，會在逗號前斷行。 */
+/* 44ch 是照英文字寬算的；中文大標字級大，9 個字就放不下，會在逗號前斷行（.finale h2 的 17ch 同理）。 */
 :lang(zh) .sec-head{max-width:min(100%,36rem)}
 .sec-head h2{margin-bottom:.7rem}
 .sec-head .lede{margin:0}
@@ -399,6 +399,7 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
   background:var(--finale); color:var(--brand-ink); position:relative; overflow:hidden;
 }
 .finale h2{color:var(--brand-ink); margin-bottom:.9rem; max-width:17ch; margin-inline:auto}
+:lang(zh) .finale h2{max-width:none}
 .finale p{color:var(--brand-ink); opacity:.82; max-width:44ch; margin:0 auto 2rem; font-size:1.08rem}
 .finale .btn.primary{background:var(--brand-ink); color:var(--finale)}
 .finale .btn.primary:hover{background:var(--brand-ink); opacity:.9}
