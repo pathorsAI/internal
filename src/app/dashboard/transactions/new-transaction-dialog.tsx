@@ -127,7 +127,7 @@ export function NewTransactionDialog({
           <Plus className="size-4" /> {t("form.addTransaction")}
         </Button>
       </SheetTrigger>
-      <SheetContent className="data-[side=right]:sm:max-w-xl">
+      <SheetContent className="sm:max-w-xl">
         {scenario === null ? (
           <ScenarioPicker onPick={pickScenario} />
         ) : (

@@ -77,7 +77,7 @@ export function WiseSyncButton() {
         <RefreshCw className="size-4" /> {t("sync.button")}
       </Button>
       <Sheet open={open} onOpenChange={(o) => !applying && setOpen(o)}>
-        <SheetContent className="data-[side=right]:sm:max-w-3xl">
+        <SheetContent className="sm:max-w-3xl">
           <SheetHeader className="shrink-0">
             <SheetTitle>{t("sync.title")}</SheetTitle>
             <SheetDescription>{t("sync.description")}</SheetDescription>

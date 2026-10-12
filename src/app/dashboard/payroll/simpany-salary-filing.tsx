@@ -684,7 +684,7 @@ export function SalaryFilingSheet({
           {settled ? t("payslips") : t("prepare")}
         </button>
       </SheetTrigger>
-      <SheetContent className="data-[side=right]:sm:max-w-2xl">
+      <SheetContent className="sm:max-w-2xl">
         <SheetHeader className="shrink-0">
           <SheetTitle>{title}</SheetTitle>
           <SheetDescription>{t("description")}</SheetDescription>

@@ -485,7 +485,7 @@ function ConnectSheet({
   return (
     <>
       <Sheet open={open} onOpenChange={requestClose}>
-        <SheetContent className="data-[side=right]:sm:max-w-md">
+        <SheetContent className="sm:max-w-md">
           <SheetHeader className="shrink-0">
             <SheetTitle className="flex items-center gap-2">
               <LogoTile letter={row.logo.letter} className={cn("size-7 text-sm", row.logo.className)} />

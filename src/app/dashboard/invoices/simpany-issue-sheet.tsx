@@ -241,7 +241,7 @@ export function SimpanyIssueSheet({
           <Receipt className="size-4" /> {t("trigger")}
         </Button>
       </SheetTrigger>
-      <SheetContent className="data-[side=right]:sm:max-w-lg">
+      <SheetContent className="sm:max-w-lg">
         <SheetHeader className="shrink-0">
           <SheetTitle>{t("title")}</SheetTitle>
           <SheetDescription>{t("description")}</SheetDescription>
