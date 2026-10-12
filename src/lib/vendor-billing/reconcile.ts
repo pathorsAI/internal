@@ -1,7 +1,7 @@
 import { and, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { paymentMethods, transactions, vendorBillingAccounts, vendorInvoices } from "@/db/schema";
-import { matchPartiesOf } from "./account-meta";
+import { matchPartiesOf, parseRejectedTransactionIds } from "./account-meta";
 import {
   addDays,
   GROUP_WINDOW_DAYS,
@@ -181,11 +181,13 @@ async function loadInvoices(db: Db, orgId: string, partiesOf: Map<number, number
       matchStatus: vendorInvoices.matchStatus,
       matchedTransactionId: vendorInvoices.matchedTransactionId,
       suggestedTransactionId: vendorInvoices.suggestedTransactionId,
+      meta: vendorInvoices.meta,
     })
     .from(vendorInvoices)
     .where(and(eq(vendorInvoices.organizationId, orgId), inArray(vendorInvoices.billingAccountId, [...partiesOf.keys()])));
-  return rows.map((r) => ({
+  return rows.map(({ meta, ...r }) => ({
     ...r,
+    rejectedTransactionIds: parseRejectedTransactionIds(meta),
     amount: Number(r.amount),
     currency: r.currency.trim().toUpperCase(),
     matchStatus: r.matchStatus as MatchStatus,

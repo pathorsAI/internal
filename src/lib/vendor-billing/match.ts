@@ -20,6 +20,8 @@
 //   3. 1、2 交替跑到沒有新的配對為止（一筆綁走後，別的發票的候選可能變唯一）。
 //   4. 唯一結果 → matched（自動）；有可能但不唯一 → suggested；都沒有 → unmatched。
 // matched / manual / created / ignored 是定案狀態，這裡不會改；suggested 每次重算。
+// 人工解除過的綁定記在發票 meta.rejectedTransactionIds：那筆交易不會再被自動配給這張發票
+// （單張、合併、建議都一樣；合併時任何一張拒絕過就不能放進那筆交易的組合）。人工綁定不受限制。
 
 export const MATCH_WINDOW_DAYS = 45;
 export const GROUP_WINDOW_DAYS = 75;
@@ -56,7 +58,14 @@ export type MatchInvoice = {
   matchStatus: MatchStatus;
   matchedTransactionId: number | null;
   suggestedTransactionId: number | null;
+  /** 人工解除過、不要再自動配給這張發票的交易。 */
+  rejectedTransactionIds?: readonly number[];
 };
+
+/** 這張發票拒絕過這筆交易。 */
+function rejects(inv: MatchInvoice, txnId: number): boolean {
+  return inv.rejectedTransactionIds?.includes(txnId) ?? false;
+}
 
 export type MatchTransaction = {
   id: number;
@@ -167,6 +176,7 @@ function singleCandidates(ctx: Ctx, inv: MatchInvoice): MatchTransaction[] {
   return ctx.txns.filter(
     (t) =>
       !ctx.used.has(t.id) &&
+      !rejects(inv, t.id) &&
       t.partyId !== null &&
       inv.partyIds.includes(t.partyId) &&
       inWindow(inv.invoiceDate, t.txnDate) &&
@@ -208,6 +218,7 @@ function groupPool(ctx: Ctx, t: MatchTransaction): MatchInvoice[] {
     .filter(
       (inv) =>
         isOpen(ctx, inv) &&
+        !rejects(inv, t.id) &&
         t.partyId !== null &&
         inv.partyIds.includes(t.partyId) &&
         inv.amount > 0 &&
@@ -271,7 +282,12 @@ function suggestionFor(ctx: Ctx, inv: MatchInvoice, groupSuggestion: Map<number,
   const group = groupSuggestion.get(inv.id);
   if (group !== undefined) return suggested(group, "ambiguous");
   const inWin = ctx.txns.filter(
-    (t) => !ctx.used.has(t.id) && t.partyId !== null && inv.partyIds.includes(t.partyId) && inWindow(inv.invoiceDate, t.txnDate),
+    (t) =>
+      !ctx.used.has(t.id) &&
+      !rejects(inv, t.id) &&
+      t.partyId !== null &&
+      inv.partyIds.includes(t.partyId) &&
+      inWindow(inv.invoiceDate, t.txnDate),
   );
   if (inWin.length === 1 && !sameCurrency(inWin[0].currency, inv.currency)) return suggested(inWin[0].id, "currency");
   return UNMATCHED;

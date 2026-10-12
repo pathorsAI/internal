@@ -248,3 +248,34 @@ describe("create_unmatched", () => {
     expect(out.map((i) => i.id)).toEqual([due.id]);
   });
 });
+
+describe("rejected transactions (unlink)", () => {
+  test("a rejected exact match is skipped; another candidate can still match automatically", () => {
+    const i = inv({ invoiceDate: "2026-09-05", amount: 1000, rejectedTransactionIds: [1] });
+    const u = reconcileInvoices(
+      [i],
+      [txn({ id: 1, txnDate: "2026-09-10", amount: 1000 }), txn({ id: 2, txnDate: "2026-09-12", amount: 1015 })],
+    );
+    expect(u[0]).toMatchObject({ matchStatus: "matched", matchedTransactionId: 2 });
+  });
+
+  test("a rejected transaction is not even suggested (currency mismatch case)", () => {
+    const i = inv({ invoiceDate: "2026-09-02", amount: 52.3, currency: "USD", partyIds: [GOOGLE], rejectedTransactionIds: [9] });
+    expect(reconcileInvoices([i], [txn({ id: 9, txnDate: "2026-09-10", amount: 1722, partyId: GOOGLE })])).toEqual([]);
+  });
+
+  test("group: if any invoice of the would-be group rejected the transaction, that group is not formed", () => {
+    const a = inv({ invoiceDate: "2026-03-09", amount: 4626, partyIds: [AZURE] });
+    const b = inv({ invoiceDate: "2026-04-09", amount: 4338, partyIds: [AZURE], rejectedTransactionIds: [101] });
+    const u = reconcileInvoices([a, b], [txn({ id: 101, txnDate: "2026-04-13", amount: 8964, partyId: AZURE })]);
+    expect(u.find((x) => x.matchStatus === "matched")).toBeUndefined();
+  });
+
+  test("other invoices are unaffected by someone else's rejection", () => {
+    const rejecter = inv({ invoiceDate: "2026-09-01", amount: 500, rejectedTransactionIds: [1] });
+    const other = inv({ invoiceDate: "2026-09-05", amount: 1000 });
+    const u = byInvoice(reconcileInvoices([rejecter, other], [txn({ id: 1, txnDate: "2026-09-10", amount: 1000 })]));
+    expect(u.get(other.id)).toMatchObject({ matchStatus: "matched", matchedTransactionId: 1 });
+    expect(u.has(rejecter.id)).toBe(false);
+  });
+});

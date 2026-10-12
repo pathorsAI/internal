@@ -272,6 +272,9 @@ Wise 是**唯讀**整合：只把 Wise 對帳單的交易匯入本組織的帳�
   分類空白、`needs_review`、`external_source` = azure / gcp、`external_ref` = 帳單號），用 0026 的唯一索引
   `ON CONFLICT DO NOTHING`；之前建過又被刪掉的不會長回來（帳單改標 ignored）。
 - 人工動作（頁面與 MCP `resolve_vendor_invoice`）：確認建議、綁到指定交易（同組織檢查）、解除、不對帳、立即建立。
+- 解除綁定會把那筆交易（與當時的建議）記進帳單 `meta.rejectedTransactionIds`：之後單張、合併、建議都不會再把它
+  自動配給這張帳單（合併時，組合裡任何一張拒絕過就不能湊進那筆交易）；別的候選照樣可以自動配。人工再綁回去可以，
+  綁上時就從清單拿掉。
 
 ### 多租戶
 
@@ -305,7 +308,11 @@ Wise 是**唯讀**整合：只把 Wise 對帳單的交易匯入本組織的帳�
 | POST | `…/billingProfiles/{bp}/providers/Microsoft.CostManagement/query` | ActualCost，Monthly，依 SubscriptionName × ServiceName（讀取，只是 API 設計成 POST） |
 
 nextLink 也要過白名單。付款卡以 payment method id upsert（同一張卡掛在多個 profile 只算一張；沒有才用 link
-name）；帳號的付款方式只在「沒設」或「原本就是同步來的」時改，不覆寫人工指定。期間：第一次同步抓 13 個月，
+name）。還沒有這個 Azure id 的卡時，先找同組織、未刪除、`kind = card`、`external_ref` 空的手動卡，卡別（不分大小寫）、
+末四碼、到期月 / 年都相同：剛好一張就**收編**（改成 source azure、填上 Azure id，名稱 / 扣款帳戶 / 備註保留人填的）；
+沒有就新建；多張就不新建、帳號也不綁，頁面提醒「多張卡資料相同，請合併」（記在帳號 `meta.paymentMethodConflict`，
+下次同步解開就清掉）。`src/lib/vendor-billing/card-dedupe.ts`。帳號的付款方式只在「沒設」或「原本就是同步來的」時改，
+不覆寫人工指定。期間：第一次同步抓 13 個月，
 之後從最後一張發票日 − 60 天；費用查詢每段最多 12 個月。SubscriptionName 空白的負數列（折扣 / 調整）
 歸到資源「(未分配)」。401 → 換新 token 重試一次 → `markNeedsReauth`；其他錯誤 → `recordSyncFailure`，
 單一步驟（例如費用 429）失敗只記在摘要的警告，其他步驟照跑。帳單平台狀態 OverDue（或發票日 30 天後仍有

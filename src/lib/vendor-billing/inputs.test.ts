@@ -36,3 +36,14 @@ describe("billing account input", () => {
     expect(forbiddenSyncedFields(patch, SYNCED_ACCOUNT_EDITABLE)).toEqual(["displayName"]);
   });
 });
+
+describe("rejected transaction list", () => {
+  test("unlink adds, manual link removes", async () => {
+    const { withRejected, parseRejectedTransactionIds } = await import("./account-meta");
+    expect(withRejected([], [7, null])).toEqual([7]);
+    expect(withRejected([7], [7, 8])).toEqual([7, 8]);
+    expect(withRejected([7, 8], [], 7)).toEqual([8]);
+    expect(parseRejectedTransactionIds({ rejectedTransactionIds: [3, "4", -1, "x", 3] })).toEqual([3, 4]);
+    expect(parseRejectedTransactionIds({})).toEqual([]);
+  });
+});
