@@ -94,6 +94,9 @@ export type SpendTrend = {
   unconverted: number;
 };
 
+/** 第一筆支出在最近幾個月內（含當月）才算「新」。 */
+export const NEW_ITEM_MONTHS = 2;
+
 // ---- 月份工具 ----
 
 /** 某個時間點在台北是哪個月（YYYY-MM）。Workers 跑在 UTC，月初 00:00–08:00 會差一個月。 */
@@ -166,7 +169,8 @@ function collectItems(
   dimension: TrendDimension,
 ): { items: TrendItem[]; unconverted: number } {
   const index = new Map(window.map((m, i) => [m, i]));
-  const periodStart = window[0] ?? "";
+  // 「新」= 第一筆支出落在最近 NEW_ITEM_MONTHS 個月（含當月），跟選的期間長短無關
+  const newSince = window.at(-NEW_ITEM_MONTHS) ?? window[0] ?? "";
   type Acc = Identity & { monthly: number[]; count: number };
   const acc = new Map<string, Acc>();
   let unconverted = 0;
@@ -200,7 +204,7 @@ function collectItems(
         prev,
         change: last - prev,
         changePct: changeRatio(last, prev),
-        isNew: a.kind !== "none" && a.firstMonth != null && a.firstMonth >= periodStart,
+        isNew: a.kind !== "none" && a.firstMonth != null && a.firstMonth >= newSince,
       };
     })
     .filter((it) => it.total > 0)

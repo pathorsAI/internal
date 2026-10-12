@@ -129,9 +129,9 @@ const reports = {
       topCategory: { "zh-TW": "本期最大類別", en: "Largest category" },
       topParty: { "zh-TW": "本期最大廠商", en: "Largest vendor" },
       shareOfPeriod: { "zh-TW": "占本期 {share}", en: "{share} of the period" },
-      newCategory: { "zh-TW": "本期新出現的類別", en: "New categories" },
-      newParty: { "zh-TW": "本期新出現的廠商", en: "New vendors" },
-      newHint: { "zh-TW": "第一筆支出在這段期間內", en: "First expense falls in this period" },
+      newCategory: { "zh-TW": "近兩個月新出現的類別", en: "New categories (last 2 months)" },
+      newParty: { "zh-TW": "近兩個月新出現的廠商", en: "New vendors (last 2 months)" },
+      newHint: { "zh-TW": "第一筆支出在本月或上個月", en: "First expense this month or last month" },
       partialMonth: { "zh-TW": "本月尚未結束", en: "Month in progress" },
     },
     stack: {

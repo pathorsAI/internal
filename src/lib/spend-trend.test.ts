@@ -128,15 +128,17 @@ describe("summarizeSpendTrend", () => {
     expect(t.summary.top?.id).toBe(1);
   });
 
-  test("new items are those whose first spend falls inside the period; 未分類 never counts", () => {
+  test("new items are those whose first spend is this month or last month; 未分類 never counts", () => {
     const rows = [
       vendor(1, "2026-10", 100, { partyFirstMonth: "2024-03" }),
-      vendor(2, "2026-10", 100, { partyFirstMonth: "2026-07" }),
+      vendor(2, "2026-10", 100, { partyFirstMonth: "2026-09" }),
+      vendor(4, "2026-10", 100, { partyFirstMonth: "2026-07" }),
       vendor(3, "2026-10", 100, { partyFirstMonth: "2026-03" }),
       row({ totalTwd: 50 }),
     ];
-    expect(summarizeSpendTrend(rows, MONTHS, 6, "party").summary.newItems).toBe(1); // 期間 2026-05 起
-    expect(summarizeSpendTrend(rows, MONTHS, 12, "party").summary.newItems).toBe(2); // 期間 2025-11 起
+    // 不論期間長短，只有 2026-09 起第一筆的才算新
+    expect(summarizeSpendTrend(rows, MONTHS, 6, "party").summary.newItems).toBe(1);
+    expect(summarizeSpendTrend(rows, MONTHS, 12, "party").summary.newItems).toBe(1);
     expect(summarizeSpendTrend(rows, MONTHS, 12, "category").summary.newItems).toBe(0);
   });
 

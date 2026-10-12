@@ -231,10 +231,8 @@ export async function getMonthlyTrends(
   monthsBack = 12,
 ): Promise<MonthlyTrends> {
   const db = getDb();
-  const now = new Date();
-  const months = Array.from({ length: monthsBack }, (_, i) =>
-    format(addMonths(now, i - (monthsBack - 1)), "yyyy-MM"),
-  );
+  // 月份以台北時間切（Workers 跑在 UTC，月初 00:00–08:00 會差一個月），與支出分析頁一致
+  const months = monthWindow(yearMonthIn(new Date()), monthsBack);
   const windowStart = `${months[0]}-01`;
   const txnMonth = sql<string>`to_char(${transactions.txnDate}, 'YYYY-MM')`;
 
@@ -386,10 +384,8 @@ export type SpendBreakdown = { months: string[]; rows: SpendRow[] };
 export async function getSpendBreakdown(orgId: string, monthsBack = 12): Promise<SpendBreakdown> {
   const db = getDb();
   // 月份視窗與 getMonthlyTrends 同一個算法（含當月，由舊到新）
-  const now = new Date();
-  const months = Array.from({ length: monthsBack }, (_, i) =>
-    format(addMonths(now, i - (monthsBack - 1)), "yyyy-MM"),
-  );
+  // 月份以台北時間切（Workers 跑在 UTC，月初 00:00–08:00 會差一個月），與支出分析頁一致
+  const months = monthWindow(yearMonthIn(new Date()), monthsBack);
   const windowStart = `${months[0]}-01`;
   const txnMonth = sql<string>`to_char(${transactions.txnDate}, 'YYYY-MM')`;
   const twd = spendTwdSql();
