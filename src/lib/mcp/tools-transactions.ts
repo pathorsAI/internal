@@ -6,7 +6,6 @@ import {
   contracts,
   documents,
   employees,
-  parties,
   payslips,
   projects,
   subscriptions,
@@ -40,6 +39,7 @@ import {
 import { resolvePayoutAccount } from "@/db/employee-accounts";
 import { PAYOUT_ACCOUNT_SCHEMA, payoutAccountOutput } from "./tools-employee-accounts";
 import { externalSingleLegSide } from "@/lib/external-transfer";
+import { resolveOrCreateParties, resolveOrCreateParty } from "@/lib/party-resolve";
 import {
   assertAccountCurrency,
   findMismatchInMap,
@@ -204,23 +204,9 @@ const ADVANCE_ROW = rowSchema({
 
 type Db = ReturnType<typeof getDb>;
 
-async function getOrCreateParty(
-  db: Db,
-  orgId: string,
-  name: string,
-  label: string,
-): Promise<number> {
-  const found = await db
-    .select({ id: parties.id })
-    .from(parties)
-    .where(and(eq(parties.organizationId, orgId), eq(parties.name, name)))
-    .limit(1);
-  if (found.length) return found[0].id;
-  const [created] = await db
-    .insert(parties)
-    .values({ organizationId: orgId, name, label })
-    .returning({ id: parties.id });
-  return created.id;
+/** 名稱 → 交易對象 id（比對名稱 / 別名，只看未刪除的；查無就新建）。 */
+async function getOrCreateParty(db: Db, orgId: string, name: string, label: string): Promise<number> {
+  return (await resolveOrCreateParty(db, orgId, name, label)).id;
 }
 
 async function getOrCreateEmployee(db: Db, orgId: string, name: string): Promise<number> {
@@ -235,34 +221,6 @@ async function getOrCreateEmployee(db: Db, orgId: string, name: string): Promise
     .values({ organizationId: orgId, name })
     .returning({ id: employees.id });
   return created.id;
-}
-
-// Resolve many party names to ids in two round trips (one select + one insert),
-// creating any that don't exist yet. Used by bulk_create_transactions to avoid
-// a getOrCreateParty round trip per row. `labelByName` carries the label to use
-// when a name has to be created (income → customer, expense/advance → vendor).
-async function resolvePartyNames(
-  db: Db,
-  orgId: string,
-  labelByName: Map<string, string>,
-): Promise<Map<string, number>> {
-  const map = new Map<string, number>();
-  const names = [...labelByName.keys()];
-  if (names.length === 0) return map;
-  const existing = await db
-    .select({ id: parties.id, name: parties.name })
-    .from(parties)
-    .where(and(eq(parties.organizationId, orgId), inArray(parties.name, names)));
-  for (const r of existing) map.set(r.name, r.id);
-  const missing = names.filter((n) => !map.has(n));
-  if (missing.length) {
-    const created = await db
-      .insert(parties)
-      .values(missing.map((name) => ({ organizationId: orgId, name, label: labelByName.get(name)! })))
-      .returning({ id: parties.id, name: parties.name });
-    for (const r of created) map.set(r.name, r.id);
-  }
-  return map;
 }
 
 async function resolveEmployeeNames(
@@ -913,7 +871,7 @@ export const transactionTools: Record<string, ToolDef> = {
         if (bad) throw new Error(`items[${i}]: ${accountCurrencyErrorMessage(bad)}`);
       });
 
-      const partyId = await resolvePartyNames(db, orgId, partyLabelByName);
+      const partyId = await resolveOrCreateParties(db, orgId, partyLabelByName);
       const employeeId = await resolveEmployeeNames(db, orgId, employeeNames);
 
       const values = norms.map((n) => ({

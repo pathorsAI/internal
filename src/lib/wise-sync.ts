@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull, max, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { bankAccounts, parties, transactions } from "@/db/schema";
+import { bankAccounts, transactions } from "@/db/schema";
+import { resolveOrCreateParties } from "@/lib/party-resolve";
 import { getIntegration, updateConfig } from "@/lib/integrations/store";
 import type { IntegrationConfig } from "@/lib/integrations/types";
 import {
@@ -657,30 +658,6 @@ async function existingRefs(db: Db, orgId: string, refs: string[]): Promise<Set<
   return out;
 }
 
-async function resolveParties(
-  db: Db,
-  orgId: string,
-  labelByName: Map<string, string>,
-): Promise<Map<string, number>> {
-  const map = new Map<string, number>();
-  const names = [...labelByName.keys()];
-  if (names.length === 0) return map;
-  const existing = await db
-    .select({ id: parties.id, name: parties.name })
-    .from(parties)
-    .where(and(eq(parties.organizationId, orgId), inArray(parties.name, names)));
-  for (const r of existing) if (!map.has(r.name)) map.set(r.name, r.id);
-  const missing = names.filter((n) => !map.has(n));
-  if (missing.length) {
-    const created = await db
-      .insert(parties)
-      .values(missing.map((name) => ({ organizationId: orgId, name, label: labelByName.get(name)! })))
-      .returning({ id: parties.id, name: parties.name });
-    for (const r of created) map.set(r.name, r.id);
-  }
-  return map;
-}
-
 async function fetchStatementRange(
   client: WiseClient,
   m: WiseAccountMapping,
@@ -892,7 +869,7 @@ async function insertPlanned(db: Db, orgId: string, toCreate: PlannedRow[]): Pro
       labelByName.set(p.partyName, p.type === "income" ? "customer" : "vendor");
     }
   }
-  const partyIds = await resolveParties(db, orgId, labelByName);
+  const partyIds = await resolveOrCreateParties(db, orgId, labelByName);
   const createdRefs = new Set<string>();
   for (let i = 0; i < toCreate.length; i += INSERT_CHUNK) {
     const chunk = toCreate.slice(i, i + INSERT_CHUNK);

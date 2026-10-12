@@ -188,6 +188,12 @@ one organization.
 and overview pages select these columns. Avatars live in the same `STORAGE` bucket under
 `orgs/<organizationId>/parties/<partyId>/`.
 
+**Migration 0033** (`migrations/0033_party_aliases.sql`) adds `parties.aliases`
+(`text[] NOT NULL DEFAULT '{}'`, additive). Run it **before** deploying that code: the
+parties page, `list_parties` / `get_party` and every name → party lookup (Wise sync,
+`create_transaction` / `bulk_create_transactions`, the forms' customer field, Simpany
+sync) select this column.
+
 **Migration**: `migrations/0028_activity_channel_system.sql` allows
 `activity_log.channel = 'system'` (the auto-sync's audit entries, no human actor).
 Deploying before running it is safe — those log inserts are silently dropped by

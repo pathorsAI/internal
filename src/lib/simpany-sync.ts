@@ -8,6 +8,7 @@ import {
   subscriptionPeriods,
   transactions,
 } from "@/db/schema";
+import { matchParty, type PartyCandidate } from "@/lib/party-aliases";
 import { listBillingBoard } from "@/db/queries";
 import {
   getSimpanyClient,
@@ -140,16 +141,19 @@ const existingColumns = {
   note: invoices.note,
 };
 
-type PartyLite = { id: number; name: string; taxId: string | null };
+type PartyLite = PartyCandidate & { taxId: string | null };
 
 async function loadParties(orgId: string): Promise<PartyLite[]> {
   return getDb()
-    .select({ id: parties.id, name: parties.name, taxId: parties.taxId })
+    .select({ id: parties.id, name: parties.name, aliases: parties.aliases, taxId: parties.taxId })
     .from(parties)
     .where(and(eq(parties.organizationId, orgId), isNull(parties.deletedAt)));
 }
 
-/** 先比統編，再比完全相同的名稱；各自只有唯一一筆才算數。 */
+/**
+ * 先比統編（唯一一筆才算數），再比名稱：名稱 / 別名 / 前綴別名，規則同 Wise 匯入
+ * （src/lib/party-aliases.ts matchParty）。
+ */
 export function matchPartyId(
   all: PartyLite[],
   vat: string | null,
@@ -160,12 +164,7 @@ export function matchPartyId(
     const byVat = all.filter((p) => p.taxId?.trim() === v);
     if (byVat.length === 1) return byVat[0].id;
   }
-  const n = name?.trim();
-  if (n) {
-    const byName = all.filter((p) => p.name.trim() === n);
-    if (byName.length === 1) return byName[0].id;
-  }
-  return null;
+  return name ? matchParty(all, name) : null;
 }
 
 export type UpsertOutcome = {
