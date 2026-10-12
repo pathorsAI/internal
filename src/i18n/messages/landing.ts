@@ -36,12 +36,11 @@ const landing = {
   },
 
   hero: {
-    badge: { "zh-TW": "開源 · Apache 2.0", en: "Open source · Apache 2.0" },
     titleA: { "zh-TW": "你負責決定，", en: "You decide." },
     titleB: { "zh-TW": "AI 負責記帳。", en: "Your AI books it." },
     lede: {
-      "zh-TW": "一本總帳裝下所有帳戶 —— 台幣、美金、內帳、外帳。透過 MCP，你自己的 AI 讀得到也寫得進去；拿不準的帳，它會先問你再寫。",
-      en: "One ledger holds every account — TWD, USD, the internal books, the external books. Over MCP your own AI reads it and writes to it, and asks you before committing anything it is unsure about.",
+      "zh-TW": "不用再自己 key 帳、對帳。AI 把帳記好，拿不準的才來問你。",
+      en: "No more keying in and reconciling by hand. Your AI keeps the books and only asks you when it\u2019s unsure.",
     },
     secondary: { "zh-TW": "看看怎麼運作", en: "See how it works" },
     trustSelfHost: { "zh-TW": "雲端直接用，或自己架", en: "Hosted, or run it yourself" },
@@ -77,31 +76,31 @@ const landing = {
   },
 
   problems: {
-    heading: { "zh-TW": "這些狀況你應該不陌生", en: "You already know how this goes wrong" },
+    heading: { "zh-TW": "這些狀況，你應該不陌生", en: "You already know how this goes wrong" },
     lede: {
-      "zh-TW": "每一家自己記帳的小公司，都會遇到這三件事。",
-      en: "Three things that happen to every small company that keeps its own books.",
+      "zh-TW": "以前這些都要等會計幫你做好。現在小團隊自己用 AI，就收得掉。",
+      en: "These used to wait for the accountant. A small team can now clear them with its own AI.",
     },
-    driftTitle: { "zh-TW": "兩份檔案對不起來了", en: "The two files stopped matching" },
+    driftTitle: { "zh-TW": "帳總是忘了記", en: "Entries never get made on time" },
     driftBody: {
-      "zh-TW": "有人在其中一邊改了數字，另一邊忘了改。等到三月才發現，早就想不起來哪一個才是對的。",
-      en: "Someone fixed a number in one place and not the other. You find out in March, when it is far too late to remember which one was right.",
+      "zh-TW": "錢進錢出的當下沒記，月底才翻對帳單一筆一筆補，補到一半已經不知道哪幾筆記過了。",
+      en: "Money moves and nobody writes it down. At month end you rebuild it from the bank statement, line by line, unsure which ones you already entered.",
     },
-    unbilledTitle: { "zh-TW": "請款單根本沒寄出去", en: "The invoice never went out" },
+    unbilledTitle: { "zh-TW": "合約走到哪一期，沒人說得清", en: "Nobody knows where each contract stands" },
     unbilledBody: {
-      "zh-TW": "東西五月就交付了，請款卻拖到八月，還是客戶先來問才想起來。中間那三個月沒有人在看。",
-      en: "The work shipped in May. The invoice went out in August, after the client asked about it. Nobody was watching the gap in between.",
+      "zh-TW": "哪個案子簽了、哪一期該請款、哪一期已經請了，散在信件和試算表裡，問一次就要翻半小時。",
+      en: "Which projects are signed, which stage is due, which one is already billed — it is scattered across email and spreadsheets, and every answer takes half an hour of digging.",
     },
-    unknownTitle: { "zh-TW": "沒人說得出來還有多少錢沒收", en: "Nobody can say what you are owed" },
+    unknownTitle: { "zh-TW": "收款日期對不起來", en: "Payment dates never line up" },
     unknownBody: {
-      "zh-TW": "除非打開四個檔案、一個一個篩選再手動加總 —— 而且每算一次答案都不太一樣。",
-      en: "Not without opening four files, filtering each one and adding it up by hand — and getting a slightly different answer every time.",
+      "zh-TW": "客戶說已經匯了，帳上卻找不到；哪筆款項對到哪張發票、哪一期，每次都要人工一筆一筆比。",
+      en: "The client says they paid and the books cannot find it. Matching each payment to its invoice and stage is done by hand, every time.",
     },
   },
 
   books: {
-    badge: { "zh-TW": "內外帳", en: "Dual books" },
-    heading: { "zh-TW": "標記一次，之後它自己歸位。", en: "Mark it once. It files itself." },
+    badge: { "zh-TW": "兩份 Excel 對不起來", en: "Two spreadsheets that never agree" },
+    heading: { "zh-TW": "內外帳記一次，兩邊自動對齊", en: "Enter it once. Both books agree." },
     lede: {
       "zh-TW": "每一筆交易都標明它屬於哪本帳：內帳、外帳，或兩本都算。兩邊看的是同一批資料，所以不可能各走各的。",
       en: "Every transaction says which books it belongs to — internal, external, or both. The two views read from the same rows, so they cannot drift apart.",
@@ -129,11 +128,11 @@ const landing = {
   },
 
   billing: {
-    badge: { "zh-TW": "請款看板", en: "Billing board" },
-    heading: { "zh-TW": "該收的錢，一頁看完", en: "One page for everything you are owed" },
+    badge: { "zh-TW": "做完了，卻忘了請款", en: "Work shipped, never billed" },
+    heading: { "zh-TW": "項目款項一鍵追蹤", en: "Every project\u2019s payments, tracked at a glance" },
     lede: {
-      "zh-TW": "誰該請款、誰已經請了、誰還沒付 —— 每一列都直接寫著下一步要做什麼。",
-      en: "Who should be billed, who has been billed, and who still has not paid — with the next thing to do sitting on every row.",
+      "zh-TW": "每個案子分幾期、哪一期該請、哪一期還沒收，一頁看完，每一列都寫著下一步。",
+      en: "How many stages each project has, which one is due, which is still unpaid — one page, with the next step on every row.",
     },
     shotLabel: { "zh-TW": "請款看板", en: "Billing board" },
     shotAlt: {
@@ -143,7 +142,7 @@ const landing = {
   },
 
   flow: {
-    heading: { "zh-TW": "不會有卡在中間沒人管的項目", en: "Nothing sits in limbo" },
+    heading: { "zh-TW": "狀態自己往前走，沒有項目會卡住", en: "Statuses move on their own. Nothing gets stuck." },
     lede: {
       "zh-TW": "日期到了、款項進來了，項目就自己往前走。狀態不用手動改，也就不會默默錯掉。",
       en: "An item moves forward on its own as dates pass and payments arrive. You never set a status by hand, so it is never quietly wrong.",
@@ -161,7 +160,7 @@ const landing = {
   },
 
   merge: {
-    heading: { "zh-TW": "兩種收錢方式，同一份清單", en: "Two kinds of money, one list" },
+    heading: { "zh-TW": "分期合約和月費訂閱，排在同一張清單", en: "Staged contracts and monthly subscriptions, one list" },
     lede: {
       "zh-TW": "合約簽一次、分期請款；訂閱則是每個月收一次，收到停約為止。但對星期二早上的你來說，它們就是同一件事，所以放在同一份清單裡。",
       en: "A contract is signed once and billed in stages. A subscription bills every month, forever. On a Tuesday morning they are the same job, so they share the same list.",
@@ -178,8 +177,8 @@ const landing = {
   },
 
   reminders: {
-    badge: { "zh-TW": "提醒", en: "Reminders" },
-    heading: { "zh-TW": "找得到你的提醒", en: "Nagging that reaches you" },
+    badge: { "zh-TW": "提醒放在系統裡，沒人會去看", en: "Reminders nobody opens" },
+    heading: { "zh-TW": "該請款、該催款，手機自己提醒你", en: "Your phone tells you when to bill and when to chase" },
     lede: {
       "zh-TW": "只在系統裡跳的提醒，要有人打開系統才有用。這裡的提醒會直接寫進 Google 日曆 —— 早上九點就跟你的會議一起出現在手機上。",
       en: "A reminder inside the app only works if someone opens the app. These go into a Google Calendar instead — so they turn up on your phone at nine in the morning, next to your meetings.",
@@ -201,18 +200,26 @@ const landing = {
   },
 
   reports: {
-    badge: { "zh-TW": "總覽與報表", en: "Overview & reports" },
-    heading: { "zh-TW": "錢在哪裡，誰又拖著沒付", en: "Where the money is, and who is late" },
+    badge: { "zh-TW": "每季重做一份試算表", en: "Rebuilding the spreadsheet every quarter" },
+    heading: { "zh-TW": "花費分布一看便知", en: "See where the money goes at a glance" },
     lede: {
-      "zh-TW": "這兩個你每天都在問的問題，兩頁就答完，不用每一季重做一份試算表。",
-      en: "Two questions you ask constantly, answered on two pages instead of in a spreadsheet you rebuild every quarter.",
+      "zh-TW": "錢花去哪些廠商、哪些分類，每月收支和帳戶餘額的走勢，打開就是最新的，不用再自己拉表。",
+      en: "Which vendors and categories the money goes to, plus monthly cash flow and balance trends — current the moment you open it, no spreadsheet to rebuild.",
     },
     overviewLabel: { "zh-TW": "總覽", en: "Overview" },
     overviewAlt: {
       "zh-TW": "總覽頁：各帳戶餘額、每月現金流與餘額走勢",
       en: "Overview page showing balances per account, monthly cash flow and the balance trend",
     },
-    balancesLead: { "zh-TW": "每個帳戶、每種幣別。", en: "Every account, every currency." },
+    spendLead: {
+      "zh-TW": "支出去向，",
+      en: "Where spending goes,",
+    },
+    spendBody: {
+      "zh-TW": "前八大廠商或分類排給你看，點一下就篩出那些交易。",
+      en: "the top eight vendors or categories, one click away from the transactions behind them.",
+    },
+    balancesLead: { "zh-TW": "每個帳戶還剩多少，一眼看完。", en: "Every account, every currency, at a glance." },
     balancesBody: {
       "zh-TW": "餘額並排列出、不換算，你看到的數字就是銀行裡的數字。",
       en: "Balances sit side by side, unconverted, so the number you read is the number in the bank.",
@@ -227,27 +234,27 @@ const landing = {
       "zh-TW": "報表頁：應收帳齡、營業稅期與合約完整性",
       en: "Reports page with receivables ageing, tax periods and contract coverage",
     },
-    ageingLead: { "zh-TW": "這筆錢欠多久了，", en: "How old the debt is," },
+    ageingLead: { "zh-TW": "誰拖款最久，", en: "Who has owed you longest," },
     ageingBody: {
-      "zh-TW": "一個客戶一個客戶看 —— 不是只看金額多大。",
-      en: "per client — not just how big it is.",
+      "zh-TW": "照客戶排好給你，不只看金額大小。",
+      en: "client by client — not just how much.",
     },
-    coverageLead: { "zh-TW": "談好卻從沒請款的工作。", en: "Work you agreed to but never billed for." },
+    coverageLead: { "zh-TW": "簽了約卻沒排請款，", en: "A signed contract with no billing schedule" },
     coverageBody: {
-      "zh-TW": "簽了約卻沒排請款期別，那筆錢你就會忘記去要。",
-      en: "A signed contract nobody scheduled is money you will forget to ask for.",
+      "zh-TW": "系統會把它抓出來，這筆錢就不會忘了要。",
+      en: "gets flagged, so that money is never forgotten.",
     },
   },
 
   assistant: {
-    badge: { "zh-TW": "AI 助理 · MCP", en: "AI assistant · MCP" },
+    badge: { "zh-TW": "每個月手動 key 對帳單", en: "Typing in the bank statement by hand" },
     heading: {
-      "zh-TW": "不用等我們串接你的銀行",
-      en: "You do not have to wait for a bank integration",
+      "zh-TW": "對帳單丟給 AI，它問清楚再入帳",
+      en: "Hand the statement to your AI. It asks, then books it.",
     },
     lede: {
-      "zh-TW": "大部分記帳工具在拼銀行 API。但你每個月本來就拿得到一份對帳單 —— 把它丟給你自己的 AI，它會直接把交易寫進來。",
-      en: "Most bookkeeping tools are racing to integrate with banks. But you already get a statement every month — hand it to your own AI and it writes the transactions straight in.",
+      "zh-TW": "不用等我們串接你的銀行。你每個月本來就拿得到對帳單，丟給你自己的 AI，它會直接把交易寫進來。",
+      en: "No need to wait for a bank integration. You already get a statement every month — hand it to your own AI and it writes the transactions straight in.",
     },
     sub: {
       "zh-TW": "關鍵是它會問。哪幾筆只進內帳、哪幾筆外帳也要認、分類拿不準的，它會先跟你確認再寫，而不是猜完就送出。",
@@ -284,47 +291,67 @@ const landing = {
   },
 
   more: {
-    heading: { "zh-TW": "一個月剩下的那些事", en: "The rest of the month" },
+    heading: { "zh-TW": "每個月其他的麻煩，也一起收掉", en: "The rest of the monthly mess, handled too" },
     lede: {
-      "zh-TW": "記帳不是只有帳本和發票。這些是讓它撐得下去的其他部分。",
-      en: "Bookkeeping is not only ledgers and invoices. These are the parts that make it survivable.",
+      "zh-TW": "記帳不只有帳本和發票。這些小事，每一件都曾經吃掉一個下午。",
+      en: "Bookkeeping is not only ledgers and invoices. Each of these used to eat an afternoon.",
     },
-    partiesTitle: { "zh-TW": "客戶與廠商", en: "Clients and suppliers" },
+    partiesTitle: { "zh-TW": "同一家客戶不再有三種寫法", en: "One client, one spelling" },
     partiesBody: {
       "zh-TW": "每一個往來對象都是一筆正式資料，名字不會被重複輸入，也不會出現兩種寫法。",
       en: "Everyone you deal with is a proper record, so a name is never typed twice or spelled two ways.",
     },
-    advancesTitle: { "zh-TW": "同事先代墊的錢", en: "Money people fronted" },
+    advancesTitle: { "zh-TW": "誰代墊了多少，一筆不漏", en: "Who fronted what, never lost" },
     advancesBody: {
       "zh-TW": "有人先自掏腰包付了。記下公司欠他多少，好好結清。",
       en: "Someone paid out of their own pocket. Track what the company owes them and settle it properly.",
     },
-    reconciliationTitle: { "zh-TW": "跟銀行對帳", en: "Checking against the bank" },
+    reconciliationTitle: { "zh-TW": "跟銀行對帳，差額一目了然", en: "Bank reconciliation, differences in plain sight" },
     reconciliationBody: {
       "zh-TW": "把銀行的紀錄跟你記的對起來，差額直接寫下來，不要用猜的。",
       en: "Match what the bank says against what you recorded, and write down the difference instead of arguing with it.",
     },
-    payrollTitle: { "zh-TW": "薪資", en: "Payroll" },
+    payrollTitle: { "zh-TW": "薪資從試算到薪資單一次走完", en: "Payroll from calculation to payslip in one pass" },
     payrollBody: {
-      "zh-TW": "員工、薪資項目與每月發放，直接入到薪資該待的內帳。",
-      en: "Staff, pay items and pay runs, posting straight into the internal books where salaries belong.",
+      "zh-TW": "接上 Simpany，試算、寫入、送記帳士、寄薪資單一路完成，發薪直接入內帳。",
+      en: "Connected to Simpany: calculate, file, hand off to the accountant and send payslips in one pass, with pay runs posted to the internal books.",
     },
-    filesTitle: { "zh-TW": "單據留底", en: "Receipts on file" },
+    recurringTitle: { "zh-TW": "固定扣款不再嚇一跳", en: "No surprise auto-debits" },
+    recurringBody: {
+      "zh-TW": "訂閱、月租這類固定支出先登記好，扣款前在 Discord 提醒你，每月再回顧一次有沒有漏扣、扣錯帳戶。",
+      en: "Log recurring costs once. Discord reminds you before each debit, and a monthly recap flags anything missed or charged to the wrong account.",
+    },
+    cloudBillingTitle: { "zh-TW": "雲端帳單自動對上帳", en: "Cloud bills match themselves" },
+    cloudBillingBody: {
+      "zh-TW": "Azure、GCP 的帳單自動抓進來，對到是哪張卡、哪筆交易付的。",
+      en: "Azure and GCP invoices come in on their own and get matched to the card and the transaction that paid them.",
+    },
+    einvoiceTitle: { "zh-TW": "電子發票自動同步", en: "E-invoices sync themselves" },
+    einvoiceBody: {
+      "zh-TW": "接上 Simpany，開出的電子發票每天早上自動同步回來，綁到對應的請款項目。",
+      en: "Connect Simpany and every invoice you issue syncs back each morning, tied to the billing item it belongs to.",
+    },
+    wiseTitle: { "zh-TW": "Wise 餘額每天自動更新", en: "Wise balances, updated daily" },
+    wiseBody: {
+      "zh-TW": "Wise 帳戶唯讀接上，每天早上把餘額和交易同步進來。",
+      en: "Connect Wise read-only and every morning its balances and transactions are pulled in.",
+    },
+    filesTitle: { "zh-TW": "單據跟著交易走，不用翻抽屜", en: "Receipts live on the entry, not in a drawer" },
     filesBody: {
       "zh-TW": "把收據或合約上傳，掛在它對應的那筆交易上。不用再翻鞋盒。",
       en: "Upload the receipt or the contract and attach it to the entry it justifies. No shoebox.",
     },
-    orgsTitle: { "zh-TW": "不只一家公司", en: "More than one company" },
+    orgsTitle: { "zh-TW": "好幾家公司，一個帳號切換", en: "Several companies, one login" },
     orgsBody: {
       "zh-TW": "一套系統管好幾家公司，彼此只看得到自己的數字，切換只要一個點擊。",
       en: "Run several companies from one install. Each one only ever sees its own numbers, and you switch with a click.",
     },
-    currencyTitle: { "zh-TW": "多幣別帳戶", en: "Accounts in more than one currency" },
+    currencyTitle: { "zh-TW": "美金帳不會被記成台幣", en: "USD never gets booked as TWD" },
     currencyBody: {
       "zh-TW": "美金帳戶就只收美金的交易，系統會擋掉記錯幣別的那一筆。報表按幣別分開加總，不會偷偷幫你換算。",
       en: "A USD account only takes USD transactions — the wrong currency is rejected, not quietly converted. Reports total each currency separately.",
     },
-    languagesTitle: { "zh-TW": "中英文介面", en: "Chinese and English" },
+    languagesTitle: { "zh-TW": "中英文一鍵切換", en: "Chinese or English, one click" },
     languagesBody: {
       "zh-TW": "整套跟著切換，連錯誤訊息都是。網址不變，書籤照樣能用。",
       en: "The whole thing switches, error messages included. The address never changes, so bookmarks keep working.",

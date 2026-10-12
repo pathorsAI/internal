@@ -31,9 +31,9 @@ function authCta(signedIn: boolean, className: string, label: string): string {
  * 公開的 landing page（internal.pathors.com 的根目錄），不需要登入 —— proxy（Next 16 之前叫 middleware）
  * 對 `/` 與 `/landing/*` 直接放行。系統本體在 /dashboard。
  *
- * markup / CSS / script 來自 docs/index.html（見 ./landing-content），除了導覽列以外
+ * markup / CSS / script 在 ./landing-content（最早搬自 docs/index.html），除了導覽列以外
  * 刻意不轉成 JSX、不套 Tailwind：
- *  - 字體的 @font-face 走 ./landing-fonts.css。用 import 而不是 <link>，是因為手寫
+ *  - 中文字體的 @font-face 走 ./landing-fonts.css（拉丁字體是 layout.tsx 的 next/font）。用 import 而不是 <link>，是因為手寫
  *    <link rel="stylesheet"> 會繞過 Next 的 CSS 管線（eslint 的 no-css-tags）。
  *  - <style> 直接寫在 body 內而不是靠 React 的 hoisting，這樣它在文件順序上必定
  *    晚於 head 裡的 globals.css，Tailwind preflight 打平的 h1/p 樣式才會被 landing

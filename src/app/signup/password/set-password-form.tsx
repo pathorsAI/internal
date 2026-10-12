@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { AuthCard } from "@/components/auth/auth-card";
+import { AuthShell } from "@/components/auth/auth-shell";
 import { formText } from "@/components/auth/form-text";
 import { NewPasswordFields } from "@/components/auth/new-password-fields";
 import { Button } from "@/components/ui/button";
@@ -50,18 +50,18 @@ export function SetPasswordForm({ redirectTo }: Readonly<{ redirectTo: string }>
   }
 
   return (
-    <AuthCard title={t("title")} description={t("description")}>
-      <form method="post" onSubmit={onSubmit} className="space-y-3">
+    <AuthShell title={t("title")} description={t("description")}>
+      <form method="post" onSubmit={onSubmit} className="space-y-4">
         <NewPasswordFields problem={problem} />
         {failed && (
           <p role="alert" className="text-sm text-destructive">
             {t("failed")}
           </p>
         )}
-        <Button type="submit" className="w-full" disabled={pending || !hydrated}>
+        <Button type="submit" className="h-11 w-full" disabled={pending || !hydrated}>
           {pending ? t("submitting") : t("submit")}
         </Button>
       </form>
-    </AuthCard>
+    </AuthShell>
   );
 }

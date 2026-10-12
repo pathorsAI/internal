@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { authClient } from "@/lib/auth-client";
-import { AuthCard } from "@/components/auth/auth-card";
+import { AuthShell } from "@/components/auth/auth-shell";
 import { formText } from "@/components/auth/form-text";
 import { NewPasswordFields } from "@/components/auth/new-password-fields";
 import { Button } from "@/components/ui/button";
@@ -57,10 +57,10 @@ export function ResetPasswordForm({ token }: Readonly<{ token: string | null }>)
 
   if (invalid) {
     return (
-      <AuthCard title={t("invalid.title")}>
+      <AuthShell title={t("invalid.title")}>
         <div className="space-y-4">
           <p className="text-sm">{t("invalid.body")}</p>
-          <Button asChild className="w-full">
+          <Button asChild className="h-11 w-full">
             <Link href="/forgot-password">{t("invalid.action")}</Link>
           </Button>
           <div className="text-center text-sm">
@@ -69,23 +69,23 @@ export function ResetPasswordForm({ token }: Readonly<{ token: string | null }>)
             </Link>
           </div>
         </div>
-      </AuthCard>
+      </AuthShell>
     );
   }
 
   return (
-    <AuthCard title={t("title")} description={t("description")}>
-      <form method="post" onSubmit={onSubmit} className="space-y-3">
+    <AuthShell title={t("title")} description={t("description")}>
+      <form method="post" onSubmit={onSubmit} className="space-y-4">
         <NewPasswordFields problem={problem} />
         {error && (
           <p role="alert" className="text-sm text-destructive">
             {error === "failed" ? t("failed") : ts(error)}
           </p>
         )}
-        <Button type="submit" className="w-full" disabled={pending || !hydrated}>
+        <Button type="submit" className="h-11 w-full" disabled={pending || !hydrated}>
           {pending ? t("submitting") : t("submit")}
         </Button>
       </form>
-    </AuthCard>
+    </AuthShell>
   );
 }
