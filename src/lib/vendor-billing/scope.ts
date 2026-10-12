@@ -117,7 +117,7 @@ export function matchExportTables(tableNames: readonly string[], billingAccountI
 export function parseBigQueryExport(config: IntegrationConfig | null | undefined): BigQueryExport | null {
   const c = config ?? {};
   // 設定頁存過（包括清空 = null）就以它為準，不再看連接時的平鋪欄位
-  if (Object.prototype.hasOwnProperty.call(c, "bigQueryExport")) {
+  if (Object.hasOwn(c, "bigQueryExport")) {
     const o = c.bigQueryExport && typeof c.bigQueryExport === "object" ? (c.bigQueryExport as Record<string, unknown>) : {};
     const v = { projectId: str(o.projectId) ?? "", dataset: str(o.dataset) ?? "" };
     return isValidBigQueryExport(v) ? v : null;

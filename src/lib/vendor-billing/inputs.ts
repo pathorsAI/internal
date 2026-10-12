@@ -1,5 +1,3 @@
-import type { MatchStatus } from "./match";
-
 // 廠商計費寫入的輸入驗證（純函式；web server action 與 MCP 工具共用，client 也可以 import 常數）。
 // 驗證失敗丟 VendorBillingInputError，訊息給人看（zh-TW）。
 
@@ -18,7 +16,7 @@ export type AccountStatus = (typeof ACCOUNT_STATUSES)[number];
 export const INVOICE_ACTIONS = ["confirm", "link", "unlink", "ignore", "create"] as const;
 export type InvoiceAction = (typeof INVOICE_ACTIONS)[number];
 
-export type { MatchStatus };
+export type { MatchStatus } from "./match";
 
 export class VendorBillingInputError extends Error {
   constructor(message: string) {
@@ -47,7 +45,7 @@ function id(v: unknown, label: string): number | null {
   return n;
 }
 
-const has = (o: Record<string, unknown>, k: string) => Object.prototype.hasOwnProperty.call(o, k);
+const has = (o: Record<string, unknown>, k: string) => Object.hasOwn(o, k);
 
 // ---------------------------------------------------------------------------
 // 付款方式
@@ -77,6 +75,9 @@ function requiredText(label: string, max: number, missing: string) {
 
 /** 末四碼：空 → null；剛好 4 位數字才收；更長的數字視為有人貼了完整卡號，拒絕且不截斷。 */
 function parseLast4(v: unknown): string | null {
+  if (v !== null && v !== undefined && typeof v !== "string" && typeof v !== "number") {
+    throw new VendorBillingInputError("末四碼必須是 4 位數字");
+  }
   const s = v === null || v === undefined ? "" : String(v).replaceAll(/[\s•*-]/g, "");
   if (s === "") return null;
   if (/^\d{4}$/.test(s)) return s;

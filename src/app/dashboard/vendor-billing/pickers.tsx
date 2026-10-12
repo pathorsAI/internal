@@ -5,10 +5,14 @@ import { Check, ChevronsUpDown, Plus, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 
 // 可搜尋的「從既有項目挑」選擇器（單選 / 多選）。跟 components/combobox.tsx 不同：
 // 這裡不能自由輸入新值，只能挑清單裡已有的（交易對象、付款方式都要對到 id）。
+
+/** cmdk 的項目 value 不能是空字串，「未設定」用這個代號。 */
+const NONE_VALUE = "__none";
 
 export type PickerOption = {
   value: string;
@@ -33,8 +37,6 @@ function OptionList({
 }>) {
   const t = useTranslations("vendorBilling");
   const [q, setQ] = React.useState("");
-  const [active, setActive] = React.useState(0);
-  const listId = React.useId();
 
   const filtered = React.useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -45,63 +47,28 @@ function OptionList({
     return noneLabel && !needle ? [{ value: "", label: noneLabel } as PickerOption, ...list] : list;
   }, [options, q, noneLabel]);
 
-  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setActive((i) => Math.min(i + 1, filtered.length - 1));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setActive((i) => Math.max(i - 1, 0));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      const o = filtered[active];
-      if (o) onPick(o.value === "" ? null : o.value);
-    }
-  }
-
+  // 篩選自己做（子字串比對、順序不變），cmdk 只負責鍵盤導覽與 combobox / listbox 的無障礙語意
   return (
-    <div className="flex flex-col">
-      <input
-        autoFocus
-        value={q}
-        onChange={(e) => {
-          setQ(e.target.value);
-          setActive(0);
-        }}
-        onKeyDown={onKeyDown}
-        placeholder={t("picker.search")}
-        role="combobox"
-        aria-expanded
-        aria-controls={listId}
-        className="h-9 border-b bg-transparent px-3 text-sm outline-none placeholder:text-muted-foreground"
-      />
-      <div id={listId} role="listbox" className="max-h-64 overflow-y-auto p-1">
-        {filtered.length === 0 ? (
-          <div className="px-2 py-1.5 text-sm text-muted-foreground">{t("picker.noResults")}</div>
-        ) : (
-          filtered.map((o, idx) => (
-            <div
-              key={o.value || "__none"}
-              role="option"
-              tabIndex={-1}
-              aria-selected={selected.has(o.value)}
-              className={cn(
-                "flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none",
-                idx === active && "bg-accent text-accent-foreground",
-                o.value === "" && "text-muted-foreground",
-              )}
-              onMouseEnter={() => setActive(idx)}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => onPick(o.value === "" ? null : o.value)}
+    <Command shouldFilter={false}>
+      <CommandInput autoFocus value={q} onValueChange={setQ} placeholder={t("picker.search")} />
+      <CommandList className="max-h-64">
+        <CommandEmpty className="px-2 py-1.5 text-sm text-muted-foreground">{t("picker.noResults")}</CommandEmpty>
+        <CommandGroup>
+          {filtered.map((o) => (
+            <CommandItem
+              key={o.value || NONE_VALUE}
+              value={o.value || NONE_VALUE}
+              onSelect={() => onPick(o.value === "" ? null : o.value)}
+              className={cn(o.value === "" && "text-muted-foreground")}
             >
-              <Check className={cn("size-4 shrink-0", selected.has(o.value) ? "opacity-100" : "opacity-0")} />
+              <Check className={cn("size-4 text-current", selected.has(o.value) ? "opacity-100" : "opacity-0")} />
               <span className="min-w-0 flex-1 truncate">{o.label}</span>
               {o.hint ? <span className="shrink-0 text-xs text-muted-foreground">{o.hint}</span> : null}
-            </div>
-          ))
-        )}
-      </div>
-    </div>
+            </CommandItem>
+          ))}
+        </CommandGroup>
+      </CommandList>
+    </Command>
   );
 }
 

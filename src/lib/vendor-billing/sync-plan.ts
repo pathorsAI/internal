@@ -55,7 +55,10 @@ export function monthChunks(from: string, to: string, maxMonths = COST_CHUNK_MON
   while (cur <= to) {
     const nextStart = addMonths(cur, maxMonths);
     const end = addDays(nextStart, -1);
-    out.push({ from: cur, to: end < to ? end : to });
+    // YYYY-MM-DD 字串依字典序就是日期順序；最後一段截在 to
+    let chunkEnd = end;
+    if (chunkEnd > to) chunkEnd = to;
+    out.push({ from: cur, to: chunkEnd });
     cur = nextStart;
   }
   return out;

@@ -161,7 +161,7 @@ export async function fetchAzureToken(creds: IntegrationCredentials, fetchImpl: 
     if (res.status === 401 || AAD_AUTH_ERRORS.has(code)) throw new AzureAuthError(detail);
     throw new AzureApiError(res.status, `Azure 登入回應 ${res.status}：${detail}`);
   }
-  const j = (await res.json()) as { access_token?: string; expires_in?: number | string };
+  const j: { access_token?: string; expires_in?: number | string } = await res.json();
   if (!j.access_token) throw new AzureApiError(res.status, "Azure 登入沒有回傳 access token");
   const ttl = Number(j.expires_in) || 3600;
   return { value: j.access_token, expiresAt: new Date(Date.now() + ttl * 1000) };
@@ -350,7 +350,7 @@ export function parseInvoices(json: unknown): ParsedAzureInvoice[] {
     const total = obj(p.totalAmount);
     const amount = n(total.value);
     const currency = s(total.currency)?.toUpperCase() ?? null;
-    if (!externalRef || !invoiceDate || amount === null || !currency || currency.length !== 3) return [];
+    if (!externalRef || !invoiceDate || amount === null || currency?.length !== 3) return [];
     return [
       {
         externalRef,

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 import { Plus, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/page-header";
 import { cn } from "@/lib/utils";
 import type { AttentionItem } from "@/lib/vendor-billing/attention";
@@ -30,7 +31,7 @@ const FILTER_STATUSES: Record<Exclude<InvoiceFilter, "all">, readonly MatchStatu
   ignored: ["ignored"],
 };
 
-/** 小型分段按鈕（不是大 tab bar）。 */
+/** 小型分段切換（shadcn Tabs 的 list + trigger，不是大 tab bar）；窄螢幕時可以換行。 */
 function Segmented<T extends string>({
   value,
   options,
@@ -38,24 +39,22 @@ function Segmented<T extends string>({
   label,
 }: Readonly<{ value: T; options: readonly { value: T; label: string }[]; onChange: (v: T) => void; label: string }>) {
   return (
-    <div role="group" aria-label={label} className="inline-flex max-w-full flex-wrap rounded-md border bg-muted/40 p-0.5">
-      {options.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          aria-pressed={value === o.value}
-          onClick={() => onChange(o.value)}
-          className={cn(
-            "h-7 rounded-sm px-3 text-sm whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-            value === o.value
-              ? "bg-background font-medium text-foreground shadow-xs"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
+    <Tabs
+      value={value}
+      onValueChange={(v) => {
+        const picked = options.find((o) => o.value === v);
+        if (picked) onChange(picked.value);
+      }}
+      className="max-w-full"
+    >
+      <TabsList aria-label={label} className="max-w-full flex-wrap justify-start group-data-[orientation=horizontal]/tabs:h-auto">
+        {options.map((o) => (
+          <TabsTrigger key={o.value} value={o.value} className="h-7 flex-none px-3">
+            {o.label}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+    </Tabs>
   );
 }
 
@@ -237,8 +236,8 @@ export function VendorBillingClient({
   function reconcileNow() {
     startReconcile(async () => {
       const res = await reconcileNowAction();
-      if (!res.ok) toast.error(res.error ?? t("toast.failed"));
-      else toast.success(t("toast.reconciled"), { description: res.message });
+      if (res.ok) toast.success(t("toast.reconciled"), { description: res.message });
+      else toast.error(res.error ?? t("toast.failed"));
     });
   }
 

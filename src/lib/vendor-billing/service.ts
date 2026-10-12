@@ -707,7 +707,7 @@ export async function resolveVendorInvoice(
   invoiceId: number,
   action: InvoiceAction,
   transactionId?: number | null,
-): Promise<InvoiceRow> {
+): Promise<InvoiceRow | undefined> {
   const db = getDb();
   await assertOrgRefs(orgId, invoiceResolutionRefs({ invoiceId, transactionId: action === "link" ? transactionId : null }));
   const [row] = await db
@@ -808,8 +808,8 @@ export async function resolveVendorInvoice(
       break;
     }
   }
-  const [out] = (await listVendorInvoices(orgId, { billingAccountId: inv.billingAccountId, limit: 500 })).filter(
+  // 帳號底下超過 500 張帳單時可能撈不到這張；寫入已經完成，所以回 undefined 而不是報錯
+  return (await listVendorInvoices(orgId, { billingAccountId: inv.billingAccountId, limit: 500 })).find(
     (i) => i.id === invoiceId,
   );
-  return out;
 }

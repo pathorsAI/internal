@@ -43,7 +43,7 @@ export function oidcKid(env: Record<string, string | undefined> = process.env): 
 function b64ToBytes(b64: string): Uint8Array {
   const bin = atob(b64);
   const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.codePointAt(i) ?? 0;
   return out;
 }
 
@@ -89,7 +89,7 @@ export function base64url(input: ArrayBuffer | Uint8Array | string): string {
   else if (input instanceof Uint8Array) bytes = input;
   else bytes = new Uint8Array(input);
   let bin = "";
-  for (const b of bytes) bin += String.fromCharCode(b);
+  for (const b of bytes) bin += String.fromCodePoint(b);
   // padding 只會在結尾（最多兩個 =），直接拿掉所有 = 就好，不用正規表示式
   return btoa(bin).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
@@ -152,7 +152,7 @@ export async function publicJwk(
   env: Record<string, string | undefined> = process.env,
 ): Promise<{ kty: string; n: string; e: string; kid: string; alg: "RS256"; use: "sig" }> {
   const key = await crypto.subtle.importKey("pkcs8", parsePkcs8(env.OIDC_SIGNING_KEY), RS256, true, ["sign"]);
-  const jwk = (await crypto.subtle.exportKey("jwk", key)) as JsonWebKey;
+  const jwk = await crypto.subtle.exportKey("jwk", key);
   if (!jwk.n || !jwk.e) throw new OidcConfigError("OIDC_SIGNING_KEY 不是 RSA 私鑰");
   return { kty: "RSA", n: jwk.n, e: jwk.e, kid: oidcKid(env), alg: "RS256", use: "sig" };
 }

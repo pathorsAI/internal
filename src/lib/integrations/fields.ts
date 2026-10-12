@@ -21,7 +21,10 @@ export function fieldApplies(
 ): boolean {
   if (!field.when) return true;
   const dep = allFields.find((f) => f.key === field.when?.key);
-  const current = dep ? fieldValue(dep, values) : String(values[field.when.key] ?? "");
+  const raw = values[field.when.key];
+  // 沒宣告的欄位：字串／數字／布林照原樣比對，其他（null、物件）當成沒填
+  const loose = typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean" ? String(raw) : "";
+  const current = dep ? fieldValue(dep, values) : loose;
   return current === field.when.equals;
 }
 

@@ -134,14 +134,21 @@ function SectionTitle({ children }: Readonly<{ children: React.ReactNode }>) {
   return <h3 className="text-sm font-medium">{children}</h3>;
 }
 
+/** 骨架的區塊與列數（固定的鍵，不用陣列索引當 key）。 */
+const SKELETON_SECTIONS = [
+  { key: "resources", rows: ["r1", "r2", "r3"] },
+  { key: "invoices", rows: ["i1", "i2", "i3", "i4"] },
+  { key: "costs", rows: ["c1", "c2", "c3"] },
+] as const;
+
 function DetailSkeleton() {
   return (
     <div className="space-y-6">
-      {[3, 4, 3].map((n, s) => (
-        <div key={s} className="space-y-2 border-t pt-4">
+      {SKELETON_SECTIONS.map((section) => (
+        <div key={section.key} className="space-y-2 border-t pt-4">
           <Skeleton className="h-4 w-20" />
-          {Array.from({ length: n }, (_, i) => (
-            <Skeleton key={i} className="h-8 w-full" />
+          {section.rows.map((row) => (
+            <Skeleton key={row} className="h-8 w-full" />
           ))}
         </div>
       ))}

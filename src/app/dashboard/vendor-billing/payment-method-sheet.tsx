@@ -94,7 +94,7 @@ function wireValue(k: FormKey, v: MethodForm[FormKey]): unknown {
   return s;
 }
 
-const digits = (s: string) => s.replace(/[\s•*-]/g, "");
+const digits = (s: string) => s.replaceAll(/[\s•*-]/g, "");
 
 function MethodHeader({
   row,

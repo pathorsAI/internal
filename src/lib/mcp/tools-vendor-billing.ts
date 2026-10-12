@@ -488,7 +488,7 @@ export const vendorBillingTools: Record<string, ToolDef> = {
       const action = requireString(args, "action");
       if (!(INVOICE_ACTIONS as readonly string[]).includes(action)) throw new Error(`Unknown action ${action}.`);
       const invoice = await resolveVendorInvoice(orgId, id, action as InvoiceAction, optNumber(args, "transactionId") ?? null);
-      return { id, invoice: invoiceOut(invoice) };
+      return { id, invoice: invoice ? invoiceOut(invoice) : null };
     },
   },
 };

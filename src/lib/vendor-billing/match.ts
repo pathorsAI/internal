@@ -201,7 +201,7 @@ function singleRound(ctx: Ctx, exactOnly: boolean): boolean {
   let changed = false;
   for (const inv of ctx.open) {
     const l = lists.get(inv.id);
-    if (!l || l.length !== 1) continue;
+    if (l?.length !== 1) continue;
     const t = l[0];
     if (claims.get(t.id) !== 1 || ctx.used.has(t.id)) continue;
     ctx.used.add(t.id);

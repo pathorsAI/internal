@@ -170,7 +170,7 @@ export function parseServiceAccountJson(raw: string | undefined): ServiceAccount
 export function pemToDer(pem: string): ArrayBuffer {
   const bin = atob(pemBody(pem));
   const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.codePointAt(i) ?? 0;
   return out.buffer;
 }
 
@@ -293,7 +293,8 @@ async function stsExchange(audience: string, assertion: string, fetchImpl: typeo
     }
     throw new GcpApiError(res.status, `GCP STS 回應 ${res.status}：${detail}`);
   }
-  const token = ((await res.json()) as { access_token?: string }).access_token;
+  const body: { access_token?: string } = await res.json();
+  const token = body.access_token;
   if (!token) throw new GcpApiError(res.status, "GCP STS 沒有回傳 access token");
   return token;
 }
@@ -319,10 +320,10 @@ async function impersonate(serviceAccountEmail: string, federated: string, fetch
     if (res.status === 401) throw new GcpAuthError(`impersonation：${detail}`);
     throw new GcpApiError(res.status, `Google IAM 回應 ${res.status}：${detail}`);
   }
-  const j = (await res.json()) as { accessToken?: string; expireTime?: string };
+  const j: { accessToken?: string; expireTime?: string } = await res.json();
   if (!j.accessToken) throw new GcpApiError(res.status, "Google IAM 沒有回傳 access token");
-  const exp = new Date(j.expireTime ?? Date.now() + 3600_000);
-  return { value: j.accessToken, expiresAt: Number.isNaN(exp.getTime()) ? new Date(Date.now() + 3600_000) : exp };
+  const exp = new Date(j.expireTime ?? Date.now() + 3_600_000);
+  return { value: j.accessToken, expiresAt: Number.isNaN(exp.getTime()) ? new Date(Date.now() + 3_600_000) : exp };
 }
 
 /**
@@ -369,7 +370,7 @@ async function fetchKeyToken(creds: IntegrationCredentials, fetchImpl: typeof fe
     if (res.status === 400 || res.status === 401) throw new GcpAuthError(detail);
     throw new GcpApiError(res.status, `Google 登入回應 ${res.status}：${detail}`);
   }
-  const j = (await res.json()) as { access_token?: string; expires_in?: number };
+  const j: { access_token?: string; expires_in?: number } = await res.json();
   if (!j.access_token) throw new GcpApiError(res.status, "Google 登入沒有回傳 access token");
   return { value: j.access_token, expiresAt: new Date(Date.now() + (Number(j.expires_in) || 3600) * 1000) };
 }
