@@ -10,6 +10,7 @@ import projects from "./projects";
 import parties from "./parties";
 import categories from "./categories";
 import bankAccounts from "./bankAccounts";
+import vendorBilling from "./vendorBilling";
 import advances from "./advances";
 import accountantNotices from "./accountantNotices";
 import reconciliation from "./reconciliation";
@@ -40,6 +41,7 @@ const catalogue = {
   parties,
   categories,
   bankAccounts,
+  vendorBilling,
   advances,
   accountantNotices,
   reconciliation,
