@@ -28,6 +28,9 @@ import {
 } from "./schema";
 import { oauthAccessToken, oauthConsent, member } from "./auth-schema";
 import { uploadDocument } from "@/lib/storage";
+import { validateAvatarBytes } from "@/lib/party-avatar";
+import { removePartyAvatar, replacePartyAvatar } from "@/lib/party-avatar-store";
+import { partyAvatarDeps } from "@/lib/party-avatar-deps";
 import { canManageOrg, requireOrg, requireOrgWithRole } from "@/lib/session";
 import { auth } from "@/lib/auth";
 import { logWeb } from "@/db/activity";
@@ -627,6 +630,52 @@ export async function createTransaction(
   }
 }
 
+// ---- 交易對象頭像 ----
+
+/**
+ * 編輯表單送上來的頭像變更。表單裡有兩個欄位（src/app/dashboard/parties/party-avatar-field.tsx）：
+ * - avatarAction：keep（沒動）/ replace（換圖，附 avatar 檔）/ remove（移除）
+ * - avatar：瀏覽器已裁成正方形、縮到 256×256 的 WebP（或 JPEG）
+ * 頭像跟其他欄位一起按「儲存變更」才生效，按「取消」就什麼都不會發生。
+ */
+type AvatarChange = { kind: "keep" } | { kind: "remove" } | { kind: "replace"; bytes: Uint8Array };
+
+async function readAvatarChange(
+  formData: FormData,
+): Promise<{ change: AvatarChange } | { error: string }> {
+  const t = await getTranslations("errors");
+  const action = str(formData.get("avatarAction"));
+  if (action === "remove") return { change: { kind: "remove" } };
+  if (action !== "replace") return { change: { kind: "keep" } };
+  const file = formData.get("avatar");
+  if (!(file instanceof File)) return { error: t("avatar.empty") };
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  // 先驗再寫其他欄位：格式不對就整張表單不存，使用者改完檔案再按一次就好。
+  const check = validateAvatarBytes(bytes);
+  if (!check.ok) return { error: t(`avatar.${check.reason}`) };
+  return { change: { kind: "replace", bytes } };
+}
+
+async function applyAvatarChange(
+  orgId: string,
+  partyId: number,
+  change: AvatarChange,
+): Promise<string | null> {
+  if (change.kind === "keep") return null;
+  const t = await getTranslations("errors");
+  try {
+    const res =
+      change.kind === "remove"
+        ? await removePartyAvatar(partyAvatarDeps(), { orgId, partyId })
+        : await replacePartyAvatar(partyAvatarDeps(), { orgId, partyId, bytes: change.bytes });
+    if (res.ok) return null;
+    return res.error === "notFound" ? t("notFound.party") : t(`avatar.${res.error}`);
+  } catch (e) {
+    console.error("[party-avatar] save failed", e);
+    return t("avatar.uploadFailed");
+  }
+}
+
 export async function updateParty(
   _prev: ActionState,
   formData: FormData,
@@ -643,6 +692,8 @@ export async function updateParty(
     const defaultAccountId = num(formData.get("defaultAccountId"));
     const refError = await unownedRefError(db, orgId, [[bankAccounts, [defaultAccountId]]]);
     if (refError) return { ok: false, error: refError };
+    const avatar = await readAvatarChange(formData);
+    if ("error" in avatar) return { ok: false, error: avatar.error };
     await db
       .update(parties)
       .set({
@@ -660,6 +711,13 @@ export async function updateParty(
     await logWeb(orgId, "update", "party", id, name);
     revalidatePath("/dashboard/parties");
     revalidatePath(`/dashboard/parties/${id}`);
+    // 其他欄位已經存好了；頭像失敗就只回報頭像的錯，使用者重選圖再存一次即可。
+    const avatarError = await applyAvatarChange(orgId, id, avatar.change);
+    if (avatar.change.kind !== "keep") {
+      revalidatePath("/dashboard/transactions");
+      revalidatePath("/dashboard");
+    }
+    if (avatarError) return { ok: false, error: avatarError };
     return { ok: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : t("failed.update");

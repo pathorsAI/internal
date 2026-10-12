@@ -64,6 +64,9 @@ const transactions = {
     account: {
       all: { "zh-TW": "全部帳戶", en: "All accounts" },
     },
+    party: {
+      all: { "zh-TW": "全部對象", en: "All counterparties" },
+    },
     month: {
       all: { "zh-TW": "全部月份", en: "All months" },
       label: { "zh-TW": "{year} 年 {month} 月", en: "{month}/{year}" },

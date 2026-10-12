@@ -33,6 +33,15 @@ import {
 
 export type Book = "internal" | "external" | "both";
 
+/**
+ * 頭像版本（avatar_updated_at 的毫秒 epoch，字串）；沒有頭像回 NULL。
+ * 用整數字串而不是 timestamptz 原樣：Postgres 的 "2026-10-12 10:00:00+00" 不是 JS 認得的 ISO 格式。
+ */
+function avatarVersionSql() {
+  return sql<string | null>`case when ${parties.avatarR2Key} is not null and ${parties.avatarUpdatedAt} is not null
+    then (extract(epoch from ${parties.avatarUpdatedAt}) * 1000)::bigint::text end`;
+}
+
 export async function getOverview(orgId: string) {
   const db = getDb();
 
@@ -69,11 +78,13 @@ export type TxnFilters = {
   period?: string; // YYYY-MM
   /** 只看自動匯入、還沒人確認的列（Wise 同步）。 */
   needsReview?: boolean;
+  /** 只看某個交易對象（總覽「支出去向」點進來的）。 */
+  partyId?: number;
 };
 
 // 內外帳列表與筆數共用的 where（篩選條件的 single source of truth）
 function txnWhere(orgId: string, filters: TxnFilters) {
-  const { book, categoryId, accountId, projectId, period, needsReview } = filters;
+  const { book, categoryId, accountId, projectId, period, needsReview, partyId } = filters;
   return and(
     eq(transactions.organizationId, orgId),
     book ? eq(transactions.book, book) : undefined,
@@ -85,6 +96,7 @@ function txnWhere(orgId: string, filters: TxnFilters) {
         )
       : undefined,
     projectId ? eq(transactions.projectId, projectId) : undefined,
+    partyId ? eq(transactions.partyId, partyId) : undefined,
     period ? sql`to_char(${transactions.txnDate}, 'YYYY-MM') = ${period}` : undefined,
     needsReview === undefined ? undefined : eq(transactions.needsReview, needsReview),
     isNull(transactions.deletedAt),
@@ -303,6 +315,102 @@ export async function getMonthlyTrends(
     startBalances: startBalances.map((r) => ({
       accountId: r.accountId,
       balance: Number(r.balance),
+    })),
+  };
+}
+
+// ---- 總覽頁「支出去向」：近 12 個月的支出，依 交易對象 × 分類 × 月 彙總 ----
+
+/**
+ * 一列 = 某個月、某個交易對象、某個分類的支出合計（台幣）。12 個月一次抓完，
+ * 範圍（本月 / 3 / 12 個月）與「依廠商 / 依分類」都在 client 端切（src/lib/spend.ts），
+ * 跟收支趨勢圖同一個做法，切換不用重新載入。
+ */
+export type SpendRow = {
+  month: string;
+  partyId: number | null;
+  partyName: string | null;
+  partyAvatarVersion: string | null;
+  categoryId: number | null;
+  categoryName: string | null;
+  /** 台幣合計：amount_twd，沒有的話台幣交易用 amount；外幣又沒換算的不計入。 */
+  totalTwd: number;
+  /** 計入的筆數 */
+  count: number;
+  /** 外幣、沒有 amount_twd 而沒計入的筆數（畫面上會註明） */
+  unconverted: number;
+};
+
+export type SpendBreakdown = { months: string[]; rows: SpendRow[] };
+
+export async function getSpendBreakdown(orgId: string, monthsBack = 12): Promise<SpendBreakdown> {
+  const db = getDb();
+  // 月份視窗與 getMonthlyTrends 同一個算法（含當月，由舊到新）
+  const now = new Date();
+  const months = Array.from({ length: monthsBack }, (_, i) =>
+    format(addMonths(now, i - (monthsBack - 1)), "yyyy-MM"),
+  );
+  const windowStart = `${months[0]}-01`;
+  const txnMonth = sql<string>`to_char(${transactions.txnDate}, 'YYYY-MM')`;
+  const twd = sql`coalesce(${transactions.amountTwd}, case when ${transactions.currency} = 'TWD' then ${transactions.amount} end)`;
+
+  const rows = await db
+    .select({
+      month: txnMonth.as("month"),
+      partyId: transactions.partyId,
+      partyName: parties.name,
+      partyAvatarVersion: avatarVersionSql(),
+      categoryId: transactions.categoryId,
+      categoryName: categories.name,
+      totalTwd: sql<string>`coalesce(sum(${twd}), 0)`,
+      count: sql<number>`(count(*) filter (where ${twd} is not null))::int`,
+      unconverted: sql<number>`(count(*) filter (where ${twd} is null))::int`,
+    })
+    .from(transactions)
+    // join 條件也帶 org：transactions.party_id / category_id 理論上只會指向自己組織的列，
+    // 但萬一有髒資料，也不會把別的組織的名稱或頭像版本帶出來。
+    .leftJoin(
+      parties,
+      and(eq(parties.id, transactions.partyId), eq(parties.organizationId, orgId)),
+    )
+    .leftJoin(
+      categories,
+      and(eq(categories.id, transactions.categoryId), eq(categories.organizationId, orgId)),
+    )
+    .where(
+      and(
+        eq(transactions.organizationId, orgId),
+        isNull(transactions.deletedAt),
+        sql`${transactions.txnDate} >= ${windowStart}`,
+        // 只算真正花出去的錢：type = expense（含成本類分類）。
+        // 不算：收入、轉帳、代墊（advance）與撥款（reimbursement）這類結算列。
+        eq(transactions.type, "expense"),
+        // 型別是 expense 但被歸到轉帳 / 業主往來 / 收入分類的，是記錯的列，也不算進支出
+        sql`(${categories.kind} is null or ${categories.kind} not in ('transfer','equity','income'))`,
+      ),
+    )
+    .groupBy(
+      sql`1`,
+      transactions.partyId,
+      parties.name,
+      parties.avatarR2Key,
+      parties.avatarUpdatedAt,
+      transactions.categoryId,
+      categories.name,
+    );
+
+  return {
+    months,
+    rows: rows.map((r) => ({
+      month: r.month,
+      partyId: r.partyId,
+      partyName: r.partyName,
+      partyAvatarVersion: r.partyAvatarVersion,
+      categoryId: r.categoryId,
+      categoryName: r.categoryName,
+      totalTwd: Number(r.totalTwd),
+      count: Number(r.count),
+      unconverted: Number(r.unconverted),
     })),
   };
 }
@@ -604,6 +712,10 @@ export async function listParties(orgId: string) {
       note: parties.note,
       isActive: parties.isActive,
       accountName: bankAccounts.name,
+      // 頭像：只給「有沒有」與版本（cache buster），不給 R2 key —— key 是內部細節，
+      // 網址由 partyAvatarUrl(id, avatarVersion) 組。
+      hasAvatar: sql<boolean>`(${parties.avatarR2Key} is not null)`,
+      avatarVersion: avatarVersionSql(),
       txnCount: sql<number>`(select count(*)::int from ${transactions} t where t.party_id = ${parties.id} and t.deleted_at is null)`,
     })
     .from(parties)

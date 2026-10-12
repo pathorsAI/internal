@@ -44,6 +44,7 @@ import { conversionCurrencies, externalSingleLegSide } from "@/lib/external-tran
 import { requireOrg } from "@/lib/session";
 import { formatAccountShort } from "@/lib/employee-accounts";
 import { getTranslations } from "next-intl/server";
+import { PartyAvatar } from "@/components/party-avatar";
 
 export const dynamic = "force-dynamic";
 
@@ -83,6 +84,7 @@ function TransactionRow({
   contracts,
   docs,
   audit,
+  partyAvatarVersion,
 }: Readonly<{
   t: TxnRow;
   typeLabel: Record<string, string>;
@@ -102,6 +104,8 @@ function TransactionRow({
   contracts: ContractOption[];
   docs: TxnDocument[];
   audit?: AuditMeta;
+  /** 交易對象的頭像版本（null = 沒有頭像，顯示首字） */
+  partyAvatarVersion: string | null;
 }>) {
   // 表格上「最後更新」的操作人：改過就顯示最後修改人，沒改過就顯示建立人
   const updater = audit?.updatedBy ?? audit?.createdBy ?? null;
@@ -122,7 +126,19 @@ function TransactionRow({
           </TableCell>
           <TableCell>
             <div className="flex min-w-0 flex-col gap-1">
-              <span className="truncate">{t.partyName ?? t.settleName ?? "—"}</span>
+              {t.partyId != null && t.partyName ? (
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <PartyAvatar
+                    name={t.partyName}
+                    partyId={t.partyId}
+                    avatarVersion={partyAvatarVersion}
+                    size="sm"
+                  />
+                  <span className="truncate">{t.partyName}</span>
+                </span>
+              ) : (
+                <span className="truncate">{t.settleName ?? "—"}</span>
+              )}
               {t.settleToAccountLast5 ? (
                 <span className="truncate text-xs text-muted-foreground">
                   →{" "}
@@ -210,6 +226,11 @@ function TransactionRow({
 
 const PAGE_SIZE = 50;
 
+/** 網址上的 id 篩選（?category= / ?account= / ?party=）：不是數字就當沒篩。 */
+function idParam(v: string | undefined): number | undefined {
+  return v && Number.isFinite(Number(v)) ? Number(v) : undefined;
+}
+
 export default async function TransactionsPage({
   searchParams,
 }: Readonly<{
@@ -221,6 +242,8 @@ export default async function TransactionsPage({
     page?: string;
     /** review=1：只看自動匯入、待確認的列。 */
     review?: string;
+    /** 交易對象 id（總覽「支出去向」點進來的） */
+    party?: string;
   }>;
 }>) {
   const { orgId } = await requireOrg();
@@ -243,15 +266,16 @@ export default async function TransactionsPage({
     { label: tr("columns.lastUpdated"), width: "w-36" },
     { label: tr("columns.amount"), width: "w-32", align: "right" },
   ];
-  const { book, category, account, period, page: pageParam, review } = await searchParams;
+  const { book, category, account, period, page: pageParam, review, party } = await searchParams;
   const active = (["internal", "external", "both"].includes(book ?? "") ? book : undefined) as
     | Book
     | undefined;
-  const categoryId = category && Number.isFinite(Number(category)) ? Number(category) : undefined;
-  const accountId = account && Number.isFinite(Number(account)) ? Number(account) : undefined;
+  const categoryId = idParam(category);
+  const accountId = idParam(account);
+  const partyId = idParam(party);
   const page = Math.max(1, Math.trunc(Number(pageParam)) || 1);
   const needsReview = review === "1" ? true : undefined;
-  const filters = { book: active, categoryId, accountId, period, needsReview };
+  const filters = { book: active, categoryId, accountId, partyId, period, needsReview };
   const [rows, total, accounts, categories, parties, employees, projects, contracts, months, reviewCount] =
     await Promise.all([
       listTransactions(orgId, filters, PAGE_SIZE, (page - 1) * PAGE_SIZE),
@@ -271,6 +295,7 @@ export default async function TransactionsPage({
     getAuditMeta(orgId, "transaction", rows.map((r) => r.id)),
   ]);
   const partyOpts = parties.map((s) => ({ id: s.id, name: s.name }));
+  const avatarByParty = new Map(parties.map((s) => [s.id, s.avatarVersion]));
   const employeeOpts = employees.map((e) => ({ id: e.id, name: e.name }));
   const accountOpts = accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }));
   const projectOpts = projects.map((p) => ({ id: p.id, name: p.name }));
@@ -297,10 +322,12 @@ export default async function TransactionsPage({
       <TransactionFilters
         categories={categories.map((c) => ({ id: c.id, name: c.name }))}
         accounts={accountOpts}
+        parties={partyOpts}
         months={months}
         book={active}
         category={category}
         account={account}
+        party={partyId === undefined ? undefined : String(partyId)}
         period={period}
       />
 
@@ -317,7 +344,7 @@ export default async function TransactionsPage({
             href={{
               pathname: "/dashboard/transactions",
               query: Object.fromEntries(
-                Object.entries({ book, category, account, period, review: needsReview ? undefined : "1" })
+                Object.entries({ book, category, account, party, period, review: needsReview ? undefined : "1" })
                   .filter(([, v]) => v !== undefined),
               ),
             }}
@@ -383,6 +410,7 @@ export default async function TransactionsPage({
                       contracts={contractOpts}
                       docs={docsMap.get(t.id) ?? []}
                       audit={auditMap.get(t.id)}
+                      partyAvatarVersion={t.partyId == null ? null : (avatarByParty.get(t.partyId) ?? null)}
                     />
                   ))}
                 </Fragment>
@@ -397,7 +425,7 @@ export default async function TransactionsPage({
         totalPages={totalPages}
         total={total}
         basePath="/dashboard/transactions"
-        params={{ book, category, account, period, review }}
+        params={{ book, category, account, party, period, review }}
       />
     </>
   );

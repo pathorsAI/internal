@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import {
@@ -17,6 +18,8 @@ import {
   getMonthlyTrends,
 } from "@/db/queries";
 import { TrendCharts } from "./trend-charts";
+import { SpendSection } from "./spend-section";
+import { SpendSkeleton } from "./spend-chart";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { signColor } from "@/components/amount";
 import { EmptyState } from "@/components/empty-state";
@@ -134,6 +137,11 @@ export default async function DashboardPage() {
         accounts={balances.map((a) => ({ id: a.id, name: a.name, currency: a.currency }))}
         trends={trends}
       />
+
+      {/* 支出去向：前 8 名廠商（或分類）+ 其他，可切本月 / 3 / 12 個月；點一列看該對象的交易 */}
+      <Suspense fallback={<SpendSkeleton />}>
+        <SpendSection orgId={orgId} />
+      </Suspense>
 
       {/* 收支概況：依幣別分組的收入 / 支出 / 淨額（流量，不含期初餘額） */}
       <section className="space-y-2">

@@ -14,18 +14,22 @@ import {
 export function TransactionFilters({
   categories,
   accounts,
+  parties,
   months,
   book,
   category,
   account,
+  party,
   period,
 }: Readonly<{
   categories: { id: number; name: string }[];
   accounts: { id: number; name: string }[];
+  parties: { id: number; name: string }[];
   months: string[];
   book?: string;
   category?: string;
   account?: string;
+  party?: string;
   period?: string;
 }>) {
   const t = useTranslations("transactions");
@@ -55,6 +59,10 @@ export function TransactionFilters({
     all: t("filters.account.all"),
     ...Object.fromEntries(accounts.map((a) => [String(a.id), a.name])),
   };
+  const partyItems: Record<string, string> = {
+    all: t("filters.party.all"),
+    ...Object.fromEntries(parties.map((p) => [String(p.id), p.name])),
+  };
   const monthItems: Record<string, string> = {
     all: t("filters.month.all"),
     ...Object.fromEntries(
@@ -70,6 +78,7 @@ export function TransactionFilters({
     { key: "book", value: book ?? "all", items: bookItems, w: "w-32" },
     { key: "category", value: category ?? "all", items: categoryItems, w: "w-44" },
     { key: "account", value: account ?? "all", items: accountItems, w: "w-44" },
+    { key: "party", value: party ?? "all", items: partyItems, w: "w-44" },
   ];
 
   return (

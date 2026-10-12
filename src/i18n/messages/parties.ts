@@ -47,6 +47,25 @@ const parties = {
     saving: { "zh-TW": "儲存中…", en: "Saving…" },
     saveChanges: { "zh-TW": "儲存變更", en: "Save changes" },
   },
+  avatar: {
+    choose: { "zh-TW": "上傳頭像", en: "Upload logo" },
+    replace: { "zh-TW": "更換", en: "Replace" },
+    remove: { "zh-TW": "移除", en: "Remove" },
+    undo: { "zh-TW": "復原", en: "Undo" },
+    hint: {
+      "zh-TW": "PNG、JPEG、WebP，1 MB 以內。可點擊、拖曳或直接貼上（⌘V / Ctrl+V）；會裁成正方形。",
+      en: "PNG, JPEG or WebP up to 1 MB. Click, drag & drop, or paste (⌘V / Ctrl+V); it is cropped to a square.",
+    },
+    processing: { "zh-TW": "處理中…", en: "Processing…" },
+    pendingReplace: { "zh-TW": "按「儲存變更」後套用新頭像", en: "The new logo is applied when you save changes" },
+    pendingRemove: { "zh-TW": "按「儲存變更」後移除頭像", en: "The logo is removed when you save changes" },
+    errors: {
+      empty: { "zh-TW": "這個檔案是空的", en: "That file is empty" },
+      type: { "zh-TW": "只支援 PNG、JPEG、WebP 圖片", en: "Only PNG, JPEG and WebP images are supported" },
+      tooLarge: { "zh-TW": "圖片超過 1 MB", en: "The image is larger than 1 MB" },
+      processFailed: { "zh-TW": "無法讀取這張圖片", en: "Could not read that image" },
+    },
+  },
   toast: {
     created: { "zh-TW": "已新增交易對象", en: "Counterparty added" },
     updated: { "zh-TW": "已更新", en: "Updated" },

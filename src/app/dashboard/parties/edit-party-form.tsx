@@ -4,8 +4,9 @@ import { useTranslations } from "next-intl";
 import { updateParty } from "@/db/mutations";
 import { EditForm } from "@/components/edit-form";
 import { PartyFields, type AccountOption, type PartyFormValues } from "./party-fields";
+import { PartyAvatarField } from "./party-avatar-field";
 
-type Party = PartyFormValues & { id: number };
+type Party = PartyFormValues & { id: number; avatarVersion: string | null };
 
 export function EditPartyForm({
   party,
@@ -28,6 +29,7 @@ export function EditPartyForm({
       footer={footer}
     >
       <input type="hidden" name="id" value={party.id} />
+      <PartyAvatarField partyId={party.id} name={party.name} avatarVersion={party.avatarVersion} />
       <PartyFields accounts={accounts} values={party} />
     </EditForm>
   );
