@@ -198,7 +198,7 @@ function StackTooltip({
   const total = rows.reduce((sum, r) => sum + r.v, 0);
   return (
     <div className="grid min-w-48 gap-1 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
-      <div className="font-medium">{fullLabel(String(label ?? ""))}</div>
+      <div className="font-medium">{fullLabel(typeof label === "string" ? label : "")}</div>
       {rows.map(({ s, v }) => (
         <div key={s.key} className="flex items-center gap-2">
           <span className="size-2.5 shrink-0 rounded-[2px]" style={{ background: s.color }} />
@@ -318,6 +318,21 @@ function StackChart({
 
 // ---- 選取項目：月柱 + 組成 ----
 
+/** 單一項目月柱的說明框：月份 + 金額（recharts 會 clone 並補上 active / payload / label）。 */
+function MonthAmountTooltip({
+  active,
+  payload,
+  label,
+}: Readonly<{ active?: boolean; payload?: ReadonlyArray<{ value?: unknown }>; label?: unknown }>) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="grid gap-1 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
+      <div className="font-medium">{fullLabel(typeof label === "string" ? label : "")}</div>
+      <div className="font-medium tabular-nums">{money(Number(payload[0].value))}</div>
+    </div>
+  );
+}
+
 function FocusCard({
   trend,
   item,
@@ -385,14 +400,7 @@ function FocusCard({
             <YAxis tickLine={false} axisLine={false} width={48} tickFormatter={(v: number) => compact.format(v)} />
             <ChartTooltip
               cursor={{ fill: "var(--muted)", opacity: 0.5 }}
-              content={({ active, payload, label: month }) =>
-                active && payload?.length ? (
-                  <div className="grid gap-1 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
-                    <div className="font-medium">{fullLabel(String(month ?? ""))}</div>
-                    <div className="font-medium tabular-nums">{money(Number(payload[0].value))}</div>
-                  </div>
-                ) : null
-              }
+              content={<MonthAmountTooltip />}
             />
             <ReferenceLine
               y={item.average}
