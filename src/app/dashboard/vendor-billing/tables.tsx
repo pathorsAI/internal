@@ -22,7 +22,7 @@ import {
   period,
 } from "./shared";
 
-/** 寬表格在窄螢幕橫向捲動，不把整頁撐寬。 */
+/** 寬表格在自己的容器裡橫向捲動（表格有 min-w），不把整頁撐寬。 */
 function Scroll({ children }: Readonly<{ children: React.ReactNode }>) {
   return <div className="min-w-0 overflow-x-auto">{children}</div>;
 }
@@ -38,7 +38,7 @@ export function AccountsTable({
   return (
     <TableCard>
       <Scroll>
-        <Table>
+        <Table className="min-w-[60rem]">
           <TableHeader>
             <TableRow>
               <TableHead>{t("columns.provider")}</TableHead>
@@ -144,7 +144,7 @@ export function MethodsTable({
   return (
     <TableCard>
       <Scroll>
-        <Table>
+        <Table className="min-w-[48rem]">
           <TableHeader>
             <TableRow>
               <TableHead>{t("columns.label")}</TableHead>
@@ -214,7 +214,7 @@ export function InvoicesTable({
   return (
     <TableCard>
       <Scroll>
-        <Table>
+        <Table className="min-w-[56rem]">
           <TableHeader>
             <TableRow>
               <TableHead>{t("columns.date")}</TableHead>

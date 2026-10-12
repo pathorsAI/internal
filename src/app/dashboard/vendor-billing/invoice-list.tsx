@@ -43,11 +43,11 @@ export function ProviderStatus({
 export function InvoiceTxn({ invoice }: Readonly<{ invoice: InvoiceRow }>) {
   const t = useTranslations("vendorBilling");
   if (invoice.matchedTransaction) {
-    return <span className="block truncate">{txnText(invoice.matchedTransaction)}</span>;
+    return <span className="block break-words">{txnText(invoice.matchedTransaction)}</span>;
   }
   if (invoice.suggestedTransaction) {
     return (
-      <span className="block truncate text-sky-700 dark:text-sky-400">
+      <span className="block break-words text-sky-700 dark:text-sky-400">
         {t("cell.suggestedTxn", { txn: txnText(invoice.suggestedTransaction) })}
       </span>
     );
@@ -221,9 +221,9 @@ export function InvoiceList({
     <ul className="divide-y">
       {invoices.map((inv) => (
         <li key={inv.id} className="space-y-1.5 py-2.5">
-          <div className="flex items-baseline gap-3">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
             <span className="font-medium">{inv.externalRef}</span>
-            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+            <span className="min-w-0 flex-1 text-xs text-muted-foreground tabular-nums">
               {day(inv.invoiceDate)}
               {inv.periodStart || inv.periodEnd ? ` · ${period(inv.periodStart, inv.periodEnd)}` : ""}
             </span>
@@ -232,7 +232,8 @@ export function InvoiceList({
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <ProviderStatus invoice={inv} today={today} empty={null} />
             <MatchChip status={inv.matchStatus} />
-            <span className="min-w-0 flex-1 text-xs">
+            {/* 交易說明至少 12rem，太窄時整段換到下一行而不是被截斷 */}
+            <span className="min-w-48 flex-1 text-xs">
               <InvoiceTxn invoice={inv} />
             </span>
             {canManage ? <InvoiceActions invoice={inv} onChanged={onChanged} /> : null}

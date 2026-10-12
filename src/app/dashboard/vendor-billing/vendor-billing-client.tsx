@@ -38,7 +38,7 @@ function Segmented<T extends string>({
   label,
 }: Readonly<{ value: T; options: readonly { value: T; label: string }[]; onChange: (v: T) => void; label: string }>) {
   return (
-    <div role="group" aria-label={label} className="inline-flex rounded-md border bg-muted/40 p-0.5">
+    <div role="group" aria-label={label} className="inline-flex max-w-full flex-wrap rounded-md border bg-muted/40 p-0.5">
       {options.map((o) => (
         <button
           key={o.value}
@@ -120,7 +120,7 @@ function InvoiceToolbar({
 }>) {
   const t = useTranslations("vendorBilling");
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
       <Segmented
         label={t("columns.matchStatus")}
         value={filter}
@@ -266,7 +266,7 @@ export function VendorBillingClient({
         }}
       />
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
         <Segmented
           label={t("title")}
           value={view}

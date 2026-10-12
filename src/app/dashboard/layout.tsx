@@ -42,7 +42,8 @@ export default async function DashboardLayout({
           initialOrganizations={initialOrganizations}
           initialActiveOrgId={initialActiveOrgId}
         />
-        <SidebarInset>
+        {/* min-w-0：SidebarInset 是 flex 子項，沒有它寬表格會把整頁撐寬（表格應在自己的容器裡捲動） */}
+        <SidebarInset className="min-w-0">
           <header className="sticky top-0 z-20 flex h-16 shrink-0 items-center gap-2 border-b bg-background px-4">
             <SidebarTrigger className="-ml-1" />
             <Separator

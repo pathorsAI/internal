@@ -223,7 +223,7 @@ export function PaymentMethodSheet({
   return (
     <>
       <Sheet open={open} onOpenChange={requestClose}>
-        <SheetContent className="w-full data-[side=right]:sm:max-w-xl">
+        <SheetContent className="w-full sm:max-w-xl">
           <MethodHeader row={creating ? undefined : row} synced={synced} today={today} />
 
           <form onSubmit={save} className="flex min-h-0 flex-1 flex-col" autoComplete="off">

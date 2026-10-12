@@ -571,7 +571,7 @@ export function AccountSheet({
   return (
     <>
       <Sheet open={open} onOpenChange={requestClose}>
-        <SheetContent className="w-full data-[side=right]:sm:max-w-3xl">
+        <SheetContent className="w-full sm:max-w-3xl">
           <AccountHeader
             row={row}
             creating={creating}
