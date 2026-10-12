@@ -190,6 +190,8 @@ function attentionText(a: AttentionItem): string {
       return `付款卡 ${a.label} ${a.daysLeft} 天後到期`;
     case "no_payment_method":
       return "沒有設定付款方式";
+    case "duplicate_cards":
+      return `多張卡資料相同（${a.card}），請合併`;
     case "stale_verification":
       return a.days === null ? "手動登記的資料從未確認過" : `手動登記的資料 ${a.days} 天沒確認`;
     case "invoice_unmatched":
@@ -465,7 +467,7 @@ export const vendorBillingTools: Record<string, ToolDef> = {
 
   resolve_vendor_invoice: {
     description:
-      "Resolve one cloud invoice's reconciliation (owner/admin only). action: confirm = accept the suggested ledger transaction; link = link to transactionId (look it up with list_transactions; several invoices may share one transaction); unlink = back to unmatched (a transaction created earlier is NOT deleted); ignore = stop reconciling it; create = create a needs-review expense for it now (party = the account's party, from the payment method's settles-from account, book internal). Show the user what will happen and get confirmation before create.",
+      "Resolve one cloud invoice's reconciliation (owner/admin only). action: confirm = accept the suggested ledger transaction; link = link to transactionId (look it up with list_transactions; several invoices may share one transaction); unlink = back to unmatched and remember that transaction as rejected so auto-matching never links it to this invoice again — other candidates can still match; linking it manually later is allowed (a transaction created earlier is NOT deleted); ignore = stop reconciling it; create = create a needs-review expense for it now (party = the account's party, from the payment method's settles-from account, book internal). Show the user what will happen and get confirmation before create.",
     inputSchema: {
       type: "object",
       properties: {

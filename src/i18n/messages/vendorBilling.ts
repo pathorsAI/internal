@@ -67,6 +67,10 @@ const vendorBilling = {
     cardExpired: { "zh-TW": "{label} 已過期", en: "{label} has expired" },
     cardExpiring: { "zh-TW": "{label} {days} 天後到期", en: "{label} expires in {days} days" },
     noPaymentMethod: { "zh-TW": "{label} 沒有付款方式", en: "{label} has no payment method" },
+    duplicateCards: {
+      "zh-TW": "{label}：多張卡資料相同（{card}），請合併",
+      en: "{label}: several cards have the same details ({card}); merge them",
+    },
     staleVerification: { "zh-TW": "{label} {days} 天未確認", en: "{label} not verified for {days} days" },
     neverVerified: { "zh-TW": "{label} 從未確認", en: "{label} never verified" },
     invoiceUnmatched: {

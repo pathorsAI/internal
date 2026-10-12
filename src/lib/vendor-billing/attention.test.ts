@@ -65,3 +65,16 @@ describe("attention list", () => {
     expect(items.filter((i) => i.kind === "resource_missing").map((i) => ("resourceId" in i ? i.resourceId : 0))).toEqual([100]);
   });
 });
+
+test("several identical manual cards for a synced card → 請合併, instead of 'no payment method'", () => {
+  const items = computeAttention({
+    today,
+    paymentMethods: [],
+    accounts: [
+      { id: 1, displayName: "鄭宇傑（國泰）", provider: "azure", source: "synced", status: "active", paymentMethodId: null, lastVerifiedAt: null, updatedAt: "2026-10-01 00:00:00+00", cardConflict: "MasterCard •2579" },
+    ],
+    resources: [],
+    invoices: [],
+  });
+  expect(items).toEqual([{ kind: "duplicate_cards", billingAccountId: 1, label: "鄭宇傑（國泰）", card: "MasterCard •2579" }]);
+});

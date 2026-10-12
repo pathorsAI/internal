@@ -35,6 +35,8 @@ function itemText(item: AttentionItem, t: VbT, providerOf: (accountId: number) =
       return t("attention.cardExpiring", { label: item.label, days: item.daysLeft });
     case "no_payment_method":
       return t("attention.noPaymentMethod", { label: item.label });
+    case "duplicate_cards":
+      return t("attention.duplicateCards", { label: item.label, card: item.card });
     case "stale_verification":
       return item.days === null
         ? t("attention.neverVerified", { label: item.label })

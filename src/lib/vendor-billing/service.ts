@@ -11,7 +11,7 @@ import {
   vendorCostLines,
   vendorInvoices,
 } from "@/db/schema";
-import { matchPartiesOf, parseMatchPartyIds } from "./account-meta";
+import { matchPartiesOf, parseMatchPartyIds, parseRejectedTransactionIds, withRejected } from "./account-meta";
 import { computeAttention, type AttentionItem } from "./attention";
 import { assertOrgRefs, billingAccountRefs, invoiceResolutionRefs, paymentMethodRefs } from "./guards";
 import {
@@ -480,6 +480,7 @@ export async function getAttention(orgId: string, today = taipeiToday()): Promis
         paymentMethodId: vendorBillingAccounts.paymentMethodId,
         lastVerifiedAt: vendorBillingAccounts.lastVerifiedAt,
         updatedAt: vendorBillingAccounts.updatedAt,
+        meta: vendorBillingAccounts.meta,
       })
       .from(vendorBillingAccounts)
       .where(and(eq(vendorBillingAccounts.organizationId, orgId), isNull(vendorBillingAccounts.deletedAt))),
@@ -503,7 +504,10 @@ export async function getAttention(orgId: string, today = taipeiToday()): Promis
   return computeAttention({
     today,
     paymentMethods: pms,
-    accounts,
+    accounts: accounts.map(({ meta, ...a }) => ({
+      ...a,
+      cardConflict: typeof meta?.paymentMethodConflict === "string" ? meta.paymentMethodConflict : null,
+    })),
     resources: resources.filter((r) => live.has(r.billingAccountId)),
     invoices: invoices
       .filter((i) => live.has(i.billingAccountId))
@@ -692,8 +696,9 @@ export async function deletePaymentMethod(orgId: string, id: number): Promise<vo
 /**
  * 人工處理一張帳單：
  *   confirm  採用建議的交易（→ manual）
- *   link     綁到指定交易（同組織、未刪除；多張帳單可以綁同一筆 → manual）
- *   unlink   解除綁定（→ unmatched；之前新建的交易不會被刪）
+ *   link     綁到指定交易（同組織、未刪除；多張帳單可以綁同一筆 → manual）；拒絕清單裡有它就拿掉
+ *   unlink   解除綁定（→ unmatched；之前新建的交易不會被刪）。解除的交易（與當時的建議）記進
+ *            meta.rejectedTransactionIds，之後不會再自動配回這張帳單；別的候選照樣可以自動配。
  *   ignore   不對帳（→ ignored）
  *   create   立刻新建一筆待確認支出並綁上（→ created）；需要帳號有交易對象
  */
@@ -714,6 +719,10 @@ export async function resolveVendorInvoice(
   if (!row) throw new VendorBillingInputError(`找不到帳單 ${invoiceId}`);
   const { inv, account } = row;
   const where = and(eq(vendorInvoices.id, invoiceId), eq(vendorInvoices.organizationId, orgId));
+  const rejected = parseRejectedTransactionIds(inv.meta);
+  /** meta 只合併 rejectedTransactionIds 這個鍵。 */
+  const rejectedMeta = (ids: number[]) =>
+    sql`${vendorInvoices.meta} || ${JSON.stringify({ rejectedTransactionIds: ids })}::jsonb`;
 
   switch (action) {
     case "confirm": {
@@ -729,6 +738,7 @@ export async function resolveVendorInvoice(
           matchedTransactionId: inv.suggestedTransactionId,
           suggestedTransactionId: null,
           matchedAt: sql`now()`,
+          meta: rejectedMeta(withRejected(rejected, [], inv.suggestedTransactionId)),
           updatedAt: sql`now()`,
         })
         .where(where);
@@ -743,6 +753,7 @@ export async function resolveVendorInvoice(
           matchedTransactionId: transactionId,
           suggestedTransactionId: null,
           matchedAt: sql`now()`,
+          meta: rejectedMeta(withRejected(rejected, [], transactionId)),
           updatedAt: sql`now()`,
         })
         .where(where);
@@ -756,6 +767,7 @@ export async function resolveVendorInvoice(
           matchedTransactionId: null,
           suggestedTransactionId: null,
           matchedAt: null,
+          meta: rejectedMeta(withRejected(rejected, [inv.matchedTransactionId, inv.suggestedTransactionId])),
           updatedAt: sql`now()`,
         })
         .where(where);

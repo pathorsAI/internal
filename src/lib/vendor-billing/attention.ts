@@ -4,6 +4,7 @@ import { daysBetween, MATCH_WINDOW_DAYS, type MatchStatus } from "./match";
 //
 //   - 卡（card / wise_card）90 天內到期或已過期
 //   - 使用中的計費帳號沒有付款方式
+//   - Azure 同步到的卡跟多張手動卡資料相同（不知道該收編哪一張），請人合併
 //   - 手動登記的帳號超過 180 天沒人確認（或從沒確認過）
 //   - 發票日超過 45 天仍沒對到交易（unmatched / suggested）
 //   - 平台說帳單逾期未付（Azure status OverDue / PastDue，或發票日過了 30 天還有 amountDue）
@@ -50,6 +51,8 @@ export type AttentionAccount = {
   paymentMethodId: number | null;
   /** ISO 時間或 null */
   lastVerifiedAt: string | null;
+  /** 同步時卡片對到多張相同的手動卡（meta.paymentMethodConflict，卡的名稱）。 */
+  cardConflict?: string | null;
   updatedAt: string;
 };
 
@@ -79,6 +82,7 @@ export type AttentionInvoice = {
 export type AttentionItem =
   | { kind: "card_expired" | "card_expiring"; paymentMethodId: number; label: string; daysLeft: number }
   | { kind: "no_payment_method"; billingAccountId: number; label: string }
+  | { kind: "duplicate_cards"; billingAccountId: number; label: string; card: string }
   | { kind: "stale_verification"; billingAccountId: number; label: string; days: number | null }
   | { kind: "invoice_unmatched"; invoiceId: number; billingAccountId: number; label: string; days: number }
   | {
@@ -151,7 +155,9 @@ function changedRecently(updatedAt: string, today: string): boolean {
 
 function accountItems(today: string, a: AttentionAccount): AttentionItem[] {
   const out: AttentionItem[] = [];
-  if (a.status === "active" && a.paymentMethodId === null) {
+  if (a.cardConflict) {
+    out.push({ kind: "duplicate_cards", billingAccountId: a.id, label: a.displayName, card: a.cardConflict });
+  } else if (a.status === "active" && a.paymentMethodId === null) {
     out.push({ kind: "no_payment_method", billingAccountId: a.id, label: a.displayName });
   }
   if (a.status === "active" && a.source === "manual") {

@@ -29,6 +29,7 @@ import {
   type GcpProjectInfo,
 } from "@/lib/integrations/gcp";
 import { updateConfig } from "@/lib/integrations/store";
+import { planCardSync, type ExistingPaymentMethod } from "./card-dedupe";
 import { reconcileVendorInvoices, type ReconcileResult } from "./reconcile";
 import {
   filterAllowlisted,
@@ -57,8 +58,9 @@ import {
  * - 計費帳號以 (org, provider, external_id) upsert；勾選了但平台上找不到 → missing，不刪。
  * - 資源以 (帳號, external_id) upsert；這次沒出現的 → missing。updated_at 只在狀態改變時更新
  *   （「最近變成 missing」的提醒靠它）。
- * - 付款卡（只有 Azure 讀得到）以 (org, 'azure', payment method id) upsert；帳號的付款方式
- *   只在「沒設」或「原本就是同步來的」時才改，不覆寫人工指定的。
+ * - 付款卡（只有 Azure 讀得到）以 (org, 'azure', payment method id) upsert；沒有的話先收編唯一一張
+ *   資料相同的手動卡（card-dedupe.ts）。帳號的付款方式只在「沒設」或「原本就是同步來的」時才改，
+ *   不覆寫人工指定的。
  * - 發票以 (org, source, external_ref) upsert，只更新金額 / 狀態 / 日期，不動對帳欄位。
  * - 費用明細以 (帳號, 月, 資源, 服務, source) upsert，覆寫金額。純分析，不進帳本。
  * 外部錯誤：憑證被拒 → 整合標 needs_reauth（由 withAzureClient / withGcpClient 處理）並往外丟；
@@ -371,57 +373,76 @@ async function upsertCostLines(
 // Azure
 // ---------------------------------------------------------------------------
 
-/**
- * 付款卡 upsert，並在帳號還沒指定付款方式（或原本就是同步來的）時把它設上去。
- * 同一個 profile 有多張卡時優先選 status = active 的第一張。
- */
-async function syncAzurePaymentMethods(
-  db: Db,
-  orgId: string,
-  billingAccountId: number,
-  links: ParsedPaymentMethod[],
-): Promise<number> {
-  if (links.length === 0) return 0;
-  const ids: number[] = [];
-  for (const pm of links) {
-    const [row] = await db
-      .insert(paymentMethods)
-      .values({
-        organizationId: orgId,
+async function upsertAzureCard(db: Db, orgId: string, pm: ParsedPaymentMethod): Promise<number> {
+  const [row] = await db
+    .insert(paymentMethods)
+    .values({
+      organizationId: orgId,
+      kind: pm.kind,
+      label: pm.label,
+      brand: pm.brand,
+      last4: pm.last4,
+      expiryMonth: pm.expiryMonth,
+      expiryYear: pm.expiryYear,
+      holderName: pm.holderName,
+      source: "azure",
+      externalRef: pm.externalRef,
+    })
+    .onConflictDoUpdate({
+      target: [paymentMethods.organizationId, paymentMethods.source, paymentMethods.externalRef],
+      targetWhere: sql`external_ref IS NOT NULL`,
+      // 名稱可能被人改過，不覆寫；卡的事實（卡別、末四碼、到期、持卡人）以 Azure 為準
+      set: {
         kind: pm.kind,
-        label: pm.label,
         brand: pm.brand,
         last4: pm.last4,
         expiryMonth: pm.expiryMonth,
         expiryYear: pm.expiryYear,
         holderName: pm.holderName,
-        source: "azure",
-        externalRef: pm.externalRef,
-      })
-      .onConflictDoUpdate({
-        target: [paymentMethods.organizationId, paymentMethods.source, paymentMethods.externalRef],
-        targetWhere: sql`external_ref IS NOT NULL`,
-        // 名稱可能被人改過，不覆寫；卡的事實（卡別、末四碼、到期、持卡人）以 Azure 為準
-        set: {
-          kind: pm.kind,
-          brand: pm.brand,
-          last4: pm.last4,
-          expiryMonth: pm.expiryMonth,
-          expiryYear: pm.expiryYear,
-          holderName: pm.holderName,
-          deletedAt: null,
-          updatedAt: sql`now()`,
-        },
-      })
-      .returning({ id: paymentMethods.id });
-    ids.push(row.id);
-  }
-  const preferred = links.findIndex((l) => (l.status ?? "").toLowerCase() === "active");
-  const pick = ids[preferred >= 0 ? preferred : 0];
-  // 只在沒設、或目前指向的是非手動的付款方式時才改
+        deletedAt: null,
+        updatedAt: sql`now()`,
+      },
+    })
+    .returning({ id: paymentMethods.id });
+  return row.id;
+}
+
+/** 收編人工建立的同一張卡：改成同步來源並填上 Azure id；名稱、扣款帳戶、備註保留。 */
+async function adoptManualCard(db: Db, orgId: string, id: number, pm: ParsedPaymentMethod): Promise<number> {
+  await db
+    .update(paymentMethods)
+    .set({
+      source: "azure",
+      externalRef: pm.externalRef,
+      brand: pm.brand,
+      holderName: pm.holderName,
+      updatedAt: sql`now()`,
+    })
+    .where(and(eq(paymentMethods.id, id), eq(paymentMethods.organizationId, orgId), isNull(paymentMethods.externalRef)));
+  return id;
+}
+
+async function loadOrgPaymentMethods(db: Db, orgId: string): Promise<ExistingPaymentMethod[]> {
+  return db
+    .select({
+      id: paymentMethods.id,
+      kind: paymentMethods.kind,
+      source: paymentMethods.source,
+      externalRef: paymentMethods.externalRef,
+      brand: paymentMethods.brand,
+      last4: paymentMethods.last4,
+      expiryMonth: paymentMethods.expiryMonth,
+      expiryYear: paymentMethods.expiryYear,
+    })
+    .from(paymentMethods)
+    .where(and(eq(paymentMethods.organizationId, orgId), isNull(paymentMethods.deletedAt)));
+}
+
+/** 帳號的付款方式只在「沒設」或「原本就不是手動指定」時改。 */
+async function linkAccountPaymentMethod(db: Db, orgId: string, billingAccountId: number, pmId: number): Promise<void> {
   await db
     .update(vendorBillingAccounts)
-    .set({ paymentMethodId: pick, updatedAt: sql`${vendorBillingAccounts.updatedAt}` })
+    .set({ paymentMethodId: pmId, updatedAt: sql`${vendorBillingAccounts.updatedAt}` })
     .where(
       and(
         eq(vendorBillingAccounts.id, billingAccountId),
@@ -432,6 +453,49 @@ async function syncAzurePaymentMethods(
         ))`,
       ),
     );
+}
+
+/** 「多張卡資料相同」的提醒存在帳號 meta（有衝突就寫、解了就清掉）。 */
+async function setCardConflict(db: Db, orgId: string, billingAccountId: number, label: string | null): Promise<void> {
+  await db
+    .update(vendorBillingAccounts)
+    .set({
+      meta: sql`${vendorBillingAccounts.meta} || ${JSON.stringify({ paymentMethodConflict: label })}::jsonb`,
+    })
+    .where(and(eq(vendorBillingAccounts.id, billingAccountId), eq(vendorBillingAccounts.organizationId, orgId)));
+}
+
+/**
+ * 付款卡同步（見 card-dedupe.ts）：同 Azure id → 更新；否則收編唯一一張相同的手動卡；
+ * 沒有就新建；多張相同 → 不新建、不綁，記下衝突給頁面提醒。
+ * 帳號優先綁 status = active 的那張。
+ */
+async function syncAzurePaymentMethods(
+  db: Db,
+  orgId: string,
+  billingAccountId: number,
+  links: ParsedPaymentMethod[],
+): Promise<number> {
+  if (links.length === 0) return 0;
+  const existing = await loadOrgPaymentMethods(db, orgId);
+  const resolved: { id: number; active: boolean }[] = [];
+  let conflict: string | null = null;
+  for (const pm of links) {
+    const plan = planCardSync(pm, existing);
+    if (plan.action === "conflict") {
+      conflict = pm.label;
+      continue;
+    }
+    const id = plan.action === "adopt" ? await adoptManualCard(db, orgId, plan.id, pm) : await upsertAzureCard(db, orgId, pm);
+    // 同一次同步裡後面的卡要看到最新狀態（收編過的卡不能再被收編一次）
+    const known = existing.find((e) => e.id === id);
+    if (known) Object.assign(known, { source: "azure", externalRef: pm.externalRef });
+    else existing.push({ id, kind: pm.kind, source: "azure", externalRef: pm.externalRef, brand: pm.brand, last4: pm.last4, expiryMonth: pm.expiryMonth, expiryYear: pm.expiryYear });
+    resolved.push({ id, active: (pm.status ?? "").toLowerCase() === "active" });
+  }
+  await setCardConflict(db, orgId, billingAccountId, conflict);
+  const pick = resolved.find((r) => r.active) ?? resolved[0];
+  if (pick && conflict === null) await linkAccountPaymentMethod(db, orgId, billingAccountId, pick.id);
   return links.length;
 }
 
