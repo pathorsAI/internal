@@ -37,16 +37,143 @@ export type CloudScopeView = {
     | null;
 };
 
+type IntegrationsT = ReturnType<typeof useTranslations<"integrations">>;
+type BigQueryInput = { projectId: string; dataset: string };
+
+function isDirty(view: CloudScopeView, selected: string[], bq: BigQueryInput): boolean {
+  if (selected.length !== view.selected.length || selected.some((id) => !view.selected.includes(id))) return true;
+  if (view.provider !== "gcp") return false;
+  return bq.projectId !== (view.bigQuery?.projectId ?? "") || bq.dataset !== (view.bigQuery?.dataset ?? "");
+}
+
+function ScopeMeta({ view, t }: Readonly<{ view: CloudScopeView; t: IntegrationsT }>) {
+  const auth = view.auth;
+  return (
+    <div className="space-y-1 text-xs text-muted-foreground">
+      {view.billingAccountId ? <p className="break-all">{t("scope.billingAccount", { id: view.billingAccountId })}</p> : null}
+      {auth?.mode === "key" && auth.email ? <p className="break-all">{t("scope.auth.key", { email: auth.email })}</p> : null}
+      {auth?.mode === "workload_identity" && auth.email ? (
+        <p className="break-all">{t("scope.auth.workloadIdentity", { email: auth.email })}</p>
+      ) : null}
+      {view.discoveredAt ? <p>{t("scope.discoveredAt", { date: view.discoveredAt })}</p> : null}
+    </div>
+  );
+}
+
+/** Workload identity：本組織的 subject 與給 GCP 管理員的綁定指令。 */
+function WorkloadIdentityBox({
+  subject,
+  command,
+  t,
+}: Readonly<{ subject: string; command: string | null; t: IntegrationsT }>) {
+  return (
+    <div className="space-y-2 rounded-md border p-3 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-muted-foreground">{t("scope.auth.subject")}</span>
+        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{subject}</code>
+      </div>
+      {command ? (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-muted-foreground">{t("scope.auth.command")}</span>
+            <CopyButton value={command} />
+          </div>
+          <pre className="overflow-x-auto rounded bg-muted p-2 text-xs whitespace-pre-wrap break-all">{command}</pre>
+        </div>
+      ) : (
+        <p className="text-xs text-amber-600">{t("scope.auth.invalid")}</p>
+      )}
+    </div>
+  );
+}
+
+function CandidateRow({
+  provider,
+  candidate,
+  checked,
+  disabled,
+  onToggle,
+  t,
+}: Readonly<{
+  provider: string;
+  candidate: CloudScopeCandidate;
+  checked: boolean;
+  disabled: boolean;
+  onToggle: (id: string, on: boolean) => void;
+  t: IntegrationsT;
+}>) {
+  const id = `scope-${provider}-${candidate.id}`;
+  return (
+    <li className="flex items-start gap-3 px-3 py-2.5">
+      <input
+        id={id}
+        type="checkbox"
+        className="mt-1 size-4 accent-primary"
+        checked={checked}
+        onChange={(e) => onToggle(candidate.id, e.target.checked)}
+        disabled={disabled}
+      />
+      <label htmlFor={id} className="min-w-0 flex-1 cursor-pointer">
+        <span className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
+          {candidate.displayName}
+          {candidate.currency ? <Badge variant="outline">{candidate.currency}</Badge> : null}
+          {candidate.reseller ? <Badge variant="secondary">{t("scope.reseller")}</Badge> : null}
+          {candidate.closed ? <Badge variant="outline">{t("scope.closed")}</Badge> : null}
+        </span>
+        <span className="block truncate text-xs text-muted-foreground">{candidate.id}</span>
+      </label>
+    </li>
+  );
+}
+
+function BigQueryInputs({
+  value,
+  onChange,
+  disabled,
+  t,
+}: Readonly<{ value: BigQueryInput; onChange: (v: BigQueryInput) => void; disabled: boolean; t: IntegrationsT }>) {
+  return (
+    <div className="space-y-2">
+      <p className="text-sm font-medium">{t("scope.bigQuery.title")}</p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="gcp-bq-project">{t("scope.bigQuery.projectId")}</Label>
+          <Input
+            id="gcp-bq-project"
+            value={value.projectId}
+            onChange={(e) => onChange({ ...value, projectId: e.target.value })}
+            disabled={disabled}
+            spellCheck={false}
+            placeholder="internal-498514"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="gcp-bq-dataset">{t("scope.bigQuery.dataset")}</Label>
+          <Input
+            id="gcp-bq-dataset"
+            value={value.dataset}
+            onChange={(e) => onChange({ ...value, dataset: e.target.value })}
+            disabled={disabled}
+            spellCheck={false}
+            placeholder="billing_export"
+          />
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">{t("scope.bigQuery.hint")}</p>
+    </div>
+  );
+}
+
 export function CloudBillingScopeSection({ view, canManage }: Readonly<{ view: CloudScopeView; canManage: boolean }>) {
   const t = useTranslations("integrations");
   const [pending, start] = useTransition();
   const [selected, setSelected] = useState<string[]>(view.selected);
-  const [bq, setBq] = useState({ projectId: view.bigQuery?.projectId ?? "", dataset: view.bigQuery?.dataset ?? "" });
-  const dirty =
-    selected.length !== view.selected.length ||
-    selected.some((id) => !view.selected.includes(id)) ||
-    (view.provider === "gcp" &&
-      (bq.projectId !== (view.bigQuery?.projectId ?? "") || bq.dataset !== (view.bigQuery?.dataset ?? "")));
+  const [bq, setBq] = useState<BigQueryInput>({
+    projectId: view.bigQuery?.projectId ?? "",
+    dataset: view.bigQuery?.dataset ?? "",
+  });
+  const dirty = isDirty(view, selected, bq);
+  const locked = !canManage || pending;
 
   function toggle(id: string, on: boolean) {
     setSelected((prev) => (on ? [...prev, id] : prev.filter((x) => x !== id)));
@@ -83,98 +210,29 @@ export function CloudBillingScopeSection({ view, canManage }: Readonly<{ view: C
       <CardContent className="space-y-4">
         <p className="max-w-prose text-sm text-muted-foreground">{t("scope.description")}</p>
         {canManage ? null : <p className="text-xs text-muted-foreground">{t("scope.readOnly")}</p>}
-
-        <div className="space-y-1 text-xs text-muted-foreground">
-          {view.billingAccountId ? <p className="break-all">{t("scope.billingAccount", { id: view.billingAccountId })}</p> : null}
-          {auth?.mode === "key" && auth.email ? <p className="break-all">{t("scope.auth.key", { email: auth.email })}</p> : null}
-          {auth?.mode === "workload_identity" && auth.email ? (
-            <p className="break-all">{t("scope.auth.workloadIdentity", { email: auth.email })}</p>
-          ) : null}
-          {view.discoveredAt ? <p>{t("scope.discoveredAt", { date: view.discoveredAt })}</p> : null}
-        </div>
-
-        {auth?.mode === "workload_identity" ? (
-          <div className="space-y-2 rounded-md border p-3 text-sm">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-muted-foreground">{t("scope.auth.subject")}</span>
-              <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{auth.subject}</code>
-            </div>
-            {auth.command ? (
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-muted-foreground">{t("scope.auth.command")}</span>
-                  <CopyButton value={auth.command} />
-                </div>
-                <pre className="overflow-x-auto rounded bg-muted p-2 text-xs whitespace-pre-wrap break-all">{auth.command}</pre>
-              </div>
-            ) : (
-              <p className="text-xs text-amber-600">{t("scope.auth.invalid")}</p>
-            )}
-          </div>
-        ) : null}
+        <ScopeMeta view={view} t={t} />
+        {auth?.mode === "workload_identity" ? <WorkloadIdentityBox subject={auth.subject} command={auth.command} t={t} /> : null}
 
         {view.candidates.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t("scope.noCandidates")}</p>
         ) : (
           <ul className="divide-y rounded-md border">
-            {view.candidates.map((c) => {
-              const id = `scope-${view.provider}-${c.id}`;
-              return (
-                <li key={c.id} className="flex items-start gap-3 px-3 py-2.5">
-                  <input
-                    id={id}
-                    type="checkbox"
-                    className="mt-1 size-4 accent-primary"
-                    checked={selected.includes(c.id)}
-                    onChange={(e) => toggle(c.id, e.target.checked)}
-                    disabled={!canManage || pending}
-                  />
-                  <label htmlFor={id} className="min-w-0 flex-1 cursor-pointer">
-                    <span className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
-                      {c.displayName}
-                      {c.currency ? <Badge variant="outline">{c.currency}</Badge> : null}
-                      {c.reseller ? <Badge variant="secondary">{t("scope.reseller")}</Badge> : null}
-                      {c.closed ? <Badge variant="outline">{t("scope.closed")}</Badge> : null}
-                    </span>
-                    <span className="block truncate text-xs text-muted-foreground">{c.id}</span>
-                  </label>
-                </li>
-              );
-            })}
+            {view.candidates.map((c) => (
+              <CandidateRow
+                key={c.id}
+                provider={view.provider}
+                candidate={c}
+                checked={selected.includes(c.id)}
+                disabled={locked}
+                onToggle={toggle}
+                t={t}
+              />
+            ))}
           </ul>
         )}
         {selected.length === 0 ? <p className="text-xs text-amber-600">{t("scope.empty")}</p> : null}
 
-        {view.provider === "gcp" ? (
-          <div className="space-y-2">
-            <p className="text-sm font-medium">{t("scope.bigQuery.title")}</p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="gcp-bq-project">{t("scope.bigQuery.projectId")}</Label>
-                <Input
-                  id="gcp-bq-project"
-                  value={bq.projectId}
-                  onChange={(e) => setBq((p) => ({ ...p, projectId: e.target.value }))}
-                  disabled={!canManage || pending}
-                  spellCheck={false}
-                  placeholder="internal-498514"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="gcp-bq-dataset">{t("scope.bigQuery.dataset")}</Label>
-                <Input
-                  id="gcp-bq-dataset"
-                  value={bq.dataset}
-                  onChange={(e) => setBq((p) => ({ ...p, dataset: e.target.value }))}
-                  disabled={!canManage || pending}
-                  spellCheck={false}
-                  placeholder="billing_export"
-                />
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground">{t("scope.bigQuery.hint")}</p>
-          </div>
-        ) : null}
+        {view.provider === "gcp" ? <BigQueryInputs value={bq} onChange={setBq} disabled={locked} t={t} /> : null}
 
         {canManage ? (
           <div className="flex flex-wrap items-center justify-end gap-2">
