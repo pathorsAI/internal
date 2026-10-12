@@ -134,6 +134,82 @@ function LabelTick({
   );
 }
 
+/** 滑過長條時的說明框（recharts 會以 element 的形式 clone 並補上 active / payload）。 */
+function SpendTooltip({
+  active,
+  payload,
+  groupBy,
+  percent,
+}: Readonly<{
+  active?: boolean;
+  payload?: ReadonlyArray<{ payload?: unknown }>;
+  groupBy: SpendGroupBy;
+  percent: Intl.NumberFormat;
+}>) {
+  const t = useTranslations("dashboard.spend");
+  const row = active ? (payload?.[0]?.payload as Row | undefined) : undefined;
+  if (!row) return null;
+  return (
+    <div className="grid min-w-40 gap-1 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
+      <div className="font-medium">{row.label}</div>
+      <div className="flex justify-between gap-4">
+        <span className="text-muted-foreground">{t("tooltip.amount")}</span>
+        <span className="font-medium tabular-nums">{money(row.total)}</span>
+      </div>
+      <div className="flex justify-between gap-4">
+        <span className="text-muted-foreground">{t("tooltip.share")}</span>
+        <span className="font-medium tabular-nums">{percent.format(row.share)}</span>
+      </div>
+      <div className="flex justify-between gap-4">
+        <span className="text-muted-foreground">{t("tooltip.count")}</span>
+        <span className="font-medium tabular-nums">{row.count}</span>
+      </div>
+      {row.kind === "other" ? (
+        <div className="text-muted-foreground">
+          {groupBy === "party"
+            ? t("tooltip.otherParties", { count: row.members })
+            : t("tooltip.otherCategories", { count: row.members })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** 長條右側的「金額 · 占比」。自己畫 <text>：內建的 label 會依剩餘寬度自動換行，金額與占比被拆成兩行。 */
+function ValueLabel({
+  x,
+  y,
+  width,
+  height,
+  value,
+  total,
+  percent,
+  format,
+}: Readonly<{
+  x?: number | string;
+  y?: number | string;
+  width?: number | string;
+  height?: number | string;
+  value?: number | string;
+  total: number;
+  percent: Intl.NumberFormat;
+  format: (n: number) => string;
+}>) {
+  const n = Number(value);
+  const share = total > 0 ? n / total : 0;
+  return (
+    <text
+      x={Number(x) + Number(width) + 8}
+      y={Number(y) + Number(height) / 2}
+      dominantBaseline="central"
+      className="fill-foreground text-xs tabular-nums"
+    >
+      {format(n)}
+      <tspan className="fill-muted-foreground"> · {percent.format(share)}</tspan>
+    </text>
+  );
+}
+
 export function SpendChart({
   months,
   rows,
@@ -215,38 +291,11 @@ export function SpendChart({
                   tickLine={false}
                   axisLine={false}
                   interval={0}
-                  tick={(props) => <LabelTick {...props} rows={byKey} groupBy={groupBy} width={labelWidth} />}
+                  tick={<LabelTick rows={byKey} groupBy={groupBy} width={labelWidth} />}
                 />
                 <ChartTooltip
                   cursor={{ fill: "var(--muted)", opacity: 0.5 }}
-                  content={({ active, payload }) => {
-                    const row = active ? (payload?.[0]?.payload as Row | undefined) : undefined;
-                    if (!row) return null;
-                    return (
-                      <div className="grid min-w-40 gap-1 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
-                        <div className="font-medium">{row.label}</div>
-                        <div className="flex justify-between gap-4">
-                          <span className="text-muted-foreground">{t("tooltip.amount")}</span>
-                          <span className="font-medium tabular-nums">{money(row.total)}</span>
-                        </div>
-                        <div className="flex justify-between gap-4">
-                          <span className="text-muted-foreground">{t("tooltip.share")}</span>
-                          <span className="font-medium tabular-nums">{percent.format(row.share)}</span>
-                        </div>
-                        <div className="flex justify-between gap-4">
-                          <span className="text-muted-foreground">{t("tooltip.count")}</span>
-                          <span className="font-medium tabular-nums">{row.count}</span>
-                        </div>
-                        {row.kind === "other" ? (
-                          <div className="text-muted-foreground">
-                            {groupBy === "party"
-                              ? t("tooltip.otherParties", { count: row.members })
-                              : t("tooltip.otherCategories", { count: row.members })}
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  }}
+                  content={<SpendTooltip groupBy={groupBy} percent={percent} />}
                 />
                 <Bar
                   dataKey="total"
@@ -266,21 +315,7 @@ export function SpendChart({
                   <LabelList
                     dataKey="total"
                     // 自己畫 <text>：內建的 label 會依剩餘寬度自動換行，金額與占比被拆成兩行
-                    content={(props) => {
-                      const n = Number(props.value);
-                      const share = summary.total > 0 ? n / summary.total : 0;
-                      return (
-                        <text
-                          x={Number(props.x) + Number(props.width) + 8}
-                          y={Number(props.y) + Number(props.height) / 2}
-                          dominantBaseline="central"
-                          className="fill-foreground text-xs tabular-nums"
-                        >
-                          {barValue(n)}
-                          <tspan className="fill-muted-foreground"> · {percent.format(share)}</tspan>
-                        </text>
-                      );
-                    }}
+                    content={<ValueLabel total={summary.total} percent={percent} format={barValue} />}
                   />
                 </Bar>
               </BarChart>

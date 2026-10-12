@@ -226,6 +226,11 @@ function TransactionRow({
 
 const PAGE_SIZE = 50;
 
+/** 網址上的 id 篩選（?category= / ?account= / ?party=）：不是數字就當沒篩。 */
+function idParam(v: string | undefined): number | undefined {
+  return v && Number.isFinite(Number(v)) ? Number(v) : undefined;
+}
+
 export default async function TransactionsPage({
   searchParams,
 }: Readonly<{
@@ -265,9 +270,9 @@ export default async function TransactionsPage({
   const active = (["internal", "external", "both"].includes(book ?? "") ? book : undefined) as
     | Book
     | undefined;
-  const categoryId = category && Number.isFinite(Number(category)) ? Number(category) : undefined;
-  const accountId = account && Number.isFinite(Number(account)) ? Number(account) : undefined;
-  const partyId = party && Number.isFinite(Number(party)) ? Number(party) : undefined;
+  const categoryId = idParam(category);
+  const accountId = idParam(account);
+  const partyId = idParam(party);
   const page = Math.max(1, Math.trunc(Number(pageParam)) || 1);
   const needsReview = review === "1" ? true : undefined;
   const filters = { book: active, categoryId, accountId, partyId, period, needsReview };

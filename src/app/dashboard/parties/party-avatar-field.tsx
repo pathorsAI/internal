@@ -141,17 +141,17 @@ export function PartyAvatarField({
       const file = firstImageFile(e.clipboardData?.items);
       if (!file) return;
       e.preventDefault();
-      void accept(file);
+      accept(file);
     };
-    window.addEventListener("paste", onPaste);
-    return () => window.removeEventListener("paste", onPaste);
+    globalThis.addEventListener("paste", onPaste);
+    return () => globalThis.removeEventListener("paste", onPaste);
   }, [accept]);
 
   const onDrop = (e: DragEvent<HTMLButtonElement>) => {
     e.preventDefault();
     setDragging(false);
     const file = firstImageFile(e.dataTransfer.items) ?? e.dataTransfer.files[0] ?? null;
-    if (file) void accept(file);
+    if (file) accept(file);
   };
 
   const undo = () => {
@@ -192,7 +192,7 @@ export function PartyAvatarField({
         onChange={(e) => {
           const file = e.target.files?.[0];
           e.target.value = ""; // 同一個檔案再選一次也要觸發
-          if (file) void accept(file);
+          if (file) accept(file);
         }}
       />
       <button
