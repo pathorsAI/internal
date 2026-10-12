@@ -34,8 +34,29 @@ function prefixOf(alias: string): string {
   return t.slice(0, -PREFIX_MARK.length).toLowerCase();
 }
 
-function lowerId(best: number | null, id: number): number {
-  return best === null || id < best ? id : best;
+/** 符合條件的候選裡 id 最小的。 */
+function lowestId(candidates: readonly PartyCandidate[], hit: (c: PartyCandidate) => boolean): number | null {
+  let best: number | null = null;
+  for (const c of candidates) {
+    if ((best === null || c.id < best) && hit(c)) best = c.id;
+  }
+  return best;
+}
+
+/** 前綴別名裡最長的那個吃到 key 的候選；同長度取 id 最小的。 */
+function longestPrefixId(candidates: readonly PartyCandidate[], key: string): number | null {
+  let best: { id: number; length: number } | null = null;
+  for (const c of candidates) {
+    for (const alias of c.aliases) {
+      if (!isPrefixAlias(alias)) continue;
+      const prefix = prefixOf(alias);
+      if (!prefix || !key.startsWith(prefix)) continue;
+      const better =
+        best === null || prefix.length > best.length || (prefix.length === best.length && c.id < best.id);
+      if (better) best = { id: c.id, length: prefix.length };
+    }
+  }
+  return best?.id ?? null;
 }
 
 /**
@@ -45,28 +66,11 @@ function lowerId(best: number | null, id: number): number {
 export function matchParty(candidates: readonly PartyCandidate[], name: string): number | null {
   const key = foldPartyName(name);
   if (!key) return null;
-
-  let byName: number | null = null;
-  let byAlias: number | null = null;
-  let byPrefix: { id: number; length: number } | null = null;
-
-  for (const c of candidates) {
-    if (foldPartyName(c.name) === key) byName = lowerId(byName, c.id);
-    for (const alias of c.aliases) {
-      if (isPrefixAlias(alias)) {
-        const prefix = prefixOf(alias);
-        if (!prefix || !key.startsWith(prefix)) continue;
-        const better =
-          byPrefix === null ||
-          prefix.length > byPrefix.length ||
-          (prefix.length === byPrefix.length && c.id < byPrefix.id);
-        if (better) byPrefix = { id: c.id, length: prefix.length };
-      } else if (foldPartyName(alias) === key) {
-        byAlias = lowerId(byAlias, c.id);
-      }
-    }
-  }
-  return byName ?? byAlias ?? byPrefix?.id ?? null;
+  return (
+    lowestId(candidates, (c) => foldPartyName(c.name) === key) ??
+    lowestId(candidates, (c) => c.aliases.some((a) => !isPrefixAlias(a) && foldPartyName(a) === key)) ??
+    longestPrefixId(candidates, key)
+  );
 }
 
 /**
