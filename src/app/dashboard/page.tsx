@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { headers } from "next/headers";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import {
@@ -16,7 +17,11 @@ import {
   listTransactions,
   listAccountBalances,
   getMonthlyTrends,
+  listMyOrgs,
 } from "@/db/queries";
+import { ConnectClaudeCard } from "./connect-claude-card";
+import { internalConnectorName, orgMcpUrl } from "@/lib/claude-connector";
+import { requestOrigin } from "@/lib/request-origin";
 import { TrendCharts } from "./trend-charts";
 import { SpendSection } from "./spend-section";
 import { SpendSkeleton } from "./spend-chart";
@@ -31,13 +36,24 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const t = await getTranslations("dashboard");
-  const { orgId } = await requireOrg();
-  const [overview, balances, recent, trends] = await Promise.all([
+  const { orgId, userId } = await requireOrg();
+  const [overview, balances, recent, trends, myOrgs, h] = await Promise.all([
     getOverview(orgId),
     listAccountBalances(orgId),
     listTransactions(orgId, undefined, 6),
     getMonthlyTrends(orgId, 12),
+    listMyOrgs(userId),
+    headers(),
   ]);
+
+  // 「接上 Claude」提示卡用目前組織的固定網址；找不到目前組織就讓按鈕導去 MCP 設定頁。
+  const activeOrg = myOrgs.find((o) => o.id === orgId);
+  const claudeConnector = activeOrg
+    ? {
+        name: internalConnectorName(activeOrg.name),
+        url: orgMcpUrl(`${requestOrigin(h)}/mcp`, activeOrg),
+      }
+    : null;
 
   const currencyLabel: Record<string, string> = {
     TWD: t("currency.TWD"),
@@ -77,6 +93,8 @@ export default async function DashboardPage() {
   return (
     <>
       <PageHeader title={t("title")} description={t("description")} />
+
+      <ConnectClaudeCard connector={claudeConnector} />
 
       {/* 資產總覽：每種幣別一張卡，顯示總資產（含期初餘額）與各帳戶餘額 */}
       <section className="space-y-2">

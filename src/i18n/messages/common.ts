@@ -65,6 +65,9 @@ const common = {
   combobox: {
     emptyText: { "zh-TW": "查無項目", en: "No matches" },
   },
+  addToClaude: {
+    label: { "zh-TW": "在 Claude 中連接", en: "Add to Claude" },
+  },
   copyButton: {
     label: { "zh-TW": "複製", en: "Copy" },
     copied: { "zh-TW": "已複製", en: "Copied" },
