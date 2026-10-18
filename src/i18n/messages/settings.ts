@@ -68,6 +68,7 @@ const settings = {
     connectionInfo: {
       title: { "zh-TW": "連線資訊", en: "Connection info" },
       description: { "zh-TW": "在 Claude 或 ChatGPT 新增一個 connector，網址填下面這個。第一次連線會跳出 Google 登入授權（跟後台同一個帳號），之後就能用對話查資料。", en: "Add a connector in Claude or ChatGPT and use the URL below. The first connection opens a Google sign-in authorization (same account as this app), and after that you can query data by chatting." },
+      addToClaudeHint: { "zh-TW": "按下去會打開 Claude 的新增 connector 視窗，名稱和網址都已填好，按新增再用同一個帳號登入授權就完成了。也可以照下面的網址手動新增。", en: "Opens Claude's add-connector dialog with the name and URL filled in. Click Add, sign in with this same account to authorize, and you're done. You can also add it manually with the URL below." },
       serverUrlLabel: { "zh-TW": "MCP 伺服器網址", en: "MCP server URL" },
       serverUrlHint: { "zh-TW": "這個網址不綁定組織。授權綁的是你的帳號，連上之後直接在對話裡問「我有哪些組織」，它會列出你所屬的全部，由你挑；同一個連線隨時可以換組織。", en: "This URL is not tied to an organization. Authorization binds to your account — once connected, just ask which organizations you have and pick one in conversation. The same connection can switch organizations at any time." },
       perOrgLabel: { "zh-TW": "固定單一組織的網址（選用）", en: "Pinned single-organization URLs (optional)" },

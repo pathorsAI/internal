@@ -12,6 +12,11 @@ const dashboard = {
     wise: { "zh-TW": "Wise / 虛擬", en: "Wise / virtual" },
     cash: { "zh-TW": "現金", en: "Cash" },
   },
+  connectClaude: {
+    title: { "zh-TW": "用 Claude 直接查帳、記帳", en: "Use internal from Claude" },
+    body: { "zh-TW": "連接後在 Claude 裡就能查交易、建合約和請款項目。", en: "Connect once, then look up transactions, create contracts and billing items right from Claude." },
+    dismiss: { "zh-TW": "關閉", en: "Dismiss" },
+  },
   stats: {
     income: { "zh-TW": "收入", en: "Income" },
     expense: { "zh-TW": "支出", en: "Expense" },
