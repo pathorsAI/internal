@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { claudeConnectorUrl } from "@/lib/claude-connector";
+import { cn } from "@/lib/utils";
 
 // Simple Icons "claude" (simple-icons@13.21.0), CC0.
 const CLAUDE_PATH =
@@ -11,7 +12,7 @@ const CLAUDE_PATH =
 
 export function ClaudeLogo({ className }: Readonly<{ className?: string }>) {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className={className} fill="#D97757">
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={className} fill="currentColor">
       <path d={CLAUDE_PATH} />
     </svg>
   );
@@ -36,6 +37,9 @@ type Props = Readonly<
     }
 >;
 
+// Claude 的 clay 品牌色，壓深一階讓白字對比過 WCAG AA（4.5:1）；primary 的藍底配橘 logo 會撞色。
+const CLAY_BUTTON = "bg-[#B85535] text-white hover:bg-[#A84C2D] focus-visible:ring-[#B85535]/40";
+
 // 「在 Claude 中連接」：一鍵打開 claude.ai 的新增 connector 視窗。
 export function AddToClaudeButton(props: Props) {
   const t = useTranslations("common");
@@ -46,7 +50,7 @@ export function AddToClaudeButton(props: Props) {
     </>
   );
   return (
-    <Button asChild size={props.size ?? "sm"} className={props.className}>
+    <Button asChild size={props.size ?? "sm"} className={cn(CLAY_BUTTON, props.className)}>
       {props.href === undefined ? (
         <a
           href={claudeConnectorUrl({ name: props.name, url: props.url })}
