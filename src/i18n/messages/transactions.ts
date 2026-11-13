@@ -49,7 +49,7 @@ const transactions = {
   type: {
     expense: { "zh-TW": "一般支出", en: "Expense" },
     income: { "zh-TW": "收入", en: "Income" },
-    advance: { "zh-TW": "員工代墊", en: "Employee advance" },
+    advance: { "zh-TW": "代墊", en: "Advance" },
     reimbursement: { "zh-TW": "撥款", en: "Reimbursement" },
     transfer: { "zh-TW": "轉帳", en: "Transfer" },
     conversion: { "zh-TW": "換匯 {from} → {to}", en: "FX {from} → {to}" },
@@ -92,8 +92,8 @@ const transactions = {
         desc: { "zh-TW": "收到客戶的錢", en: "Money received from a client" },
       },
       advance: {
-        label: { "zh-TW": "員工代墊", en: "Employee advance" },
-        desc: { "zh-TW": "員工先付，之後再還", en: "Employee pays first, reimbursed later" },
+        label: { "zh-TW": "代墊", en: "Advance" },
+        desc: { "zh-TW": "員工或其他公司先付，之後再還", en: "An employee or another company pays first, repaid later" },
       },
       transfer: {
         label: { "zh-TW": "帳戶互轉", en: "Account transfer" },
@@ -127,8 +127,17 @@ const transactions = {
     vendor: { "zh-TW": "廠商 / 對象", en: "Vendor / counterparty" },
     clientPlaceholder: { "zh-TW": "輸入或選擇客戶…", en: "Enter or select a client…" },
     vendorPlaceholder: { "zh-TW": "輸入或選擇廠商…", en: "Enter or select a vendor…" },
-    payer: { "zh-TW": "代墊人（員工）", en: "Payer (employee)" },
+    payer: { "zh-TW": "代墊人", en: "Paid by" },
+    payerKind: {
+      employee: { "zh-TW": "員工", en: "Employee" },
+      party: { "zh-TW": "公司", en: "Company" },
+    },
+    payerKindHint: {
+      "zh-TW": "公司代墊（例如關係企業先替我們付）會列在「代墊／應付未還」，撥款後結清。",
+      en: "Advances paid by another company (e.g. an affiliate) are listed under Advances / payables until repaid.",
+    },
     payerPlaceholder: { "zh-TW": "輸入代墊的員工…", en: "Enter the employee who paid…" },
+    payerCompanyPlaceholder: { "zh-TW": "輸入或選擇代墊的公司…", en: "Enter or select the company that paid…" },
     category: { "zh-TW": "分類", en: "Category" },
     receivingAccount: { "zh-TW": "收款帳戶", en: "Receiving account" },
     payingAccount: { "zh-TW": "付款帳戶", en: "Paying account" },

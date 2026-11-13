@@ -250,6 +250,7 @@ const MERGE_RESULT: JsonSchemaObject = {
       description: "Rows moved from the sources to the target, per table.",
       properties: {
         transactions: MERGE_COUNT,
+        settledAdvances: { type: "number", description: "Advances / reimbursements whose company payer (settlePartyId) was moved." },
         projects: MERGE_COUNT,
         subscriptions: MERGE_COUNT,
         contracts: MERGE_COUNT,
@@ -261,6 +262,7 @@ const MERGE_RESULT: JsonSchemaObject = {
       },
       required: [
         "transactions",
+        "settledAdvances",
         "projects",
         "subscriptions",
         "contracts",

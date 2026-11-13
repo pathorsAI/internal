@@ -204,6 +204,7 @@ function TransactionRow({
           billedToCompanyTaxId: t.billedToCompanyTaxId,
           partyName: t.partyName,
           settleName: t.settleName,
+          settlePartyId: t.settlePartyId,
           fromAccountId: t.fromAccountId,
           toAccountId: t.toAccountId,
           externalSource: t.externalSource,

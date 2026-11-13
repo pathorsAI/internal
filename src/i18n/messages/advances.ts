@@ -1,10 +1,22 @@
 import type { Dictionary } from "./dictionary";
 
 const advances = {
-  title: { "zh-TW": "代墊", en: "Advances" },
-  description: { "zh-TW": "員工先付、公司尚未撥款的費用", en: "Expenses employees paid for before the company reimbursed them" },
+  title: { "zh-TW": "代墊／應付未還", en: "Advances & payables" },
+  description: {
+    "zh-TW": "員工或其他公司先替我們付、還沒還的費用",
+    en: "Expenses an employee or another company paid on our behalf that we haven't repaid yet",
+  },
   tooltipAria: { "zh-TW": "代墊說明", en: "About advances" },
-  tooltipContent: { "zh-TW": "員工已代墊並納入帳務（進項），公司尚未撥款", en: "The employee already paid and it's booked (as an input), the company hasn't reimbursed it yet" },
+  tooltipContent: {
+    "zh-TW": "代墊已納入帳務（進項），還沒撥款還給代墊人。代墊人可以是員工，也可以是公司（例如關係企業先替我們付）。",
+    en: "The advance is already booked (as an input) and hasn't been repaid yet. The payer can be an employee or a company (e.g. an affiliate that paid first).",
+  },
+  byPayee: {
+    title: { "zh-TW": "依代墊人加總", en: "Totals by payer" },
+    count: { "zh-TW": "筆數", en: "Entries" },
+    unassigned: { "zh-TW": "（未填代墊人）", en: "(No payer)" },
+  },
+  companyBadge: { "zh-TW": "公司", en: "Company" },
   card: {
     totalLabel: { "zh-TW": "目前未還總額", en: "Total outstanding" },
   },

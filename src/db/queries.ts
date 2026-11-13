@@ -3,6 +3,7 @@ import { sql, eq, desc, and, or, lte, gte, lt, inArray, isNull, isNotNull, alias
 import { getDb } from "./index";
 import { nextChargeDate, todayStr } from "@/lib/mcp/shared";
 import { periodRange, type LedgerTransaction } from "@/lib/recurring-expenses";
+import { settleKindOf } from "@/lib/advance-payee";
 import { monthWindow, shiftMonth, yearMonthIn } from "@/lib/spend-trend";
 import {
   transactions,
@@ -141,6 +142,8 @@ export async function listTransactions(
   const toAcct = aliasedTable(bankAccounts, "to_acct");
   // 撥款 / 薪資匯入的員工帳戶：只取遮罩後能顯示的欄位（沒有帳號密文）
   const settleTo = aliasedTable(employeeBankAccounts, "settle_to_acct");
+  // 代墊人／撥款對象是公司時（settle_party_id）的交易對象；跟廠商那個 parties join 分開。
+  const settleParty = aliasedTable(parties, "settle_party");
 
   const rows = await db
     .select({
@@ -162,13 +165,15 @@ export async function listTransactions(
       toAccountId: transactions.toAccountId,
       partyId: transactions.partyId,
       settleEmployeeId: transactions.settleEmployeeId,
+      settlePartyId: transactions.settlePartyId,
       projectId: transactions.projectId,
       projectName: projects.name,
       contractId: transactions.contractId,
       fromAccount: fromAcct.name,
       toAccount: toAcct.name,
       partyName: parties.name,
-      settleName: employees.name,
+      // 代墊人／撥款對象：員工或公司（兩欄二擇一，見 migrations/0034）
+      settleName: sql<string | null>`coalesce(${employees.name}, ${settleParty.name})`,
       settleToAccountId: transactions.settleToAccountId,
       settleToBankName: sql<string | null>`coalesce(${settleTo.bankName}, ${settleTo.label}, ${settleTo.bankCode})`,
       settleToAccountLast5: settleTo.accountLast5,
@@ -183,6 +188,7 @@ export async function listTransactions(
     .leftJoin(toAcct, eq(toAcct.id, transactions.toAccountId))
     .leftJoin(parties, eq(parties.id, transactions.partyId))
     .leftJoin(employees, eq(employees.id, transactions.settleEmployeeId))
+    .leftJoin(settleParty, eq(settleParty.id, transactions.settlePartyId))
     .leftJoin(settleTo, eq(settleTo.id, transactions.settleToAccountId))
     .leftJoin(projects, eq(projects.id, transactions.projectId))
     .where(txnWhere(orgId, filters))
@@ -626,11 +632,16 @@ export async function listAccountantNotices(orgId: string) {
     .orderBy(desc(transactions.txnDate), desc(documents.id));
 }
 
-// 代墊未還：type=advance 且還沒有任何 reimbursement 連回它
+/**
+ * 代墊／應付未還：type=advance 且還沒有任何 reimbursement 連回它。
+ * 代墊人可以是員工（settleEmployeeId）或公司（settlePartyId，migrations/0034）；
+ * settleKind 標出是哪一種，settleName 是員工姓名或公司名稱。依代墊人加總見 @/lib/advance-payee。
+ */
 export async function listOutstandingAdvances(orgId: string) {
   const db = getDb();
   const vendor = aliasedTable(parties, "adv_vendor");
-  return db
+  const settleParty = aliasedTable(parties, "adv_settle_party");
+  const rows = await db
     .select({
       id: transactions.id,
       txnDate: transactions.txnDate,
@@ -640,12 +651,14 @@ export async function listOutstandingAdvances(orgId: string) {
       description: transactions.description,
       vendorName: vendor.name,
       settleEmployeeId: transactions.settleEmployeeId,
-      settleName: employees.name,
+      settlePartyId: transactions.settlePartyId,
+      settleName: sql<string | null>`coalesce(${employees.name}, ${settleParty.name})`,
       categoryName: categories.name,
     })
     .from(transactions)
     .leftJoin(vendor, eq(vendor.id, transactions.partyId))
     .leftJoin(employees, eq(employees.id, transactions.settleEmployeeId))
+    .leftJoin(settleParty, eq(settleParty.id, transactions.settlePartyId))
     .leftJoin(categories, eq(categories.id, transactions.categoryId))
     .where(
       and(
@@ -655,7 +668,8 @@ export async function listOutstandingAdvances(orgId: string) {
         isNull(transactions.deletedAt),
       ),
     )
-    .orderBy(desc(transactions.txnDate));
+    .orderBy(desc(transactions.txnDate), desc(transactions.id));
+  return rows.map((r) => ({ ...r, settleKind: settleKindOf(r) }));
 }
 
 export async function listInvoices(orgId: string, limit = 100) {
@@ -2571,6 +2585,7 @@ export async function listLedgerTransactionsForPeriod(
 ): Promise<LedgerTransaction[]> {
   const db = getDb();
   const { start, endExclusive } = periodRange(period);
+  const settleParty = aliasedTable(parties, "period_settle_party");
   const rows = await db
     .select({
       id: transactions.id,
@@ -2583,12 +2598,14 @@ export async function listLedgerTransactionsForPeriod(
       cardLast4: sql<string | null>`${transactions.externalMeta}->>'cardLastFour'`,
       partyName: parties.name,
       description: transactions.description,
-      settleEmployeeName: employees.name,
+      // 代墊人：員工姓名，或代墊的公司名稱（migrations/0034）
+      settleEmployeeName: sql<string | null>`coalesce(${employees.name}, ${settleParty.name})`,
     })
     .from(transactions)
     .leftJoin(bankAccounts, eq(bankAccounts.id, transactions.fromAccountId))
     .leftJoin(parties, eq(parties.id, transactions.partyId))
     .leftJoin(employees, eq(employees.id, transactions.settleEmployeeId))
+    .leftJoin(settleParty, eq(settleParty.id, transactions.settlePartyId))
     .where(
       and(
         eq(transactions.organizationId, orgId),

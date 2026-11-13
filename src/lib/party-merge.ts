@@ -21,6 +21,8 @@ export type MergeParty = {
 /** 每張表改指目標的列數。 */
 export type MergeCounts = {
   transactions: number;
+  /** 代墊人／撥款對象是這家公司的交易（transactions.settle_party_id）。 */
+  settledAdvances: number;
   projects: number;
   subscriptions: number;
   contracts: number;

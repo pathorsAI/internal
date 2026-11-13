@@ -15,6 +15,7 @@ type Row = MergeParty & { deletedAt: string | null };
 
 const ZERO: MergeCounts = {
   transactions: 0,
+  settledAdvances: 0,
   projects: 0,
   subscriptions: 0,
   contracts: 0,

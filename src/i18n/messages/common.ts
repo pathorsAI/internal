@@ -25,7 +25,7 @@ const common = {
       transactions: { "zh-TW": "內外帳", en: "Dual books" },
       parties: { "zh-TW": "交易對象", en: "Counterparty" },
       categories: { "zh-TW": "分類", en: "Category" },
-      advances: { "zh-TW": "代墊", en: "Advance" },
+      advances: { "zh-TW": "代墊／應付", en: "Advances & payables" },
       accountantNotices: { "zh-TW": "待通知會計師", en: "Accountant notices" },
       bankAccounts: { "zh-TW": "銀行帳戶", en: "Bank account" },
       vendorBilling: { "zh-TW": "廠商計費", en: "Vendor billing" },
