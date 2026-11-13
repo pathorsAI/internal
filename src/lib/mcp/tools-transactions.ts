@@ -265,6 +265,31 @@ const PAYEE_TOTAL_ROW = rowSchema({
   totalTwd: { type: "number", description: "TWD total; foreign rows count at their booked TWD amount, rows without one are left out." },
 });
 
+// create_transaction 與 bulk_create_transactions 每一筆共用的輸入欄位（合約／訂閱的說明兩邊不同，各自寫）。
+const TXN_INPUT_PROPS: Record<string, unknown> = {
+  type: { type: "string", enum: [...TXN_TYPES] },
+  txnDate: { type: "string", description: "YYYY-MM-DD." },
+  amount: { type: "number" },
+  currency: { type: "string", description: "3-letter; default TWD." },
+  description: { type: "string" },
+  reported: { type: "boolean", description: "Reported to tax (book=both). Default false." },
+  accountId: { type: "number", description: "expense=paying acct, income=receiving acct." },
+  partyName: { type: "string", description: "Vendor/customer; created if new." },
+  categoryId: { type: "number" },
+  settleEmployeeName: { type: "string", description: "For advance paid by an employee; created if new." },
+  settlePartyId: {
+    type: "number",
+    description: "For advance paid by a company (e.g. an affiliate that paid on your behalf): its party id from list_parties. Use instead of settleEmployeeName.",
+  },
+  settlePartyName: {
+    type: "string",
+    description: "For advance paid by a company, by name (matched by name/alias, created if new). Ignored when settlePartyId is given.",
+  },
+  fromAccountId: { type: "number", description: "For transfer." },
+  toAccountId: { type: "number", description: "For transfer." },
+  projectId: { type: "number", description: "Optional project tag." },
+};
+
 type Db = ReturnType<typeof getDb>;
 
 /** 名稱 → 交易對象 id（比對名稱 / 別名，只看未刪除的；查無就新建）。 */
@@ -324,6 +349,28 @@ const ADVANCE_PAYEE_ERRORS = {
   both: 'advance takes either an employee ("settleEmployeeName") or a company ("settlePartyId" / "settlePartyName"), not both.',
 } as const;
 
+/** 代墊人：員工（名稱，查無就建）或公司（party id 驗證屬於本組織；名稱查無就建）。 */
+async function resolveAdvancePayee(
+  db: Db,
+  orgId: string,
+  args: Record<string, unknown>,
+): Promise<Pick<TxnFields, "settleEmployeeId" | "settlePartyId">> {
+  const payee = pickAdvancePayee({
+    employeeName: optString(args, "settleEmployeeName"),
+    partyId: optNumber(args, "settlePartyId"),
+    partyName: optString(args, "settlePartyName"),
+  });
+  if ("error" in payee) throw new Error(ADVANCE_PAYEE_ERRORS[payee.error]);
+  if (payee.kind === "employee") {
+    return { settleEmployeeId: await getOrCreateEmployee(db, orgId, payee.name), settlePartyId: null };
+  }
+  if (payee.id === null) {
+    return { settleEmployeeId: null, settlePartyId: await getOrCreateParty(db, orgId, payee.name ?? "", "vendor") };
+  }
+  await assertInOrg(db, parties, payee.id, orgId, "Settle party");
+  return { settleEmployeeId: null, settlePartyId: payee.id };
+}
+
 // Mirrors mutations.ts resolveTxnFields, with org-scoped FK validation.
 async function resolveTxnFields(
   db: Db,
@@ -362,26 +409,12 @@ async function resolveTxnFields(
   if (type === "advance") {
     const categoryId = optNumber(args, "categoryId") ?? null; // 可省略＝未分類
     if (categoryId !== null) await assertInOrg(db, categories, categoryId, orgId, "Category");
-    const payee = pickAdvancePayee({
-      employeeName: optString(args, "settleEmployeeName"),
-      partyId: optNumber(args, "settlePartyId"),
-      partyName: optString(args, "settlePartyName"),
-    });
-    if ("error" in payee) throw new Error(ADVANCE_PAYEE_ERRORS[payee.error]);
-    const fields: TxnFields = {
+    return {
       ...blank,
       categoryId,
       partyId: await getOrCreateParty(db, orgId, requireString(args, "partyName"), "vendor"),
+      ...(await resolveAdvancePayee(db, orgId, args)),
     };
-    if (payee.kind === "employee") {
-      fields.settleEmployeeId = await getOrCreateEmployee(db, orgId, payee.name);
-    } else if (payee.id !== null) {
-      await assertInOrg(db, parties, payee.id, orgId, "Settle party");
-      fields.settlePartyId = payee.id;
-    } else {
-      fields.settlePartyId = await getOrCreateParty(db, orgId, payee.name ?? "", "vendor");
-    }
-    return fields;
   }
   if (type === "transfer") {
     const fromAccountId = requireNumber(args, "fromAccountId");
@@ -839,27 +872,7 @@ export const transactionTools: Record<string, ToolDef> = {
     inputSchema: {
       type: "object",
       properties: {
-        type: { type: "string", enum: [...TXN_TYPES] },
-        txnDate: { type: "string", description: "YYYY-MM-DD." },
-        amount: { type: "number" },
-        currency: { type: "string", description: "3-letter; default TWD." },
-        description: { type: "string" },
-        reported: { type: "boolean", description: "Reported to tax (book=both). Default false." },
-        accountId: { type: "number", description: "expense=paying acct, income=receiving acct." },
-        partyName: { type: "string", description: "Vendor/customer; created if new." },
-        categoryId: { type: "number" },
-        settleEmployeeName: { type: "string", description: "For advance paid by an employee; created if new." },
-        settlePartyId: {
-          type: "number",
-          description: "For advance paid by a company (e.g. an affiliate that paid on your behalf): its party id from list_parties. Use instead of settleEmployeeName.",
-        },
-        settlePartyName: {
-          type: "string",
-          description: "For advance paid by a company, by name (matched by name/alias, created if new). Ignored when settlePartyId is given.",
-        },
-        fromAccountId: { type: "number", description: "For transfer." },
-        toAccountId: { type: "number", description: "For transfer." },
-        projectId: { type: "number", description: "Optional project tag." },
+        ...TXN_INPUT_PROPS,
         contractId: {
           type: "number",
           description:
@@ -961,27 +974,7 @@ export const transactionTools: Record<string, ToolDef> = {
           items: {
             type: "object",
             properties: {
-              type: { type: "string", enum: [...TXN_TYPES] },
-              txnDate: { type: "string", description: "YYYY-MM-DD." },
-              amount: { type: "number" },
-              currency: { type: "string", description: "3-letter; default TWD." },
-              description: { type: "string" },
-              reported: { type: "boolean", description: "Reported to tax (book=both). Default false." },
-              accountId: { type: "number", description: "expense=paying acct, income=receiving acct." },
-              partyName: { type: "string", description: "Vendor/customer; created if new." },
-              categoryId: { type: "number" },
-              settleEmployeeName: { type: "string", description: "For advance paid by an employee; created if new." },
-        settlePartyId: {
-          type: "number",
-          description: "For advance paid by a company (e.g. an affiliate that paid on your behalf): its party id from list_parties. Use instead of settleEmployeeName.",
-        },
-        settlePartyName: {
-          type: "string",
-          description: "For advance paid by a company, by name (matched by name/alias, created if new). Ignored when settlePartyId is given.",
-        },
-              fromAccountId: { type: "number", description: "For transfer." },
-              toAccountId: { type: "number", description: "For transfer." },
-              projectId: { type: "number", description: "Optional project tag." },
+              ...TXN_INPUT_PROPS,
               contractId: {
                 type: "number",
                 description:

@@ -18,8 +18,7 @@ export type AdvancePayee =
 export type AdvancePayeeError = "missing" | "both";
 
 function clean(v: string | null | undefined): string | null {
-  const s = v?.trim();
-  return s ? s : null;
+  return v?.trim() || null;
 }
 
 /**
@@ -82,31 +81,31 @@ export type PayeeTotal = {
 /**
  * 未還代墊依代墊人加總。員工與公司分開算（同名也不會併在一起），台幣合計多的排前面。
  */
+type PayeeGroup = PayeeTotal & { byCurrency: Map<string, number> };
+
+/** 這列歸到哪一組；沒填代墊人（或 id 缺）的舊資料一律歸 none。 */
+function newPayeeGroup(r: OutstandingAdvanceLike): PayeeGroup {
+  const id = r.settleKind === "party" ? r.settlePartyId : r.settleEmployeeId;
+  const base = { count: 0, totals: [], totalTwd: 0, byCurrency: new Map<string, number>() };
+  if (!r.settleKind || id == null) return { ...base, key: "none", kind: null, id: null, name: null };
+  return { ...base, key: `${r.settleKind}:${id}`, kind: r.settleKind, id, name: r.settleName };
+}
+
+function addToGroup(g: PayeeGroup, r: OutstandingAdvanceLike) {
+  const currency = r.currency ?? "TWD";
+  g.count += 1;
+  g.byCurrency.set(currency, (g.byCurrency.get(currency) ?? 0) + Number(r.amount ?? 0));
+  const twd = r.amountTwd ?? (currency === "TWD" ? r.amount : null);
+  g.totalTwd += Number(twd ?? 0);
+}
+
 export function summarizeOutstandingByPayee(rows: readonly OutstandingAdvanceLike[]): PayeeTotal[] {
-  const byKey = new Map<string, PayeeTotal & { byCurrency: Map<string, number> }>();
+  const byKey = new Map<string, PayeeGroup>();
   for (const r of rows) {
-    const id = r.settleKind === "party" ? r.settlePartyId : r.settleEmployeeId;
-    const key = r.settleKind && id != null ? `${r.settleKind}:${id}` : "none";
-    let g = byKey.get(key);
-    if (!g) {
-      g = {
-        key,
-        kind: key === "none" ? null : r.settleKind,
-        id: key === "none" ? null : id,
-        name: key === "none" ? null : r.settleName,
-        count: 0,
-        totals: [],
-        totalTwd: 0,
-        byCurrency: new Map(),
-      };
-      byKey.set(key, g);
-    }
-    const currency = r.currency ?? "TWD";
-    const amount = Number(r.amount ?? 0);
-    g.count += 1;
-    g.byCurrency.set(currency, (g.byCurrency.get(currency) ?? 0) + amount);
-    const twd = r.amountTwd ?? (currency === "TWD" ? r.amount : null);
-    g.totalTwd += Number(twd ?? 0);
+    const fresh = newPayeeGroup(r);
+    const g = byKey.get(fresh.key) ?? fresh;
+    byKey.set(g.key, g);
+    addToGroup(g, r);
   }
   return [...byKey.values()]
     .map(({ byCurrency, ...g }) => ({
