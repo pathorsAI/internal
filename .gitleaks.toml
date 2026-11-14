@@ -1,0 +1,32 @@
+# gitleaks configuration: the default ruleset plus a short, reviewed allowlist.
+#
+# Every entry below is a known false positive. Keep each one scoped to a single
+# rule and a single file, so a real secret added next to it is still caught.
+# Run locally with: gitleaks git --config .gitleaks.toml .
+
+[extend]
+useDefault = true
+
+# Discord integration test: a made-up webhook token used only to build a fake
+# webhook URL for the unit tests. It has never been a real credential.
+[[allowlists]]
+description = "Fake Discord webhook token in unit tests"
+targetRules = ["generic-api-key"]
+paths = ['''^src/lib/integrations/discord\.test\.ts$''']
+regexes = ['''s3cr3t-T0ken_abc''']
+
+# OIDC signing tests: the PEM header is a template string around a key pair that
+# the test generates at runtime with crypto.subtle.generateKey. No key material
+# is stored in the file.
+[[allowlists]]
+description = "PEM template for a runtime-generated key in OIDC tests"
+targetRules = ["private-key"]
+paths = ['''^src/lib/oidc\.test\.ts$''']
+
+# Sonar workflow: `curl -u "$SONAR_TOKEN:"` passes a GitHub Actions secret by
+# environment variable reference; the value never appears in the file.
+[[allowlists]]
+description = "Sonar API calls that reference the SONAR_TOKEN secret by env var"
+targetRules = ["curl-auth-user"]
+paths = ['''^\.github/workflows/sonar\.yml$''']
+regexes = ['''-u "\$SONAR_TOKEN:"''']
