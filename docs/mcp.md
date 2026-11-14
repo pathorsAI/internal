@@ -125,8 +125,8 @@ the `tools-*.ts` modules):
 - `_meta["openai/toolInvocation/invoking" | "invoked"]`, the status line ChatGPT
   shows while a call is in flight.
 
-**Output schemas.** Every tool declares an `outputSchema` — all 106 of them, as of
-server version 1.12.0 (the Simpany tools whose result shape comes from Simpany's
+**Output schemas.** Every tool declares an `outputSchema` — all 111 of them, as of
+server version 1.13.0 (the Simpany tools whose result shape comes from Simpany's
 unofficial API declare an open object schema). When a tool declares one the handler additionally returns
 the result as MCP `structuredContent` (the JSON text block stays, per MCP's
 back-compat recommendation), which is what ChatGPT and Codex prefer over parsing
@@ -329,6 +329,10 @@ integrations.md):
 | `simpany_apply_salary_filing` | `draftId` | Owner/admin. Only after the user approved the preview. Owner flags → payday → PUT each declaration verbatim → read back and verify net pay → re-sync. Reports exactly what was written on failure; retryable (all overwrites). The month is still editable (not yet settled). |
 | `simpany_settle_salary_filing` | `year`, `month`, `confirmPayday`, `confirmOwner`, `confirmSalary` | Owner/admin, **destructive**: submits the month to the bookkeeper; cannot be undone here. All three confirmations must be true (the user confirmed each). Refuses when `canSettle` is false (returns the missing earlier months), data is incomplete, or the month is already settled. |
 | `simpany_send_payslips` | `year`, `month`, `employeeNames?` | Owner/admin. Settled months only. Simpany emails each employee an encrypted payslip PDF (default text); 404 = payslips still generating. |
+| `simpany_list_tax_uploads` | `page?`, `limit?` (1-100, default 10) | 稅務申報 › 申報檔案上傳: upload history (流水號 `hashId`, period, category, files, note) plus the live options (`options.periods` open for upload — first is Simpany's default —, categories / subcategories, off-period notice). |
+| `simpany_create_tax_upload_slots` | `fileNames[]` (≤ 20) | Owner/admin. One single-use PUT URL per file (`/api/simpany-tax-uploads/<token>`, 30 min). Upload local files with `curl -T <file> <url>` so the bytes never pass through the conversation. Nothing reaches Simpany. |
+| `simpany_preview_tax_upload` | `period` (e.g. `115-12`), `category?` (default `export_labor_services`), `subcategory?` (default `labor_service`), `note?` (≤ 255), `files[{uploadId\|documentId\|fileName+contentBase64}]` | Owner/admin. Validates against Simpany's live options and its frontend limits (formats pdf/jpg/jpeg/png/bmp/csv/xls/xlsx/doc/docx, name ≤ 100 chars, ≤ 20 files, ≤ 50 MB), stores a draft in R2 (2 h). Does **not** upload. |
+| `simpany_upload_tax_files` | `draftId` | Owner/admin. Only after the user approved the preview. Sends the draft verbatim (SHA-256 re-checked) as Simpany's page does (`POST /v1/{companyId}/file-upload`, multipart `period`/`category`/`subcategory`/`note`/`files[]`), once. Files go to the bookkeeper's filing folder; Simpany has no delete. Returns the matched 上傳紀錄. |
 
 Salary reads (list / sync / arrears) are read-only: they use the GET-only
 `assertSalaryReadOnly` whitelist and write only this organization's own
