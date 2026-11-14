@@ -15,7 +15,19 @@ import {
   taipeiDate,
   type TaxTreatment,
 } from "@/lib/simpany-sync";
-import { getSimpanyClient } from "@/lib/integrations/simpany";
+import { getSimpanyClient, SimpanyError } from "@/lib/integrations/simpany";
+import { getDocument } from "@/db/queries";
+import { publicBaseUrl } from "@/lib/base-url";
+import {
+  createUploadSlots,
+  parseTaxUploadHistory,
+  parseTaxUploadOptions,
+  previewTaxUpload,
+  submitTaxUpload,
+  TAX_UPLOAD_EXTS,
+  type TaxFileRef,
+} from "@/lib/simpany-tax-upload";
+import { r2TaxUploadStore } from "@/lib/simpany-tax-upload-r2";
 import {
   listSalaryDeclarationsLive,
   salaryReconciliation,
@@ -245,6 +257,27 @@ const SALARY_EMPLOYEE_SCHEMA = {
   },
   additionalProperties: false,
 } as const;
+
+function parseTaxFileRefs(v: unknown): TaxFileRef[] {
+  if (!Array.isArray(v)) throw new Error('"files" must be an array.');
+  return v.map((raw, i) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`files[${i}] must be an object.`);
+    const f = raw as Record<string, unknown>;
+    const fileName = optString(f, "fileName");
+    const uploadId = optString(f, "uploadId");
+    const documentId = optNumber(f, "documentId");
+    const contentBase64 = optString(f, "contentBase64");
+    const given = [uploadId, documentId, contentBase64].filter((x) => x !== undefined).length;
+    if (given !== 1) throw new Error(`files[${i}]: give exactly one of uploadId, documentId or contentBase64.`);
+    if (uploadId) return { uploadId, fileName };
+    if (documentId !== undefined) return { documentId, fileName };
+    if (!fileName) throw new Error(`files[${i}]: fileName is required with contentBase64.`);
+    return { fileName, contentBase64: contentBase64! };
+  });
+}
+
+const TAX_PERIOD_DESC =
+  "申報月份 as Simpany's key \"<ROC year>-<even end month>\", e.g. \"115-12\" = 115 年 11、12 月 (Gregorian Nov–Dec 2026). Must be one of the periods simpany_list_tax_uploads returns in options.periods.";
 
 export const simpanyTools: Record<string, ToolDef> = {
   simpany_list_invoices: {
@@ -866,6 +899,183 @@ export const simpanyTools: Record<string, ToolDef> = {
         estimateUnfiled: optBoolean(args, "estimateUnfiled"),
         expectedMonthlyNet: optNumberMap(args.expectedMonthlyNet, "expectedMonthlyNet"),
       });
+    },
+  },
+
+  // ---- 稅務申報 › 申報檔案上傳（src/lib/simpany-tax-upload.ts）----
+  //
+  // 三段式：開上傳網址（本機 curl 傳檔，位元組不經過對話）→ 預覽草稿 → 使用者同意後只收 draftId 送出。
+
+  simpany_list_tax_uploads: {
+    description:
+      "[read] Simpany 稅務申報 › 申報檔案上傳: the upload history (上傳紀錄, newest first: 流水號 hashId, 申報月份, category, files, note, time) plus the current upload options — which 申報月份 are open (options.periods, first = Simpany's default), upload categories / subcategories, and Simpany's off-period notice. Use it before simpany_preview_tax_upload to pick the period, and after an upload to confirm the record. Unofficial API.",
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    inputSchema: {
+      type: "object",
+      properties: {
+        page: { type: "number", description: "Default 1." },
+        limit: { type: "number", description: "Records per page, 1-100. Default 10." },
+        ...ORG_ARG,
+      },
+      additionalProperties: false,
+    },
+    outputSchema: LOOSE_OBJECT,
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      await requireIntegrationForTool(orgId, "simpany");
+      const page = optNumber(args, "page") ?? 1;
+      const limit = optNumber(args, "limit") ?? 10;
+      if (!Number.isInteger(page) || page < 1) throw new Error('"page" must be a positive integer.');
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('"limit" must be 1-100.');
+      const client = await getSimpanyClient(orgId);
+      const [options, history] = await Promise.all([
+        client.getTaxUploadInitial().then(parseTaxUploadOptions),
+        client.listTaxUploads(page, limit).then((b) => parseTaxUploadHistory(b, page)),
+      ]);
+      return { options, uploads: history.items, page: history.page, totalPages: history.totalPages, total: history.total };
+    },
+  },
+
+  simpany_create_tax_upload_slots: {
+    description:
+      `Step 1 of uploading 申報檔案 (e.g. the zero-rated export-service Invoice PDF, the client MSA and the bank remittance slip 水單) to Simpany. Creates one single-use upload URL per file (valid 30 minutes). Then upload each LOCAL file from the shell — the bytes never go through the conversation: \`curl -sS --fail-with-body -T '<local path>' '<uploadUrl>'\` (HTTP PUT; returns JSON with size and sha256). Nothing reaches Simpany yet. Then call simpany_preview_tax_upload with the uploadIds. fileName is the name Simpany will show (keep the original file name; max 100 chars; formats: ${TAX_UPLOAD_EXTS.join(", ")}). Owner/admin only.`,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    inputSchema: {
+      type: "object",
+      properties: {
+        fileNames: { type: "array", items: { type: "string" }, description: "One entry per file, max 20." },
+        ...ORG_ARG,
+      },
+      required: ["fileNames"],
+      additionalProperties: false,
+    },
+    outputSchema: LOOSE_OBJECT,
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      await requireIntegrationForTool(orgId, "simpany");
+      await requireManager(orgId, ctx, "上傳 Simpany 申報檔案");
+      const fileNames = optStringArray(args.fileNames, "fileNames") ?? [];
+      const slots = await createUploadSlots(r2TaxUploadStore(), {
+        orgId,
+        userId: ctx.userId,
+        fileNames,
+        baseUrl: publicBaseUrl(),
+      });
+      return {
+        slots: slots.map((s) => ({ ...s, curl: `curl -sS --fail-with-body -T '<local path to ${s.fileName}>' '${s.uploadUrl}'` })),
+        nextStep:
+          "PUT each local file to its uploadUrl with curl (one command per file), check each response is ok, then call simpany_preview_tax_upload with files: [{ uploadId }, …].",
+      };
+    },
+  },
+
+  simpany_preview_tax_upload: {
+    description:
+      "Step 2: validate a Simpany 申報檔案上傳 against Simpany's live options and save it as a draft (nothing is sent yet). Files can be { uploadId } from simpany_create_tax_upload_slots (after the curl PUT), { documentId } of a document already stored in this system, or { fileName, contentBase64 } for a tiny file (≤ 2 MB total). Checks period, category, file formats / names, ≤ 20 files and ≤ 50 MB. Show the returned preview (period label, category, every file name + size, note, warnings) to the user; only after they explicitly approve it call simpany_upload_tax_files({ draftId }). Owner/admin only.",
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    inputSchema: {
+      type: "object",
+      properties: {
+        period: { type: "string", description: TAX_PERIOD_DESC },
+        category: { type: "string", description: "上傳類型. Default export_labor_services (外銷勞務) — currently the only one Simpany offers on this page." },
+        subcategory: { type: "string", description: "上傳分類: labor_service (技術服務、專案服務等, default), app, steam or youtube." },
+        note: { type: "string", description: "備註 shown to the bookkeeper, max 255 chars." },
+        files: {
+          type: "array",
+          description: "1-20 files, each exactly one of uploadId / documentId / contentBase64.",
+          items: {
+            type: "object",
+            properties: {
+              uploadId: { type: "string" },
+              documentId: { type: "number" },
+              contentBase64: { type: "string" },
+              fileName: { type: "string", description: "Name shown in Simpany. Required with contentBase64; optional override otherwise." },
+            },
+            additionalProperties: false,
+          },
+        },
+        ...ORG_ARG,
+      },
+      required: ["period", "files"],
+      additionalProperties: false,
+    },
+    outputSchema: LOOSE_OBJECT,
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      await requireIntegrationForTool(orgId, "simpany");
+      await requireManager(orgId, ctx, "上傳 Simpany 申報檔案");
+      const files = parseTaxFileRefs(args.files);
+      const client = await getSimpanyClient(orgId);
+      const options = parseTaxUploadOptions(await client.getTaxUploadInitial());
+      const preview = await previewTaxUpload(r2TaxUploadStore(), {
+        orgId,
+        userId: ctx.userId,
+        options,
+        period: requireString(args, "period"),
+        category: optString(args, "category"),
+        subcategory: optString(args, "subcategory"),
+        note: optString(args, "note"),
+        files,
+        loadDocument: async (id) => {
+          const d = await getDocument(orgId, id);
+          return d ? { r2Key: d.r2Key, fileName: d.fileName } : null;
+        },
+      });
+      return {
+        ...preview,
+        nextStep:
+          "Show this preview to the user. Uploaded files go into the bookkeeper's filing folder and Simpany has no delete — only after they explicitly approve, call simpany_upload_tax_files({ draftId }). The draft expires at expiresAt.",
+      };
+    },
+  },
+
+  simpany_upload_tax_files: {
+    description:
+      "Step 3: send a previewed draft to Simpany 稅務申報 › 申報檔案上傳. The files land in the bookkeeper's filing folder for that period and CANNOT BE DELETED from here or from Simpany's member site. Only call after the user explicitly approved the preview from simpany_preview_tax_upload in this conversation. Takes ONLY the draftId: the exact previewed files (re-checked by SHA-256) are sent, once. Returns the new 上傳紀錄 (流水號 hashId) when it can be matched. Owner/admin only.",
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    inputSchema: {
+      type: "object",
+      properties: {
+        draftId: { type: "string", description: "From simpany_preview_tax_upload." },
+        ...ORG_ARG,
+      },
+      required: ["draftId"],
+      additionalProperties: false,
+    },
+    outputSchema: LOOSE_OBJECT,
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      await requireIntegrationForTool(orgId, "simpany");
+      await requireManager(orgId, ctx, "上傳 Simpany 申報檔案");
+      const draftId = requireString(args, "draftId");
+      const client = await getSimpanyClient(orgId);
+      try {
+        const res = await submitTaxUpload(r2TaxUploadStore(), {
+          orgId,
+          draftId,
+          submit: (form) => client.createTaxUpload(form),
+          isRetryable: (e) =>
+            e instanceof SimpanyError && ["validation", "business", "auth", "config"].includes(e.kind),
+          latestRecords: async () => parseTaxUploadHistory(await client.listTaxUploads(1, 10), 1).items,
+        });
+        await auditIntegrationCall(
+          ctx,
+          orgId,
+          "simpany",
+          "create",
+          `tax file upload ${res.period} (${res.files.length} files) → ${res.hashId ?? "unmatched"}`,
+        );
+        return res;
+      } catch (e) {
+        await auditIntegrationCall(
+          ctx,
+          orgId,
+          "simpany",
+          "create",
+          `tax file upload draft ${draftId.slice(0, 8)}… failed: ${(e instanceof Error ? e.message : String(e)).slice(0, 200)}`,
+        );
+        throw e;
+      }
     },
   },
 };

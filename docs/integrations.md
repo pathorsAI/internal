@@ -563,6 +563,25 @@ Simpany 上已不存在的表單 / 員工會從本地刪掉，所以重跑是冪
 →「送出給記帳士」→「寄送薪資單」。只對 owner / admin、整合可用、且月份不晚於本月時顯示。
 MCP：`simpany_prepare_salary_filing`、`simpany_apply_salary_filing`、`simpany_settle_salary_filing`、`simpany_send_payslips`。
 
+### 申報檔案上傳（外銷勞務零稅率附件）
+
+Simpany「稅務申報 › 申報檔案上傳」（member.simpany.co/file-upload）每期要附 Invoice、合約、銀行水單。網頁只能拖檔，
+Claude 在瀏覽器裡開不了檔案選擇器，所以接成 MCP 三段式（`src/lib/simpany-tax-upload.ts`）：
+
+1. `simpany_create_tax_upload_slots` —— 每個檔案開一個一次性上傳網址 `PUT /api/simpany-tax-uploads/<token>`
+   （30 分鐘、只能用一次、檔名在開網址時就定好）。本機 `curl -T <檔案> <網址>`，檔案不經過對話。網址本身就是憑證
+   （256-bit token），不走登入；收到的檔案只進那個組織的 R2 暫存區（`simpany-tax/files/<orgId>/`）。
+2. `simpany_preview_tax_upload` —— 收 uploadId、系統內既有文件（documents）或小檔 base64，對照 Simpany 當下的
+   `GET file-upload/initial`（可上傳月份、分類）與它前端的限制驗證，草稿存 R2（`simpany-tax/drafts/`，2 小時）。
+3. `simpany_upload_tax_files(draftId)` —— 使用者確認後送出：`POST /v1/{companyId}/file-upload`，multipart
+   `period`（如 `115-12`）、`category`（`export_labor_services`）、`subcategory`（`labor_service`/`app`/`steam`/`youtube`）、
+   `note`、`files[]`。送出前重算 SHA-256，草稿以 R2 條件寫入保證只送一次；Simpany 明確拒絕 → 草稿回到可重送，
+   網路 / 5xx → 鎖住，要先看上傳紀錄。成功後刪暫存檔，回傳對到的上傳紀錄（流水號）。
+
+端點走 `assertTaxFileUpload` 白名單（GET initial、GET history?page&limit、POST 建立），沒有刪除端點 ——
+傳上去的檔案只能請記帳士處理。上傳紀錄：`simpany_list_tax_uploads`。
+沒用完的上傳網址 / 草稿會留在 R2（很小），目前沒有自動清理。
+
 ## Discord（固定支出通知）
 
 Discord 整合用頻道的 Incoming Webhook 發兩種訊息給團隊：扣款前的**提醒**，以及每月一次的**固定支出回顧**。

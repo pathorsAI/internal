@@ -32,6 +32,8 @@ import type {
  *   （GET + 路徑白名單）；寫入（申報明細、發薪日、負責人、結算、寄薪資單）另走 assertSalaryWrite
  *   （method + 路徑逐條白名單），只由 src/lib/simpany-payroll.ts 呼叫。回應含身分證字號 / 地址 /
  *   國籍，解析時一律丟掉；請求 / 回應 body 一律不寫 log。
+ * - api.simpany.co/v1/{companyId}/file-upload  稅務申報 › 申報檔案上傳（外銷勞務零稅率附件）。
+ *   走 assertTaxFileUpload（method + 路徑逐條白名單）：讀選項、讀上傳紀錄、建立一筆上傳。
  */
 
 const AUTH_BASE = "https://api.simpany.co/v1";
@@ -104,6 +106,34 @@ export function assertSalaryWrite(
   }
   if (Object.keys(query ?? {}).length > 0) {
     throw new SimpanyError("config", `Simpany 薪資申報寫入端點不接受 query 參數（${m} ${path}）`);
+  }
+}
+
+/**
+ * 申報檔案上傳的端點白名單（相對於 {companyId}/file-upload）。路徑 "" = 建立上傳本身。
+ * 讀前端 bundle（member.simpany.co 的 fileUpload store module）確認過，沒有刪除端點。
+ */
+const TAX_FILE_ENDPOINTS: readonly { method: string; path: RegExp; query?: readonly string[] }[] = [
+  { method: "GET", path: /^initial$/ },
+  { method: "GET", path: /^history$/, query: ["page", "limit"] },
+  { method: "POST", path: /^$/ },
+];
+
+/** 申報檔案上傳的護欄：method + 路徑不在白名單、或 query key 不在該端點允許的清單內，一律丟錯。 */
+export function assertTaxFileUpload(
+  method: string,
+  path: string,
+  query?: Record<string, unknown>,
+): void {
+  const m = method.toUpperCase();
+  const hit = TAX_FILE_ENDPOINTS.find((e) => e.method === m && e.path.test(path));
+  if (!hit) {
+    throw new SimpanyError("config", `Simpany 申報檔案上傳不允許 ${m} /file-upload/${path}（不在端點白名單內）`);
+  }
+  for (const k of Object.keys(query ?? {})) {
+    if (!hit.query?.includes(k)) {
+      throw new SimpanyError("config", `Simpany 申報檔案上傳不允許 query 參數 ${k}`);
+    }
   }
 }
 
@@ -906,9 +936,10 @@ type RequestOptions = {
 
 /**
  * einvoice = member2 的電子發票；salary = api 的薪資申報唯讀端點（assertSalaryReadOnly）；
- * salaryWrite = 同一個 host 的薪資申報寫入端點（assertSalaryWrite）。
+ * salaryWrite = 同一個 host 的薪資申報寫入端點（assertSalaryWrite）；
+ * taxFile = 同一個 host 的申報檔案上傳（assertTaxFileUpload，body 可以是 FormData）。
  */
-type ApiBase = "einvoice" | "salary" | "salaryWrite";
+type ApiBase = "einvoice" | "salary" | "salaryWrite" | "taxFile";
 
 /**
  * 已登入、已選定公司的 Simpany client。用 getSimpanyClient(orgId) 取得。
@@ -952,11 +983,11 @@ export class SimpanyClient {
   // ---- HTTP ----
 
   private url(base: ApiBase, path: string, query?: RequestOptions["query"]): string {
-    const u = new URL(
-      base === "einvoice"
-        ? `${EINVOICE_BASE}/${this.companyId}/${path}`
-        : `${SALARY_BASE}/${this.companyId}/salary-declaration/${path}`,
-    );
+    let raw: string;
+    if (base === "einvoice") raw = `${EINVOICE_BASE}/${this.companyId}/${path}`;
+    else if (base === "taxFile") raw = `${AUTH_BASE}/${this.companyId}/file-upload${path ? `/${path}` : ""}`;
+    else raw = `${SALARY_BASE}/${this.companyId}/salary-declaration/${path}`;
+    const u = new URL(raw);
     for (const [k, v] of Object.entries(query ?? {})) {
       if (v !== undefined && v !== "") u.searchParams.set(k, String(v));
     }
@@ -971,12 +1002,18 @@ export class SimpanyClient {
   ): Promise<Response> {
     if (base === "salary") assertSalaryReadOnly(opts.method ?? "GET", path, opts.query);
     if (base === "salaryWrite") assertSalaryWrite(opts.method ?? "GET", path, opts.query);
+    if (base === "taxFile") assertTaxFileUpload(opts.method ?? "GET", path, opts.query);
     const headers: Record<string, string> = { ...BASE_HEADERS, Authorization: `Bearer ${token}` };
-    if (opts.body !== undefined) headers["Content-Type"] = "application/json";
+    // FormData：讓 fetch 自己帶 multipart boundary，不能手動設 Content-Type。
+    const isForm = opts.body instanceof FormData;
+    if (opts.body !== undefined && !isForm) headers["Content-Type"] = "application/json";
+    let body: BodyInit | undefined;
+    if (isForm) body = opts.body as FormData;
+    else if (opts.body !== undefined) body = JSON.stringify(opts.body);
     return safeFetch(this.url(base, path, opts.query), {
       method: opts.method ?? "GET",
       headers,
-      body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+      body,
     });
   }
 
@@ -1019,7 +1056,7 @@ export class SimpanyClient {
     const body = await readBody(res);
     // 薪資申報的回應可能含個資：錯誤訊息只取結構化的 message，不附 body 片段。
     const errorText = (b: unknown) =>
-      base === "einvoice" ? simpanyErrorMessage(b) : salaryErrorMessage(b);
+      base === "einvoice" || base === "taxFile" ? simpanyErrorMessage(b) : salaryErrorMessage(b);
     if (res.ok) {
       // 業務錯誤有時仍是 2xx：{ status: "error", error: {...} }
       if (isObj(body) && body.status === "error") {
@@ -1186,6 +1223,31 @@ export class SimpanyClient {
   /** POST form/{formId}/payslip/send：寄薪資單給員工（Simpany 寄信）。 */
   async sendSalaryPayslips(formId: number, body: SimpanyPayslipSendBody): Promise<void> {
     await this.salaryWrite("POST", `form/${positiveId(formId, "formId")}/payslip/send`, body);
+  }
+
+  // ---- 稅務申報 › 申報檔案上傳（只由 src/lib/simpany-tax-upload.ts 呼叫）----
+
+  /** GET file-upload/initial：可上傳的申報月份、上傳類型 / 分類、提醒文字。原樣回傳 data。 */
+  async getTaxUploadInitial(): Promise<unknown> {
+    assertTaxFileUpload("GET", "initial");
+    return unwrapData(await this.requestAt("taxFile", "initial", { method: "GET" }));
+  }
+
+  /** GET file-upload/history?page&limit：上傳紀錄（新到舊）。回傳完整 body（含 meta.pagination）。 */
+  async listTaxUploads(page: number, limit: number): Promise<unknown> {
+    const query = { page: positiveId(page, "page"), limit: positiveId(limit, "limit") };
+    assertTaxFileUpload("GET", "history", query);
+    return this.requestAt("taxFile", "history", { method: "GET", query });
+  }
+
+  /**
+   * POST file-upload（multipart：period、category、subcategory、note、files[]）。
+   * **檔案會進會計的申報資料夾，Simpany 沒有刪除端點。** 只能由 simpany-tax-upload.ts 以
+   * 使用者確認過的草稿呼叫。
+   */
+  async createTaxUpload(form: FormData): Promise<unknown> {
+    assertTaxFileUpload("POST", "");
+    return this.requestAt("taxFile", "", { method: "POST", body: form });
   }
 
   // ---- receipts ----

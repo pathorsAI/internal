@@ -82,7 +82,7 @@ function deriveMcpAudit(name: string, out: unknown): McpAudit | null {
 
 /** Bump on every published change to tools, schemas or instructions. Clients
  *  (and OpenAI's plugin "Scan Tools") key their cached snapshot off this. */
-export const SERVER_VERSION = "1.12.0";
+export const SERVER_VERSION = "1.13.0";
 
 /** Public base URL of this deployment; doubles as the OAuth issuer.
  *  Keep in sync with the `resource` passed to `mcp()` in src/lib/auth.ts. */
@@ -287,6 +287,9 @@ const OPENWORLD_OVERRIDES: Record<string, Partial<ToolAnnotations>> = {
   simpany_issue_invoice: { openWorldHint: true },
   simpany_void_invoice: { openWorldHint: true },
   simpany_list_zero_rate_reasons: { openWorldHint: true },
+  simpany_list_tax_uploads: { openWorldHint: true },
+  simpany_preview_tax_upload: { openWorldHint: true },
+  simpany_upload_tax_files: { openWorldHint: true },
   // Salary declarations: GET-only reads from Simpany (assertSalaryReadOnly); the
   // sync writes only our own simpany_salary_* tables. salary_arrears reads only
   // our tables, so it keeps the closed-world default.
