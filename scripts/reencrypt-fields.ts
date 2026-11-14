@@ -34,7 +34,7 @@
  */
 import { and, asc, eq, gt, isNotNull, type SQL } from "drizzle-orm";
 import type { AnyPgColumn, PgTable } from "drizzle-orm/pg-core";
-import { getDb } from "@/db";
+import { getDb, runBatch } from "@/db";
 import { employeeBankAccounts, employees, orgIntegrations } from "@/db/schema";
 import {
   activeKeyId,
@@ -174,15 +174,17 @@ async function planRow(t: Target, r: Row, c: Counts): Promise<Planned | null> {
 
 async function writeBatch(t: Target, planned: Planned[], c: Counts) {
   if (planned.length === 0) return;
-  const db = getDb();
-  const queries = planned.map((p) =>
-    db
-      .update(t.table)
-      .set({ [t.encKey]: p.newEnc } as never)
-      .where(and(eq(t.id, p.id), eq(t.enc, p.oldEnc)))
-      .returning({ id: t.id }),
-  );
-  const results = (await db.batch(queries as unknown as Parameters<typeof db.batch>[0])) as unknown as unknown[][];
+  // runBatch：neon-http 用 db.batch，pg 用交易；每句都用它給的 q 建，才會落在同一個交易。
+  // 每列的 where 帶舊密文，讀出之後被改過的列不會被覆蓋，算 conflict，下次再跑。
+  const results = (await runBatch((q) =>
+    planned.map((p) =>
+      q
+        .update(t.table)
+        .set({ [t.encKey]: p.newEnc } as never)
+        .where(and(eq(t.id, p.id), eq(t.enc, p.oldEnc)))
+        .returning({ id: t.id }),
+    ) as never,
+  )) as unknown as unknown[][];
   for (const rows of results) {
     if (rows.length > 0) c.reencrypted++;
     else c.conflict++;
