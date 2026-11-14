@@ -27,7 +27,7 @@ export function TermsEn() {
         <h2>What the Service is</h2>
         <p>
           The Service is a multi-tenant accounting and operations management system. It covers
-          transaction records for the internal and external books, counterparties, invoices and
+          transaction records for the management and tax books, counterparties, invoices and
           reconciliation, projects, contracts, subscriptions and billing schedules, the employee
           roster and payroll, and optional Google Calendar sync.
         </p>

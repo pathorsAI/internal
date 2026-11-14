@@ -51,3 +51,6 @@ wrangler.local.jsonc
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local file storage (STORAGE_DRIVER=fs default dir in dev)
+/data/

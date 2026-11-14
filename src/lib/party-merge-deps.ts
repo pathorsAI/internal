@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { PgColumn, PgTable, PgUpdateSetSource } from "drizzle-orm/pg-core";
-import { getDb } from "@/db";
+import { getDb, runBatch, type Db } from "@/db";
 import {
   billingItems,
   contracts,
@@ -13,8 +13,6 @@ import {
   vendorBillingAccounts,
 } from "@/db/schema";
 import type { MergeCounts, MergePlan, PartyMergeDeps } from "./party-merge";
-
-type Db = ReturnType<typeof getDb>;
 
 type RepointKey = Exclude<keyof MergeCounts, "vendorBillingMatchParties">;
 
@@ -40,7 +38,8 @@ const REPOINTS: { key: RepointKey; table: OrgTable; prop: string; column: PgColu
  * 合併要跑的所有語句（依序）。拆出來是為了讓本機驗證可以用別的 driver 跑同一組 SQL。
  *
  * 第一句是守門：目標與來源必須都還在（同組織、未刪除），否則除以零讓整個 transaction 失敗 ——
- * 驗證（讀）跟寫入之間有空檔，neon-http 又沒有互動式 transaction，只能這樣把檢查放進同一批。
+ * 驗證（讀）跟寫入之間有空檔，neon-http 又沒有互動式 transaction，只能這樣把檢查放進同一批
+ * （pg 走 runBatch 的交易，同一招一樣成立）。
  */
 export function buildMergeStatements(db: Db, plan: MergePlan) {
   const { orgId, targetId, sourceIds } = plan;
@@ -101,7 +100,7 @@ export function countsFromResults(plan: MergePlan, results: readonly unknown[]):
   return counts;
 }
 
-/** 正式環境的 deps：Neon。每個查詢都帶 organization_id；寫入用 db.batch（單一 transaction）。 */
+/** 正式環境的 deps。每個查詢都帶 organization_id；寫入用 runBatch（neon-http batch／pg 交易，單一 transaction）。 */
 export function partyMergeDeps(db: Db = getDb()): PartyMergeDeps {
   return {
     async loadParties(orgId, ids) {
@@ -122,14 +121,11 @@ export function partyMergeDeps(db: Db = getDb()): PartyMergeDeps {
         .where(eq(vendorBillingAccounts.organizationId, orgId));
     },
     async apply(plan) {
-      const s = buildMergeStatements(db, plan);
-      const results = await db.batch([
-        s.guard,
-        ...s.repoints.map((r) => r.query),
-        ...s.metaUpdates,
-        s.targetAliases,
-        s.softDelete,
-      ]);
+      const results = await runBatch((q) => {
+        // 用 runBatch 給的 q 組語句：pg 上 q 是交易物件，語句才會跑在同一個交易裡。
+        const s = buildMergeStatements(q, plan);
+        return [s.guard, ...s.repoints.map((r) => r.query), ...s.metaUpdates, s.targetAliases, s.softDelete] as const;
+      }, db);
       return countsFromResults(plan, results);
     },
   };

@@ -96,7 +96,7 @@ function idFilter(column: typeof transactions.categoryId | typeof transactions.p
   return v === "none" ? isNull(column) : eq(column, v);
 }
 
-// 內外帳列表與筆數共用的 where（篩選條件的 single source of truth）
+// 收支紀錄列表與筆數共用的 where（篩選條件的 single source of truth）
 function txnWhere(orgId: string, filters: TxnFilters) {
   const { book, categoryId, accountId, projectId, period, needsReview, partyId, ids } = filters;
   return and(
@@ -172,7 +172,7 @@ export async function listTransactions(
       fromAccount: fromAcct.name,
       toAccount: toAcct.name,
       partyName: parties.name,
-      // 代墊人／撥款對象：員工或公司（兩欄二擇一，見 migrations/0034）
+      // 代墊人／撥款對象：員工或公司（兩欄二擇一，見 migrations/0036）
       settleName: sql<string | null>`coalesce(${employees.name}, ${settleParty.name})`,
       settleToAccountId: transactions.settleToAccountId,
       settleToBankName: sql<string | null>`coalesce(${settleTo.bankName}, ${settleTo.label}, ${settleTo.bankCode})`,
@@ -634,7 +634,7 @@ export async function listAccountantNotices(orgId: string) {
 
 /**
  * 代墊／應付未還：type=advance 且還沒有任何 reimbursement 連回它。
- * 代墊人可以是員工（settleEmployeeId）或公司（settlePartyId，migrations/0034）；
+ * 代墊人可以是員工（settleEmployeeId）或公司（settlePartyId，migrations/0036）；
  * settleKind 標出是哪一種，settleName 是員工姓名或公司名稱。依代墊人加總見 @/lib/advance-payee。
  */
 export async function listOutstandingAdvances(orgId: string) {
@@ -2598,7 +2598,7 @@ export async function listLedgerTransactionsForPeriod(
       cardLast4: sql<string | null>`${transactions.externalMeta}->>'cardLastFour'`,
       partyName: parties.name,
       description: transactions.description,
-      // 代墊人：員工姓名，或代墊的公司名稱（migrations/0034）
+      // 代墊人：員工姓名，或代墊的公司名稱（migrations/0036）
       settleEmployeeName: sql<string | null>`coalesce(${employees.name}, ${settleParty.name})`,
     })
     .from(transactions)

@@ -24,6 +24,12 @@
   "r2_buckets": [
     { "binding": "STORAGE", "bucket_name": "pathors-internal-storage" }
   ],
+  // 自架、用一般 Postgres（非 Neon）跑在 Workers 上時：建一個 Hyperdrive 設定，
+  // 綁成 HYPERDRIVE。src/db/index.ts 看到這個 binding 就改用 node-postgres 走
+  // Hyperdrive，DATABASE_URL 可以不設。我們自己用 Neon HTTP，所以沒有開。
+  // "hyperdrive": [
+  //   { "binding": "HYPERDRIVE", "id": "<wrangler hyperdrive create 回傳的 id>" }
+  // ],
   // Worker 固定在 Neon 的同一個 AWS 區域執行（ap-southeast-1，prod DB 在 team
   // 專案的 ep-dawn-star）。沒設的話 Worker 跑在「離使用者最近」的機房，而 HiNet
   // 的流量常被 Cloudflare 分到美西 SJC / 美東 IAD：一次登入要打好幾次 Neon，
@@ -43,7 +49,15 @@
   // 整合每日自動同步：22:00 UTC = 台北 06:00（Cron Trigger 一律以 UTC 計）。
   // scheduled() 在 worker.ts；同步內容見 docs/integrations.md「每日自動同步」。
   "triggers": { "crons": ["0 22 * * *"] },
+  // 非機密設定。自架的人改成自己的值（或刪掉，走程式裡的預設：見 .env.example）。
+  // TRUSTED_ORIGINS：除了 BETTER_AUTH_URL 之外也能登入的 origin（自訂網域與 *.workers.dev 兩個入口）。
+  // OIDC_ISSUER：GCP Workload Identity provider 登記的 issuer，必須一字不差，所以明寫，
+  //   不跟著 BETTER_AUTH_URL 走。
+  // RESEND_FROM：寄件身分；正式環境沒設就不寄信（不再有寫死的預設寄件人）。
   "vars": {
-    "NEXT_PUBLIC_APP_NAME": "Pathors Internal"
+    "NEXT_PUBLIC_APP_NAME": "Pathors Internal",
+    "TRUSTED_ORIGINS": "https://internal.pathors.com,https://pathors-internal.pathors.workers.dev",
+    "OIDC_ISSUER": "https://internal.pathors.com",
+    "RESEND_FROM": "Pathors Internal <noreply@pathors.com>"
   }
 }

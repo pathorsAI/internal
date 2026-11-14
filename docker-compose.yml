@@ -1,30 +1,69 @@
 # Vendor-neutral self-host: the app + Postgres. See docs/deployment.md.
 #
-# Before this works end-to-end you must swap the DB driver in src/db/index.ts
-# (Neon HTTP -> node-postgres). File uploads additionally need an S3-compatible
-# store (see the optional `minio` service below and the storage note in the docs).
+# No code changes are needed for the database: src/db/index.ts picks the
+# node-postgres driver for any host that is not *.neon.tech (DATABASE_DRIVER=pg
+# below makes that explicit). The one-shot `migrate` service applies
+# migrations/*.sql before the app starts.
+#
+# File uploads: stored on the `storage-data` volume by default (STORAGE_DRIVER=fs).
+# For an S3 store instead: STORAGE_DRIVER=s3 docker compose --profile s3 up -d
+
+x-database-env: &database-env
+  DATABASE_URL: postgres://app:app@db:5432/app
+  DATABASE_DRIVER: pg
 
 services:
+  # Applies migrations/*.sql in filename order (scripts/migrate.ts), recording
+  # each file in the `_migrations` table, then exits. Re-runs are no-ops, so it
+  # is safe on every `docker compose up`. Run it by hand with:
+  #   docker compose run --rm migrate
+  migrate:
+    build: .
+    command: ["bun", "scripts/migrate.ts"]
+    environment:
+      <<: *database-env
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
   app:
     build: .
     ports:
       - "3000:3000"
     environment:
-      # Point at the db service. The migrations create the schema; see docs.
-      DATABASE_URL: postgres://app:app@db:5432/app
+      <<: *database-env
+      # Optional: node-postgres pool size per app process (default 10).
+      # DATABASE_POOL_MAX: "10"
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
-      # For document uploads after swapping storage.ts to an S3 client:
-      # S3_ENDPOINT: http://minio:9000
-      # S3_REGION: auto
-      # S3_BUCKET: documents
-      # S3_ACCESS_KEY_ID: minioadmin
-      # S3_SECRET_ACCESS_KEY: minioadmin
+      # Field encryption keyring (kid:base64key,...). Required for employee bank
+      # accounts, national IDs and integration credentials. See docs/security.md.
+      FIELD_ENCRYPTION_KEYS: ${FIELD_ENCRYPTION_KEYS}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM: ${RESEND_FROM:-}
+      # File storage (docs/deployment.md#file-storage). Default: local directory on
+      # the storage-data volume. The S3_* values only matter with STORAGE_DRIVER=s3
+      # and default to the optional s3 service below; point them at AWS / R2 / B2
+      # in .env to use a hosted bucket instead.
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-fs}
+      STORAGE_DIR: /app/data/storage
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://s3:8333}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-documents}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-devkey}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-devsecret}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+    volumes:
+      - storage-data:/app/data/storage
     depends_on:
       db:
         condition: service_healthy
+      # Don't serve traffic against a half-migrated schema.
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   db:
@@ -42,21 +81,25 @@ services:
       retries: 10
     restart: unless-stopped
 
-  # Optional S3-compatible object store for document uploads.
-  # Uncomment, then adapt src/lib/storage.ts + the documents route to S3.
-  # minio:
-  #   image: minio/minio
-  #   command: server /data --console-address ":9001"
-  #   ports:
-  #     - "9000:9000"
-  #     - "9001:9001"
-  #   environment:
-  #     MINIO_ROOT_USER: minioadmin
-  #     MINIO_ROOT_PASSWORD: minioadmin
-  #   volumes:
-  #     - minio-data:/data
-  #   restart: unless-stopped
+  # Optional S3-compatible object store (SeaweedFS). Only starts with
+  # `--profile s3`; pair it with STORAGE_DRIVER=s3 (see the app service above).
+  # Not MinIO: MinIO stopped publishing its community images (minio/minio can no
+  # longer be pulled). The bucket is created on the first upload.
+  s3:
+    image: chrislusf/seaweedfs:4.53
+    profiles: ["s3"]
+    command: server -s3 -dir=/data
+    ports:
+      - "127.0.0.1:8333:8333"
+    environment:
+      # SeaweedFS turns these into its admin S3 identity; the app signs with the same pair.
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-devkey}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-devsecret}
+    volumes:
+      - s3-data:/data
+    restart: unless-stopped
 
 volumes:
   db-data:
-  # minio-data:
+  storage-data:
+  s3-data:

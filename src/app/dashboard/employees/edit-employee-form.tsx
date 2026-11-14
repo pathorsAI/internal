@@ -19,7 +19,6 @@ export function EditEmployeeForm({
   employee,
   members,
   accounts,
-  legacySalaryAccount,
   canManage,
   footer,
 }: Readonly<{
@@ -27,8 +26,6 @@ export function EditEmployeeForm({
   members: MemberOption[];
   /** 這位員工的收款帳戶（遮罩後） */
   accounts: MaskedEmployeeAccount[];
-  /** 舊 salary_account（遮罩後），沒有就是 null */
-  legacySalaryAccount: string | null;
   /** owner / admin 才能改；成員看到的是唯讀表單 */
   canManage: boolean;
   footer?: React.ReactNode;
@@ -55,7 +52,6 @@ export function EditEmployeeForm({
             employeeName={employee.name}
             accounts={accounts}
             canManage={canManage}
-            legacySalaryAccount={legacySalaryAccount}
           />
         }
       />

@@ -99,7 +99,6 @@ const errors = {
     inactive: { "zh-TW": "這個員工帳戶已停用", en: "That employee bank account is deactivated" },
     wrongEmployee: { "zh-TW": "這個帳戶不屬於該員工", en: "That account belongs to a different employee" },
     revealFailed: { "zh-TW": "無法顯示完整帳號（加密金鑰未設定或密文損壞）", en: "Could not reveal the account number (encryption key missing or data corrupted)" },
-    nothingToConvert: { "zh-TW": "沒有可轉換的舊薪資帳戶，或這位員工已經有帳戶了", en: "There is no legacy salary account to convert, or this employee already has accounts" },
   },
   avatar: {
     empty: { "zh-TW": "沒有收到圖片，請重新選擇", en: "No image was received. Please choose it again." },

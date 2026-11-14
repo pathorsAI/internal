@@ -155,6 +155,14 @@ const nextConfig: NextConfig = {
   // Production/OpenNext builds use a separate dist dir (NEXT_DIST_DIR=.next-prod)
   // so they never clobber the `.next` that `next dev` is actively using.
   distDir: process.env.NEXT_DIST_DIR || ".next",
+  // pg 在 Next 的預設 serverExternalPackages 裡，所以是靠 file tracing 把 node_modules
+  // 複製進輸出。tracing 用 Node 的 export 條件解析，只會帶到 pg-cloudflare 的
+  // dist/empty.js；OpenNext 打包 Worker 時用 workerd 條件，要的是 dist/index.js，
+  // 少了它 `bun run cf:build` 會在 esbuild 階段報 Could not resolve "pg-cloudflare"。
+  // 明確把整個套件（很小）加進 tracing，Node 與 Workers 兩邊都拿得到需要的檔案。
+  outputFileTracingIncludes: {
+    "/*": ["./node_modules/pg-cloudflare/**/*"],
+  },
   // 憑證上傳走 Server Action，預設 body 上限 1MB，手機拍的發票照常常超過
   experimental: {
     serverActions: {
@@ -225,5 +233,10 @@ const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 export default withNextIntl(nextConfig);
 
 // Enables Cloudflare bindings (env, KV, etc.) during `next dev`.
+// 只在 dev 啟動：它會 spawn workerd（本機的 Workers 模擬器）。`next build` 用不到它，
+// 而在 Docker 的 alpine（musl）映像裡 workerd 的 glibc 執行檔根本跑不起來，
+// 無條件呼叫會讓自架的 `docker compose up` 建置直接失敗。
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
-initOpenNextCloudflareForDev();
+if (process.env.NODE_ENV === "development") {
+  initOpenNextCloudflareForDev();
+}

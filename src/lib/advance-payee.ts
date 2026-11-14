@@ -1,5 +1,5 @@
 /**
- * 代墊（type='advance'）的「代墊人」：員工（settle_employee_id）或公司（settle_party_id，migrations/0034）。
+ * 代墊（type='advance'）的「代墊人」：員工（settle_employee_id）或公司（settle_party_id，migrations/0036）。
  *
  * 員工先付、公司還錢是原本的用法；關係企業替我們墊的錢（東蜂替派斯墊 Groq、Twilio…）也是同一件事，
  * 只是對象是交易對象（party），而且公司沒有員工銀行帳戶。兩種都進同一張「代墊／應付未還」清單，

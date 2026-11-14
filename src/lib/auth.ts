@@ -7,7 +7,7 @@ import { nextCookies } from "better-auth/next-js";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { completeSignupEmail, resetPasswordEmail, signInLinkEmail } from "@/lib/auth-emails";
-import { publicBaseUrl } from "@/lib/base-url";
+import { publicBaseUrl, trustedOrigins } from "@/lib/base-url";
 import { sendEmail, type EmailMessage } from "@/lib/email";
 import { claimEmailCooldown } from "@/lib/email-cooldown";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
@@ -62,14 +62,11 @@ async function userExists(email: string): Promise<boolean> {
 export const auth = betterAuth({
   secret: process.env.BETTER_AUTH_SECRET,
   baseURL: process.env.BETTER_AUTH_URL,
-  // Trust the custom domain, the *.workers.dev domain, and localhost (dev) so
-  // requests from any of them pass better-auth's CSRF/origin check. (baseURL
-  // alone — currently the workers.dev URL — would reject internal.pathors.com.)
-  trustedOrigins: [
-    "https://internal.pathors.com",
-    "https://pathors-internal.pathors.workers.dev",
-    "http://localhost:3000",
-  ],
+  // 通過 better-auth CSRF / origin 檢查的 origin：BETTER_AUTH_URL + TRUSTED_ORIGINS（逗號分隔），
+  // 非 production 再加 http://localhost:3000（見 src/lib/base-url.ts trustedOrigins）。
+  // 不寫死任何網域，自架的人改 env 就好；正式站同時有自訂網域與 *.workers.dev 兩個入口，
+  // 兩個都列在 wrangler.jsonc 的 TRUSTED_ORIGINS（只靠 baseURL 會擋掉另一個）。
+  trustedOrigins: trustedOrigins(),
   advanced: {
     ipAddress: {
       // better-auth 預設只讀 `x-forwarded-for`，而那個 header 的第一段是**用戶端
@@ -83,23 +80,22 @@ export const auth = betterAuth({
   // ---------------------------------------------------------------------
   // Rate limiting
   // ---------------------------------------------------------------------
-  // ⚠️ 這裡的效果在 Cloudflare Workers 上是「有限」的，不要把它當成真的防線：
-  // storage 是 memory（見下），而 Worker 的 isolate 短命又同時有很多份，計數
-  // 不會跨 isolate、跨 colo 共享。實際上它擋得住「同一個人手滑連按」與單機
-  // 腳本的暴衝，擋不住刻意分散來源的攻擊。
+  // ⚠️ 預設的 storage 是 memory，在 Cloudflare Workers 上效果「有限」，不要把它
+  // 當成真的防線：Worker 的 isolate 短命又同時有很多份，計數不會跨 isolate、跨 colo
+  // 共享。它擋得住「同一個人手滑連按」與單機腳本的暴衝，擋不住刻意分散來源的攻擊。
   //
-  // 要變成真的有效，得把 storage 換成共享儲存，兩條路都需要另一個 PR：
-  //   (a) storage: "database" —— better-auth 會用 `rateLimit` model（欄位
-  //       key / count / lastRequest，見 @better-auth/core db/schema/rate-limit）。
-  //       src/db/auth-schema.ts 目前沒有這張表，需要一份 migration；本次刻意
-  //       不自己寫 migration（見回報）。另外每個 auth request 會多兩次 Neon
-  //       round trip，延遲成本要一起評估。
+  // 要變成真的有效，得把 storage 換成共享儲存：
+  //   (a) RATE_LIMIT_STORAGE=database（opt-in）—— better-auth 改用 `rateLimit` model，
+  //       表是 migrations/0034 的 rate_limit（src/db/auth-schema.ts 的 rateLimit）。
+  //       代價是每個 auth request 多一讀一寫的 Neon round trip，所以預設不開；
+  //       設之前先跑 0034。
   //   (b) secondaryStorage 指到 Cloudflare KV —— 效能上最合適，但 wrangler
   //       設定目前沒有 KV binding，而且 secondaryStorage 一旦設了，session 也會
   //       改走它，那是比 rate limit 大得多的行為改變。
   //
   // enabled 沒有明寫：better-auth 預設只在 production 開啟，dev 不擋，正是我們要的。
   rateLimit: {
+    storage: process.env.RATE_LIMIT_STORAGE === "database" ? "database" : "memory",
     // 全站預設維持 better-auth 的預設值（每個 IP × 每個 endpoint，10 秒 100 次），
     // 只是明寫出來。刻意不調嚴：計數是 IP 為單位，客戶端在同一個 NAT 出口後面
     // （辦公室、公司 VPN）會共用一組配額，調太緊會先弄壞正常使用者。
@@ -193,6 +189,25 @@ export const auth = betterAuth({
       if (!(await claimEmailCooldown("reset-password", user.email))) return;
       await deliver(user.email, resetPasswordEmail(url));
     },
+  },
+  // ---------------------------------------------------------------------
+  // OAuth token 加密
+  // ---------------------------------------------------------------------
+  // account 表的 access_token / refresh_token（Google 登入、Google 日曆的 refresh token
+  // 能長期讀寫行事曆）改存 BETTER_AUTH_SECRET 加密後的密文。
+  //
+  // 既有的明文 token 不用搬：better-auth 1.6.14 的 decryptOAuthToken
+  // （node_modules/better-auth/dist/oauth2/utils.mjs）在開啟加密時，先用 isLikelyEncrypted
+  // 判斷 —— 只有 `$ba$` 開頭或「偶數長度的純 hex 字串」才當密文去解，其他一律原樣回傳。
+  // Google 的 token（`ya29.` / `1//` 開頭、含 `.` `/` `-`）不可能是純 hex，所以舊資料照樣
+  // 能讀；下一次 refresh 或重新登入寫回時才變成密文。
+  //
+  // ⚠️ 開了之後 BETTER_AUTH_SECRET 就成了這些 token 的金鑰：換 secret 前要改用
+  // BETTER_AUTH_SECRETS 保留舊版本，否則所有人都得重新授權 Google 日曆。
+  // 程式裡讀 token 一律走 auth.api.getAccessToken（src/lib/google-calendar.ts），
+  // 它會解密；不要直接 select account.access_token。
+  account: {
+    encryptOAuthTokens: true,
   },
   socialProviders: {
     google: {
@@ -376,6 +391,14 @@ export const auth = betterAuth({
     // OAuth 2.0 / OIDC provider for MCP clients. Adds /api/auth/mcp/* endpoints
     // (authorize, token, register, get-session) + OAuth discovery. Unauthenticated
     // authorize requests are sent to loginPage, which redirects back after sign-in.
+    // ⚠️ 已知的殘留風險（better-auth 1.6.14 的 mcp plugin 沒有對應選項）：
+    // - oauth_application.client_secret 以明文存放：mcp() 不支援 oidcProvider 的
+    //   storeClientSecret（"hashed" / "encrypted"），token endpoint 直接拿明文做
+    //   constantTimeEqual 比對（plugins/mcp/index.mjs）。MCP client 多半是 public client
+    //   （PKCE、沒有 secret），影響面主要是動態註冊的 confidential client。
+    // - oauth_access_token 的 access_token / refresh_token 也是明文：DB 唯讀外流就能
+    //   直接拿來呼叫 /mcp（以該使用者身分讀寫帳務）。緩解靠 access token 的短效期與
+    //   DB 存取控管；要根治得等 plugin 支援雜湊存放，或改用 @better-auth/oauth-provider。
     mcp({
       loginPage: "/login",
       // Canonical resource identifier published in the RFC 9728 protected

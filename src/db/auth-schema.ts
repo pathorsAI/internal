@@ -1,7 +1,7 @@
 // better-auth tables (email/password + organization plugin).
 // Hand-maintained to match better-auth's expected schema — do NOT overwrite
 // with `db:pull` (that command owns ./schema.ts only).
-import { pgTable, text, timestamp, boolean } from "drizzle-orm/pg-core";
+import { bigint, boolean, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -170,4 +170,16 @@ export const ssoProvider = pgTable("sso_provider", {
   // scripts/register-sso-provider.ts 在註冊時直接寫 true —— 管理者用腳本註冊
   // 就是驗證。migration: 0021_sso_domain_verified.sql。
   domainVerified: boolean("domain_verified").notNull().default(false),
+});
+
+// ---- better-auth rate limit 的共用儲存（migrations/0034）----
+// 只有 RATE_LIMIT_STORAGE=database 時才會被用到（src/lib/auth.ts）。欄位照
+// @better-auth/core db/get-tables 的 rateLimit model：key 唯一、count、lastRequest
+// （毫秒 epoch，bigint）。export 名稱必須正好是 `rateLimit`：drizzle adapter 用 model
+// 名稱去 schema 物件上取表。id 由 adapter 產生。
+export const rateLimit = pgTable("rate_limit", {
+  id: text("id").primaryKey(),
+  key: text("key").notNull().unique(),
+  count: integer("count").notNull(),
+  lastRequest: bigint("last_request", { mode: "number" }).notNull(),
 });

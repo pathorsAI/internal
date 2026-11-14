@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ASSERTION_TTL_SECONDS, buildOrgAssertionClaims, parsePkcs8, publicJwk, signOrgAssertion } from "./oidc";
+import { ASSERTION_TTL_SECONDS, buildOrgAssertionClaims, oidcIssuer, parsePkcs8, publicJwk, signOrgAssertion } from "./oidc";
 
 async function keyMaterial() {
   const pair = (await crypto.subtle.generateKey(
@@ -45,11 +45,12 @@ describe("org assertion", () => {
 
   test("signed JWT verifies with the published JWK and carries kid / defaults", async () => {
     const { b64 } = await keyMaterial();
-    const env = { OIDC_SIGNING_KEY: b64 };
+    // OIDC_ISSUER 沒設時預設跟著 BETTER_AUTH_URL（尾端斜線去掉）
+    const env = { OIDC_SIGNING_KEY: b64, BETTER_AUTH_URL: "https://app.example.com/" };
     const jwt = await signOrgAssertion("org_pathors", { env, nowSec: 1_760_000_000 });
     const [h, c, s] = jwt.split(".");
     expect(decode(h)).toEqual({ alg: "RS256", typ: "JWT", kid: "internal-2026-10b" });
-    expect(decode(c)).toMatchObject({ iss: "https://internal.pathors.com", sub: "org_pathors", aud: "internal-billing" });
+    expect(decode(c)).toMatchObject({ iss: "https://app.example.com", sub: "org_pathors", aud: "internal-billing" });
     const jwk = await publicJwk(env);
     expect(Object.keys(jwk).sort()).toEqual(["alg", "e", "kid", "kty", "n", "use"]);
     const pub = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
@@ -63,5 +64,13 @@ describe("org assertion", () => {
     const [h, c] = jwt.split(".");
     expect(decode(h).kid).toBe("k2");
     expect(decode(c).iss).toBe("https://x.test");
+  });
+
+  test("issuer: OIDC_ISSUER wins, then BETTER_AUTH_URL, then localhost (no hardcoded deployment)", () => {
+    expect(oidcIssuer({ OIDC_ISSUER: "https://idp.example.com/", BETTER_AUTH_URL: "https://app.example.com" })).toBe(
+      "https://idp.example.com",
+    );
+    expect(oidcIssuer({ BETTER_AUTH_URL: "https://app.example.com//" })).toBe("https://app.example.com");
+    expect(oidcIssuer({})).toBe("http://localhost:3000");
   });
 });

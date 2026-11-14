@@ -41,7 +41,7 @@ import {
   type ToolDef,
 } from "./shared";
 import { assertAccountCurrency } from "@/lib/account-currency";
-import { isValidEmail, maskBankAccount } from "@/lib/pii";
+import { isValidEmail } from "@/lib/pii";
 import {
   createEmployeeAccount,
   groupAccountsByEmployee,
@@ -117,25 +117,24 @@ function checkEmailArg(args: Record<string, unknown>, key: string) {
 // national_id_enc（密文）不能出現在輸出裡，連密文都不給。
 type EmployeeRowIn = typeof employees.$inferSelect;
 
-async function redactEmployee(e: EmployeeRowIn, accounts: MaskedEmployeeAccount[]) {
+async function redactEmployee(orgId: string, e: EmployeeRowIn, accounts: MaskedEmployeeAccount[]) {
   // 密文欄位整個拿掉（schema 是封閉的，多一個 key 也會讓 structuredContent 不合法）
   const rest: Partial<EmployeeRowIn> = { ...e };
   delete rest.nationalIdEnc;
   const salaryDefault = accounts.find((a) => a.defaultForSalary && a.isActive);
   return {
     ...(rest as Omit<EmployeeRowIn, "nationalIdEnc">),
-    nationalId: await readMaskedNationalId(e),
-    // 相容舊欄位：有薪資預設帳戶就用它的末 5 碼，否則退回舊的自由文字（遮罩）。
-    salaryAccount: salaryDefault
-      ? `****${salaryDefault.accountLast5}`
-      : maskBankAccount(e.salaryAccount),
+    nationalId: await readMaskedNationalId(orgId, e),
+    // 相容舊欄位：有薪資預設帳戶就用它的末 5 碼。舊的明文 salary_account 欄位已由
+    // migrations/0035 移除，沒有預設帳戶就是 null。
+    salaryAccount: salaryDefault ? `****${salaryDefault.accountLast5}` : null,
     bankAccounts: accounts,
   };
 }
 
 /** 單筆員工 → MCP 輸出（含遮罩後的帳戶清單）。 */
 async function employeeOut(orgId: string, e: EmployeeRowIn) {
-  return redactEmployee(e, await listEmployeeAccounts(orgId, e.id));
+  return redactEmployee(orgId, e, await listEmployeeAccounts(orgId, e.id));
 }
 
 /**
@@ -181,7 +180,7 @@ const EMPLOYEE_PROPS = {
   salaryAccount: {
     type: ["string", "null"],
     description:
-      "Deprecated — see bankAccounts. Masked: the last 5 characters of the salary-default account (e.g. ****12345), or of the legacy free-text value. Null when unset.",
+      "Deprecated — see bankAccounts. Masked: the last 5 characters of the salary-default account (e.g. ****12345). Null when there is no salary-default account.",
   },
   startDate: { type: ["string", "null"], description: "YYYY-MM-DD." },
   endDate: { type: ["string", "null"], description: "YYYY-MM-DD." },
@@ -387,7 +386,7 @@ export const hrTools: Record<string, ToolDef> = {
       ]);
       const byEmployee = groupAccountsByEmployee(accounts);
       return listResult(
-        await Promise.all(rows.map((e) => redactEmployee(e, byEmployee.get(e.id) ?? []))),
+        await Promise.all(rows.map((e) => redactEmployee(orgId, e, byEmployee.get(e.id) ?? []))),
       );
     },
   },
@@ -481,7 +480,7 @@ export const hrTools: Record<string, ToolDef> = {
         .values({
           organizationId: orgId,
           name: requireString(args, "name"),
-          ...(await nationalIdColumns(optString(args, "nationalId"))),
+          ...(await nationalIdColumns(orgId, optString(args, "nationalId"))),
           employmentType: optString(args, "employmentType") ?? "full_time",
           baseSalary: optDecimal(args, "baseSalary") ?? null,
           laborInsuredSalary,
@@ -559,7 +558,7 @@ export const hrTools: Record<string, ToolDef> = {
       const patch = buildEmployeePatch(args);
       if ("userId" in args) patch.userId = await resolveEmployeeUserId(args, orgId, id);
       if (optString(args, "nationalId") !== undefined) {
-        Object.assign(patch, await nationalIdColumns(optString(args, "nationalId")));
+        Object.assign(patch, await nationalIdColumns(orgId, optString(args, "nationalId")));
       }
       const salaryAccount = optString(args, "salaryAccount");
       if (Object.keys(patch).length === 0 && salaryAccount === undefined) {
@@ -768,7 +767,7 @@ export const hrTools: Record<string, ToolDef> = {
         book: {
           type: "string",
           enum: ["both", "internal", "external"],
-          description: "Ledger book; default both (reported). Use internal to keep it off the tax books.",
+          description: "Ledger book: both = management + tax books (default); internal = management books only; external = tax books only.",
         },
         toEmployeeAccountId: {
           type: "number",

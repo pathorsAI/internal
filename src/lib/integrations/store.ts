@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import { orgIntegrations } from "@/db/schema";
 import { user } from "@/db/auth-schema";
 import { decryptField, decryptJson, encryptField, encryptJson } from "@/lib/crypto";
+import { integrationCredentialsContext, integrationTokenCacheContext } from "@/lib/field-contexts";
 import type {
   IntegrationConfig,
   IntegrationCredentials,
@@ -14,7 +15,8 @@ import type {
 } from "./types";
 
 /**
- * org_integrations 的唯一存取點（server only —— 會碰 DB 與 FIELD_ENCRYPTION_KEY）。
+ * org_integrations 的唯一存取點（server only —— 會碰 DB 與欄位加密金鑰）。
+ * 密文的 context 綁 organization + provider（src/lib/field-contexts.ts）。
  *
  * 讀：getIntegration / listIntegrations 回傳 IntegrationSummary，型別上就不含密文。
  * 真的要憑證的只有 provider 的實作，走 loadCredentials / requireEnabledIntegration。
@@ -118,7 +120,10 @@ export async function loadCredentials(
     .where(whereRow(orgId, provider))
     .limit(1);
   if (!row?.credentialsEnc) return null;
-  return decryptJson<IntegrationCredentials>(row.credentialsEnc);
+  return decryptJson<IntegrationCredentials>(
+    row.credentialsEnc,
+    integrationCredentialsContext(orgId, provider),
+  );
 }
 
 /** 快取的 session token；沒有或已過期（預留 60 秒緩衝）回 null。 */
@@ -139,7 +144,10 @@ export async function loadTokenCache(
   if (Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() - 60_000 <= Date.now()) {
     return null;
   }
-  return { value: await decryptField(row.tokenCacheEnc), expiresAt };
+  return {
+    value: await decryptField(row.tokenCacheEnc, integrationTokenCacheContext(orgId, provider)),
+    expiresAt,
+  };
 }
 
 /**
@@ -187,7 +195,7 @@ export async function saveTokenCache(
   await getDb()
     .update(orgIntegrations)
     .set({
-      tokenCacheEnc: await encryptField(value),
+      tokenCacheEnc: await encryptField(value, integrationTokenCacheContext(orgId, provider)),
       tokenExpiresAt: expiresAt.toISOString(),
       updatedAt: sql`now()`,
     })
@@ -289,8 +297,13 @@ export async function saveConnection(args: {
   config: IntegrationConfig;
   tokenCache?: TokenCache;
 }): Promise<void> {
-  const credentialsEnc = await encryptJson(args.credentials);
-  const tokenCacheEnc = args.tokenCache ? await encryptField(args.tokenCache.value) : null;
+  const credentialsEnc = await encryptJson(
+    args.credentials,
+    integrationCredentialsContext(args.orgId, args.provider),
+  );
+  const tokenCacheEnc = args.tokenCache
+    ? await encryptField(args.tokenCache.value, integrationTokenCacheContext(args.orgId, args.provider))
+    : null;
   const tokenExpiresAt = args.tokenCache ? args.tokenCache.expiresAt.toISOString() : null;
   const configJson = JSON.stringify(args.config);
   await getDb()

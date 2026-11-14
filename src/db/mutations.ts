@@ -506,7 +506,7 @@ async function readTransactionHeader(
   if (!txnDate) return { error: t("required.date") };
   if (amount === null) return { error: t("required.amount") };
 
-  // 報稅與否：transfer 固定 both；其餘看「上外帳」勾選（勾→both，不勾→internal）
+  // 帳別：transfer 固定 both；其餘看「計入稅務帳」勾選（勾→both，不勾→internal）
   const reported = type === "transfer" || formData.get("reported") === "on";
   const book = reported ? "both" : "internal";
 
@@ -1059,8 +1059,8 @@ async function employeeEmailError(formData: FormData): Promise<string | null> {
 
 /**
  * 新增與編輯員工共用的欄位。差別只有 isActive：新增一律 true，編輯看勾選。
- * 身分證字號另外走 nationalIdColumns（加密），薪轉帳戶改由 employee_bank_accounts 管理，
- * 這裡都不碰 —— 舊的 salary_account 值會留著，直到轉成帳戶或跑搬移腳本。
+ * 身分證字號另外走 nationalIdColumns（加密），薪轉帳戶由 employee_bank_accounts 管理，
+ * 這裡都不碰。
  */
 function employeeColumns(
   formData: FormData,
@@ -1107,7 +1107,7 @@ export async function createEmployee(
       .values({
         organizationId: orgId,
         ...employeeColumns(formData, name, userId),
-        ...(await nationalIdColumns(str(formData.get("nationalId")))),
+        ...(await nationalIdColumns(orgId, str(formData.get("nationalId")))),
         isActive: true,
       })
       .returning({ id: employees.id });
@@ -1135,9 +1135,9 @@ export async function updateEmployee(
     if ("error" in auth) return { ok: false, error: auth.error };
     const { orgId } = auth;
     const userId = await resolveEmployeeUserId(orgId, str(formData.get("userId")), id);
-    // 身分證字號欄位有送上來才改（寫密文、清空明文）；沒送就維持原值。
+    // 身分證字號欄位有送上來才改（寫密文）；沒送就維持原值。
     const nationalId = formData.has("nationalId")
-      ? await nationalIdColumns(str(formData.get("nationalId")))
+      ? await nationalIdColumns(orgId, str(formData.get("nationalId")))
       : {};
     await getDb()
       .update(employees)
@@ -1722,7 +1722,7 @@ async function parsePayslipForm(
   if (!year || !month) return { error: t("required.payPeriod") };
   if (!payDate) return { error: t("required.payDate") };
   if (!fromAccountId) return { error: t("required.payingAccount") };
-  // 帳別：沒投保沒合約的可只記內帳、不報稅
+  // 帳別由使用者選，預設兩本都記（both）
   const bookRaw = str(formData.get("book")) ?? "both";
   const book = ["internal", "external", "both"].includes(bookRaw) ? bookRaw : "both";
 

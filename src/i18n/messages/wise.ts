@@ -54,8 +54,8 @@ const wise = {
     title: { "zh-TW": "從 Wise 同步交易", en: "Sync transactions from Wise" },
     description: {
       "zh-TW":
-        "以下是試算結果，尚未寫入。確認無誤再按寫入：新交易記在內帳、分類留空並標為「待確認」；已同步過的交易不會重複寫入。",
-      en: "This is a preview — nothing has been written yet. New entries are booked to the internal book, uncategorized and marked “To review”; entries synced before are never written twice.",
+        "以下是試算結果，尚未寫入。確認無誤再按寫入：新交易記在管理帳、分類留空並標為「待確認」；已同步過的交易不會重複寫入。",
+      en: "This is a preview — nothing has been written yet. New entries are booked to the management books, uncategorized and marked “To review”; entries synced before are never written twice.",
     },
     loading: { "zh-TW": "正在讀取 Wise 對帳單…", en: "Reading Wise statements…" },
     retry: { "zh-TW": "重試", en: "Retry" },
