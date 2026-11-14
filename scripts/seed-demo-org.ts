@@ -35,6 +35,8 @@ import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDb } from "@/db";
 import { splitGross } from "@/lib/vat";
+import { hasFieldEncryptionKey } from "@/lib/crypto";
+import { createEmployeeAccount, nationalIdColumns } from "@/db/employee-accounts";
 import { organization } from "@/db/auth-schema";
 import {
   accountReconciliations,
@@ -581,36 +583,52 @@ const EMPLOYEE_DEFS: EmployeeDef[] = [
   { name: "吳冠廷 (Wu Kuan-Ting)", type: "contractor", nationalId: "A199000055", base: 55_000, account: "00000000010055", start: day(-600), end: day(-60), active: false, pension: false, email: "kuanting@meridian-demo.example", phone: "02-0000-0055" },
 ];
 
-const employee = await section("employees", async () =>
-  byName(
-    await db
-      .insert(employees)
-      .values(
-        EMPLOYEE_DEFS.map((e) => ({
-          ...scoped,
-          name: e.name,
-          nationalId: e.nationalId,
-          employmentType: e.type,
-          hasLaborInsurance: e.active,
-          hasHealthInsurance: e.active,
-          hasPension: e.pension,
-          baseSalary: dec(e.base),
-          laborInsuredSalary: dec(e.base),
-          healthInsuredSalary: dec(e.base),
-          salaryAccount: e.account,
-          startDate: e.start,
-          endDate: e.end,
-          isActive: e.active,
-          workEmail: e.email,
-          personalEmail: null,
-          phone: e.phone,
-          note: "示範資料（fictional demo data）",
-          userId: null,
-        })),
-      )
-      .returning({ id: employees.id, name: employees.name }),
-  ),
-);
+// 身分證字號與薪轉帳號只以密文存（明文欄位已由 migrations/0035 移除），所以需要
+// FIELD_ENCRYPTION_KEYS / FIELD_ENCRYPTION_KEY。沒設金鑰就跳過這兩項，其他資料照鋪。
+const seedPii = hasFieldEncryptionKey();
+if (!seedPii) console.warn("  (no field encryption key: employees seeded without national IDs / bank accounts)");
+
+const employee = await section("employees", async () => {
+  const values = await Promise.all(
+    EMPLOYEE_DEFS.map(async (e) => ({
+      ...scoped,
+      name: e.name,
+      ...(seedPii ? await nationalIdColumns(ORG, e.nationalId) : {}),
+      employmentType: e.type,
+      hasLaborInsurance: e.active,
+      hasHealthInsurance: e.active,
+      hasPension: e.pension,
+      baseSalary: dec(e.base),
+      laborInsuredSalary: dec(e.base),
+      healthInsuredSalary: dec(e.base),
+      startDate: e.start,
+      endDate: e.end,
+      isActive: e.active,
+      workEmail: e.email,
+      personalEmail: null,
+      phone: e.phone,
+      note: "示範資料（fictional demo data）",
+      userId: null,
+    })),
+  );
+  const rows = byName(
+    await db.insert(employees).values(values).returning({ id: employees.id, name: employees.name }),
+  );
+  if (seedPii) {
+    for (const e of EMPLOYEE_DEFS) {
+      await createEmployeeAccount(ORG, pick(rows, e.name), {
+        kind: "bank",
+        bankCode: "822",
+        accountHolder: e.name,
+        accountNumber: e.account,
+        currency: "TWD",
+        defaultForSalary: true,
+        note: "示範資料（fictional demo data）",
+      });
+    }
+  }
+  return rows;
+});
 
 const PAYROLL_EMPLOYEES = EMPLOYEE_DEFS.filter((e) => e.active);
 

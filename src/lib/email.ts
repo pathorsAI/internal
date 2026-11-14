@@ -4,8 +4,10 @@
  * 不裝 resend SDK：整個需求就是一個 POST，SDK 帶來的是 Node 專屬的相依與更大的
  * Worker bundle，換不到任何東西。fetch 在 Workers、Node、bun 上都是原生的。
  *
- * 寄件身分預設 noreply@pathors.com；網域必須先在 Resend 驗證過（DNS），否則
- * Resend 回 403。自架的人用 RESEND_FROM 換成自己的網域。
+ * 寄件身分來自 RESEND_FROM（例如 `My App <noreply@example.com>`），網域必須先在 Resend
+ * 驗證過（DNS），否則 Resend 回 403。正式環境沒設 RESEND_FROM 就拒絕寄信 —— 不退回
+ * 任何寫死的網域：自架的人寄出「冒用別人網域」的信，比寄不出去更糟。
+ * 本機開發沒設時用 `<NEXT_PUBLIC_APP_NAME> <noreply@localhost>`，反正沒有 key 也不會真的寄。
  */
 
 export type EmailMessage = {
@@ -16,7 +18,17 @@ export type EmailMessage = {
 };
 
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
-const DEFAULT_FROM = "Pathors Internal <noreply@pathors.com>";
+
+/** 寄件人；正式環境沒設 RESEND_FROM 時丟錯（呼叫端會寫進 log）。 */
+export function resolveSender(env: Record<string, string | undefined> = process.env): string {
+  const from = env.RESEND_FROM?.trim();
+  if (from) return from;
+  if (env.NODE_ENV === "production") {
+    throw new Error("RESEND_FROM is not set; refusing to send email without an explicit sender");
+  }
+  const name = env.NEXT_PUBLIC_APP_NAME?.trim() || "Internal";
+  return `${name} <noreply@localhost>`;
+}
 
 export async function sendEmail({ to, subject, html, text }: EmailMessage): Promise<void> {
   const apiKey = process.env.RESEND_API_KEY;
@@ -31,6 +43,7 @@ export async function sendEmail({ to, subject, html, text }: EmailMessage): Prom
     throw new Error("RESEND_API_KEY is not set; cannot send email");
   }
 
+  const from = resolveSender();
   const response = await fetch(RESEND_ENDPOINT, {
     method: "POST",
     headers: {
@@ -38,7 +51,7 @@ export async function sendEmail({ to, subject, html, text }: EmailMessage): Prom
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      from: process.env.RESEND_FROM ?? DEFAULT_FROM,
+      from,
       to: [to],
       subject,
       html,

@@ -10,14 +10,20 @@
  *       → national_id_enc 還是空的：加密寫入 national_id_enc，清空 national_id。
  *       → 兩欄都有值：解密比對，一致就清空明文；不一致列入「需人工確認」，不動。
  *
+ * ⚠️ migrations/0035 會刪掉這兩個明文欄位，而且在還有任何非 NULL 值時拒絕執行 ——
+ * 套用 0035 之前一定要先用這支（--apply）把資料清乾淨。0035 套用之後這支就沒有用了
+ * （欄位已不存在）。src/db/schema.ts 已經沒有這兩欄，所以這裡用本地的
+ * legacyEmployees 表定義去讀寫它們。
+ *
  * 用法（先確認 0024 已經套用）：
  *   bun run scripts/migrate-employee-pii.ts            # dry run，只印筆數
  *   bun run scripts/migrate-employee-pii.ts --apply    # 真的寫入
  *
- * 需要 DATABASE_URL 與 FIELD_ENCRYPTION_KEY（bun 會自動讀 .env.local；要指定別的
+ * 需要 DATABASE_URL 與 FIELD_ENCRYPTION_KEYS / FIELD_ENCRYPTION_KEY（bun 會自動讀 .env.local；要指定別的
  * 環境檔就用 `bun --env-file=.dev.vars run scripts/migrate-employee-pii.ts`）。
- * FIELD_ENCRYPTION_KEY 必須跟正式環境的 Worker secret 是同一把，否則寫進去的密文
- * 網頁端解不開。
+ * 金鑰必須跟正式環境的 Worker secret 是同一組，否則寫進去的密文網頁端解不開。
+ * 密文用 src/lib/field-contexts.ts 的 context 綁組織（與員工），沒有 organization_id
+ * 的員工列無法加密，會被列為 missingOrg、不動。
  *
  * 安全性質（刻意的設計，不要拿掉）：
  *   - 冪等：已經搬過的列不會再被選到，重跑只會處理剩下的。
@@ -27,9 +33,11 @@
  *   - 軟刪除的員工一樣處理：明文不該因為人離職被刪除就留在資料庫裡。
  */
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { bigint, pgTable, text } from "drizzle-orm/pg-core";
 import { getDb } from "@/db";
-import { employeeBankAccounts, employees } from "@/db/schema";
-import { decryptField, encryptField } from "@/lib/crypto";
+import { employeeBankAccounts } from "@/db/schema";
+import { decryptField, encryptField, hasFieldEncryptionKey } from "@/lib/crypto";
+import { employeeAccountNumberContext, employeeNationalIdContext } from "@/lib/field-contexts";
 import {
   LEGACY_ACCOUNT_NOTE,
   accountLast5,
@@ -47,21 +55,34 @@ function bump(c: Counts, key: string) {
 
 type Db = ReturnType<typeof getDb>;
 type LegacyAccount = NonNullable<ReturnType<typeof parseLegacySalaryAccount>>;
+// 0035 之前的 employees 欄位（只列這支腳本用得到的）。
+const employees = pgTable("employees", {
+  id: bigint({ mode: "number" }).primaryKey(),
+  organizationId: text("organization_id"),
+  name: text().notNull(),
+  nationalId: text("national_id"),
+  nationalIdEnc: text("national_id_enc"),
+  salaryAccount: text("salary_account"),
+});
 type EmployeeRow = typeof employees.$inferSelect;
 type SalaryRow = Pick<EmployeeRow, "id" | "organizationId" | "name" | "salaryAccount">;
-type NationalIdRow = Pick<EmployeeRow, "id" | "nationalId" | "nationalIdEnc">;
+type NationalIdRow = Pick<EmployeeRow, "id" | "organizationId" | "nationalId" | "nationalIdEnc">;
 
 /** 既有帳戶裡是否已經有這串帳號（解密後正規化比對）。 */
-async function anyAccountMatches(existing: { enc: string }[], accountNumber: string): Promise<boolean> {
+async function anyAccountMatches(
+  existing: { enc: string }[],
+  accountNumber: string,
+  context: string,
+): Promise<boolean> {
   const target = normalizeAccountNumber(accountNumber);
   for (const a of existing) {
-    if (normalizeAccountNumber(await decryptField(a.enc)) === target) return true;
+    if (normalizeAccountNumber(await decryptField(a.enc, context)) === target) return true;
   }
   return false;
 }
 
 /** 建帳戶 + 清空舊欄位，同一個交易。 */
-async function createAccountFromLegacy(db: Db, e: SalaryRow, parsed: LegacyAccount) {
+async function createAccountFromLegacy(db: Db, e: SalaryRow & { organizationId: string }, parsed: LegacyAccount) {
   const insert = db.insert(employeeBankAccounts).values({
     organizationId: e.organizationId,
     employeeId: e.id,
@@ -70,7 +91,10 @@ async function createAccountFromLegacy(db: Db, e: SalaryRow, parsed: LegacyAccou
     branchCode: parsed.branchCode,
     bankName: parsed.bankName,
     accountHolder: e.name,
-    accountNumberEnc: await encryptField(parsed.accountNumber),
+    accountNumberEnc: await encryptField(
+      parsed.accountNumber,
+      employeeAccountNumberContext(e.organizationId, e.id),
+    ),
     accountLast5: accountLast5(parsed.accountNumber),
     currency: "TWD",
     defaultForSalary: true,
@@ -93,6 +117,8 @@ async function migrateSalaryAccount(db: Db, e: SalaryRow): Promise<string> {
     if (apply) await clearSalaryAccount(db, e.id);
     return "blankCleared";
   }
+  if (!e.organizationId) return "missingOrg";
+  const orgId = e.organizationId;
 
   const existing = await db
     .select({ enc: employeeBankAccounts.accountNumberEnc })
@@ -100,12 +126,13 @@ async function migrateSalaryAccount(db: Db, e: SalaryRow): Promise<string> {
     .where(and(eq(employeeBankAccounts.employeeId, e.id), isNull(employeeBankAccounts.deletedAt)));
 
   if (existing.length === 0) {
-    if (apply) await createAccountFromLegacy(db, e, parsed);
+    if (apply) await createAccountFromLegacy(db, { ...e, organizationId: orgId }, parsed);
     return parsed.kind === "bank" ? "createdBank" : "createdOther";
   }
 
   // 已經有帳戶：舊值若已經在其中之一，就只是還沒清掉的明文
-  if (!(await anyAccountMatches(existing, parsed.accountNumber))) return "needsReview";
+  const context = employeeAccountNumberContext(orgId, e.id);
+  if (!(await anyAccountMatches(existing, parsed.accountNumber, context))) return "needsReview";
   if (apply) await clearSalaryAccount(db, e.id);
   return "alreadyMigratedCleared";
 }
@@ -138,16 +165,18 @@ async function migrateNationalId(db: Db, e: NationalIdRow): Promise<string> {
     if (apply) await clearNationalId(db, e.id);
     return "blankCleared";
   }
+  if (!e.organizationId) return "missingOrg";
+  const context = employeeNationalIdContext(e.organizationId);
   if (!e.nationalIdEnc) {
     if (apply) {
       await db
         .update(employees)
-        .set({ nationalIdEnc: await encryptField(plain), nationalId: null })
+        .set({ nationalIdEnc: await encryptField(plain, context), nationalId: null })
         .where(eq(employees.id, e.id));
     }
     return "encrypted";
   }
-  if ((await decryptField(e.nationalIdEnc)) !== plain) return "needsReview";
+  if ((await decryptField(e.nationalIdEnc, context)) !== plain) return "needsReview";
   if (apply) await clearNationalId(db, e.id);
   return "alreadyEncryptedCleared";
 }
@@ -158,6 +187,7 @@ async function migrateNationalIds(): Promise<Counts> {
   const rows = await db
     .select({
       id: employees.id,
+      organizationId: employees.organizationId,
       nationalId: employees.nationalId,
       nationalIdEnc: employees.nationalIdEnc,
     })
@@ -180,16 +210,16 @@ function print(title: string, counts: Counts) {
 
 async function main() {
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is not set");
-  if (!process.env.FIELD_ENCRYPTION_KEY) throw new Error("FIELD_ENCRYPTION_KEY is not set");
+  if (!hasFieldEncryptionKey()) throw new Error("FIELD_ENCRYPTION_KEYS / FIELD_ENCRYPTION_KEY is not set");
   // 先試一次加解密，金鑰格式不對就在動任何資料之前失敗
-  const probe = await encryptField("probe");
-  if ((await decryptField(probe)) !== "probe") throw new Error("FIELD_ENCRYPTION_KEY self-test failed");
+  const probe = await encryptField("probe", "self-test");
+  if ((await decryptField(probe, "self-test")) !== "probe") throw new Error("field encryption self-test failed");
 
   console.log(apply ? "Mode: APPLY (writing changes)" : "Mode: dry run (no writes; pass --apply to write)");
   print("salary_account → employee_bank_accounts", await migrateSalaryAccounts());
   print("national_id → national_id_enc", await migrateNationalIds());
   console.log(
-    "\nneedsReview rows were left untouched: fix them in the web app (employee → 帳戶 / 身分證), then re-run.",
+    "\nneedsReview / missingOrg rows were left untouched: fix them (web app → employee → 帳戶 / 身分證, or set organization_id), then re-run.",
   );
 }
 

@@ -16,7 +16,45 @@ export function trimTrailingSlashes(value: string): string {
   return value.slice(0, end);
 }
 
-/** `BETTER_AUTH_URL`（去掉尾端斜線），未設定時退回正式站網址。 */
+const DEV_ORIGIN = "http://localhost:3000";
+
+/**
+ * `BETTER_AUTH_URL`（去掉尾端斜線）。未設定時退回本機開發網址 —— 不寫死任何一個
+ * 正式站：自架的人忘了設，寧可 OAuth issuer / MCP resource 明顯錯成 localhost，
+ * 也不要默默宣稱自己是別人的網域。正式環境一定要設 BETTER_AUTH_URL。
+ */
 export function publicBaseUrl(): string {
-  return trimTrailingSlashes(process.env.BETTER_AUTH_URL ?? "https://internal.pathors.com");
+  const v = process.env.BETTER_AUTH_URL?.trim();
+  return trimTrailingSlashes(v || DEV_ORIGIN);
+}
+
+function originOf(url: string): string | null {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * better-auth 的 trustedOrigins（CSRF / origin 檢查），也是 /mcp 允許的「自家」瀏覽器 origin：
+ * - BETTER_AUTH_URL 的 origin
+ * - TRUSTED_ORIGINS：逗號分隔的額外 origin（例如自訂網域 + *.workers.dev 兩個都要能登入）
+ * - http://localhost:3000：只在 NODE_ENV !== "production" 時加入。正式環境信任 localhost
+ *   等於讓任何在使用者電腦上跑 3000 port 的東西都能過 origin 檢查。
+ * 解析不了的值直接丟掉（不讓一個打錯的設定變成「信任任意字串」）。
+ */
+export function trustedOrigins(env: Record<string, string | undefined> = process.env): string[] {
+  const out = new Set<string>();
+  const base = env.BETTER_AUTH_URL?.trim();
+  if (base) {
+    const o = originOf(base);
+    if (o) out.add(o);
+  }
+  for (const raw of (env.TRUSTED_ORIGINS ?? "").split(",")) {
+    const o = raw.trim() ? originOf(raw.trim()) : null;
+    if (o) out.add(o);
+  }
+  if (env.NODE_ENV !== "production") out.add(DEV_ORIGIN);
+  return [...out];
 }
