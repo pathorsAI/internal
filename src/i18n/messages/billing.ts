@@ -151,7 +151,7 @@ const billing = {
       description: { "zh-TW": "尚未收 {amount}{customer}。下面是還沒綁到任何請款項目的收入交易，金額最接近的排在前面。", en: "{amount} outstanding{customer}. Unlinked income transactions are listed below, closest match first." },
     },
     loading: { "zh-TW": "搜尋可配對的交易…", en: "Searching for matching transactions…" },
-    empty: { "zh-TW": "沒有未綁定的收入交易可以配對。錢還沒入帳的話，先到內外帳建一筆收入。", en: "No unlinked income transactions to match. If the money hasn't arrived yet, add an income entry in Dual books first." },
+    empty: { "zh-TW": "沒有未綁定的收入交易可以配對。錢還沒入帳的話，先到收支紀錄建一筆收入。", en: "No unlinked income transactions to match. If the money hasn't arrived yet, add an income entry in the Ledger first." },
     candidate: {
       noDescription: { "zh-TW": "（無說明）", en: "(No description)" },
       matchExact: { "zh-TW": "金額吻合", en: "Exact match" },
@@ -159,7 +159,7 @@ const billing = {
       linking: { "zh-TW": "配對中…", en: "Linking…" },
       pick: { "zh-TW": "就是這筆", en: "Use this one" },
     },
-    goToTransactions: { "zh-TW": "到內外帳建一筆收入", en: "Add income in Dual books" },
+    goToTransactions: { "zh-TW": "到收支紀錄建一筆收入", en: "Add income in the Ledger" },
     toast: {
       linked: { "zh-TW": "已認列這筆收款", en: "Recorded this payment" },
       linkFailed: { "zh-TW": "配對失敗", en: "Failed to match" },

@@ -2,7 +2,7 @@
 
 This app exposes a [Model Context Protocol](https://modelcontextprotocol.io) server
 so an MCP client (Claude, etc.) can run essentially the whole app in natural
-language — the ledger (內外帳), parties, categories, bank accounts, invoices,
+language — the ledger (management & tax books), parties, categories, bank accounts, invoices,
 projects, recurring subscriptions, contracts, employees, payroll records, and
 reconciliations.
 
@@ -186,7 +186,7 @@ board automatically. `sync_billing_calendar` pushes the board to Google Calendar
 > charge (`billingItemId`) or to a subscription period — never from `paidOn`, which
 > is only a human annotation.
 
-**Ledger (內外帳)** — `list_transactions`, `get_transaction`,
+**Ledger (management & tax books)** — `list_transactions`, `get_transaction`,
 `list_outstanding_advances`, `create_transaction` (expense/income/advance/transfer),
 `update_transaction` (date/amount/category/project/…), `delete_transaction`,
 `create_reimbursement` (book an advance as repaid). Rows imported by an
@@ -305,7 +305,7 @@ optional `endDate` / `limit` → compact statement rows), and
 true**). The description tells the model to show the dry-run preview and get the
 user's explicit approval before calling it with `dryRun: false`. All three only
 send GET requests to Wise; the sync writes only this organization's ledger
-(internal book, uncategorized, `needsReview`), deduped by Wise reference. Mapping
+(management books — `book: internal` — uncategorized, `needsReview`), deduped by Wise reference. Mapping
 balances to ledger accounts and setting the cutover date is done in the web app
 (設定 › 整合 › Wise).
 
@@ -356,7 +356,7 @@ world; syncing Azure / GCP is `run_integration_sync`):
 | `list_payment_methods` | — | Cards (brand, last 4, expiry, holder — never full numbers), reseller invoices, bank transfers, Wise cards; settles-from ledger account; the accounts each pays. |
 | `upsert_payment_method` | `id?`, `kind`, `label`, `brand?`, `last4?`, `expiryMonth?`, `expiryYear?`, `holderName?`, `settlesFromAccountId?`, `isActive?`, `note?` | Owner/admin. `last4` must be exactly 4 digits (longer input is rejected). Azure-synced cards only accept label / settles-from / active / note. |
 | `list_vendor_invoices` | `matchStatus?`, `billingAccountId?`, `limit?` | Azure invoices and GCP monthly totals (BigQuery export) with their reconciliation status. |
-| `resolve_vendor_invoice` | `id`, `action` (`confirm` / `link` / `unlink` / `ignore` / `create`), `transactionId?` | Owner/admin. `link` checks the transaction is in the org; several invoices may share one transaction. `create` books a needs-review expense (internal book) — ask the user first. |
+| `resolve_vendor_invoice` | `id`, `action` (`confirm` / `link` / `unlink` / `ignore` / `create`), `transactionId?` | Owner/admin. `link` checks the transaction is in the org; several invoices may share one transaction. `create` books a needs-review expense (management books, `book: internal`) — ask the user first. |
 
 **Not exposed (do in the app):** creating an organization, uploading
 invoice/receipt **files** (R2), multi-currency FX entry, and *connecting* Google
@@ -446,7 +446,7 @@ bun scripts/seed-demo-org.ts --owner-email reviewer@example.com --org-slug demo
 `seed-demo-org.ts` creates one organization ("Meridian Software Ltd. (Demo)" by
 default, `--org-name` to change it) and fills it with plainly fictional data:
 categories, TWD/USD bank accounts, customers and vendors, six months of
-transactions across the internal and external books, projects, contracts with
+transactions across the management and tax books, projects, contracts with
 instalment schedules, subscriptions with period overrides, billing rows in every
 board state (due / billed / partial / overdue / paid / upcoming), invoices in
 several issue states, employees with payroll runs and payslips, an outstanding

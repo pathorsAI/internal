@@ -10,15 +10,31 @@
 <h1 align="center">Internal</h1>
 
 <p align="center">
-  <b>Self-hosted internal accounting (內外帳) &amp; client-finance management for small companies.</b><br/>
+  <b>Self-hosted bookkeeping &amp; client-finance management for small companies.</b><br/>
   One deployment serves many organizations, with every row scoped by <code>organization_id</code>.
 </p>
 
 ---
 
-It keeps two sets of books — *internal* and *external* (內外帳) — in one ledger, and tracks
+It keeps one ledger with two views — the *management books* and the *tax books* — and tracks
 the money owed to you on the other side: projects, contracts, subscriptions, invoices and
 who still hasn't paid. It's the in-house tool we run ourselves, not a general-purpose ERP.
+
+### Management books vs. tax books
+
+This is the ordinary split between **management accounting** and **tax accounting**, not
+two competing versions of the truth. The *management books* (管理帳) are everything the
+company wants to track for its own decisions: project P&L, cost allocations between
+projects, expenses that are real costs but not tax-deductible, balances held in foreign
+wallets, income that has arrived but is not yet invoiced. The *tax books* (稅務帳) are the
+subset your accountant uses to prepare the filings — entries backed by qualifying invoices
+and receipts. Every transaction carries a `book` tag (`both`, `internal` = management only,
+`external` = tax only), so both views read from the same rows and can always be reconciled
+against each other.
+
+The app is a bookkeeping tool. It does not file returns with a tax authority itself (the
+optional Simpany integration hands documents to your accountant), and it is not designed or intended to help anyone misreport income or expenses — the tax treatment
+of every entry remains the responsibility of the company and its accountant.
 
 The UI ships in English and Traditional Chinese (zh-TW), switchable per user from the
 sidebar. The codebase, docs and configuration are English.
@@ -42,8 +58,8 @@ same ideas — it is [`docs/index.html`](docs/index.html), published with GitHub
       list, and every row carries its next action.</sub></p>
     </td>
     <td width="50%" valign="top">
-      <img src="public/landing/images/transactions.png" alt="Dual-book ledger" width="100%" />
-      <p><b>Dual books</b> — the internal / external ledger.<br/>
+      <img src="public/landing/images/transactions.png" alt="Ledger" width="100%" />
+      <p><b>Ledger</b> — management and tax books in one place.<br/>
       <sub>Every transaction carries a <code>book</code> tag, so both views come from
       the same records instead of two spreadsheets that drift apart. Filter by month,
       book, category or account.</sub></p>
@@ -70,8 +86,9 @@ same ideas — it is [`docs/index.html`](docs/index.html), published with GitHub
 - **Multi-tenancy** — one deployment, many organizations, via the
   [better-auth](https://better-auth.com) organization plugin. Every row is scoped by
   `organization_id`, with an org switcher and owner/admin roles.
-- **Dual books (內外帳)** — a `book` field on every transaction separates the internal and
-  external ledgers.
+- **Ledger with management & tax views** — a `book` field on every transaction says whether
+  it belongs to the management books, the tax books or both.
+  See [Management books vs. tax books](#management-books-vs-tax-books).
 - **Accounting core** — transactions, categories, bank accounts, counterparties,
   reconciliation, advances and reimbursements.
 - **Client finance** — projects, contracts (with instalment schedules), subscriptions and
@@ -164,6 +181,8 @@ only. See [`docs/sso.md`](docs/sso.md).
 | Variable | Purpose |
 | --- | --- |
 | `DATABASE_URL` | Postgres connection string (pooled) |
+| `DATABASE_DRIVER` | Optional: `neon-http` or `pg`. Default: `neon-http` for `*.neon.tech`, `pg` otherwise |
+| `DATABASE_POOL_MAX` | Optional: node-postgres pool size per process (default 10) |
 | `BETTER_AUTH_SECRET` | Session signing secret (`openssl rand -base64 32`) |
 | `BETTER_AUTH_URL` | App base URL, no trailing slash |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth credentials (sign-in **and** the optional Google Calendar integration) |
@@ -222,14 +241,14 @@ Postgres through **Drizzle ORM**. `src/db/schema.ts` is introspected from the da
 **any Postgres works**.
 
 The Drizzle client lives in [`src/db/index.ts`](src/db/index.ts) — point `DATABASE_URL` at
-your database and you're set. Which Postgres *driver* to use is the only runtime-dependent
-choice (a TCP driver like `node-postgres` on a normal server; an HTTP driver where you can't
-open TCP). That single swap is covered in the
+your database and you're set. The driver is picked at runtime: Neon hosts use Neon's HTTP
+driver, any other Postgres uses `node-postgres`, and Cloudflare Workers can reach any Postgres
+through a Hyperdrive binding. Override with `DATABASE_DRIVER`; details in the
 [deployment guide](docs/deployment.md#database-driver).
 
-> `migrations/` is a forward-only history for an existing database, not a bootstrap for an
-> empty one. How you evolve schema, branch your database or roll out migrations is up to
-> your own workflow — this project does not prescribe one.
+`bun run db:apply` applies `migrations/` in order (starting from `0000_baseline.sql` on an
+empty database) and records what it applied, so re-runs only pick up new files — see
+[Migrations](docs/deployment.md#migrations).
 
 ## Deployment
 
@@ -262,7 +281,9 @@ docker-compose.yml
 ## Contributing
 
 Issues and pull requests are welcome — please use [GitHub Issues](../../issues) for bugs and
-feature requests. User-facing strings must go through i18n rather than being hardcoded —
+feature requests, and read [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening a PR. To report
+a vulnerability, follow [`SECURITY.md`](SECURITY.md) instead of opening a public issue;
+operators should also read the [security overview](docs/security.md). User-facing strings must go through i18n rather than being hardcoded —
 see [Internationalization](#internationalization) for where the message files live.
 
 ## License

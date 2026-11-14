@@ -7,7 +7,8 @@ import { trimTrailingSlashes } from "@/lib/base-url";
  *
  *   OIDC_SIGNING_KEY  Worker secret。PKCS#8 DER 的 base64（一行、不含 PEM 標頭）；也接受完整 PEM。
  *   OIDC_SIGNING_KID  選填，JWT header 的 kid，預設 internal-2026-10b（GCP 上傳的 JWKS 用的就是它）
- *   OIDC_ISSUER       選填，預設 https://internal.pathors.com
+ *   OIDC_ISSUER       選填，預設 BETTER_AUTH_URL（去掉尾端斜線）。GCP WIF provider 登記的 issuer
+ *                     必須跟它一字不差，所以正式站在 wrangler.jsonc 明寫（自訂網域與 BETTER_AUTH_URL 不同時）
  *
  * 組織隔離靠 `sub`：sub 一律是 server 端 org context 的 organization_id（呼叫端從
  * requireOrg / 整合的 orgId 傳進來），**絕不**取自使用者輸入或 config。GCP 那邊只把
@@ -18,7 +19,6 @@ import { trimTrailingSlashes } from "@/lib/base-url";
  */
 
 export const DEFAULT_OIDC_KID = "internal-2026-10b";
-export const DEFAULT_OIDC_ISSUER = "https://internal.pathors.com";
 /** 給 GCP workload identity provider 的 JWT audience（provider 的 allowed audiences）。 */
 export const GCP_WIF_JWT_AUDIENCE = "internal-billing";
 /** 短效：只用來馬上換 token。 */
@@ -33,7 +33,9 @@ export class OidcConfigError extends Error {
 
 export function oidcIssuer(env: Record<string, string | undefined> = process.env): string {
   const v = env.OIDC_ISSUER?.trim();
-  return v ? trimTrailingSlashes(v) : DEFAULT_OIDC_ISSUER;
+  if (v) return trimTrailingSlashes(v);
+  // 跟 publicBaseUrl() 同一套規則，但讀傳進來的 env（測試可以注入）。
+  return trimTrailingSlashes(env.BETTER_AUTH_URL?.trim() || "http://localhost:3000");
 }
 
 export function oidcKid(env: Record<string, string | undefined> = process.env): string {

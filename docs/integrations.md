@@ -14,7 +14,7 @@ settings page just lists it alongside the others.
 
 | Where | What |
 | --- | --- |
-| `migrations/0023_org_integrations.sql` / `orgIntegrations` in `src/db/schema.ts` | One row per (organization, provider). `credentials_enc` / `token_cache_enc` are ciphertext from `src/lib/crypto.ts` (`FIELD_ENCRYPTION_KEY`). `config` is non-secret jsonb. |
+| `migrations/0023_org_integrations.sql` / `orgIntegrations` in `src/db/schema.ts` | One row per (organization, provider). `credentials_enc` / `token_cache_enc` are ciphertext from `src/lib/crypto.ts` (`FIELD_ENCRYPTION_KEYS`, bound to org + provider via `src/lib/field-contexts.ts`). `config` is non-secret jsonb. |
 | `src/lib/integrations/types.ts` | Provider ids, field/catalog/provider types, `IntegrationSummary` (the secret-free view). Client-safe. |
 | `src/lib/integrations/catalog.ts` | Static catalog: logo + credential/config fields per provider. Drives the settings UI. Client-safe. |
 | `src/lib/integrations/registry.ts` | Map of **implementations** (`testConnection`). Simpany, Wise, Azure, GCP and Discord are registered. Server only. |
@@ -158,7 +158,7 @@ Wise 是**唯讀**整合：只把 Wise 對帳單的交易匯入本組織的帳�
   `assertReadOnly()` 會拒絕任何非 GET，且 path 必須符合唯讀白名單
   （`/v2/profiles`、`/v4/profiles/{id}/balances`、`/v1/profiles/{id}/balance-statements/{balanceId}/statement.json`），
   否則不發請求直接丟錯。**沒有任何建立 quote / transfer / conversion 的程式碼路徑。**
-- 同步唯一會寫的是本組織的 `transactions`（內帳），不會寫 Wise。
+- 同步唯一會寫的是本組織的 `transactions`（管理帳，`book=internal`），不會寫 Wise。
 - Wise 回 401 → `markNeedsReauth`；回 403 且帶 `x-2fa-approval` header → 丟出「需要 SCA」的清楚錯誤
   （本系統不實作 SCA 簽章）；其他錯誤 → `recordSyncFailure`。成功 → `recordSyncSuccess`。
 
@@ -344,7 +344,7 @@ service × currency` 加總 `cost + credits` → `vendor_cost_lines`，並為**�
 ### Workload Identity Federation（GCP，不存金鑰）
 
 - 平台有一把**整個部署共用**的 RSA 私鑰 `OIDC_SIGNING_KEY`（Worker secret；PKCS#8 DER 一行 base64，也接受 PEM），
-  選填 `OIDC_SIGNING_KID`（預設 `internal-2026-10b`）、`OIDC_ISSUER`（預設 `https://internal.pathors.com`）。
+  選填 `OIDC_SIGNING_KID`（預設 `internal-2026-10b`）、`OIDC_ISSUER`（預設 `BETTER_AUTH_URL`，必須與 GCP provider 登記的 issuer 一字不差）。
 - 同步時以 WebCrypto 簽一個 JWT：`iss`、`sub` = **server 端 org context 的 organization id**（絕不取自使用者輸入
   或 config）、`aud = internal-billing`、`iat`、`exp = iat + 300`，header `kid`。
 - → `POST sts.googleapis.com/v1/token`（token-exchange，audience = config `wifAudience`，即
@@ -718,9 +718,9 @@ cron 回應仍帶著自動同步的結果，但回 500 讓 Cloudflare 把這次 
 
 ## Security rules
 
-- Credentials are encrypted with `FIELD_ENCRYPTION_KEY` (see
-  [deployment.md](deployment.md)). Losing or rotating the key means every
-  integration has to be reconnected.
+- Credentials are encrypted with `FIELD_ENCRYPTION_KEYS` (see
+  [deployment.md](deployment.md)). Rotate with `scripts/reencrypt-fields.ts`; losing
+  a key means every integration encrypted with it has to be reconnected.
 - Nothing that reaches a client — server-action results, page props, MCP results —
   may contain credentials, tokens or ciphertext. `IntegrationSummary` has no such
   fields by construction; don't bypass it with a raw select.

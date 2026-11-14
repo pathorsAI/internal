@@ -26,7 +26,6 @@ import {
   readMaskedNationalId,
   readNationalId,
 } from "@/db/employee-accounts";
-import { maskBankAccount } from "@/lib/pii";
 
 export const dynamic = "force-dynamic";
 
@@ -72,17 +71,18 @@ function insuranceCell(e: EmployeeRow, labels: InsuranceLabels) {
 }
 
 async function nationalIdView(
+  orgId: string,
   e: EmployeeRow,
   canManage: boolean,
 ): Promise<{ value: string | null; masked: boolean }> {
   if (canManage) {
     try {
-      return { value: await readNationalId(e), masked: false };
+      return { value: await readNationalId(orgId, e), masked: false };
     } catch {
       // fall through to the masked view
     }
   }
-  return { value: await readMaskedNationalId(e), masked: true };
+  return { value: await readMaskedNationalId(orgId, e), masked: true };
 }
 
 export default async function EmployeesPage() {
@@ -107,7 +107,7 @@ export default async function EmployeesPage() {
   // 明文只在 server 端出現，成員的 RSC payload 裡不會有完整值。解不開（金鑰缺失）
   // 時連 owner / admin 也退回遮罩且不可編輯，免得把遮罩值存回去蓋掉原值。
   const nationalIds = new Map(
-    await Promise.all(rows.map(async (e) => [e.id, await nationalIdView(e, canManage)] as const)),
+    await Promise.all(rows.map(async (e) => [e.id, await nationalIdView(orgId, e, canManage)] as const)),
   );
   const accountList = accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }));
   const memberByUserId = new Map(members.map((m) => [m.userId, m]));
@@ -199,7 +199,6 @@ export default async function EmployeesPage() {
                     }}
                     members={members}
                     accounts={accountsByEmployee.get(e.id) ?? []}
-                    legacySalaryAccount={maskBankAccount(e.salaryAccount)}
                     canManage={canManage}
                     footer={
                       <div className="flex items-center gap-1">

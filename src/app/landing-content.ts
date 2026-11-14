@@ -469,13 +469,13 @@ export const LANDING_HTML = `<main id="top">
         <div class="stem" aria-hidden="true"></div>
         <div class="books">
           <div class="book">
-            <div class="book-hd"><span class="nm">{{demo.internalBook}}</span><span class="live">{{demo.inSync}}</span><span class="file">internal.xlsx</span></div>
+            <div class="book-hd"><span class="nm">{{demo.internalBook}}</span><span class="live">{{demo.inSync}}</span><span class="file">management.xlsx</span></div>
             <div class="row"><span class="d">08/14</span><span class="t">Morningside Creative</span><span class="a">60,000</span></div>
             <div class="row key edited"><span class="d">08/11</span><span class="t">Verdant Biosciences</span><span class="a"><span class="now">260,000</span><span class="alt">280,000</span></span></div>
             <div class="row orphan"><span class="d">08/05</span><span class="t">{{demo.rowPayroll}}</span><span class="a">−201,000</span></div>
           </div>
           <div class="book">
-            <div class="book-hd"><span class="nm">{{demo.externalBook}}</span><span class="live">{{demo.inSync}}</span><span class="file">external.xlsx</span></div>
+            <div class="book-hd"><span class="nm">{{demo.externalBook}}</span><span class="live">{{demo.inSync}}</span><span class="file">tax.xlsx</span></div>
             <div class="row"><span class="d">08/14</span><span class="t">Morningside Creative</span><span class="a">60,000</span></div>
             <div class="row"><span class="d">08/12</span><span class="t">{{demo.rowSaas}}</span><span class="a">−9,800</span></div>
             <div class="row key"><span class="d">08/11</span><span class="t">Verdant Biosciences</span><span class="a">260,000</span></div>

@@ -5,27 +5,24 @@
 //   select 清單裡根本不含 account_number_enc —— 列表路徑沒有機會把密文或明文帶出去。
 // - 解密只有兩個入口：revealEmployeeAccountNumber（呼叫端必須先確認 owner/admin
 //   並寫 activity_log）與 readNationalId（server 端用來遮罩或給 owner/admin 編輯）。
-// - 「預設帳戶」的切換用 db.batch 送出：neon-http 的 batch 在同一個交易裡執行，
+// - 「預設帳戶」的切換用 runBatch 送出（neon-http 的 batch／pg 的交易，都是同一個交易），
 //   先清掉舊預設再設新預設，partial unique index 不會在中間狀態撞到。
 import { and, asc, desc, eq, inArray, isNull, ne, or } from "drizzle-orm";
-import { getDb } from "./index";
+import { getDb, runBatch, type Db } from "./index";
 import { employeeBankAccounts, employees } from "./schema";
 import { decryptField, encryptField } from "@/lib/crypto";
+import { employeeAccountNumberContext, employeeNationalIdContext } from "@/lib/field-contexts";
 import { maskNationalId } from "@/lib/pii";
 import {
   EmployeeAccountError,
-  LEGACY_ACCOUNT_NOTE,
   accountLast5,
   bankNameForCode,
   checkAccountCodes,
   checkAccountNumber,
   isAccountKind,
-  parseLegacySalaryAccount,
   type EmployeeAccountKind,
   type MaskedEmployeeAccount,
 } from "@/lib/employee-accounts";
-
-type Db = ReturnType<typeof getDb>;
 
 /** 遮罩後的欄位投影。不含 account_number_enc。 */
 const maskedColumns = {
@@ -180,36 +177,35 @@ export async function createEmployeeAccount(
   const defaultForSalary = isActive && !!input.defaultForSalary;
   const defaultForReimbursement = isActive && !!input.defaultForReimbursement;
 
-  const insert = db
-    .insert(employeeBankAccounts)
-    .values({
-      organizationId: orgId,
-      employeeId,
-      kind,
-      ...codes,
-      bankName: textOrNull(input.bankName) ?? bankNameForCode(codes.bankCode),
-      accountHolder: textOrNull(input.accountHolder),
-      accountNumberEnc: await encryptField(number),
-      accountLast5: accountLast5(number),
-      label: textOrNull(input.label),
-      defaultForSalary,
-      defaultForReimbursement,
-      isActive,
-      note: textOrNull(input.note),
-    })
-    .returning(maskedColumns);
+  const values: typeof employeeBankAccounts.$inferInsert = {
+    organizationId: orgId,
+    employeeId,
+    kind,
+    ...codes,
+    bankName: textOrNull(input.bankName) ?? bankNameForCode(codes.bankCode),
+    accountHolder: textOrNull(input.accountHolder),
+    accountNumberEnc: await encryptField(number, employeeAccountNumberContext(orgId, employeeId)),
+    accountLast5: accountLast5(number),
+    label: textOrNull(input.label),
+    defaultForSalary,
+    defaultForReimbursement,
+    isActive,
+    note: textOrNull(input.note),
+  };
+  // 用傳進來的 q 建：在 runBatch 裡 q 可能是交易物件（pg），用外面的 db 建會跑出交易。
+  const insert = (q: Db) => q.insert(employeeBankAccounts).values(values).returning(maskedColumns);
 
   if (defaultForSalary || defaultForReimbursement) {
-    const [, inserted] = await db.batch([
-      clearDefaultsQuery(db, orgId, employeeId, {
+    const [, inserted] = await runBatch((q) => [
+      clearDefaultsQuery(q, orgId, employeeId, {
         salary: defaultForSalary,
         reimbursement: defaultForReimbursement,
       }),
-      insert,
+      insert(q),
     ]);
     return inserted[0];
   }
-  const [row] = await insert;
+  const [row] = await insert(db);
   return row;
 }
 
@@ -225,17 +221,22 @@ function orExisting<T>(next: T | undefined, existing: T): T {
 /** 新帳號 → 加密 + 末五碼；沒帶新帳號就不動（但改成銀行帳戶時必須重填）。 */
 async function accountNumberPatch(
   kind: EmployeeAccountKind,
-  existingKind: string,
+  existing: { kind: string; employeeId: number },
+  orgId: string,
   rawNumber: string | null | undefined,
 ): Promise<AccountPatch> {
   const newNumber = textOrNull(rawNumber);
   if (!newNumber) {
     // 改成銀行帳戶時，舊帳號可能不是純數字（例如舊資料的 other）→ 要求重新輸入。
-    if (kind === "bank" && existingKind !== "bank") throw new EmployeeAccountError("numberDigits");
+    if (kind === "bank" && existing.kind !== "bank") throw new EmployeeAccountError("numberDigits");
     return {};
   }
   const n = checkAccountNumber(kind, newNumber);
-  return { accountNumberEnc: await encryptField(n), accountLast5: accountLast5(n) };
+  // employee_id 不會被 update 改掉，所以 context 綁它是安全的。
+  return {
+    accountNumberEnc: await encryptField(n, employeeAccountNumberContext(orgId, existing.employeeId)),
+    accountLast5: accountLast5(n),
+  };
 }
 
 /** 銀行名稱：有帶就用（空白則依代碼帶預設）；只改代碼時跟著代碼換；都沒動回 undefined。 */
@@ -270,7 +271,7 @@ export async function updateEmployeeAccount(
   const patch: AccountPatch = {
     kind,
     ...codes,
-    ...(await accountNumberPatch(kind, existing.kind, input.accountNumber)),
+    ...(await accountNumberPatch(kind, existing, orgId, input.accountNumber)),
     updatedAt: new Date().toISOString(),
   };
   const bankName = bankNamePatch(input, codes.bankCode, existing.bankCode);
@@ -286,22 +287,23 @@ export async function updateEmployeeAccount(
   patch.defaultForSalary = wantSalary;
   patch.defaultForReimbursement = wantReimb;
 
-  const update = db
-    .update(employeeBankAccounts)
-    .set(patch)
-    .where(and(notDeleted(orgId), eq(employeeBankAccounts.id, id)))
-    .returning(maskedColumns);
+  const update = (q: Db) =>
+    q
+      .update(employeeBankAccounts)
+      .set(patch)
+      .where(and(notDeleted(orgId), eq(employeeBankAccounts.id, id)))
+      .returning(maskedColumns);
 
   const newlySalary = wantSalary && !existing.defaultForSalary;
   const newlyReimb = wantReimb && !existing.defaultForReimbursement;
   if (newlySalary || newlyReimb) {
-    const [, updated] = await db.batch([
-      clearDefaultsQuery(db, orgId, existing.employeeId, { salary: newlySalary, reimbursement: newlyReimb }, id),
-      update,
+    const [, updated] = await runBatch((q) => [
+      clearDefaultsQuery(q, orgId, existing.employeeId, { salary: newlySalary, reimbursement: newlyReimb }, id),
+      update(q),
     ]);
     return updated[0];
   }
-  const [row] = await update;
+  const [row] = await update(db);
   return row;
 }
 
@@ -326,12 +328,12 @@ export async function softDeleteEmployeeAccount(orgId: string, id: number): Prom
  */
 export async function revealEmployeeAccountNumber(orgId: string, id: number): Promise<string> {
   const [row] = await getDb()
-    .select({ enc: employeeBankAccounts.accountNumberEnc })
+    .select({ enc: employeeBankAccounts.accountNumberEnc, employeeId: employeeBankAccounts.employeeId })
     .from(employeeBankAccounts)
     .where(and(notDeleted(orgId), eq(employeeBankAccounts.id, id)))
     .limit(1);
   if (!row) throw new EmployeeAccountError("notFound");
-  return decryptField(row.enc);
+  return decryptField(row.enc, employeeAccountNumberContext(orgId, row.employeeId));
 }
 
 export type PayoutPurpose = "salary" | "reimbursement";
@@ -374,66 +376,37 @@ export async function resolvePayoutAccount(
   return row ?? null;
 }
 
-/**
- * 舊 salary_account → 一個「薪資預設」帳戶，成功後清空舊欄位（明文不再留在 DB）。
- * 已經有任何帳戶的員工不轉（避免蓋掉人手動建的預設），回傳 null。
- */
-export async function convertLegacySalaryAccount(
-  orgId: string,
-  employeeId: number,
-): Promise<MaskedEmployeeAccount | null> {
-  const db = getDb();
-  const [emp] = await db
-    .select({ salaryAccount: employees.salaryAccount, name: employees.name })
-    .from(employees)
-    .where(and(eq(employees.organizationId, orgId), eq(employees.id, employeeId), isNull(employees.deletedAt)))
-    .limit(1);
-  if (!emp) throw new EmployeeAccountError("wrongEmployee");
-  const parsed = emp.salaryAccount ? parseLegacySalaryAccount(emp.salaryAccount) : null;
-  if (!parsed) return null;
-  const existing = await listEmployeeAccounts(orgId, employeeId);
-  if (existing.length > 0) return null;
-  const created = await createEmployeeAccount(orgId, employeeId, {
-    ...parsed,
-    accountHolder: emp.name,
-    currency: "TWD",
-    defaultForSalary: true,
-    note: LEGACY_ACCOUNT_NOTE,
-  });
-  await db
-    .update(employees)
-    .set({ salaryAccount: null })
-    .where(and(eq(employees.organizationId, orgId), eq(employees.id, employeeId)));
-  return created;
-}
-
 // ---- 身分證字號 ----
+// 明文欄位 employees.national_id 已由 migrations/0035 移除，只剩密文 national_id_enc。
+// orgId 一律由呼叫端從 server 端的 org context 傳進來（requireOrg / MCP 的 orgId），
+// 不取自資料列本身 —— context 綁的是「這筆資料應該屬於的組織」。
 
-/** 身分證字號明文：優先解密 national_id_enc，沒有才退回舊的明文欄位。 */
-export async function readNationalId(row: {
-  nationalId: string | null;
-  nationalIdEnc: string | null;
-}): Promise<string | null> {
-  if (row.nationalIdEnc) return decryptField(row.nationalIdEnc);
-  return row.nationalId;
+/** 身分證字號明文（解密 national_id_enc）。 */
+export async function readNationalId(
+  orgId: string,
+  row: { nationalIdEnc: string | null },
+): Promise<string | null> {
+  if (!row.nationalIdEnc) return null;
+  return decryptField(row.nationalIdEnc, employeeNationalIdContext(orgId));
 }
 
 /** 遮罩後的身分證字號；解不開（金鑰缺失 / 密文損壞）時回固定遮罩，不讓頁面整個掛掉。 */
-export async function readMaskedNationalId(row: {
-  nationalId: string | null;
-  nationalIdEnc: string | null;
-}): Promise<string | null> {
+export async function readMaskedNationalId(
+  orgId: string,
+  row: { nationalIdEnc: string | null },
+): Promise<string | null> {
   try {
-    return maskNationalId(await readNationalId(row));
+    return maskNationalId(await readNationalId(orgId, row));
   } catch {
     return "***";
   }
 }
 
-/** 寫入用：明文 → { nationalIdEnc, nationalId: null }；空值兩欄都清空。 */
+/** 寫入用：明文 → { nationalIdEnc }；空值清空。 */
 export async function nationalIdColumns(
+  orgId: string,
   value: string | null | undefined,
-): Promise<{ nationalId: null; nationalIdEnc: string | null }> {
+): Promise<{ nationalIdEnc: string | null }> {
   const v = value?.trim();
-  return { nationalId: null, nationalIdEnc: v ? await encryptField(v) : null };
+  return { nationalIdEnc: v ? await encryptField(v, employeeNationalIdContext(orgId)) : null };
 }

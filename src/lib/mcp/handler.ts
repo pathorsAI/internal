@@ -1,7 +1,7 @@
 import { type ToolContext, tools } from "./tools";
 import { type ToolAnnotations, type ToolDef, resolveOrg } from "./shared";
 import { logMcp, type ActivityAction } from "@/db/activity";
-import { publicBaseUrl } from "@/lib/base-url";
+import { publicBaseUrl, trustedOrigins } from "@/lib/base-url";
 import { MCP_SERVER_ICONS } from "./mcp-icons";
 
 type McpAudit = {
@@ -121,7 +121,7 @@ const LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0];
 // before doing org-scoped work — important because the signed-in account may
 // belong to multiple organizations and we never guess.
 const INSTRUCTIONS = [
-  "This server is the operational surface for one organization's bookkeeping: ledger transactions (內外帳), parties, categories, bank accounts, invoices, projects, subscriptions, contracts, employees, payroll records, and reconciliations.",
+  "This server is the operational surface for one organization's bookkeeping: ledger transactions (management & tax books), parties, categories, bank accounts, invoices, projects, subscriptions, contracts, employees, payroll records, and reconciliations.",
   "It is a bookkeeping system and nothing else. Every write creates or edits a record in this organization's own books. No tool moves money: none of them initiates, authorizes or executes a payment, transfer, payout or trade, and the server cannot instruct any bank, card or payment provider — the only bank link is an optional, read-only Wise integration (wise_* tools) that reads balances and statements and can import them into the ledger. The Azure / GCP billing integrations are read-only too: they record which platform account is paid by which card or invoice and reconcile cloud invoices against existing ledger rows (vendor billing tools). Words like pay, payment, transfer, salary, reimbursement and advance always describe an entry being recorded, never money being sent.",
   "The signed-in account may belong to multiple organizations.",
   "At the start of each session, before calling any org-scoped tool, call list_organizations and ask the user which organization to work in.",
@@ -145,19 +145,19 @@ const CORS_EXPOSE_HEADERS = "WWW-Authenticate, Mcp-Session-Id, MCP-Protocol-Vers
 // validate `Origin` (DNS-rebinding defence). Requests with no Origin header —
 // which is how ChatGPT, Codex and Claude actually connect, server-to-server —
 // are unaffected. Add a host here if a new browser-based client shows up.
+// 自家的 origin 不寫死：跟 better-auth 的 trustedOrigins 同一份（BETTER_AUTH_URL +
+// TRUSTED_ORIGINS，非 production 再加 localhost:3000），自架的人改 env 就好。
 const ALLOWED_ORIGINS = new Set(
   [
     PUBLIC_BASE_URL,
-    "https://internal.pathors.com",
-    "https://pathors-internal.pathors.workers.dev",
+    ...trustedOrigins(),
     "https://chatgpt.com",
     "https://chat.openai.com",
     "https://platform.openai.com",
     "https://codex.openai.com",
     "https://claude.ai",
     "https://claude.com",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
+    ...(process.env.NODE_ENV === "production" ? [] : ["http://127.0.0.1:3000"]),
   ].map((u) => {
     try {
       return new URL(u).origin;

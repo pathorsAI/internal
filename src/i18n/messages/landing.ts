@@ -10,7 +10,7 @@ import type { Dictionary } from "./dictionary";
  *  1. **這裡不放 HTML 標記。** 句子中間有 `<b>` 或 `<br>` 的，拆成 `…Lead` / `…Body`
  *     兩個 key，標記留在模板裡 —— 值一律會被 escape，寫進來的標籤只會變成字面文字。
  *  2. **中文是「寫」的，不是翻的。** 英文那側是有語氣的行銷文案，中文照台灣人講話的
- *     方式重寫，用語跟系統內其他 namespace 對齊（內外帳／請款／對帳／發票）。
+ *     方式重寫，用語跟系統內其他 namespace 對齊（管理帳／稅務帳／請款／對帳／發票）。
  *
  * 專有名詞不翻：Internal、MCP、Apache 2.0、GitHub、PostgreSQL、Google。
  * demo 裡的虛構公司名（Verdant Biosciences 等）與檔名、金額同理，留在模板裡。
@@ -19,8 +19,8 @@ const landing = {
   meta: {
     title: { "zh-TW": "你的 AI 也接得進來的總帳", en: "A Ledger Your AI Can Plug Into" },
     description: {
-      "zh-TW": "台幣帳、美金帳、內帳、外帳 —— 一筆交易只記一次，兩邊自己對得起來。它是一台 MCP 伺服器：你自己的 AI 讀得到帳本，也能把每個月的對帳單直接寫進來。",
-      en: "A TWD account, a USD account, the internal books, the external books — enter a transaction once and both sides stay in step. It is an MCP server too, so your own AI can read the ledger and write the month\u2019s statement straight into it.",
+      "zh-TW": "台幣帳、美金帳、管理帳、稅務帳 —— 一筆交易只記一次，兩邊自己對得起來。它是一台 MCP 伺服器：你自己的 AI 讀得到帳本，也能把每個月的對帳單直接寫進來。",
+      en: "A TWD account, a USD account, the management books, the tax books — enter a transaction once and both sides stay in step. It is an MCP server too, so your own AI can read the ledger and write the month\u2019s statement straight into it.",
     },
   },
 
@@ -57,15 +57,15 @@ const landing = {
       "zh-TW": "Verdant Biosciences — 數據儀表板加購",
       en: "Verdant Biosciences — data dashboard add-on",
     },
-    srcChip: { "zh-TW": "內外帳都算", en: "Both books" },
-    internalBook: { "zh-TW": "內帳", en: "Internal book" },
-    externalBook: { "zh-TW": "外帳", en: "External book" },
+    srcChip: { "zh-TW": "兩本都記", en: "Both books" },
+    internalBook: { "zh-TW": "管理帳", en: "Management books" },
+    externalBook: { "zh-TW": "稅務帳", en: "Tax books" },
     inSync: { "zh-TW": "一致", en: "in sync" },
     rowPayroll: { "zh-TW": "當月薪資發放", en: "Monthly payroll run" },
     rowSaas: { "zh-TW": "團隊軟體訂閱", en: "Team software subscriptions" },
     verdictOkChip: { "zh-TW": "對得起來", en: "Agreeing" },
     verdictOkText: {
-      "zh-TW": "一筆輸入，標記為內外帳都算。改一次，兩本帳一起跟著改。",
+      "zh-TW": "一筆輸入，標記為兩本都記。改一次，兩本帳一起跟著改。",
       en: "One entry, marked as belonging to both. Change it once and both books change with it.",
     },
     verdictBadChip: { "zh-TW": "差了 NT$20,000", en: "Off by NT$20,000" },
@@ -100,15 +100,15 @@ const landing = {
 
   books: {
     badge: { "zh-TW": "兩份 Excel 對不起來", en: "Two spreadsheets that never agree" },
-    heading: { "zh-TW": "內外帳記一次，兩邊自動對齊", en: "Enter it once. Both books agree." },
+    heading: { "zh-TW": "管理帳、稅務帳記一次，兩邊自動對齊", en: "Enter it once. Both books agree." },
     lede: {
-      "zh-TW": "每一筆交易都標明它屬於哪本帳：內帳、外帳，或兩本都算。兩邊看的是同一批資料，所以不可能各走各的。",
-      en: "Every transaction says which books it belongs to — internal, external, or both. The two views read from the same rows, so they cannot drift apart.",
+      "zh-TW": "每一筆交易都標明它屬於哪本帳：管理帳、稅務帳，或兩本都記。兩邊看的是同一批資料，所以不可能各走各的。",
+      en: "Every transaction says which books it belongs to — management, tax, or both. The two views read from the same rows, so they cannot drift apart.",
     },
-    payrollLead: { "zh-TW": "薪資只留在內帳。", en: "Salaries stay internal." },
+    payrollLead: { "zh-TW": "不能列費用的支出，照樣記清楚。", en: "Costs you can\u2019t deduct still get tracked." },
     payrollBody: {
-      "zh-TW": "標成內帳的薪資發放不會出現在外帳，你不用刪掉它，也不用另外留一份。",
-      en: "A pay run marked internal never appears in the external view. You do not delete it, and you do not keep a second copy of it.",
+      "zh-TW": "沒有合格憑證的支出、專案之間的內部分攤，標成管理帳就好，你掌握的是真實成本；稅務帳只列會計師申報需要的項目。不用刪掉，也不用另外留一份。",
+      en: "Spending without a qualifying receipt, or cost allocations between projects, can be marked management-only, so you see the real cost; the tax view lists only what your accountant files. Nothing is deleted, and nothing needs a second copy.",
     },
     incomeLead: { "zh-TW": "客戶收入刻意算兩次。", en: "Client income counts twice, on purpose." },
     incomeBody: {
@@ -120,10 +120,10 @@ const landing = {
       "zh-TW": "台幣和美金分開加總，系統不會自己幫你假設一個匯率。",
       en: "New Taiwan dollars and US dollars are added up separately. Nothing invents an exchange rate for you.",
     },
-    shotLabel: { "zh-TW": "內外帳", en: "Dual books" },
+    shotLabel: { "zh-TW": "收支紀錄", en: "Ledger" },
     shotAlt: {
-      "zh-TW": "交易列表，每一筆都標示屬於內帳、外帳或兩者",
-      en: "The ledger listing transactions, each marked as internal, external or both",
+      "zh-TW": "交易列表，每一筆都標示屬於管理帳、稅務帳或兩者",
+      en: "The ledger listing transactions, each marked as management, tax or both",
     },
   },
 
@@ -257,8 +257,8 @@ const landing = {
       en: "No need to wait for a bank integration. You already get a statement every month — hand it to your own AI and it writes the transactions straight in.",
     },
     sub: {
-      "zh-TW": "關鍵是它會問。哪幾筆只進內帳、哪幾筆外帳也要認、分類拿不準的，它會先跟你確認再寫，而不是猜完就送出。",
-      en: "The point is that it asks. Which entries belong only to the internal books, which the external books must own, which category is ambiguous — it checks with you before writing, instead of guessing and committing.",
+      "zh-TW": "關鍵是它會問。哪幾筆有憑證、要計入稅務帳，哪幾筆只是管理用的分攤，分類拿不準的，它會先跟你確認再寫，而不是猜完就送出。",
+      en: "The point is that it asks. Which entries have an invoice and go into the tax books, which are management-only allocations, which category is ambiguous — it checks with you before writing, instead of guessing and committing.",
     },
     audit: {
       "zh-TW": "每一筆經由 AI 的寫入都會留下稽核紀錄，員工個資送出前會遮罩。",
@@ -280,10 +280,10 @@ const landing = {
       en: "\u201CConsulting fee, NT$45,000\u201D",
     },
     termWhich: {
-      "zh-TW": "—— 只進內帳，還是外帳也認？",
-      en: "— internal books only, or do the external books take it too?",
+      "zh-TW": "—— 有拿到發票嗎？要列為可扣抵的費用嗎？",
+      en: "— is there an invoice, and is it a deductible expense?",
     },
-    termAnswer: { "zh-TW": "外帳也要", en: "Yes, external too" },
+    termAnswer: { "zh-TW": "有發票，列費用", en: "Yes, invoiced and deductible" },
     termDone: {
       "zh-TW": "好，23 筆都寫進去了",
       en: "Done. All 23 written in.",
@@ -313,8 +313,8 @@ const landing = {
     },
     payrollTitle: { "zh-TW": "薪資從試算到薪資單一次走完", en: "Payroll from calculation to payslip in one pass" },
     payrollBody: {
-      "zh-TW": "接上 Simpany，試算、寫入、送記帳士、寄薪資單一路完成，發薪直接入內帳。",
-      en: "Connected to Simpany: calculate, file, hand off to the accountant and send payslips in one pass, with pay runs posted to the internal books.",
+      "zh-TW": "接上 Simpany，試算、寫入、送記帳士、寄薪資單一路完成，發薪紀錄直接入帳。",
+      en: "Connected to Simpany: calculate, file, hand off to the accountant and send payslips in one pass, with pay runs posted straight to the ledger.",
     },
     recurringTitle: { "zh-TW": "固定扣款不再嚇一跳", en: "No surprise auto-debits" },
     recurringBody: {

@@ -1,6 +1,6 @@
 # Deployment
 
-This project (an internal-accounting / 內外帳 + client-finance app) is a standard
+This project (a bookkeeping + client-finance app for small companies) is a standard
 **Next.js 16 (App Router)** application backed by **Postgres**. There is nothing
 that forces a particular host on you — if you can run Next.js and reach a
 Postgres database, you can run this app.
@@ -13,11 +13,11 @@ This document describes two paths:
 2. **[Docker self-host](#docker-self-host)** — a portable, vendor-neutral setup
    (Node + Postgres) with a `docker-compose.yml`, for running it on your own box.
 
-> **Heads-up on file uploads.** The document-upload feature stores files in
-> **Cloudflare R2** through a Workers binding (`env.STORAGE`). That binding only
-> exists on Cloudflare. On any other host (including Docker) uploads/downloads
-> need an alternative storage backend — see
-> [Storage portability](#storage-portability). Everything else (auth,
+> **File uploads work on any host.** Documents, counterparty avatars and Simpany
+> tax uploads go through a small storage layer with three drivers: Cloudflare
+> **R2** (the Workers binding we use), any **S3-compatible** store (AWS S3, MinIO,
+> Backblaze B2, R2 via its S3 API), or a **local directory** (dev / Docker
+> volume). See [File storage](#file-storage). Everything else (auth,
 > accounting, client finance, reports) is host-agnostic.
 
 ---
@@ -27,14 +27,17 @@ This document describes two paths:
 | Requirement | Notes |
 | --- | --- |
 | A Node-compatible runtime | Next.js 16, React 19. We build with **Bun**. |
-| Postgres | Any Postgres. Schema is introspect-only (`bun run db:pull`); migrations under [`migrations/`](../migrations) are plain forward-only SQL. |
-| A Postgres driver that matches your runtime | On serverless/edge you need an **HTTP** driver (e.g. Neon). On a normal Node server you can use a regular TCP driver (`pg`). See [Database driver](#database-driver). |
-| Object storage *(only for document uploads)* | Cloudflare R2 by default. Swappable — see [Storage portability](#storage-portability). |
-| Env vars | `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `FIELD_ENCRYPTION_KEY`, `RESEND_API_KEY` (optional: `RESEND_FROM`). See [`.env.example`](../.env.example). |
+| Postgres | Any Postgres. Schema is introspect-only (`bun run db:pull`); migrations under [`migrations/`](../migrations) are plain forward-only SQL, applied with `bun run db:apply` (see [Migrations](#migrations)). |
+| A Postgres driver | Picked at runtime, no code change: Neon hosts use Neon's HTTP driver, everything else uses node-postgres (`pg`), and a Cloudflare Hyperdrive binding is used when present. Override with `DATABASE_DRIVER`. See [Database driver](#database-driver). |
+| File storage *(document uploads, avatars)* | Cloudflare R2 binding, any S3-compatible bucket, or a local directory. Picked by `STORAGE_DRIVER` — see [File storage](#file-storage). |
+| Env vars | `DATABASE_URL` (optional: `DATABASE_DRIVER`, `DATABASE_POOL_MAX`), `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `FIELD_ENCRYPTION_KEYS`, `RESEND_API_KEY`, `RESEND_FROM` (optional: `TRUSTED_ORIGINS`, `RATE_LIMIT_STORAGE`, `OIDC_ISSUER`, `STORAGE_DRIVER` + its settings). See [`.env.example`](../.env.example). |
 | `OIDC_SIGNING_KEY` | Optional. RSA private key (PKCS#8, base64 one line or PEM) used to sign per-organization OIDC JWTs for GCP Workload Identity Federation (keyless GCP billing). Without it, GCP can only be connected with a service account key. |
 | `RESEND_API_KEY` | [Resend](https://resend.com) API key. **Required in production** for public sign-up (`/signup` sends a confirmation link) and forgot-password (`/reset-password` links). Without it those emails are not sent — the pages still say "check your inbox", and the Worker log shows `[auth-email] failed to send …`. In development (`NODE_ENV !== "production"`) a missing key prints each email, link included, to the server console instead. |
-| `RESEND_FROM` *(optional)* | Sender, default `Pathors Internal <noreply@pathors.com>`. The domain must be verified in Resend. Self-hosters set this to their own domain. |
-| `FIELD_ENCRYPTION_KEY` | 32 random bytes, base64 (`openssl rand -base64 32`). AES-256-GCM key for field-level encryption of integration credentials (Simpany, Wise — see [integrations.md](integrations.md)) and other high-sensitivity fields. Without it, connecting an integration fails with a clear error. **Losing or rotating it makes stored credentials unreadable** — every integration must be reconnected. |
+| `RESEND_FROM` | Sender, e.g. `My App <noreply@example.com>`. **Required in production** — there is no built-in default; without it sending fails (logged as `[auth-email] failed to send …`) instead of spoofing someone else's domain. The domain must be verified in Resend. |
+| `TRUSTED_ORIGINS` *(optional)* | Comma-separated extra origins allowed through better-auth's CSRF/origin check (and as browser origins for `/mcp`). `BETTER_AUTH_URL`'s origin is always trusted; `http://localhost:3000` is added only when `NODE_ENV !== "production"`. List every hostname users sign in on (e.g. custom domain **and** `*.workers.dev`). |
+| `RATE_LIMIT_STORAGE` *(optional)* | `database` stores better-auth rate-limit counters in the `rate_limit` table (migration 0034) so they are shared across Worker isolates. Default: per-isolate memory. Costs an extra DB read + write per auth request. |
+| `FIELD_ENCRYPTION_KEYS` | Keyring for AES-256-GCM field-level encryption (integration credentials, employee bank account numbers, national IDs): `kid1:base64key,kid2:base64key`, each key 32 random bytes (`openssl rand -base64 32`). The **first** entry encrypts new writes; all entries are tried by kid on read. Ciphertext is bound to its column + organization (AES-GCM associated data), so it cannot be copied to another row or org. Rotate: prepend a new key, run `bun run scripts/reencrypt-fields.ts --apply` until the dry run shows nothing left, then drop the old key. **Losing a key makes values encrypted with it unreadable.** |
+| `FIELD_ENCRYPTION_KEY` *(legacy)* | The old single key (kid `legacy`). Keep it set while any `v1:` / `v2:legacy:` ciphertext remains — it is required to read them. If `FIELD_ENCRYPTION_KEYS` is unset it is also used for new writes (as `v2:legacy:`, never `v1`). |
 
 ---
 
@@ -48,10 +51,12 @@ This is the configuration the repo ships with.
   driver (`drizzle-orm/neon-http` + `@neondatabase/serverless`).
 - **Files:** Cloudflare R2, bound to the Worker as `STORAGE`.
 
-**Why Neon here?** Workers can't open a raw TCP socket, so a normal Postgres
-driver won't connect. Neon's HTTP driver works inside the Worker. This is the
-*only* reason Neon is the default — the app is otherwise plain Postgres. Swap in
-any Postgres-over-HTTP option, or move off Workers entirely, and it still runs.
+**Why Neon here?** It is a managed Postgres whose HTTP driver needs no
+connection pooling on the Worker side, and the app auto-selects that driver for
+any `*.neon.tech` host. It is not a requirement: on Workers you can use any
+Postgres through [Cloudflare Hyperdrive](https://developers.cloudflare.com/hyperdrive/)
+(bind it as `HYPERDRIVE`, see [Database driver](#database-driver)), and off
+Workers any Postgres works over plain TCP.
 
 ### Deploy
 
@@ -114,10 +119,11 @@ Local dev reads `.env.local`. For the deployed Worker, set secrets with wrangler
 echo "$BETTER_AUTH_SECRET" | bunx wrangler secret put BETTER_AUTH_SECRET
 echo "$DATABASE_URL"       | bunx wrangler secret put DATABASE_URL
 echo "$GOOGLE_CLIENT_ID"   | bunx wrangler secret put GOOGLE_CLIENT_ID
-echo "$FIELD_ENCRYPTION_KEY" | bunx wrangler secret put FIELD_ENCRYPTION_KEY
+echo "$FIELD_ENCRYPTION_KEYS" | bunx wrangler secret put FIELD_ENCRYPTION_KEYS
 echo "$OIDC_SIGNING_KEY"     | bunx wrangler secret put OIDC_SIGNING_KEY
 echo "$RESEND_API_KEY"     | bunx wrangler secret put RESEND_API_KEY
-# …and GOOGLE_CLIENT_SECRET, BETTER_AUTH_URL (and RESEND_FROM if you override the sender)
+# …and GOOGLE_CLIENT_SECRET, BETTER_AUTH_URL. RESEND_FROM / TRUSTED_ORIGINS / OIDC_ISSUER are
+# plain vars in wrangler.jsonc — change them to your own values.
 ```
 
 `OIDC_SIGNING_KEY` is the platform's RSA signing key (PKCS#8 DER, one line of
@@ -126,7 +132,7 @@ base64; a full PEM also works) for GCP Workload Identity Federation — see
 one key for the whole deployment; organizations are told apart by the JWT `sub`
 (= organization id). Optional plain vars: `OIDC_SIGNING_KID` (default
 `internal-2026-10b`, must match the `kid` in the JWKS uploaded to GCP) and
-`OIDC_ISSUER` (default `https://internal.pathors.com`). The public key is served
+`OIDC_ISSUER` (default: `BETTER_AUTH_URL`; must equal the issuer registered in GCP). The public key is served
 unauthenticated at `/.well-known/jwks.json` (and `/.well-known/openid-configuration`)
 for future rotation; GCP currently uses the JWKS uploaded to the provider.
 
@@ -188,6 +194,15 @@ one organization.
 and overview pages select these columns. Avatars live in the same `STORAGE` bucket under
 `orgs/<organizationId>/parties/<partyId>/`.
 
+**Migration 0034** (`migrations/0034_rate_limit.sql`) creates `rate_limit` for
+`RATE_LIMIT_STORAGE=database` (additive; unused unless that var is set). Run it before
+setting the var.
+
+**Migration 0035** (`migrations/0035_drop_plaintext_pii.sql`) drops the deprecated
+plaintext `employees.national_id` / `salary_account`. Order: deploy the code that no
+longer reads them, run `bun run scripts/migrate-employee-pii.ts --apply` until nothing is
+left, then run 0035 — it aborts with an error while any non-NULL value remains.
+
 **Migration 0033** (`migrations/0033_party_aliases.sql`) adds `parties.aliases`
 (`text[] NOT NULL DEFAULT '{}'`, additive). Run it **before** deploying that code: the
 parties page, `list_parties` / `get_party` and every name → party lookup (Wise sync,
@@ -216,46 +231,25 @@ it), so the cron finds no Discord rows and the notification step does nothing.
 | `bun run cf:build` | OpenNext build only |
 | `bun run cf:preview` | Build + run the Worker locally |
 | `bun run cf:deploy` | Build + deploy to Cloudflare |
+| `bun run db:apply` | Apply pending `migrations/*.sql` (see [Migrations](#migrations)) |
 
 ---
 
 ## Docker self-host
 
 A vendor-neutral path: a plain Node server (built with Bun) plus a Postgres
-container. No Cloudflare, no Neon. Two code changes are required first — they're
-small and the repo is structured to make them easy.
+container. No Cloudflare, no Neon. The database needs **no code changes**: with
+a non-Neon `DATABASE_URL` the app uses node-postgres automatically (the compose
+file also sets `DATABASE_DRIVER=pg` to make it explicit). Only document uploads
+need work — see Step 1.
 
-### Step 1 — Database driver
+### Step 1 — Storage
 
-The default DB client uses Neon's HTTP driver, which is only needed on Workers.
-On a normal server, use a TCP driver instead. Edit
-[`src/db/index.ts`](../src/db/index.ts):
+Nothing to do for a first run: `docker-compose.yml` sets `STORAGE_DRIVER=fs`
+and keeps uploads on the named volume `storage-data`. To use S3 / MinIO instead,
+see [File storage](#file-storage).
 
-```ts
-// Replace the neon-http driver…
-//   import { drizzle } from "drizzle-orm/neon-http";
-//   import { neon } from "@neondatabase/serverless";
-//   _db = drizzle(neon(connectionString), { schema: fullSchema });
-
-// …with node-postgres:
-import { drizzle } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
-// inside getDb():
-_db = drizzle(new Pool({ connectionString }), { schema: fullSchema });
-```
-
-Then add the driver: `bun add pg && bun add -d @types/pg`.
-
-Because a TCP driver supports interactive transactions, you can also **remove**
-the `transaction: false` line in [`src/lib/auth.ts`](../src/lib/auth.ts) (it's a
-workaround for the HTTP driver only).
-
-### Step 2 — Storage (only if you need document uploads)
-
-See [Storage portability](#storage-portability). If you don't need the upload
-feature, you can skip this; the rest of the app runs fine.
-
-### Step 3 — Build and run
+### Step 2 — Build and run
 
 The repo ships a [`Dockerfile`](../Dockerfile), [`docker-compose.yml`](../docker-compose.yml),
 and [`.dockerignore`](../.dockerignore).
@@ -267,22 +261,16 @@ cp .env.example .env
 #   set BETTER_AUTH_URL to your public URL
 #   generate BETTER_AUTH_SECRET:  openssl rand -base64 32
 
-# 2. Build and start app + postgres
+# 2. Build and start postgres, apply migrations, start the app
 docker compose up --build -d
-
-# 3. Apply the schema to the fresh database (one-time)
-#    Pipe the SQL in migrations/ into the db container, in filename order.
-#    0000_baseline.sql creates the tables that predate migrations/; the rest
-#    build on it. ON_ERROR_STOP makes a failure stop the run instead of
-#    carrying on with a half-built schema.
-cat migrations/*.sql | docker compose exec -T db psql -U app -d app -v ON_ERROR_STOP=1
 ```
 
-The same works for any empty Postgres (e.g. a new Neon project): apply every
-file in `migrations/` in order, starting with `0000_baseline.sql`. The baseline
-is idempotent (`CREATE … IF NOT EXISTS`), so it is a no-op on a database that
-already has those tables. Afterwards `bun run db:pull` against it should
-produce the same tables and columns as `src/db/schema.ts`.
+`docker compose up` runs the one-shot `migrate` service first: it applies
+`migrations/*.sql` in filename order with [`scripts/migrate.ts`](../scripts/migrate.ts)
+and exits, and `app` only starts once it succeeded. Re-runs are no-ops, so this
+also picks up new migrations after you pull and rebuild. To run it by hand:
+`docker compose run --rm migrate`. See [Migrations](#migrations) for how it
+tracks what has been applied.
 
 The app is then on `http://localhost:3000` (map/route it behind your own TLS
 proxy for production).
@@ -296,48 +284,143 @@ proxy for production).
 
 ## Database driver
 
-| Runtime | Driver | Import |
+[`src/db/index.ts`](../src/db/index.ts) picks the driver the first time a query
+runs (the client stays lazy, so `next build` still needs no `DATABASE_URL`):
+
+| Situation | Driver |
+| --- | --- |
+| Cloudflare Workers with a Hyperdrive binding named `HYPERDRIVE` | node-postgres through Hyperdrive (`env.HYPERDRIVE.connectionString`); `DATABASE_URL` is not read |
+| `DATABASE_DRIVER=neon-http` or `DATABASE_DRIVER=pg` | that driver |
+| `DATABASE_DRIVER` unset, `DATABASE_URL` host ends in `.neon.tech` | Neon HTTP (`drizzle-orm/neon-http`) — what we run |
+| `DATABASE_DRIVER` unset, any other host | node-postgres (`drizzle-orm/node-postgres`) |
+
+`DATABASE_POOL_MAX` (default `10`) sizes the node-postgres pool per process.
+Under Hyperdrive the app creates a small pool (max 5) **per request** instead:
+Workers cannot reuse a socket across requests, and the real pooling happens on
+Hyperdrive's side.
+
+**Workers + any Postgres (Hyperdrive).** Create a Hyperdrive config pointing at
+your database (`wrangler hyperdrive create <name> --connection-string=…`), then
+uncomment the `hyperdrive` block in `wrangler.jsonc` with the returned id. For
+`next dev`, also give that binding a `localConnectionString`.
+
+**Atomic multi-statement writes.** Neon's HTTP driver has no interactive
+transactions, so code that needs "all or nothing" uses `runBatch()` from
+`src/db/index.ts`: `db.batch` on neon-http, `db.transaction` on node-postgres,
+same result shape. Build the queries from the `q` it hands you, not from an
+outer `db` — on node-postgres only queries built from the transaction run inside
+it. The `transaction: false` flag in [`src/lib/auth.ts`](../src/lib/auth.ts) is
+kept because it is correct on both drivers.
+
+### Migrations
+
+`bun run db:apply` (= `bun scripts/migrate.ts`) applies `migrations/*.sql` to
+`DATABASE_URL` over plain TCP, whatever driver the app itself uses:
+
+- Applied files are recorded in a `_migrations` table (filename, sha256
+  checksum, applied_at); re-runs only apply new files.
+- Each file runs in its own transaction, so a failure rolls back only that file.
+  Migration files therefore must not contain `BEGIN`/`COMMIT` or statements that
+  cannot run in a transaction (e.g. `CREATE INDEX CONCURRENTLY`).
+- If an already-applied file's checksum changed, it refuses to run anything —
+  add a new migration instead of editing an old one.
+- `--dry-run` lists what would be applied and writes nothing.
+- **Existing databases** (migrated by hand before this script existed) start
+  with an empty `_migrations`. Record the history first, without executing it:
+  `bun scripts/migrate.ts --mark-applied-through <last-applied-file>.sql`.
+
+On an empty database it starts with `0000_baseline.sql`, which creates the tables
+that predate `migrations/`. Afterwards `bun run db:pull` against it should
+produce the same tables and columns as `src/db/schema.ts`. CI
+([`.github/workflows/postgres.yml`](../.github/workflows/postgres.yml)) applies
+the full history to a stock `postgres:17` on every PR.
+
+## File storage
+
+Everything that touches files goes through [`src/lib/storage`](../src/lib/storage)
+(document upload and download, counterparty avatars, Simpany tax-upload drafts).
+It has three drivers, selected by `STORAGE_DRIVER`:
+
+| `STORAGE_DRIVER` | Backend | Settings |
 | --- | --- | --- |
-| Cloudflare Workers / edge | Neon (HTTP) — **default** | `drizzle-orm/neon-http` |
-| Node server / Docker | node-postgres (TCP) | `drizzle-orm/node-postgres` |
-| Node server (alt) | postgres.js (TCP) | `drizzle-orm/postgres-js` |
+| `r2` | Cloudflare R2 through the Workers binding `STORAGE` (what we run) | `r2_buckets` in `wrangler.jsonc` |
+| `s3` | Any S3-compatible store: AWS S3, MinIO, Backblaze B2, Wasabi, R2 via its S3 API | `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, optional `S3_ENDPOINT`, `S3_REGION`, `S3_FORCE_PATH_STYLE` |
+| `fs` | A local directory | `STORAGE_DIR` (default `./data/storage`) |
 
-Only [`src/db/index.ts`](../src/db/index.ts) and the `transaction: false` flag in
-[`src/lib/auth.ts`](../src/lib/auth.ts) are driver-specific. Everything else is
-plain Drizzle/Postgres.
+**When `STORAGE_DRIVER` is not set:** `r2` if the Worker has the `STORAGE`
+binding; otherwise `fs` in `./data/storage` in development. In production
+(`NODE_ENV=production`) with no binding and no `STORAGE_DRIVER`, the first
+upload fails with an error that names these variables. The app does not fall
+back to local disk in production on its own, because a container without a
+volume would lose every file when it is recreated, and you would not notice
+until someone needs a receipt.
 
-## Storage portability
+### S3-compatible (`s3`)
 
-Document uploads and counterparty avatars currently depend on Cloudflare R2 through
-the Workers binding:
-
-- [`src/lib/storage.ts`](../src/lib/storage.ts) — `getCloudflareContext().env.STORAGE`
-  for `put` / `get` / `delete` (avatars stream through `getObjectStream`, served by
-  `src/app/api/parties/[id]/avatar/route.ts`).
-- [`src/app/api/documents/[id]/route.ts`](../src/app/api/documents/[id]/route.ts) —
-  `getCloudflareContext().env.STORAGE.get(...)` to stream files back.
-
-`getCloudflareContext()` only resolves inside a Cloudflare Worker, so on Docker /
-plain Node these two spots must be swapped for an S3-compatible client. R2 itself
-speaks the S3 API, so an `@aws-sdk/client-s3` implementation works against R2,
-AWS S3, or self-hosted **MinIO** alike. Sketch:
-
-```ts
-// src/lib/storage.ts (S3-compatible version)
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
-
-const s3 = new S3Client({
-  endpoint: process.env.S3_ENDPOINT,            // e.g. http://minio:9000
-  region: process.env.S3_REGION ?? "auto",
-  credentials: {
-    accessKeyId: process.env.S3_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY!,
-  },
-  forcePathStyle: true,                           // required for MinIO
-});
-// then PutObjectCommand / DeleteObjectCommand / GetObjectCommand against process.env.S3_BUCKET
+```bash
+STORAGE_DRIVER=s3
+S3_BUCKET=documents
+S3_ACCESS_KEY_ID=...
+S3_SECRET_ACCESS_KEY=...
+# Leave S3_ENDPOINT unset for AWS (https://s3.<region>.amazonaws.com).
+S3_ENDPOINT=http://s3:8333   # e.g. MinIO / SeaweedFS
+S3_REGION=us-east-1          # R2: auto
+# Default: true when S3_ENDPOINT is set (MinIO, R2, B2 need it), false for AWS.
+# S3_FORCE_PATH_STYLE=true
 ```
 
-The provided `docker-compose.yml` includes an **optional, commented-out MinIO
-service** as a starting point. Until you make this swap, the accounting app runs
-fine but the document upload/preview feature will error.
+Requests are signed with SigV4 by [`aws4fetch`](https://github.com/mhart/aws4fetch)
+over plain `fetch`, so the same code runs on Node, Bun and Workers. The bucket
+must already exist (the compose SeaweedFS service below is the exception) and
+must stay private; the app streams files back through its
+own authenticated routes. The Simpany tax upload relies on conditional writes
+(`If-Match`), which AWS S3, R2, MinIO and SeaweedFS support. If your store ignores
+`If-Match`, one-time upload links are no longer guaranteed single-use.
+
+Examples:
+
+- **AWS S3:** `S3_REGION=ap-southeast-1`, no `S3_ENDPOINT`.
+- **Cloudflare R2 off Workers:** `S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com`,
+  `S3_REGION=auto`, keys from an R2 API token.
+- **MinIO / SeaweedFS / Garage:** `S3_ENDPOINT=http://<host>:<port>`. The compose
+  file has a ready-made SeaweedFS service (below).
+
+### Local directory (`fs`)
+
+```bash
+STORAGE_DRIVER=fs
+STORAGE_DIR=/app/data/storage   # put this on a persistent volume
+```
+
+Files are stored under `<STORAGE_DIR>/objects/<key>` with their content type and
+etag in `<STORAGE_DIR>/meta/<key>.json`. Keys are validated so nothing can
+escape the directory (`..`, absolute paths and backslashes are rejected). It is
+meant for one server: conditional writes are serialised within one process, so
+do not point several app instances at the same directory (use `s3` for that).
+Back the directory up together with the database.
+
+### Docker Compose
+
+`docker-compose.yml` defaults to `fs` on the named volume `storage-data`, so
+uploads work with no extra service. The image creates `/app/data/storage`
+owned by the unprivileged runtime user, so the volume is writable.
+
+To try the S3 driver locally, start the optional `s3` profile, a single-node
+[SeaweedFS](https://github.com/seaweedfs/seaweedfs) with its S3 gateway:
+
+```bash
+STORAGE_DRIVER=s3 docker compose --profile s3 up -d
+```
+
+The bucket (`documents` unless you set `S3_BUCKET`) is created on the first
+upload. The default key pair (`devkey` / `devsecret`) is for local testing only;
+set `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` in `.env`, and compose passes the
+same pair to SeaweedFS and to the app. To use a hosted bucket instead (AWS, R2,
+B2), set `STORAGE_DRIVER=s3` and the `S3_*` variables in `.env` and leave the
+profile off. Compose fills empty values with the SeaweedFS defaults, so for AWS
+set `S3_ENDPOINT=https://s3.<region>.amazonaws.com` and
+`S3_FORCE_PATH_STYLE=false` explicitly rather than leaving them blank.
+
+Why not MinIO: MinIO stopped publishing community Docker images, and
+`minio/minio` can no longer be pulled. An existing MinIO server still works
+with `STORAGE_DRIVER=s3` and `S3_ENDPOINT` pointing at it.

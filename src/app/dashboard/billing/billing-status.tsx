@@ -12,7 +12,7 @@ const variant: Record<BillingItemStatus, "default" | "secondary" | "outline" | "
   overdue: "destructive",
 };
 
-// 已收款用收入色、逾期用支出色，與內外帳/合約頁的金額配色一致。
+// 已收款用收入色、逾期用支出色，與收支紀錄/合約頁的金額配色一致。
 const extraClass: Partial<Record<BillingItemStatus, string>> = {
   paid: "border-income/40 text-income",
 };

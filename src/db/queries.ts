@@ -95,7 +95,7 @@ function idFilter(column: typeof transactions.categoryId | typeof transactions.p
   return v === "none" ? isNull(column) : eq(column, v);
 }
 
-// 內外帳列表與筆數共用的 where（篩選條件的 single source of truth）
+// 收支紀錄列表與筆數共用的 where（篩選條件的 single source of truth）
 function txnWhere(orgId: string, filters: TxnFilters) {
   const { book, categoryId, accountId, projectId, period, needsReview, partyId, ids } = filters;
   return and(

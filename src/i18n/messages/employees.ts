@@ -82,10 +82,6 @@ const employees = {
       reimbursement: { "zh-TW": "報銷", en: "Reimbursement" },
       inactive: { "zh-TW": "停用", en: "Inactive" },
     },
-    legacy: {
-      notice: { "zh-TW": "舊的薪資帳戶欄位：{value}", en: "Legacy salary account field: {value}" },
-      convert: { "zh-TW": "轉成帳戶", en: "Convert to account" },
-    },
     deleteConfirm: {
       title: { "zh-TW": "刪除這個帳戶？", en: "Delete this account?" },
       description: { "zh-TW": "已記錄在薪資單或撥款上的帳戶紀錄會保留，但之後不能再選這個帳戶。", en: "Payslips and reimbursements already recorded against it keep the record, but it can no longer be selected." },
@@ -119,7 +115,6 @@ const employees = {
       created: { "zh-TW": "已新增帳戶", en: "Account added" },
       updated: { "zh-TW": "已更新帳戶", en: "Account updated" },
       deleted: { "zh-TW": "已刪除帳戶", en: "Account deleted" },
-      converted: { "zh-TW": "已轉成帳戶，並設為薪資預設", en: "Converted to an account and set as the salary default" },
     },
   },
   new: {
@@ -145,9 +140,9 @@ const employees = {
     toAccountLabel: { "zh-TW": "匯入帳戶", en: "Paid into" },
     toAccountNone: { "zh-TW": "不記錄", en: "Don't record" },
     bookOptions: {
-      both: { "zh-TW": "內外帳（both）", en: "Both (internal & external)" },
-      internal: { "zh-TW": "僅內帳（不報稅）", en: "Internal only (not for tax filing)" },
-      external: { "zh-TW": "僅外帳", en: "External only" },
+      both: { "zh-TW": "兩本都記（管理帳＋稅務帳）", en: "Both (management & tax)" },
+      internal: { "zh-TW": "僅管理帳", en: "Management only" },
+      external: { "zh-TW": "僅稅務帳", en: "Tax only" },
     },
     itemsSection: { "zh-TW": "薪資項目（底薪、加班費、獎金、請假扣…）", en: "Salary items (base pay, overtime, bonus, leave deduction…)" },
     selectItemPlaceholder: { "zh-TW": "選擇項目", en: "Select item" },

@@ -92,9 +92,9 @@ export const employees = pgTable("employees", {
 	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
 	organizationId: text("organization_id"),
 	name: text().notNull(),
-	// 已淘汰：明文身分證字號。新寫入一律改存 nationalIdEnc 並清空這欄（migrations/0024）。
-	nationalId: text("national_id"),
-	// 身分證字號密文（src/lib/crypto.ts encryptField）。讀取走 src/db/employee-accounts.ts 的 readNationalId。
+	// 身分證字號密文（src/lib/crypto.ts encryptField，context 見 src/lib/field-contexts.ts）。
+	// 讀取走 src/db/employee-accounts.ts 的 readNationalId。舊的明文欄位 national_id 已由
+	// migrations/0035 移除。
 	nationalIdEnc: text("national_id_enc"),
 	employmentType: text("employment_type").default('full_time').notNull(),
 	hasLaborInsurance: boolean("has_labor_insurance").default(true).notNull(),
@@ -104,8 +104,7 @@ export const employees = pgTable("employees", {
 	// 勞健保投保薪資（記錄保多少，先不試算保費）；是否有勞退看 hasPension
 	laborInsuredSalary: numeric("labor_insured_salary", { precision: 18, scale: 2 }),
 	healthInsuredSalary: numeric("health_insured_salary", { precision: 18, scale: 2 }),
-	// 已淘汰：單一自由文字的薪轉帳戶，改用 employee_bank_accounts（migrations/0024）。
-	salaryAccount: text("salary_account"),
+	// 薪轉帳戶在 employee_bank_accounts（migrations/0024）；舊的明文 salary_account 已由 0035 移除。
 	startDate: date("start_date"),
 	endDate: date("end_date"),
 	isActive: boolean("is_active").default(true).notNull(),
