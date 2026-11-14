@@ -13,11 +13,11 @@ This document describes two paths:
 2. **[Docker self-host](#docker-self-host)** — a portable, vendor-neutral setup
    (Node + Postgres) with a `docker-compose.yml`, for running it on your own box.
 
-> **Heads-up on file uploads.** The document-upload feature stores files in
-> **Cloudflare R2** through a Workers binding (`env.STORAGE`). That binding only
-> exists on Cloudflare. On any other host (including Docker) uploads/downloads
-> need an alternative storage backend — see
-> [Storage portability](#storage-portability). Everything else (auth,
+> **File uploads work on any host.** Documents, counterparty avatars and Simpany
+> tax uploads go through a small storage layer with three drivers: Cloudflare
+> **R2** (the Workers binding we use), any **S3-compatible** store (AWS S3, MinIO,
+> Backblaze B2, R2 via its S3 API), or a **local directory** (dev / Docker
+> volume). See [File storage](#file-storage). Everything else (auth,
 > accounting, client finance, reports) is host-agnostic.
 
 ---
@@ -29,8 +29,8 @@ This document describes two paths:
 | A Node-compatible runtime | Next.js 16, React 19. We build with **Bun**. |
 | Postgres | Any Postgres. Schema is introspect-only (`bun run db:pull`); migrations under [`migrations/`](../migrations) are plain forward-only SQL. |
 | A Postgres driver that matches your runtime | On serverless/edge you need an **HTTP** driver (e.g. Neon). On a normal Node server you can use a regular TCP driver (`pg`). See [Database driver](#database-driver). |
-| Object storage *(only for document uploads)* | Cloudflare R2 by default. Swappable — see [Storage portability](#storage-portability). |
-| Env vars | `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `FIELD_ENCRYPTION_KEYS`, `RESEND_API_KEY`, `RESEND_FROM` (optional: `TRUSTED_ORIGINS`, `RATE_LIMIT_STORAGE`, `OIDC_ISSUER`). See [`.env.example`](../.env.example). |
+| File storage *(document uploads, avatars)* | Cloudflare R2 binding, any S3-compatible bucket, or a local directory. Picked by `STORAGE_DRIVER` — see [File storage](#file-storage). |
+| Env vars | `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `FIELD_ENCRYPTION_KEYS`, `RESEND_API_KEY`, `RESEND_FROM` (optional: `TRUSTED_ORIGINS`, `RATE_LIMIT_STORAGE`, `OIDC_ISSUER`, `STORAGE_DRIVER` + its settings). See [`.env.example`](../.env.example). |
 | `OIDC_SIGNING_KEY` | Optional. RSA private key (PKCS#8, base64 one line or PEM) used to sign per-organization OIDC JWTs for GCP Workload Identity Federation (keyless GCP billing). Without it, GCP can only be connected with a service account key. |
 | `RESEND_API_KEY` | [Resend](https://resend.com) API key. **Required in production** for public sign-up (`/signup` sends a confirmation link) and forgot-password (`/reset-password` links). Without it those emails are not sent — the pages still say "check your inbox", and the Worker log shows `[auth-email] failed to send …`. In development (`NODE_ENV !== "production"`) a missing key prints each email, link included, to the server console instead. |
 | `RESEND_FROM` | Sender, e.g. `My App <noreply@example.com>`. **Required in production** — there is no built-in default; without it sending fails (logged as `[auth-email] failed to send …`) instead of spoofing someone else's domain. The domain must be verified in Resend. |
@@ -263,10 +263,11 @@ Because a TCP driver supports interactive transactions, you can also **remove**
 the `transaction: false` line in [`src/lib/auth.ts`](../src/lib/auth.ts) (it's a
 workaround for the HTTP driver only).
 
-### Step 2 — Storage (only if you need document uploads)
+### Step 2 — Storage
 
-See [Storage portability](#storage-portability). If you don't need the upload
-feature, you can skip this; the rest of the app runs fine.
+Nothing to do for a first run: `docker-compose.yml` sets `STORAGE_DRIVER=fs`
+and keeps uploads on the named volume `storage-data`. To use S3 / MinIO instead,
+see [File storage](#file-storage).
 
 ### Step 3 — Build and run
 
@@ -319,38 +320,92 @@ Only [`src/db/index.ts`](../src/db/index.ts) and the `transaction: false` flag i
 [`src/lib/auth.ts`](../src/lib/auth.ts) are driver-specific. Everything else is
 plain Drizzle/Postgres.
 
-## Storage portability
+## File storage
 
-Document uploads and counterparty avatars currently depend on Cloudflare R2 through
-the Workers binding:
+Everything that touches files goes through [`src/lib/storage`](../src/lib/storage)
+(document upload and download, counterparty avatars, Simpany tax-upload drafts).
+It has three drivers, selected by `STORAGE_DRIVER`:
 
-- [`src/lib/storage.ts`](../src/lib/storage.ts) — `getCloudflareContext().env.STORAGE`
-  for `put` / `get` / `delete` (avatars stream through `getObjectStream`, served by
-  `src/app/api/parties/[id]/avatar/route.ts`).
-- [`src/app/api/documents/[id]/route.ts`](../src/app/api/documents/[id]/route.ts) —
-  `getCloudflareContext().env.STORAGE.get(...)` to stream files back.
+| `STORAGE_DRIVER` | Backend | Settings |
+| --- | --- | --- |
+| `r2` | Cloudflare R2 through the Workers binding `STORAGE` (what we run) | `r2_buckets` in `wrangler.jsonc` |
+| `s3` | Any S3-compatible store: AWS S3, MinIO, Backblaze B2, Wasabi, R2 via its S3 API | `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, optional `S3_ENDPOINT`, `S3_REGION`, `S3_FORCE_PATH_STYLE` |
+| `fs` | A local directory | `STORAGE_DIR` (default `./data/storage`) |
 
-`getCloudflareContext()` only resolves inside a Cloudflare Worker, so on Docker /
-plain Node these two spots must be swapped for an S3-compatible client. R2 itself
-speaks the S3 API, so an `@aws-sdk/client-s3` implementation works against R2,
-AWS S3, or self-hosted **MinIO** alike. Sketch:
+**When `STORAGE_DRIVER` is not set:** `r2` if the Worker has the `STORAGE`
+binding; otherwise `fs` in `./data/storage` in development. In production
+(`NODE_ENV=production`) with no binding and no `STORAGE_DRIVER`, the first
+upload fails with an error that names these variables. The app does not fall
+back to local disk in production on its own, because a container without a
+volume would lose every file when it is recreated, and you would not notice
+until someone needs a receipt.
 
-```ts
-// src/lib/storage.ts (S3-compatible version)
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+### S3-compatible (`s3`)
 
-const s3 = new S3Client({
-  endpoint: process.env.S3_ENDPOINT,            // e.g. http://minio:9000
-  region: process.env.S3_REGION ?? "auto",
-  credentials: {
-    accessKeyId: process.env.S3_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY!,
-  },
-  forcePathStyle: true,                           // required for MinIO
-});
-// then PutObjectCommand / DeleteObjectCommand / GetObjectCommand against process.env.S3_BUCKET
+```bash
+STORAGE_DRIVER=s3
+S3_BUCKET=documents
+S3_ACCESS_KEY_ID=...
+S3_SECRET_ACCESS_KEY=...
+# Leave S3_ENDPOINT unset for AWS (https://s3.<region>.amazonaws.com).
+S3_ENDPOINT=http://s3:8333   # e.g. MinIO / SeaweedFS
+S3_REGION=us-east-1          # R2: auto
+# Default: true when S3_ENDPOINT is set (MinIO, R2, B2 need it), false for AWS.
+# S3_FORCE_PATH_STYLE=true
 ```
 
-The provided `docker-compose.yml` includes an **optional, commented-out MinIO
-service** as a starting point. Until you make this swap, the accounting app runs
-fine but the document upload/preview feature will error.
+Requests are signed with SigV4 by [`aws4fetch`](https://github.com/mhart/aws4fetch)
+over plain `fetch`, so the same code runs on Node, Bun and Workers. The bucket
+must already exist (the compose SeaweedFS service below is the exception) and
+must stay private; the app streams files back through its
+own authenticated routes. The Simpany tax upload relies on conditional writes
+(`If-Match`), which AWS S3, R2, MinIO and SeaweedFS support. If your store ignores
+`If-Match`, one-time upload links are no longer guaranteed single-use.
+
+Examples:
+
+- **AWS S3:** `S3_REGION=ap-southeast-1`, no `S3_ENDPOINT`.
+- **Cloudflare R2 off Workers:** `S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com`,
+  `S3_REGION=auto`, keys from an R2 API token.
+- **MinIO / SeaweedFS / Garage:** `S3_ENDPOINT=http://<host>:<port>`. The compose
+  file has a ready-made SeaweedFS service (below).
+
+### Local directory (`fs`)
+
+```bash
+STORAGE_DRIVER=fs
+STORAGE_DIR=/app/data/storage   # put this on a persistent volume
+```
+
+Files are stored under `<STORAGE_DIR>/objects/<key>` with their content type and
+etag in `<STORAGE_DIR>/meta/<key>.json`. Keys are validated so nothing can
+escape the directory (`..`, absolute paths and backslashes are rejected). It is
+meant for one server: conditional writes are serialised within one process, so
+do not point several app instances at the same directory (use `s3` for that).
+Back the directory up together with the database.
+
+### Docker Compose
+
+`docker-compose.yml` defaults to `fs` on the named volume `storage-data`, so
+uploads work with no extra service. The image creates `/app/data/storage`
+owned by the unprivileged runtime user, so the volume is writable.
+
+To try the S3 driver locally, start the optional `s3` profile, a single-node
+[SeaweedFS](https://github.com/seaweedfs/seaweedfs) with its S3 gateway:
+
+```bash
+STORAGE_DRIVER=s3 docker compose --profile s3 up -d
+```
+
+The bucket (`documents` unless you set `S3_BUCKET`) is created on the first
+upload. The default key pair (`devkey` / `devsecret`) is for local testing only;
+set `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` in `.env`, and compose passes the
+same pair to SeaweedFS and to the app. To use a hosted bucket instead (AWS, R2,
+B2), set `STORAGE_DRIVER=s3` and the `S3_*` variables in `.env` and leave the
+profile off. Compose fills empty values with the SeaweedFS defaults, so for AWS
+set `S3_ENDPOINT=https://s3.<region>.amazonaws.com` and
+`S3_FORCE_PATH_STYLE=false` explicitly rather than leaving them blank.
+
+Why not MinIO: MinIO stopped publishing community Docker images, and
+`minio/minio` can no longer be pulled. An existing MinIO server still works
+with `STORAGE_DRIVER=s3` and `S3_ENDPOINT` pointing at it.
