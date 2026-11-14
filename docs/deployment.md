@@ -27,10 +27,10 @@ This document describes two paths:
 | Requirement | Notes |
 | --- | --- |
 | A Node-compatible runtime | Next.js 16, React 19. We build with **Bun**. |
-| Postgres | Any Postgres. Schema is introspect-only (`bun run db:pull`); migrations under [`migrations/`](../migrations) are plain forward-only SQL. |
-| A Postgres driver that matches your runtime | On serverless/edge you need an **HTTP** driver (e.g. Neon). On a normal Node server you can use a regular TCP driver (`pg`). See [Database driver](#database-driver). |
+| Postgres | Any Postgres. Schema is introspect-only (`bun run db:pull`); migrations under [`migrations/`](../migrations) are plain forward-only SQL, applied with `bun run db:apply` (see [Migrations](#migrations)). |
+| A Postgres driver | Picked at runtime, no code change: Neon hosts use Neon's HTTP driver, everything else uses node-postgres (`pg`), and a Cloudflare Hyperdrive binding is used when present. Override with `DATABASE_DRIVER`. See [Database driver](#database-driver). |
 | File storage *(document uploads, avatars)* | Cloudflare R2 binding, any S3-compatible bucket, or a local directory. Picked by `STORAGE_DRIVER` — see [File storage](#file-storage). |
-| Env vars | `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `FIELD_ENCRYPTION_KEYS`, `RESEND_API_KEY`, `RESEND_FROM` (optional: `TRUSTED_ORIGINS`, `RATE_LIMIT_STORAGE`, `OIDC_ISSUER`, `STORAGE_DRIVER` + its settings). See [`.env.example`](../.env.example). |
+| Env vars | `DATABASE_URL` (optional: `DATABASE_DRIVER`, `DATABASE_POOL_MAX`), `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `FIELD_ENCRYPTION_KEYS`, `RESEND_API_KEY`, `RESEND_FROM` (optional: `TRUSTED_ORIGINS`, `RATE_LIMIT_STORAGE`, `OIDC_ISSUER`, `STORAGE_DRIVER` + its settings). See [`.env.example`](../.env.example). |
 | `OIDC_SIGNING_KEY` | Optional. RSA private key (PKCS#8, base64 one line or PEM) used to sign per-organization OIDC JWTs for GCP Workload Identity Federation (keyless GCP billing). Without it, GCP can only be connected with a service account key. |
 | `RESEND_API_KEY` | [Resend](https://resend.com) API key. **Required in production** for public sign-up (`/signup` sends a confirmation link) and forgot-password (`/reset-password` links). Without it those emails are not sent — the pages still say "check your inbox", and the Worker log shows `[auth-email] failed to send …`. In development (`NODE_ENV !== "production"`) a missing key prints each email, link included, to the server console instead. |
 | `RESEND_FROM` | Sender, e.g. `My App <noreply@example.com>`. **Required in production** — there is no built-in default; without it sending fails (logged as `[auth-email] failed to send …`) instead of spoofing someone else's domain. The domain must be verified in Resend. |
@@ -51,10 +51,12 @@ This is the configuration the repo ships with.
   driver (`drizzle-orm/neon-http` + `@neondatabase/serverless`).
 - **Files:** Cloudflare R2, bound to the Worker as `STORAGE`.
 
-**Why Neon here?** Workers can't open a raw TCP socket, so a normal Postgres
-driver won't connect. Neon's HTTP driver works inside the Worker. This is the
-*only* reason Neon is the default — the app is otherwise plain Postgres. Swap in
-any Postgres-over-HTTP option, or move off Workers entirely, and it still runs.
+**Why Neon here?** It is a managed Postgres whose HTTP driver needs no
+connection pooling on the Worker side, and the app auto-selects that driver for
+any `*.neon.tech` host. It is not a requirement: on Workers you can use any
+Postgres through [Cloudflare Hyperdrive](https://developers.cloudflare.com/hyperdrive/)
+(bind it as `HYPERDRIVE`, see [Database driver](#database-driver)), and off
+Workers any Postgres works over plain TCP.
 
 ### Deploy
 
@@ -229,47 +231,25 @@ it), so the cron finds no Discord rows and the notification step does nothing.
 | `bun run cf:build` | OpenNext build only |
 | `bun run cf:preview` | Build + run the Worker locally |
 | `bun run cf:deploy` | Build + deploy to Cloudflare |
+| `bun run db:apply` | Apply pending `migrations/*.sql` (see [Migrations](#migrations)) |
 
 ---
 
 ## Docker self-host
 
 A vendor-neutral path: a plain Node server (built with Bun) plus a Postgres
-container. No Cloudflare, no Neon. Two code changes are required first — they're
-small and the repo is structured to make them easy.
+container. No Cloudflare, no Neon. The database needs **no code changes**: with
+a non-Neon `DATABASE_URL` the app uses node-postgres automatically (the compose
+file also sets `DATABASE_DRIVER=pg` to make it explicit). Only document uploads
+need work — see Step 1.
 
-### Step 1 — Database driver
-
-The default DB client uses Neon's HTTP driver, which is only needed on Workers.
-On a normal server, use a TCP driver instead. Edit
-[`src/db/index.ts`](../src/db/index.ts):
-
-```ts
-// Replace the neon-http driver…
-//   import { drizzle } from "drizzle-orm/neon-http";
-//   import { neon } from "@neondatabase/serverless";
-//   _db = drizzle(neon(connectionString), { schema: fullSchema });
-
-// …with node-postgres:
-import { drizzle } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
-// inside getDb():
-_db = drizzle(new Pool({ connectionString }), { schema: fullSchema });
-```
-
-Then add the driver: `bun add pg && bun add -d @types/pg`.
-
-Because a TCP driver supports interactive transactions, you can also **remove**
-the `transaction: false` line in [`src/lib/auth.ts`](../src/lib/auth.ts) (it's a
-workaround for the HTTP driver only).
-
-### Step 2 — Storage
+### Step 1 — Storage
 
 Nothing to do for a first run: `docker-compose.yml` sets `STORAGE_DRIVER=fs`
 and keeps uploads on the named volume `storage-data`. To use S3 / MinIO instead,
 see [File storage](#file-storage).
 
-### Step 3 — Build and run
+### Step 2 — Build and run
 
 The repo ships a [`Dockerfile`](../Dockerfile), [`docker-compose.yml`](../docker-compose.yml),
 and [`.dockerignore`](../.dockerignore).
@@ -281,22 +261,16 @@ cp .env.example .env
 #   set BETTER_AUTH_URL to your public URL
 #   generate BETTER_AUTH_SECRET:  openssl rand -base64 32
 
-# 2. Build and start app + postgres
+# 2. Build and start postgres, apply migrations, start the app
 docker compose up --build -d
-
-# 3. Apply the schema to the fresh database (one-time)
-#    Pipe the SQL in migrations/ into the db container, in filename order.
-#    0000_baseline.sql creates the tables that predate migrations/; the rest
-#    build on it. ON_ERROR_STOP makes a failure stop the run instead of
-#    carrying on with a half-built schema.
-cat migrations/*.sql | docker compose exec -T db psql -U app -d app -v ON_ERROR_STOP=1
 ```
 
-The same works for any empty Postgres (e.g. a new Neon project): apply every
-file in `migrations/` in order, starting with `0000_baseline.sql`. The baseline
-is idempotent (`CREATE … IF NOT EXISTS`), so it is a no-op on a database that
-already has those tables. Afterwards `bun run db:pull` against it should
-produce the same tables and columns as `src/db/schema.ts`.
+`docker compose up` runs the one-shot `migrate` service first: it applies
+`migrations/*.sql` in filename order with [`scripts/migrate.ts`](../scripts/migrate.ts)
+and exits, and `app` only starts once it succeeded. Re-runs are no-ops, so this
+also picks up new migrations after you pull and rebuild. To run it by hand:
+`docker compose run --rm migrate`. See [Migrations](#migrations) for how it
+tracks what has been applied.
 
 The app is then on `http://localhost:3000` (map/route it behind your own TLS
 proxy for production).
@@ -310,15 +284,56 @@ proxy for production).
 
 ## Database driver
 
-| Runtime | Driver | Import |
-| --- | --- | --- |
-| Cloudflare Workers / edge | Neon (HTTP) — **default** | `drizzle-orm/neon-http` |
-| Node server / Docker | node-postgres (TCP) | `drizzle-orm/node-postgres` |
-| Node server (alt) | postgres.js (TCP) | `drizzle-orm/postgres-js` |
+[`src/db/index.ts`](../src/db/index.ts) picks the driver the first time a query
+runs (the client stays lazy, so `next build` still needs no `DATABASE_URL`):
 
-Only [`src/db/index.ts`](../src/db/index.ts) and the `transaction: false` flag in
-[`src/lib/auth.ts`](../src/lib/auth.ts) are driver-specific. Everything else is
-plain Drizzle/Postgres.
+| Situation | Driver |
+| --- | --- |
+| Cloudflare Workers with a Hyperdrive binding named `HYPERDRIVE` | node-postgres through Hyperdrive (`env.HYPERDRIVE.connectionString`); `DATABASE_URL` is not read |
+| `DATABASE_DRIVER=neon-http` or `DATABASE_DRIVER=pg` | that driver |
+| `DATABASE_DRIVER` unset, `DATABASE_URL` host ends in `.neon.tech` | Neon HTTP (`drizzle-orm/neon-http`) — what we run |
+| `DATABASE_DRIVER` unset, any other host | node-postgres (`drizzle-orm/node-postgres`) |
+
+`DATABASE_POOL_MAX` (default `10`) sizes the node-postgres pool per process.
+Under Hyperdrive the app creates a small pool (max 5) **per request** instead:
+Workers cannot reuse a socket across requests, and the real pooling happens on
+Hyperdrive's side.
+
+**Workers + any Postgres (Hyperdrive).** Create a Hyperdrive config pointing at
+your database (`wrangler hyperdrive create <name> --connection-string=…`), then
+uncomment the `hyperdrive` block in `wrangler.jsonc` with the returned id. For
+`next dev`, also give that binding a `localConnectionString`.
+
+**Atomic multi-statement writes.** Neon's HTTP driver has no interactive
+transactions, so code that needs "all or nothing" uses `runBatch()` from
+`src/db/index.ts`: `db.batch` on neon-http, `db.transaction` on node-postgres,
+same result shape. Build the queries from the `q` it hands you, not from an
+outer `db` — on node-postgres only queries built from the transaction run inside
+it. The `transaction: false` flag in [`src/lib/auth.ts`](../src/lib/auth.ts) is
+kept because it is correct on both drivers.
+
+### Migrations
+
+`bun run db:apply` (= `bun scripts/migrate.ts`) applies `migrations/*.sql` to
+`DATABASE_URL` over plain TCP, whatever driver the app itself uses:
+
+- Applied files are recorded in a `_migrations` table (filename, sha256
+  checksum, applied_at); re-runs only apply new files.
+- Each file runs in its own transaction, so a failure rolls back only that file.
+  Migration files therefore must not contain `BEGIN`/`COMMIT` or statements that
+  cannot run in a transaction (e.g. `CREATE INDEX CONCURRENTLY`).
+- If an already-applied file's checksum changed, it refuses to run anything —
+  add a new migration instead of editing an old one.
+- `--dry-run` lists what would be applied and writes nothing.
+- **Existing databases** (migrated by hand before this script existed) start
+  with an empty `_migrations`. Record the history first, without executing it:
+  `bun scripts/migrate.ts --mark-applied-through <last-applied-file>.sql`.
+
+On an empty database it starts with `0000_baseline.sql`, which creates the tables
+that predate `migrations/`. Afterwards `bun run db:pull` against it should
+produce the same tables and columns as `src/db/schema.ts`. CI
+([`.github/workflows/postgres.yml`](../.github/workflows/postgres.yml)) applies
+the full history to a stock `postgres:17` on every PR.
 
 ## File storage
 

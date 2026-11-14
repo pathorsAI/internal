@@ -1,0 +1,65 @@
+name: Postgres
+
+# 確認「任何 Postgres 都能跑」這件事不是只寫在文件裡：每個 PR 都在一個全新的
+# postgres:17（不是 Neon）上把 migrations/ 從頭套一次，再用 node-postgres driver
+# 跑 src/db/pg-smoke.test.ts（getDb() 的基本查詢與 runBatch 的 rollback）。
+# 有人在 migration 裡寫了 Neon 才有的語法、或改壞了 pg 路徑，這裡會先紅。
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: postgres-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  migrate-and-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app -d app"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # 拋棄式的 service container，帳密不是機密。
+      DATABASE_URL: postgres://app:app@localhost:5432/app
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.2.22
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Apply migrations
+        run: bun scripts/migrate.ts
+
+      # 第二次跑必須是 no-op：證明 _migrations 的紀錄有效，重複部署不會重套。
+      - name: Re-run migrations (must be a no-op)
+        run: bun scripts/migrate.ts | tee "$RUNNER_TEMP/rerun.log" && grep -q '^up to date' "$RUNNER_TEMP/rerun.log"
+
+      - name: Smoke test getDb() on node-postgres
+        env:
+          PG_SMOKE_URL: postgres://app:app@localhost:5432/app
+          DATABASE_DRIVER: pg
+        run: bun test src/db/pg-smoke.test.ts

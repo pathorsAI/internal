@@ -181,6 +181,8 @@ only. See [`docs/sso.md`](docs/sso.md).
 | Variable | Purpose |
 | --- | --- |
 | `DATABASE_URL` | Postgres connection string (pooled) |
+| `DATABASE_DRIVER` | Optional: `neon-http` or `pg`. Default: `neon-http` for `*.neon.tech`, `pg` otherwise |
+| `DATABASE_POOL_MAX` | Optional: node-postgres pool size per process (default 10) |
 | `BETTER_AUTH_SECRET` | Session signing secret (`openssl rand -base64 32`) |
 | `BETTER_AUTH_URL` | App base URL, no trailing slash |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth credentials (sign-in **and** the optional Google Calendar integration) |
@@ -239,14 +241,14 @@ Postgres through **Drizzle ORM**. `src/db/schema.ts` is introspected from the da
 **any Postgres works**.
 
 The Drizzle client lives in [`src/db/index.ts`](src/db/index.ts) — point `DATABASE_URL` at
-your database and you're set. Which Postgres *driver* to use is the only runtime-dependent
-choice (a TCP driver like `node-postgres` on a normal server; an HTTP driver where you can't
-open TCP). That single swap is covered in the
+your database and you're set. The driver is picked at runtime: Neon hosts use Neon's HTTP
+driver, any other Postgres uses `node-postgres`, and Cloudflare Workers can reach any Postgres
+through a Hyperdrive binding. Override with `DATABASE_DRIVER`; details in the
 [deployment guide](docs/deployment.md#database-driver).
 
-> `migrations/` is a forward-only history for an existing database, not a bootstrap for an
-> empty one. How you evolve schema, branch your database or roll out migrations is up to
-> your own workflow — this project does not prescribe one.
+`bun run db:apply` applies `migrations/` in order (starting from `0000_baseline.sql` on an
+empty database) and records what it applied, so re-runs only pick up new files — see
+[Migrations](docs/deployment.md#migrations).
 
 ## Deployment
 

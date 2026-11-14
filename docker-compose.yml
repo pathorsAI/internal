@@ -1,23 +1,49 @@
 # Vendor-neutral self-host: the app + Postgres. See docs/deployment.md.
 #
-# Before this works end-to-end you must swap the DB driver in src/db/index.ts
-# (Neon HTTP -> node-postgres).
+# No code changes are needed for the database: src/db/index.ts picks the
+# node-postgres driver for any host that is not *.neon.tech (DATABASE_DRIVER=pg
+# below makes that explicit). The one-shot `migrate` service applies
+# migrations/*.sql before the app starts.
 #
 # File uploads: stored on the `storage-data` volume by default (STORAGE_DRIVER=fs).
 # For an S3 store instead: STORAGE_DRIVER=s3 docker compose --profile s3 up -d
 
+x-database-env: &database-env
+  DATABASE_URL: postgres://app:app@db:5432/app
+  DATABASE_DRIVER: pg
+
 services:
+  # Applies migrations/*.sql in filename order (scripts/migrate.ts), recording
+  # each file in the `_migrations` table, then exits. Re-runs are no-ops, so it
+  # is safe on every `docker compose up`. Run it by hand with:
+  #   docker compose run --rm migrate
+  migrate:
+    build: .
+    command: ["bun", "scripts/migrate.ts"]
+    environment:
+      <<: *database-env
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
   app:
     build: .
     ports:
       - "3000:3000"
     environment:
-      # Point at the db service. The migrations create the schema; see docs.
-      DATABASE_URL: postgres://app:app@db:5432/app
+      <<: *database-env
+      # Optional: node-postgres pool size per app process (default 10).
+      # DATABASE_POOL_MAX: "10"
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      # Field encryption keyring (kid:base64key,...). Required for employee bank
+      # accounts, national IDs and integration credentials. See docs/security.md.
+      FIELD_ENCRYPTION_KEYS: ${FIELD_ENCRYPTION_KEYS}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM: ${RESEND_FROM:-}
       # File storage (docs/deployment.md#file-storage). Default: local directory on
       # the storage-data volume. The S3_* values only matter with STORAGE_DRIVER=s3
       # and default to the optional s3 service below; point them at AWS / R2 / B2
@@ -35,6 +61,9 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      # Don't serve traffic against a half-migrated schema.
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   db:

@@ -5,10 +5,10 @@
 //   select 清單裡根本不含 account_number_enc —— 列表路徑沒有機會把密文或明文帶出去。
 // - 解密只有兩個入口：revealEmployeeAccountNumber（呼叫端必須先確認 owner/admin
 //   並寫 activity_log）與 readNationalId（server 端用來遮罩或給 owner/admin 編輯）。
-// - 「預設帳戶」的切換用 db.batch 送出：neon-http 的 batch 在同一個交易裡執行，
+// - 「預設帳戶」的切換用 runBatch 送出（neon-http 的 batch／pg 的交易，都是同一個交易），
 //   先清掉舊預設再設新預設，partial unique index 不會在中間狀態撞到。
 import { and, asc, desc, eq, inArray, isNull, ne, or } from "drizzle-orm";
-import { getDb } from "./index";
+import { getDb, runBatch, type Db } from "./index";
 import { employeeBankAccounts, employees } from "./schema";
 import { decryptField, encryptField } from "@/lib/crypto";
 import { employeeAccountNumberContext, employeeNationalIdContext } from "@/lib/field-contexts";
@@ -23,8 +23,6 @@ import {
   type EmployeeAccountKind,
   type MaskedEmployeeAccount,
 } from "@/lib/employee-accounts";
-
-type Db = ReturnType<typeof getDb>;
 
 /** 遮罩後的欄位投影。不含 account_number_enc。 */
 const maskedColumns = {
@@ -179,36 +177,35 @@ export async function createEmployeeAccount(
   const defaultForSalary = isActive && !!input.defaultForSalary;
   const defaultForReimbursement = isActive && !!input.defaultForReimbursement;
 
-  const insert = db
-    .insert(employeeBankAccounts)
-    .values({
-      organizationId: orgId,
-      employeeId,
-      kind,
-      ...codes,
-      bankName: textOrNull(input.bankName) ?? bankNameForCode(codes.bankCode),
-      accountHolder: textOrNull(input.accountHolder),
-      accountNumberEnc: await encryptField(number, employeeAccountNumberContext(orgId, employeeId)),
-      accountLast5: accountLast5(number),
-      label: textOrNull(input.label),
-      defaultForSalary,
-      defaultForReimbursement,
-      isActive,
-      note: textOrNull(input.note),
-    })
-    .returning(maskedColumns);
+  const values: typeof employeeBankAccounts.$inferInsert = {
+    organizationId: orgId,
+    employeeId,
+    kind,
+    ...codes,
+    bankName: textOrNull(input.bankName) ?? bankNameForCode(codes.bankCode),
+    accountHolder: textOrNull(input.accountHolder),
+    accountNumberEnc: await encryptField(number, employeeAccountNumberContext(orgId, employeeId)),
+    accountLast5: accountLast5(number),
+    label: textOrNull(input.label),
+    defaultForSalary,
+    defaultForReimbursement,
+    isActive,
+    note: textOrNull(input.note),
+  };
+  // 用傳進來的 q 建：在 runBatch 裡 q 可能是交易物件（pg），用外面的 db 建會跑出交易。
+  const insert = (q: Db) => q.insert(employeeBankAccounts).values(values).returning(maskedColumns);
 
   if (defaultForSalary || defaultForReimbursement) {
-    const [, inserted] = await db.batch([
-      clearDefaultsQuery(db, orgId, employeeId, {
+    const [, inserted] = await runBatch((q) => [
+      clearDefaultsQuery(q, orgId, employeeId, {
         salary: defaultForSalary,
         reimbursement: defaultForReimbursement,
       }),
-      insert,
+      insert(q),
     ]);
     return inserted[0];
   }
-  const [row] = await insert;
+  const [row] = await insert(db);
   return row;
 }
 
@@ -290,22 +287,23 @@ export async function updateEmployeeAccount(
   patch.defaultForSalary = wantSalary;
   patch.defaultForReimbursement = wantReimb;
 
-  const update = db
-    .update(employeeBankAccounts)
-    .set(patch)
-    .where(and(notDeleted(orgId), eq(employeeBankAccounts.id, id)))
-    .returning(maskedColumns);
+  const update = (q: Db) =>
+    q
+      .update(employeeBankAccounts)
+      .set(patch)
+      .where(and(notDeleted(orgId), eq(employeeBankAccounts.id, id)))
+      .returning(maskedColumns);
 
   const newlySalary = wantSalary && !existing.defaultForSalary;
   const newlyReimb = wantReimb && !existing.defaultForReimbursement;
   if (newlySalary || newlyReimb) {
-    const [, updated] = await db.batch([
-      clearDefaultsQuery(db, orgId, existing.employeeId, { salary: newlySalary, reimbursement: newlyReimb }, id),
-      update,
+    const [, updated] = await runBatch((q) => [
+      clearDefaultsQuery(q, orgId, existing.employeeId, { salary: newlySalary, reimbursement: newlyReimb }, id),
+      update(q),
     ]);
     return updated[0];
   }
-  const [row] = await update;
+  const [row] = await update(db);
   return row;
 }
 
