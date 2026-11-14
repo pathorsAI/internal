@@ -4,7 +4,7 @@ import { parties } from "@/db/schema";
 import { deleteDocument, getObjectStream, putObject } from "@/lib/storage";
 import type { PartyAvatarDeps } from "./party-avatar-store";
 
-/** 正式環境的 deps：Neon + R2。每個查詢都帶 organization_id 與未刪除條件。 */
+/** 正式環境的 deps：Postgres + 物件儲存（src/lib/storage）。每個查詢都帶 organization_id 與未刪除條件。 */
 export function partyAvatarDeps(): PartyAvatarDeps {
   return {
     async loadParty(orgId, partyId) {

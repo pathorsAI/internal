@@ -26,3 +26,6 @@ wrangler.jsonc
 # docs & assets not needed at runtime
 docs
 README.md
+
+# local file storage (STORAGE_DRIVER=fs in dev) — never bake uploads into an image
+data

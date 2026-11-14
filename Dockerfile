@@ -44,6 +44,12 @@ COPY --from=builder /app/next.config.ts ./next.config.ts
 # and the fetch cache), so it — and only it — is handed to the runtime user.
 RUN mkdir -p .next/cache && chown -R nextjs:nodejs .next/cache
 
+# File storage with STORAGE_DRIVER=fs (the docker-compose default) writes here.
+# Created in the image and owned by the runtime user so that a named volume
+# mounted on it inherits that ownership; otherwise the volume is root-owned and
+# every upload fails with EACCES.
+RUN mkdir -p data/storage && chown -R nextjs:nodejs data
+
 USER nextjs
 EXPOSE 3000
 CMD ["bun", "run", "start"]

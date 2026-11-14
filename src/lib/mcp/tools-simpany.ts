@@ -27,7 +27,7 @@ import {
   TAX_UPLOAD_EXTS,
   type TaxFileRef,
 } from "@/lib/simpany-tax-upload";
-import { r2TaxUploadStore } from "@/lib/simpany-tax-upload-r2";
+import { taxUploadStore } from "@/lib/simpany-tax-upload-store";
 import {
   listSalaryDeclarationsLive,
   salaryReconciliation,
@@ -955,7 +955,7 @@ export const simpanyTools: Record<string, ToolDef> = {
       await requireIntegrationForTool(orgId, "simpany");
       await requireManager(orgId, ctx, "上傳 Simpany 申報檔案");
       const fileNames = optStringArray(args.fileNames, "fileNames") ?? [];
-      const slots = await createUploadSlots(r2TaxUploadStore(), {
+      const slots = await createUploadSlots(taxUploadStore(), {
         orgId,
         userId: ctx.userId,
         fileNames,
@@ -1007,7 +1007,7 @@ export const simpanyTools: Record<string, ToolDef> = {
       const files = parseTaxFileRefs(args.files);
       const client = await getSimpanyClient(orgId);
       const options = parseTaxUploadOptions(await client.getTaxUploadInitial());
-      const preview = await previewTaxUpload(r2TaxUploadStore(), {
+      const preview = await previewTaxUpload(taxUploadStore(), {
         orgId,
         userId: ctx.userId,
         options,
@@ -1050,7 +1050,7 @@ export const simpanyTools: Record<string, ToolDef> = {
       const draftId = requireString(args, "draftId");
       const client = await getSimpanyClient(orgId);
       try {
-        const res = await submitTaxUpload(r2TaxUploadStore(), {
+        const res = await submitTaxUpload(taxUploadStore(), {
           orgId,
           draftId,
           submit: (form) => client.createTaxUpload(form),

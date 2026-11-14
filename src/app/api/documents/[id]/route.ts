@@ -1,6 +1,6 @@
-import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getDocument } from "@/db/queries";
 import { requireOrg } from "@/lib/session";
+import { getObject } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
 
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
  * 可以直接 inline 顯示的型別白名單。
  *
  * 為什麼需要白名單：documents.contentType 存的是上傳當下瀏覽器給的 `file.type`
- * （src/lib/storage.ts），完全由上傳者控制。把它原封不動當 Content-Type 回、再配
+ * （src/lib/storage），完全由上傳者控制。把它原封不動當 Content-Type 回、再配
  * `Content-Disposition: inline`，等於允許任何成員在 internal.pathors.com 這個
  * origin 上掛一頁自己的 HTML —— 那是教科書等級的 stored XSS，能讀到同源的
  * session cookie 與整個帳務 API。
@@ -31,7 +31,7 @@ function normalizeType(raw: string | null | undefined): string {
   return (raw ?? "").split(";")[0].trim().toLowerCase();
 }
 
-// 串流回 R2 上的憑證檔案（bucket 非公開，需透過這個 route 取用）
+// 串流回物件儲存上的憑證檔案（bucket 非公開，需透過這個 route 取用）
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -51,12 +51,12 @@ export async function GET(
     return new Response("Not found", { status: 404 });
   }
 
-  const obj = await getCloudflareContext().env.STORAGE.get(doc.r2Key);
+  const obj = await getObject(doc.r2Key);
   if (!obj) {
     return new Response("File missing", { status: 404 });
   }
 
-  const declaredType = normalizeType(doc.contentType ?? obj.httpMetadata?.contentType);
+  const declaredType = normalizeType(doc.contentType ?? obj.contentType);
   const inlineSafe = INLINE_SAFE_TYPES.has(declaredType);
   const disposition = inlineSafe ? "inline" : "attachment";
   const fileName = doc.fileName ?? `document-${docId}`;

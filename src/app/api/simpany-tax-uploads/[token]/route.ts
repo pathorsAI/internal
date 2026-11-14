@@ -1,5 +1,5 @@
 import { receiveSlotUpload, TAX_UPLOAD_MAX_TOTAL_BYTES } from "@/lib/simpany-tax-upload";
-import { r2TaxUploadStore } from "@/lib/simpany-tax-upload-r2";
+import { taxUploadStore } from "@/lib/simpany-tax-upload-store";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +17,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ token: s
     return Response.json({ ok: false, error: "file too large" }, { status: 413 });
   }
   const bytes = new Uint8Array(await req.arrayBuffer());
-  const res = await receiveSlotUpload(r2TaxUploadStore(), token, bytes);
+  const res = await receiveSlotUpload(taxUploadStore(), token, bytes);
   if (!res.ok) return Response.json({ ok: false, error: res.error }, { status: res.status });
   return Response.json(res);
 }
