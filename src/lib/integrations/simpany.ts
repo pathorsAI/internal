@@ -985,7 +985,7 @@ export class SimpanyClient {
   private url(base: ApiBase, path: string, query?: RequestOptions["query"]): string {
     let raw: string;
     if (base === "einvoice") raw = `${EINVOICE_BASE}/${this.companyId}/${path}`;
-    else if (base === "taxFile") raw = `${AUTH_BASE}/${this.companyId}/file-upload${path ? `/${path}` : ""}`;
+    else if (base === "taxFile") raw = [`${AUTH_BASE}/${this.companyId}/file-upload`, path].filter(Boolean).join("/");
     else raw = `${SALARY_BASE}/${this.companyId}/salary-declaration/${path}`;
     const u = new URL(raw);
     for (const [k, v] of Object.entries(query ?? {})) {

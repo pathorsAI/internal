@@ -382,139 +382,165 @@ export type TaxUploadPreview = {
 };
 
 function decodeBase64(raw: string): Uint8Array {
-  const s = raw.replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
+  const body = raw.startsWith("data:") ? raw.slice(raw.indexOf(",") + 1) : raw;
+  const s = body.replaceAll(/\s+/g, "");
   if (!/^[A-Za-z0-9+/_-]*={0,2}$/.test(s)) throw new TaxUploadError("contentBase64 不是合法的 base64");
   const bin = atob(s.replaceAll("-", "+").replaceAll("_", "/"));
   const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.codePointAt(i) ?? 0;
   return out;
 }
 
-export async function previewTaxUpload(
-  store: TaxUploadStore,
-  input: {
-    orgId: string;
-    userId: string;
-    options: TaxUploadOptions;
-    period: string;
-    category?: string;
-    subcategory?: string;
-    note?: string;
-    files: TaxFileRef[];
-    loadDocument(id: number): Promise<DocumentRow | null>;
-  },
-): Promise<TaxUploadPreview> {
-  const { options } = input;
-  const warnings: string[] = [];
+type PreviewInput = {
+  orgId: string;
+  userId: string;
+  options: TaxUploadOptions;
+  period: string;
+  category?: string;
+  subcategory?: string;
+  note?: string;
+  files: TaxFileRef[];
+  loadDocument(id: number): Promise<DocumentRow | null>;
+};
 
-  const periodOpt = options.periods.find((p) => p.value === input.period);
+function resolvePeriod(options: TaxUploadOptions, period: string, warnings: string[]) {
+  const periodOpt = options.periods.find((p) => p.value === period);
   if (!periodOpt) {
+    const choices = options.periods.map((p) => `${p.value}（${p.label}）`).join("、");
     throw new TaxUploadError(
-      `Simpany 目前不開放上傳 ${input.period}（${periodLabel(input.period)}）。可選：${options.periods
-        .map((p) => `${p.value}（${p.label}）`)
-        .join("、") || "（Simpany 沒有回傳任何可上傳月份）"}`,
+      `Simpany 目前不開放上傳 ${period}（${periodLabel(period)}）。可選：${choices || "（Simpany 沒有回傳任何可上傳月份）"}`,
     );
   }
-  if (options.periods[0] && options.periods[0].value !== input.period) {
+  const first = options.periods[0];
+  if (first && first.value !== period) {
     warnings.push(
-      `${periodLabel(input.period)} 不是 Simpany 網頁預設的那一期（${options.periods[0].label}）。Simpany 網頁對這種選擇會跳提醒，請確認申報月份正確。`,
+      `${periodLabel(period)} 不是 Simpany 網頁預設的那一期（${first.label}）。Simpany 網頁對這種選擇會跳提醒，請確認申報月份正確。`,
     );
   }
   if (options.offPeriodNotice) warnings.push(`Simpany 送出前的提醒：${options.offPeriodNotice}`);
+  return periodOpt;
+}
 
-  const categoryValue = input.category ?? TAX_UPLOAD_DEFAULT_CATEGORY;
+function resolveCategory(options: TaxUploadOptions, categoryValue: string, subValue: string) {
   const category = options.categories.find((c) => c.value === categoryValue);
   if (!category) {
-    throw new TaxUploadError(
-      `Simpany 沒有上傳類型 ${categoryValue}。可選：${options.categories.map((c) => `${c.value}（${c.label}）`).join("、")}`,
-    );
+    const choices = options.categories.map((c) => `${c.value}（${c.label}）`).join("、");
+    throw new TaxUploadError(`Simpany 沒有上傳類型 ${categoryValue}。可選：${choices}`);
   }
-  const subValue = input.subcategory ?? TAX_UPLOAD_DEFAULT_SUBCATEGORY;
-  const sub = category.subcategories.find((s) => s.value === subValue);
+  const sub = category.subcategories.find((x) => x.value === subValue);
   if (!sub) {
-    throw new TaxUploadError(
-      `${category.label} 底下沒有上傳分類 ${subValue}。可選：${category.subcategories
-        .map((s) => `${s.value}（${s.label}）`)
-        .join("、")}`,
-    );
+    const choices = category.subcategories.map((x) => `${x.value}（${x.label}）`).join("、");
+    throw new TaxUploadError(`${category.label} 底下沒有上傳分類 ${subValue}。可選：${choices}`);
   }
+  return { category, sub };
+}
 
-  const note = (input.note ?? "").trim();
-  if (note.length > TAX_UPLOAD_MAX_NOTE_LENGTH) {
-    throw new TaxUploadError(`備註最多 ${TAX_UPLOAD_MAX_NOTE_LENGTH} 字（現在 ${note.length} 字）`);
+async function resolveUploadRef(
+  store: TaxUploadStore,
+  orgId: string,
+  ref: { uploadId: string; fileName?: string },
+  label: string,
+): Promise<DraftFile> {
+  if (!isValidToken(ref.uploadId)) throw new TaxUploadError(`${label}：uploadId 格式不對`);
+  const slot = await readJson<SlotRecord>(store, slotKey(ref.uploadId));
+  // 別的組織的 slot 一律當作不存在。
+  if (slot?.value.orgId !== orgId) throw new TaxUploadError(`${label}：找不到上傳 ${ref.uploadId}`);
+  const uploaded = slot.value.uploaded;
+  if (!uploaded) {
+    throw new TaxUploadError(`${label}：「${slot.value.fileName}」還沒傳上來（先對上傳網址 PUT 檔案）`);
   }
+  const name = ref.fileName ?? slot.value.fileName;
+  return {
+    key: fileKey(orgId, ref.uploadId),
+    name,
+    size: uploaded.size,
+    sha256: uploaded.sha256,
+    contentType: contentTypeFor(name),
+    source: "upload",
+    staged: true,
+  };
+}
 
+async function resolveDocumentRef(
+  store: TaxUploadStore,
+  ref: { documentId: number; fileName?: string },
+  label: string,
+  loadDocument: PreviewInput["loadDocument"],
+): Promise<DraftFile> {
+  const doc = await loadDocument(ref.documentId);
+  if (!doc?.r2Key || doc.r2Key.startsWith("meta/")) {
+    throw new TaxUploadError(`${label}：找不到文件 #${ref.documentId}`);
+  }
+  const obj = await store.get(doc.r2Key);
+  if (!obj) throw new TaxUploadError(`${label}：文件 #${ref.documentId} 的檔案不在儲存空間裡`);
+  const name = ref.fileName ?? doc.fileName ?? `document-${ref.documentId}.pdf`;
+  return {
+    key: doc.r2Key,
+    name,
+    size: obj.bytes.byteLength,
+    sha256: await sha256Hex(obj.bytes),
+    contentType: contentTypeFor(name),
+    source: "document",
+    staged: false,
+  };
+}
+
+async function resolveBase64Ref(
+  store: TaxUploadStore,
+  orgId: string,
+  ref: { fileName: string; contentBase64: string },
+  bytes: Uint8Array,
+): Promise<DraftFile> {
+  const key = fileKey(orgId, store.token());
+  await store.put(key, bytes, contentTypeFor(ref.fileName));
+  return {
+    key,
+    name: ref.fileName,
+    size: bytes.byteLength,
+    sha256: await sha256Hex(bytes),
+    contentType: contentTypeFor(ref.fileName),
+    source: "base64",
+    staged: true,
+  };
+}
+
+async function resolveFiles(store: TaxUploadStore, input: PreviewInput): Promise<DraftFile[]> {
   if (input.files.length === 0) throw new TaxUploadError("至少要附一個檔案");
   if (input.files.length > TAX_UPLOAD_MAX_FILES) throw new TaxUploadError(`一次最多 ${TAX_UPLOAD_MAX_FILES} 個檔案`);
-
   const files: DraftFile[] = [];
   let base64Total = 0;
   for (const [i, ref] of input.files.entries()) {
     const label = `files[${i}]`;
     if ("uploadId" in ref) {
-      if (!isValidToken(ref.uploadId)) throw new TaxUploadError(`${label}：uploadId 格式不對`);
-      const slot = await readJson<SlotRecord>(store, slotKey(ref.uploadId));
-      // 別的組織的 slot 一律當作不存在。
-      if (slot?.value.orgId !== input.orgId) throw new TaxUploadError(`${label}：找不到上傳 ${ref.uploadId}`);
-      if (!slot.value.uploaded) {
-        throw new TaxUploadError(`${label}：「${slot.value.fileName}」還沒傳上來（先對上傳網址 PUT 檔案）`);
-      }
-      const name = ref.fileName ?? slot.value.fileName;
-      files.push({
-        key: fileKey(input.orgId, ref.uploadId),
-        name,
-        size: slot.value.uploaded.size,
-        sha256: slot.value.uploaded.sha256,
-        contentType: contentTypeFor(name),
-        source: "upload",
-        staged: true,
-      });
-    } else if ("documentId" in ref) {
-      const doc = await input.loadDocument(ref.documentId);
-      if (!doc?.r2Key || doc.r2Key.startsWith("meta/")) {
-        throw new TaxUploadError(`${label}：找不到文件 #${ref.documentId}`);
-      }
-      const obj = await store.get(doc.r2Key);
-      if (!obj) throw new TaxUploadError(`${label}：文件 #${ref.documentId} 的檔案不在儲存空間裡`);
-      const name = ref.fileName ?? doc.fileName ?? `document-${ref.documentId}.pdf`;
-      files.push({
-        key: doc.r2Key,
-        name,
-        size: obj.bytes.byteLength,
-        sha256: await sha256Hex(obj.bytes),
-        contentType: contentTypeFor(name),
-        source: "document",
-        staged: false,
-      });
-    } else {
-      const bytes = decodeBase64(ref.contentBase64);
-      if (bytes.byteLength === 0) throw new TaxUploadError(`${label}：檔案是空的`);
-      base64Total += bytes.byteLength;
-      if (base64Total > TAX_UPLOAD_MAX_BASE64_BYTES) {
-        throw new TaxUploadError(
-          `base64 檔案合計超過 ${formatBytes(TAX_UPLOAD_MAX_BASE64_BYTES)}，請改用 simpany_create_tax_upload_slots 開上傳網址`,
-        );
-      }
-      const token = store.token();
-      const key = fileKey(input.orgId, token);
-      await store.put(key, bytes, contentTypeFor(ref.fileName));
-      files.push({
-        key,
-        name: ref.fileName,
-        size: bytes.byteLength,
-        sha256: await sha256Hex(bytes),
-        contentType: contentTypeFor(ref.fileName),
-        source: "base64",
-        staged: true,
-      });
+      files.push(await resolveUploadRef(store, input.orgId, ref, label));
+      continue;
     }
+    if ("documentId" in ref) {
+      files.push(await resolveDocumentRef(store, ref, label, input.loadDocument));
+      continue;
+    }
+    const bytes = decodeBase64(ref.contentBase64);
+    if (bytes.byteLength === 0) throw new TaxUploadError(`${label}：檔案是空的`);
+    base64Total += bytes.byteLength;
+    if (base64Total > TAX_UPLOAD_MAX_BASE64_BYTES) {
+      throw new TaxUploadError(
+        `base64 檔案合計超過 ${formatBytes(TAX_UPLOAD_MAX_BASE64_BYTES)}，請改用 simpany_create_tax_upload_slots 開上傳網址`,
+      );
+    }
+    files.push(await resolveBase64Ref(store, input.orgId, ref, bytes));
   }
+  return files;
+}
 
+/** 檔名 / 總量檢查（擋）與重複檔案（提醒）。回傳總大小。 */
+function checkFiles(files: DraftFile[], warnings: string[]): number {
   const problems = files.map((f) => fileNameProblem(f.name)).filter((p): p is string => p !== null);
   if (problems.length) throw new TaxUploadError(problems.join("；"));
-  const totalSize = files.reduce((s, f) => s + f.size, 0);
+  const totalSize = files.reduce((sum, f) => sum + f.size, 0);
   if (totalSize > TAX_UPLOAD_MAX_TOTAL_BYTES) {
-    throw new TaxUploadError(`檔案合計 ${formatBytes(totalSize)}，超過 Simpany 單次上限 ${formatBytes(TAX_UPLOAD_MAX_TOTAL_BYTES)}`);
+    throw new TaxUploadError(
+      `檔案合計 ${formatBytes(totalSize)}，超過 Simpany 單次上限 ${formatBytes(TAX_UPLOAD_MAX_TOTAL_BYTES)}`,
+    );
   }
   const seenNames = new Set<string>();
   const seenHashes = new Map<string, string>();
@@ -525,6 +551,23 @@ export async function previewTaxUpload(
     if (dup) warnings.push(`「${f.name}」與「${dup}」內容完全相同`);
     seenHashes.set(f.sha256, f.name);
   }
+  return totalSize;
+}
+
+export async function previewTaxUpload(store: TaxUploadStore, input: PreviewInput): Promise<TaxUploadPreview> {
+  const warnings: string[] = [];
+  const periodOpt = resolvePeriod(input.options, input.period, warnings);
+  const { category, sub } = resolveCategory(
+    input.options,
+    input.category ?? TAX_UPLOAD_DEFAULT_CATEGORY,
+    input.subcategory ?? TAX_UPLOAD_DEFAULT_SUBCATEGORY,
+  );
+  const note = (input.note ?? "").trim();
+  if (note.length > TAX_UPLOAD_MAX_NOTE_LENGTH) {
+    throw new TaxUploadError(`備註最多 ${TAX_UPLOAD_MAX_NOTE_LENGTH} 字（現在 ${note.length} 字）`);
+  }
+  const files = await resolveFiles(store, input);
+  const totalSize = checkFiles(files, warnings);
 
   const now = store.now();
   const draft: DraftRecord = {
@@ -579,25 +622,24 @@ export type TaxUploadSubmitResult = {
   record: TaxUploadRecord | null;
 };
 
-/**
- * 錯誤分兩種：
- * - retryable = Simpany 明確拒絕（驗證 / 業務 / 權限），檔案一定沒收 → 草稿放回 pending，可修正後重送。
- * - 其他（網路、5xx）= 不確定 Simpany 有沒有收到 → 草稿標 failed，不能重送，請先看上傳紀錄。
- */
-export async function submitTaxUpload(
+type SubmitInput = {
+  orgId: string;
+  draftId: string;
+  submit(form: FormData): Promise<unknown>;
+  isRetryable(e: unknown): boolean;
+  /** 送出後讀上傳紀錄第一頁，用來找出剛剛那筆。 */
+  latestRecords(): Promise<TaxUploadRecord[]>;
+};
+
+/** 讀草稿並確認它現在可以送出；回傳草稿與它的 etag。 */
+async function loadSubmittableDraft(
   store: TaxUploadStore,
-  input: {
-    orgId: string;
-    draftId: string;
-    submit(form: FormData): Promise<unknown>;
-    isRetryable(e: unknown): boolean;
-    /** 送出後讀上傳紀錄第一頁，用來找出剛剛那筆。 */
-    latestRecords(): Promise<TaxUploadRecord[]>;
-  },
-): Promise<TaxUploadSubmitResult> {
-  if (!isValidToken(input.draftId)) throw new TaxUploadError(`找不到草稿 ${input.draftId}`);
-  const found = await readJson<DraftRecord>(store, draftKey(input.draftId));
-  if (found?.value.orgId !== input.orgId) throw new TaxUploadError(`找不到草稿 ${input.draftId}`);
+  orgId: string,
+  draftId: string,
+): Promise<{ value: DraftRecord; etag: string }> {
+  if (!isValidToken(draftId)) throw new TaxUploadError(`找不到草稿 ${draftId}`);
+  const found = await readJson<DraftRecord>(store, draftKey(draftId));
+  if (found?.value.orgId !== orgId) throw new TaxUploadError(`找不到草稿 ${draftId}`);
   const draft = found.value;
   if (draft.status === "submitted") {
     throw new TaxUploadError(`草稿 ${draft.id} 已經上傳過了（流水號 ${draft.result?.hashId ?? "未知"}），不會重複上傳`);
@@ -611,6 +653,52 @@ export async function submitTaxUpload(
   if (store.now().getTime() > Date.parse(draft.expiresAt)) {
     throw new TaxUploadError(`草稿 ${draft.id} 已過期（2 小時），請重新預覽`);
   }
+  return found;
+}
+
+/** 照 Simpany 網頁的欄位組 multipart；每個檔案重新比對 SHA-256。 */
+async function buildForm(store: TaxUploadStore, draft: DraftRecord): Promise<FormData> {
+  const form = new FormData();
+  form.set("period", draft.period);
+  form.set("category", draft.category);
+  form.set("subcategory", draft.subcategory);
+  form.set("note", draft.note);
+  for (const f of draft.files) {
+    const obj = await store.get(f.key);
+    if (!obj) throw new TaxUploadError(`「${f.name}」的檔案不見了，請重新預覽`);
+    if ((await sha256Hex(obj.bytes)) !== f.sha256) {
+      throw new TaxUploadError(`「${f.name}」的內容在預覽之後變了，請重新預覽`);
+    }
+    form.append("files[]", new File([obj.bytes as BlobPart], f.name, { type: f.contentType }));
+  }
+  return form;
+}
+
+const byLocale = (a: string, b: string) => a.localeCompare(b);
+
+/** 在上傳紀錄第一頁找同一期、檔名完全相同的那筆。讀不到不影響上傳結果。 */
+async function findRecord(draft: DraftRecord, latest: SubmitInput["latestRecords"]): Promise<TaxUploadRecord | null> {
+  const names = draft.files.map((f) => f.name).sort(byLocale).join("\n");
+  try {
+    const records = await latest();
+    return (
+      records.find(
+        (r) => r.period === draft.period && r.files.map((f) => f.name).sort(byLocale).join("\n") === names,
+      ) ?? null
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 錯誤分兩種：
+ * - retryable = Simpany 明確拒絕（驗證 / 業務 / 權限），檔案一定沒收 → 草稿放回 pending，可修正後重送。
+ * - 其他（網路、5xx）= 不確定 Simpany 有沒有收到 → 草稿標 failed，不能重送，請先看上傳紀錄。
+ */
+export async function submitTaxUpload(store: TaxUploadStore, input: SubmitInput): Promise<TaxUploadSubmitResult> {
+  const found = await loadSubmittableDraft(store, input.orgId, input.draftId);
+  const draft = found.value;
 
   // 佔住草稿：條件寫入，同一份草稿只會有一次送出。
   const claimed = await writeJson(store, draftKey(draft.id), { ...draft, status: "submitting" }, found.etag);
@@ -620,20 +708,9 @@ export async function submitTaxUpload(
     await writeJson(store, draftKey(draft.id), { ...draft, status, result });
   };
 
-  const form = new FormData();
-  form.set("period", draft.period);
-  form.set("category", draft.category);
-  form.set("subcategory", draft.subcategory);
-  form.set("note", draft.note);
+  let form: FormData;
   try {
-    for (const f of draft.files) {
-      const obj = await store.get(f.key);
-      if (!obj) throw new TaxUploadError(`「${f.name}」的檔案不見了，請重新預覽`);
-      if ((await sha256Hex(obj.bytes)) !== f.sha256) {
-        throw new TaxUploadError(`「${f.name}」的內容在預覽之後變了，請重新預覽`);
-      }
-      form.append("files[]", new File([obj.bytes as BlobPart], f.name, { type: f.contentType }));
-    }
+    form = await buildForm(store, draft);
   } catch (e) {
     await setStatus("pending");
     throw e;
@@ -653,16 +730,7 @@ export async function submitTaxUpload(
     );
   }
 
-  let record: TaxUploadRecord | null = null;
-  try {
-    const names = draft.files.map((f) => f.name).sort().join("\n");
-    record =
-      (await input.latestRecords()).find(
-        (r) => r.period === draft.period && r.files.map((f) => f.name).sort().join("\n") === names,
-      ) ?? null;
-  } catch {
-    // 讀紀錄失敗不影響上傳結果。
-  }
+  const record = await findRecord(draft, input.latestRecords);
   await setStatus("submitted", { at: store.now().toISOString(), hashId: record?.hashId ?? null });
   for (const f of draft.files) {
     if (f.staged) await store.delete(f.key).catch(() => undefined);

@@ -25,7 +25,7 @@ export function r2TaxUploadStore(): TaxUploadStore {
     token() {
       const b = new Uint8Array(32);
       crypto.getRandomValues(b);
-      return btoa(String.fromCharCode(...b)).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+      return btoa(String.fromCodePoint(...b)).replaceAll("+", "-").replaceAll("/", "_").split("=")[0];
     },
   };
 }
