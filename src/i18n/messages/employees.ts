@@ -145,9 +145,9 @@ const employees = {
     toAccountLabel: { "zh-TW": "匯入帳戶", en: "Paid into" },
     toAccountNone: { "zh-TW": "不記錄", en: "Don't record" },
     bookOptions: {
-      both: { "zh-TW": "內外帳（both）", en: "Both (internal & external)" },
-      internal: { "zh-TW": "僅內帳（不報稅）", en: "Internal only (not for tax filing)" },
-      external: { "zh-TW": "僅外帳", en: "External only" },
+      both: { "zh-TW": "兩本都記（管理帳＋稅務帳）", en: "Both (management & tax)" },
+      internal: { "zh-TW": "僅管理帳", en: "Management only" },
+      external: { "zh-TW": "僅稅務帳", en: "Tax only" },
     },
     itemsSection: { "zh-TW": "薪資項目（底薪、加班費、獎金、請假扣…）", en: "Salary items (base pay, overtime, bonus, leave deduction…)" },
     selectItemPlaceholder: { "zh-TW": "選擇項目", en: "Select item" },

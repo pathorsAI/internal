@@ -492,7 +492,7 @@ async function readTransactionHeader(
   if (!txnDate) return { error: t("required.date") };
   if (amount === null) return { error: t("required.amount") };
 
-  // 報稅與否：transfer 固定 both；其餘看「上外帳」勾選（勾→both，不勾→internal）
+  // 帳別：transfer 固定 both；其餘看「計入稅務帳」勾選（勾→both，不勾→internal）
   const reported = type === "transfer" || formData.get("reported") === "on";
   const book = reported ? "both" : "internal";
 
@@ -1684,7 +1684,7 @@ async function parsePayslipForm(
   if (!year || !month) return { error: t("required.payPeriod") };
   if (!payDate) return { error: t("required.payDate") };
   if (!fromAccountId) return { error: t("required.payingAccount") };
-  // 帳別：沒投保沒合約的可只記內帳、不報稅
+  // 帳別由使用者選，預設兩本都記（both）
   const bookRaw = str(formData.get("book")) ?? "both";
   const book = ["internal", "external", "both"].includes(bookRaw) ? bookRaw : "both";
 

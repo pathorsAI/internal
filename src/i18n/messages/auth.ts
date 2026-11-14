@@ -86,10 +86,10 @@ const auth = {
       upload: { "zh-TW": "這是上個月的對帳單，幫我入帳", en: "Here is last month's statement, book it for me" },
       read: { "zh-TW": "讀到 23 筆，有 3 筆我不確定", en: "23 transactions read — 3 I'm not sure about" },
       ask: {
-        "zh-TW": "顧問費 NT$45,000：只進內帳，還是外帳也認？",
-        en: "Consulting fee NT$45,000 — internal books only, or external too?",
+        "zh-TW": "顧問費 NT$45,000：有拿到發票嗎？要不要列為可扣抵的費用？",
+        en: "Consulting fee NT$45,000 — is there an invoice, and is it a deductible expense?",
       },
-      answer: { "zh-TW": "外帳也要", en: "External too" },
+      answer: { "zh-TW": "有發票，列費用", en: "Invoiced, deductible" },
     },
   },
   // 註冊／忘記密碼／重設密碼／設定密碼這幾頁共用的錯誤訊息與連結。

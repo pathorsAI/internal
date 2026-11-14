@@ -768,7 +768,7 @@ export const hrTools: Record<string, ToolDef> = {
         book: {
           type: "string",
           enum: ["both", "internal", "external"],
-          description: "Ledger book; default both (reported). Use internal to keep it off the tax books.",
+          description: "Ledger book: both = management + tax books (default); internal = management books only; external = tax books only.",
         },
         toEmployeeAccountId: {
           type: "number",

@@ -606,11 +606,15 @@ function applyTxnAmountPatch(
 export const transactionTools: Record<string, ToolDef> = {
   list_transactions: {
     description:
-      "List ledger transactions (內外帳), newest first. Optional filters: book, categoryId, accountId, projectId, period (YYYY-MM), needsReview (true = rows imported by an integration such as the Wise sync that nobody has confirmed yet — review them and set a category with update_transaction).",
+      "List ledger transactions (management & tax books), newest first. Optional filters: book, categoryId, accountId, projectId, period (YYYY-MM), needsReview (true = rows imported by an integration such as the Wise sync that nobody has confirmed yet — review them and set a category with update_transaction).",
     inputSchema: {
       type: "object",
       properties: {
-        book: { type: "string", enum: [...BOOKS] },
+        book: {
+          type: "string",
+          enum: [...BOOKS],
+          description: "internal = management books only; external = tax books only; both = recorded in both.",
+        },
         categoryId: { type: "number" },
         accountId: { type: "number", description: "Matches from OR to account." },
         projectId: { type: "number" },
@@ -752,7 +756,7 @@ export const transactionTools: Record<string, ToolDef> = {
 
   create_transaction: {
     description:
-      "Write one bookkeeping entry into the ledger for money that has already moved elsewhere. This records history; it never sends, collects or transfers anything, and 'transfer' here means a book entry between two of the organization's own ledger accounts. Required per type — expense/income: accountId + partyName; advance: partyName + settleEmployeeName (no account); transfer: fromAccountId + toAccountId. categoryId is optional — omit it to leave the entry 未分類 (unclassified; no need for a separate holding account). Resolve ids with list_bank_accounts / list_categories / list_parties first. 'reported' (報稅/上外帳) sets the book to 'both', otherwise 'internal' (transfers are always 'both'). Set billedToCompanyTaxId=true to mark 有報公司統編 (the invoice attachment itself is done in the app). To book a repaid advance use create_reimbursement. When contractId is set, the result carries `contractProgress` (amount/received/remaining/fullyCollected) — if `fullyCollected` is true while the contract is still draft/active, tell the user the contract is now fully collected and ask whether to set it to completed (已完成); on a yes, call update_contract with status='completed'. Never flip the status without asking.",
+      "Write one bookkeeping entry into the ledger for money that has already moved elsewhere. This records history; it never sends, collects or transfers anything, and 'transfer' here means a book entry between two of the organization's own ledger accounts. Required per type — expense/income: accountId + partyName; advance: partyName + settleEmployeeName (no account); transfer: fromAccountId + toAccountId. categoryId is optional — omit it to leave the entry 未分類 (unclassified; no need for a separate holding account). Resolve ids with list_bank_accounts / list_categories / list_parties first. 'reported' (計入稅務帳 — include in the tax books) sets the book to 'both' (management + tax), otherwise 'internal' (management books only); transfers are always 'both'. Set billedToCompanyTaxId=true to mark 有報公司統編 (the invoice attachment itself is done in the app). To book a repaid advance use create_reimbursement. When contractId is set, the result carries `contractProgress` (amount/received/remaining/fullyCollected) — if `fullyCollected` is true while the contract is still draft/active, tell the user the contract is now fully collected and ask whether to set it to completed (已完成); on a yes, call update_contract with status='completed'. Never flip the status without asking.",
     inputSchema: {
       type: "object",
       properties: {

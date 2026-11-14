@@ -796,7 +796,7 @@ const bulkTxns: TxnDef[] = [
     period: monthStart(k),
   })),
 
-  // ---- 其他收入（book=internal：只進內帳，沒有上外帳）----
+  // ---- 其他收入（book=internal：只記在管理帳）----
   { type: "income", date: day(-30), amount: 60_000, currency: "TWD", description: "Harborline 顧問時數（未開發票）", category: "顧問收入", party: harborline, from: null, to: twdAcct, book: "internal", project: projHarborline },
   { type: "income", date: day(-15), amount: 850, currency: "TWD", description: "活存利息", category: "利息收入", party: null, from: null, to: twdAcct, book: "both" },
 

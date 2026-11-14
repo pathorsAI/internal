@@ -2,7 +2,7 @@ import type { Dictionary } from "./dictionary";
 
 const transactions = {
   page: {
-    title: { "zh-TW": "內外帳", en: "Dual books" },
+    title: { "zh-TW": "收支紀錄", en: "Ledger" },
     description: { "zh-TW": "所有交易紀錄，可依帳別、分類篩選", en: "All transactions, filterable by book and category" },
   },
   columns: {
@@ -58,9 +58,9 @@ const transactions = {
   filters: {
     book: {
       all: { "zh-TW": "全部帳別", en: "All books" },
-      internal: { "zh-TW": "內帳", en: "Internal" },
-      external: { "zh-TW": "外帳", en: "External" },
-      both: { "zh-TW": "內外帳", en: "Both" },
+      internal: { "zh-TW": "管理帳", en: "Management" },
+      external: { "zh-TW": "稅務帳", en: "Tax" },
+      both: { "zh-TW": "兩本都記", en: "Both" },
     },
     category: {
       all: { "zh-TW": "全部分類", en: "All categories" },
@@ -139,7 +139,7 @@ const transactions = {
     contractHintOther: { "zh-TW": "可綁合約來追蹤這單花了多少（成本不會從合約金額扣除）。", en: "Link a contract to track how much this line cost (the cost isn't deducted from the contract amount)." },
     description: { "zh-TW": "摘要", en: "Description" },
     descriptionPlaceholder: { "zh-TW": "選填", en: "Optional" },
-    reported: { "zh-TW": "上外帳（要報稅）", en: "Include in external book (taxable)" },
+    reported: { "zh-TW": "計入稅務帳", en: "Include in tax books" },
     billedToCompanyTaxId: { "zh-TW": "這筆有報公司統編", en: "This is billed under the company's tax ID" },
     typeLabel: { "zh-TW": "類型", en: "Type" },
     typeLocked: { "zh-TW": "（類型不可改）", en: "(type can't be changed)" },

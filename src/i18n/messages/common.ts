@@ -22,7 +22,7 @@ const common = {
     items: {
       dashboard: { "zh-TW": "總覽", en: "Overview" },
       billing: { "zh-TW": "請款看板", en: "Billing board" },
-      transactions: { "zh-TW": "內外帳", en: "Dual books" },
+      transactions: { "zh-TW": "收支紀錄", en: "Ledger" },
       parties: { "zh-TW": "交易對象", en: "Counterparty" },
       categories: { "zh-TW": "分類", en: "Category" },
       advances: { "zh-TW": "代墊", en: "Advance" },
@@ -58,9 +58,9 @@ const common = {
     updated: { "zh-TW": "最後修改", en: "Last updated" },
   },
   bookBadge: {
-    internal: { "zh-TW": "內帳", en: "Internal" },
-    external: { "zh-TW": "外帳", en: "External" },
-    both: { "zh-TW": "內外", en: "Both" },
+    internal: { "zh-TW": "管理帳", en: "Management" },
+    external: { "zh-TW": "稅務帳", en: "Tax" },
+    both: { "zh-TW": "兩本", en: "Both" },
   },
   combobox: {
     emptyText: { "zh-TW": "查無項目", en: "No matches" },

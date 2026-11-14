@@ -121,7 +121,7 @@ const LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0];
 // before doing org-scoped work — important because the signed-in account may
 // belong to multiple organizations and we never guess.
 const INSTRUCTIONS = [
-  "This server is the operational surface for one organization's bookkeeping: ledger transactions (內外帳), parties, categories, bank accounts, invoices, projects, subscriptions, contracts, employees, payroll records, and reconciliations.",
+  "This server is the operational surface for one organization's bookkeeping: ledger transactions (management & tax books), parties, categories, bank accounts, invoices, projects, subscriptions, contracts, employees, payroll records, and reconciliations.",
   "It is a bookkeeping system and nothing else. Every write creates or edits a record in this organization's own books. No tool moves money: none of them initiates, authorizes or executes a payment, transfer, payout or trade, and the server cannot instruct any bank, card or payment provider — the only bank link is an optional, read-only Wise integration (wise_* tools) that reads balances and statements and can import them into the ledger. The Azure / GCP billing integrations are read-only too: they record which platform account is paid by which card or invoice and reconcile cloud invoices against existing ledger rows (vendor billing tools). Words like pay, payment, transfer, salary, reimbursement and advance always describe an entry being recorded, never money being sent.",
   "The signed-in account may belong to multiple organizations.",
   "At the start of each session, before calling any org-scoped tool, call list_organizations and ask the user which organization to work in.",

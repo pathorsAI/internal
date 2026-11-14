@@ -1,6 +1,6 @@
 # Deployment
 
-This project (an internal-accounting / 內外帳 + client-finance app) is a standard
+This project (a bookkeeping + client-finance app for small companies) is a standard
 **Next.js 16 (App Router)** application backed by **Postgres**. There is nothing
 that forces a particular host on you — if you can run Next.js and reach a
 Postgres database, you can run this app.

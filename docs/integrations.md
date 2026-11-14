@@ -158,7 +158,7 @@ Wise 是**唯讀**整合：只把 Wise 對帳單的交易匯入本組織的帳�
   `assertReadOnly()` 會拒絕任何非 GET，且 path 必須符合唯讀白名單
   （`/v2/profiles`、`/v4/profiles/{id}/balances`、`/v1/profiles/{id}/balance-statements/{balanceId}/statement.json`），
   否則不發請求直接丟錯。**沒有任何建立 quote / transfer / conversion 的程式碼路徑。**
-- 同步唯一會寫的是本組織的 `transactions`（內帳），不會寫 Wise。
+- 同步唯一會寫的是本組織的 `transactions`（管理帳，`book=internal`），不會寫 Wise。
 - Wise 回 401 → `markNeedsReauth`；回 403 且帶 `x-2fa-approval` header → 丟出「需要 SCA」的清楚錯誤
   （本系統不實作 SCA 簽章）；其他錯誤 → `recordSyncFailure`。成功 → `recordSyncSuccess`。
 
