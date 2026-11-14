@@ -77,39 +77,47 @@ read path that does not strictly need it:
 
 ### Key management
 
-> **Status: in progress.** Key rotation and the multi-key configuration below are being
-> added in parallel work. Until that lands, the app reads a single key from
-> `FIELD_ENCRYPTION_KEY`. Check `.env.example` on your checkout for what your version
-> supports.
-
 Configuration:
 
 | Variable | Format | Meaning |
 | --- | --- | --- |
 | `FIELD_ENCRYPTION_KEYS` | Comma-separated `kid:base64` pairs, e.g. `k2:…,k1:…` | Keyring. The **first** entry is the active key used for new writes; the others are kept only to decrypt older values |
-| `FIELD_ENCRYPTION_KEY` | One base64 key | Legacy single-key setting, still accepted for decryption of values written before key ids existed |
+| `FIELD_ENCRYPTION_KEY` | One base64 key | Legacy single key (kid `legacy`). Needed to read `v1:` values and anything written as `v2:legacy:`; if `FIELD_ENCRYPTION_KEYS` is unset it is also used for new writes (as `v2:legacy:`, never `v1`) |
 
 Each key is 32 random bytes, base64-encoded: `openssl rand -base64 32`. Pick short, stable
-key ids (`k1`, `2026-11`, …); the id is stored with each ciphertext so the app knows which
-key to use.
+key ids (`k1`, `2026-11`, …; `legacy` is reserved); the id is stored with each ciphertext
+so the app knows which key to use.
+
+Ciphertext format is `v2:<kid>:<iv>:<ct>`. Each value is also bound to where it lives
+through AES-GCM associated data (the column plus the organization, and for bank accounts
+the employee; see `src/lib/field-contexts.ts`), so a value copied into another row,
+column or organization fails to decrypt instead of being read as someone else's data.
 
 Rotation procedure:
 
 1. Generate a new key and **back it up** (see below) before using it.
 2. Put it first in `FIELD_ENCRYPTION_KEYS`, keeping the old key(s) after it, and deploy.
    New writes now use the new key; old values still decrypt.
-3. Re-encrypt existing values with the new key:
-   `bun scripts/reencrypt-fields.ts` (run it against the same database and keyring as the
-   app; use its dry-run option first if your version has one).
+3. Re-encrypt existing values with the new key, against the same database and keyring
+   as the app: `bun scripts/reencrypt-fields.ts` is a dry run that prints counts only;
+   add `--apply` to write. Rows changed concurrently are skipped and picked up by the
+   next run; the script exits with code 2 while anything is left.
 4. Once the script reports that nothing is left under the old key id, remove the old key
    from the keyring and deploy again.
 
 Losing a key makes every value encrypted with it unreadable: integrations must be
 reconnected and national IDs and account numbers re-entered. There is no recovery path.
 
-Also in progress: encrypting the OAuth tokens that better-auth stores (for example Google
-refresh tokens used by the Calendar integration) with the same keyring, and making the
-database and object-storage layers portable across Postgres hosts and S3-compatible stores.
+OAuth tokens that better-auth stores for linked accounts (for example the Google refresh
+token used by the Calendar integration) are encrypted by better-auth with
+`BETTER_AUTH_SECRET` (`account.encryptOAuthTokens`), not with the field keyring. Rotate
+that secret through `BETTER_AUTH_SECRETS` so old tokens stay readable, or users must
+reconnect.
+
+Known residual risk: better-auth's MCP plugin stores OAuth client secrets and MCP
+access/refresh tokens in plaintext (`oauth_application`, `oauth_access_token`). Anyone
+with read access to the database can use a live MCP token until it expires. Restrict
+database access accordingly.
 
 ## Authentication
 
