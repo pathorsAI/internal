@@ -31,6 +31,7 @@ import {
 import { submitAction } from "@/lib/form-action";
 import { DatePicker } from "@/components/date-picker";
 import { CategoryCombobox } from "./category-combobox";
+import { AdvancePayerField } from "./advance-payer-field";
 import { PartyCombobox } from "@/components/party-combobox";
 import { ContractCombobox, type ContractOption } from "./contract-combobox";
 
@@ -65,6 +66,8 @@ type Txn = {
   billedToCompanyTaxId: boolean;
   partyName: string | null;
   settleName: string | null;
+  /** 代墊人是公司時的交易對象 id（settleName 是它的名稱）；員工代墊為 null。 */
+  settlePartyId?: number | null;
   fromAccountId: number | null;
   toAccountId: number | null;
   /** 外部同步來源（wise…）；手動輸入為 null。 */
@@ -403,14 +406,12 @@ function PartyAccountFields({
         />
       </Field>
       {isAdvance && (
-        <Field label={t("form.payer")} required wide>
-          <PartyCombobox
-            parties={employees}
-            name="settleEmployeeName"
-            defaultName={txn.settleName ?? ""}
-            placeholder={t("form.payerPlaceholder")}
-          />
-        </Field>
+        <AdvancePayerField
+          employees={employees}
+          parties={parties}
+          defaultKind={txn.settlePartyId == null ? "employee" : "party"}
+          defaultName={txn.settleName ?? ""}
+        />
       )}
       <Field label={t("form.category")} required>
         <CategoryCombobox categories={categories} defaultName={defaultCategoryName} />

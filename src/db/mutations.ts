@@ -49,6 +49,8 @@ import { nationalIdColumns, resolvePayoutAccount, type PayoutPurpose } from "./e
 import { EmployeeAccountError } from "@/lib/employee-accounts";
 import { externalSingleLegSide, type SingleLegSide } from "@/lib/external-transfer";
 import { assertOrgRefs } from "@/lib/vendor-billing/guards";
+import { advancePayeeKind, pickAdvancePayee } from "@/lib/advance-payee";
+import { hasReimbursement } from "./advance-reimbursed";
 
 export type ActionState = { ok: boolean; error?: string };
 
@@ -339,6 +341,7 @@ type TxnFields = {
   categoryId: number | null;
   partyId: number | null;
   settleEmployeeId: number | null;
+  settlePartyId: number | null;
 };
 
 type TxnResult = { fields: TxnFields } | { error: string };
@@ -348,6 +351,7 @@ const blankFields: TxnFields = {
   categoryId: null,
   partyId: null,
   settleEmployeeId: null,
+  settlePartyId: null,
 };
 
 async function resolveExpenseIncome(
@@ -392,16 +396,26 @@ async function resolveAdvance(
   const categoryId = num(formData.get("categoryId")); // 可留空＝未分類
   const refError = await unownedRefError(db, orgId, [[categories, [categoryId]]]);
   if (refError) return { error: refError };
-  const settleName = str(formData.get("settleEmployeeName"));
-  if (!settleName) return { error: t("required.payer") };
-  return {
-    fields: {
-      ...blankFields,
-      categoryId,
-      partyId: await getOrCreateParty(db, orgId, partyName, "vendor"),
-      settleEmployeeId: await getOrCreateEmployee(db, orgId, settleName),
-    },
+  // 代墊人是員工還是公司（交易對象）：表單上的切換決定讀哪一欄，另一欄就算有值也不看。
+  const kind = advancePayeeKind(str(formData.get("settleKind")));
+  const payee = pickAdvancePayee(
+    kind === "party"
+      ? { partyName: str(formData.get("settlePartyName")) }
+      : { employeeName: str(formData.get("settleEmployeeName")) },
+  );
+  if ("error" in payee) return { error: t(kind === "party" ? "required.payerCompany" : "required.payer") };
+  const fields: TxnFields = {
+    ...blankFields,
+    categoryId,
+    partyId: await getOrCreateParty(db, orgId, partyName, "vendor"),
   };
+  if (payee.kind === "party") {
+    // 公司名稱或別名已存在就連到那筆，查無就新建（跟廠商欄同一套比對）。
+    fields.settlePartyId = await getOrCreateParty(db, orgId, payee.name ?? "", "vendor");
+  } else {
+    fields.settleEmployeeId = await getOrCreateEmployee(db, orgId, payee.name);
+  }
+  return { fields };
 }
 
 async function resolveTransfer(
@@ -537,6 +551,7 @@ function transactionColumns(formData: FormData, header: TxnHeader, f: TxnFields)
     categoryId: f.categoryId,
     partyId: f.partyId,
     settleEmployeeId: f.settleEmployeeId,
+    settlePartyId: f.settlePartyId,
     projectId: num(formData.get("projectId")),
     contractId: num(formData.get("contractId")),
     subscriptionId: num(formData.get("subscriptionId")),
@@ -720,6 +735,35 @@ export async function updateParty(
   }
 }
 
+/**
+ * 撥款前讀原代墊：代墊人、幣別，以及是不是已經有撥款連回它（未刪除的 reimbursement）。
+ * 只認 type=advance —— 別的交易不能拿來「撥款」。
+ */
+async function loadAdvanceForReimbursement(
+  db: ReturnType<typeof getDb>,
+  orgId: string,
+  advanceId: number,
+) {
+  const [adv] = await db
+    .select({
+      settleEmployeeId: transactions.settleEmployeeId,
+      settlePartyId: transactions.settlePartyId,
+      currency: transactions.currency,
+    })
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.organizationId, orgId),
+        eq(transactions.id, advanceId),
+        eq(transactions.type, "advance"),
+        isNull(transactions.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (!adv) return null;
+  return { ...adv, alreadyReimbursed: await hasReimbursement(db, orgId, advanceId) };
+}
+
 // 記錄撥款：把某筆代墊（type=advance）結掉 → 建一筆 type=reimbursement、related_to=該代墊
 export async function createReimbursement(
   _prev: ActionState,
@@ -740,25 +784,17 @@ export async function createReimbursement(
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
-    // 讀原代墊，拿到代墊人（員工）＝撥款對象
-    const [adv] = await db
-      .select({
-        settleEmployeeId: transactions.settleEmployeeId,
-        currency: transactions.currency,
-      })
-      .from(transactions)
-      .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, advanceId)))
-      .limit(1);
+    // 讀原代墊，拿到代墊人（員工或公司）＝撥款對象
+    const adv = await loadAdvanceForReimbursement(db, orgId, advanceId);
     if (!adv) return { ok: false, error: t("notFound.advanceRecord") };
+    if (adv.alreadyReimbursed) return { ok: false, error: t("validation.advanceAlreadyReimbursed") };
     const refError = await unownedRefError(db, orgId, [[bankAccounts, [fromAccountId]]]);
     if (refError) return { ok: false, error: refError };
-    // 匯入代墊人的哪個帳戶（選填）：沒選就用他的報銷預設帳戶
-    const payout = await payoutAccountFromForm(
-      orgId,
-      adv.settleEmployeeId,
-      "reimbursement",
-      formData,
-    );
+    // 匯入代墊人的哪個帳戶（選填）：員工沒選就用他的報銷預設帳戶；公司沒有員工帳戶，一律不記。
+    const payout =
+      adv.settlePartyId == null
+        ? await payoutAccountFromForm(orgId, adv.settleEmployeeId, "reimbursement", formData)
+        : { accountId: null };
     if ("error" in payout) return { ok: false, error: payout.error };
     const advCurrency = adv.currency ?? "TWD";
     // 撥款的幣別跟著原代墊走，所以要驗的是「付款帳戶是不是同一種幣別」。
@@ -771,7 +807,9 @@ export async function createReimbursement(
         organizationId: orgId,
         type: "reimbursement",
         txnDate: payDate,
-        settleEmployeeId: adv.settleEmployeeId, // 付給代墊人（員工）
+        // 付給代墊人：員工或公司，跟原代墊同一個
+        settleEmployeeId: adv.settleEmployeeId,
+        settlePartyId: adv.settlePartyId,
         settleToAccountId: payout.accountId,
         amount,
         currency: advCurrency,

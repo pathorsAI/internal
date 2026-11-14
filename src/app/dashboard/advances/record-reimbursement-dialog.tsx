@@ -28,7 +28,15 @@ export function RecordReimbursementDialog({
   accounts,
   employeeAccounts,
 }: Readonly<{
-  advance: { id: number; settleName: string; amount: string; currency: string; vendorName: string };
+  advance: {
+    id: number;
+    settleName: string;
+    /** 代墊人是員工或公司；公司沒有員工收款帳戶可選 */
+    settleKind: "employee" | "party" | null;
+    amount: string;
+    currency: string;
+    vendorName: string;
+  };
   accounts: { id: number; name: string; currency: string }[];
   /** 代墊人啟用中的收款帳戶（遮罩後），選「匯入帳戶」用 */
   employeeAccounts: MaskedEmployeeAccount[];
@@ -104,7 +112,7 @@ export function RecordReimbursementDialog({
                   : t("dialog.fromAccountHint", { currency: advance.currency })}
               </p>
             </div>
-            {employeeAccounts.length > 0 ? (
+            {advance.settleKind !== "party" && employeeAccounts.length > 0 ? (
               <SelectField
                 name="toEmployeeAccountId"
                 label={t("dialog.toAccount")}
