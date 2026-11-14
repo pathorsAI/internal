@@ -14,7 +14,7 @@ settings page just lists it alongside the others.
 
 | Where | What |
 | --- | --- |
-| `migrations/0023_org_integrations.sql` / `orgIntegrations` in `src/db/schema.ts` | One row per (organization, provider). `credentials_enc` / `token_cache_enc` are ciphertext from `src/lib/crypto.ts` (`FIELD_ENCRYPTION_KEY`). `config` is non-secret jsonb. |
+| `migrations/0023_org_integrations.sql` / `orgIntegrations` in `src/db/schema.ts` | One row per (organization, provider). `credentials_enc` / `token_cache_enc` are ciphertext from `src/lib/crypto.ts` (`FIELD_ENCRYPTION_KEYS`, bound to org + provider via `src/lib/field-contexts.ts`). `config` is non-secret jsonb. |
 | `src/lib/integrations/types.ts` | Provider ids, field/catalog/provider types, `IntegrationSummary` (the secret-free view). Client-safe. |
 | `src/lib/integrations/catalog.ts` | Static catalog: logo + credential/config fields per provider. Drives the settings UI. Client-safe. |
 | `src/lib/integrations/registry.ts` | Map of **implementations** (`testConnection`). Simpany, Wise, Azure, GCP and Discord are registered. Server only. |
@@ -344,7 +344,7 @@ service × currency` 加總 `cost + credits` → `vendor_cost_lines`，並為**�
 ### Workload Identity Federation（GCP，不存金鑰）
 
 - 平台有一把**整個部署共用**的 RSA 私鑰 `OIDC_SIGNING_KEY`（Worker secret；PKCS#8 DER 一行 base64，也接受 PEM），
-  選填 `OIDC_SIGNING_KID`（預設 `internal-2026-10b`）、`OIDC_ISSUER`（預設 `https://internal.pathors.com`）。
+  選填 `OIDC_SIGNING_KID`（預設 `internal-2026-10b`）、`OIDC_ISSUER`（預設 `BETTER_AUTH_URL`，必須與 GCP provider 登記的 issuer 一字不差）。
 - 同步時以 WebCrypto 簽一個 JWT：`iss`、`sub` = **server 端 org context 的 organization id**（絕不取自使用者輸入
   或 config）、`aud = internal-billing`、`iat`、`exp = iat + 300`，header `kid`。
 - → `POST sts.googleapis.com/v1/token`（token-exchange，audience = config `wifAudience`，即
@@ -718,9 +718,9 @@ cron 回應仍帶著自動同步的結果，但回 500 讓 Cloudflare 把這次 
 
 ## Security rules
 
-- Credentials are encrypted with `FIELD_ENCRYPTION_KEY` (see
-  [deployment.md](deployment.md)). Losing or rotating the key means every
-  integration has to be reconnected.
+- Credentials are encrypted with `FIELD_ENCRYPTION_KEYS` (see
+  [deployment.md](deployment.md)). Rotate with `scripts/reencrypt-fields.ts`; losing
+  a key means every integration encrypted with it has to be reconnected.
 - Nothing that reaches a client — server-action results, page props, MCP results —
   may contain credentials, tokens or ciphertext. `IntegrationSummary` has no such
   fields by construction; don't bypass it with a raw select.

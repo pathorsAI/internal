@@ -1,7 +1,7 @@
 import { type ToolContext, tools } from "./tools";
 import { type ToolAnnotations, type ToolDef, resolveOrg } from "./shared";
 import { logMcp, type ActivityAction } from "@/db/activity";
-import { publicBaseUrl } from "@/lib/base-url";
+import { publicBaseUrl, trustedOrigins } from "@/lib/base-url";
 import { MCP_SERVER_ICONS } from "./mcp-icons";
 
 type McpAudit = {
@@ -145,19 +145,19 @@ const CORS_EXPOSE_HEADERS = "WWW-Authenticate, Mcp-Session-Id, MCP-Protocol-Vers
 // validate `Origin` (DNS-rebinding defence). Requests with no Origin header —
 // which is how ChatGPT, Codex and Claude actually connect, server-to-server —
 // are unaffected. Add a host here if a new browser-based client shows up.
+// 自家的 origin 不寫死：跟 better-auth 的 trustedOrigins 同一份（BETTER_AUTH_URL +
+// TRUSTED_ORIGINS，非 production 再加 localhost:3000），自架的人改 env 就好。
 const ALLOWED_ORIGINS = new Set(
   [
     PUBLIC_BASE_URL,
-    "https://internal.pathors.com",
-    "https://pathors-internal.pathors.workers.dev",
+    ...trustedOrigins(),
     "https://chatgpt.com",
     "https://chat.openai.com",
     "https://platform.openai.com",
     "https://codex.openai.com",
     "https://claude.ai",
     "https://claude.com",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
+    ...(process.env.NODE_ENV === "production" ? [] : ["http://127.0.0.1:3000"]),
   ].map((u) => {
     try {
       return new URL(u).origin;

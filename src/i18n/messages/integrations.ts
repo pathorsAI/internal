@@ -198,8 +198,8 @@ const integrations = {
       en: "{name} must be reconnected before it can be switched on",
     },
     encryptionKeyMissing: {
-      "zh-TW": "伺服器尚未設定 FIELD_ENCRYPTION_KEY，無法安全儲存憑證，請聯絡系統管理員",
-      en: "FIELD_ENCRYPTION_KEY is not configured on the server, so credentials cannot be stored safely. Contact your administrator.",
+      "zh-TW": "伺服器尚未設定 FIELD_ENCRYPTION_KEYS，無法安全儲存憑證，請聯絡系統管理員",
+      en: "FIELD_ENCRYPTION_KEYS is not configured on the server, so credentials cannot be stored safely. Contact your administrator.",
     },
     unavailable: {
       "zh-TW": "{name} 整合尚未連接／未開啟，請 owner 或 admin 到 設定 › 整合 開啟",

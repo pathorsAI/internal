@@ -5,7 +5,6 @@ import { getTranslations } from "next-intl/server";
 import { canManageOrg, requireOrgWithRole } from "@/lib/session";
 import { logWeb } from "@/db/activity";
 import {
-  convertLegacySalaryAccount,
   createEmployeeAccount,
   getEmployeeAccount,
   revealEmployeeAccountNumber,
@@ -135,23 +134,5 @@ export async function revealEmployeeAccount(
   } catch (e) {
     if (e instanceof EmployeeAccountError) return { ok: false, error: t(`employeeAccount.${e.code}`) };
     return { ok: false, error: t("employeeAccount.revealFailed") };
-  }
-}
-
-/** 把舊的 salary_account 自由文字轉成一個「薪資預設」帳戶，並清空舊欄位。 */
-export async function convertLegacySalaryAccountAction(employeeId: number): Promise<ActionState> {
-  const auth = await requireManager();
-  if ("error" in auth) return { ok: false, error: auth.error };
-  try {
-    const created = await convertLegacySalaryAccount(auth.orgId, employeeId);
-    if (!created) {
-      const t = await getTranslations("errors");
-      return { ok: false, error: t("employeeAccount.nothingToConvert") };
-    }
-    await logWeb(auth.orgId, "create", "employee_bank_account", created.id, formatAccountShort(created));
-    revalidateEmployees();
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: await accountErrorMessage(e, "create") };
   }
 }

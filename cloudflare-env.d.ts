@@ -5,6 +5,9 @@ interface __BaseEnv_CloudflareEnv {
 	STORAGE: R2Bucket;
 	ASSETS: Fetcher;
 	NEXT_PUBLIC_APP_NAME: "Pathors Internal";
+	TRUSTED_ORIGINS: string;
+	OIDC_ISSUER: string;
+	RESEND_FROM: string;
 	DATABASE_URL: string;
 }
 declare namespace Cloudflare {
@@ -15,7 +18,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "NEXT_PUBLIC_APP_NAME" | "DATABASE_URL">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "NEXT_PUBLIC_APP_NAME" | "TRUSTED_ORIGINS" | "OIDC_ISSUER" | "RESEND_FROM" | "DATABASE_URL">> {}
 }
 
 // Begin runtime types
