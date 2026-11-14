@@ -21,13 +21,13 @@
  *
  * 安全性質（刻意的設計，不要拿掉）：
  *   - 冪等：已經搬過的列不會再被選到，重跑只會處理剩下的。
- *   - 每位員工的「建帳戶 + 清空舊欄位」用 db.batch 在同一個交易裡完成，中途失敗
+ *   - 每位員工的「建帳戶 + 清空舊欄位」用 runBatch 在同一個交易裡完成，中途失敗
  *     不會留下「帳戶建了但明文還在」或反過來的狀態。
  *   - 只印筆數，絕不印出帳號、身分證字號或員工姓名。
  *   - 軟刪除的員工一樣處理：明文不該因為人離職被刪除就留在資料庫裡。
  */
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
-import { getDb } from "@/db";
+import { getDb, runBatch } from "@/db";
 import { employeeBankAccounts, employees } from "@/db/schema";
 import { decryptField, encryptField } from "@/lib/crypto";
 import {
@@ -62,7 +62,7 @@ async function anyAccountMatches(existing: { enc: string }[], accountNumber: str
 
 /** 建帳戶 + 清空舊欄位，同一個交易。 */
 async function createAccountFromLegacy(db: Db, e: SalaryRow, parsed: LegacyAccount) {
-  const insert = db.insert(employeeBankAccounts).values({
+  const values: typeof employeeBankAccounts.$inferInsert = {
     organizationId: e.organizationId,
     employeeId: e.id,
     kind: parsed.kind,
@@ -77,8 +77,9 @@ async function createAccountFromLegacy(db: Db, e: SalaryRow, parsed: LegacyAccou
     defaultForReimbursement: false,
     isActive: true,
     note: LEGACY_ACCOUNT_NOTE,
-  });
-  await db.batch([insert, clearSalaryAccount(db, e.id)]);
+  };
+  // 兩句都用 runBatch 給的 q 建，pg 上才會落在同一個交易裡。
+  await runBatch((q) => [q.insert(employeeBankAccounts).values(values), clearSalaryAccount(q, e.id)], db);
 }
 
 function clearSalaryAccount(db: Db, id: number) {

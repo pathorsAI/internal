@@ -1,8 +1,10 @@
 # Vendor-neutral image for self-hosting on a normal Node server.
 # Builds with Bun and runs `next start`. See docs/deployment.md.
 #
-# NOTE: before this image's DB access works you must swap the Neon HTTP driver
-# for a TCP driver (node-postgres) in src/db/index.ts — see docs/deployment.md.
+# Database: no driver swap needed. src/db/index.ts uses node-postgres for any
+# non-Neon host (set DATABASE_DRIVER=pg to be explicit). The same image applies
+# the schema with `bun scripts/migrate.ts` — docker-compose.yml runs it as the
+# one-shot `migrate` service.
 
 # --- deps: install dependencies ---------------------------------------------
 FROM oven/bun:1-alpine AS deps
@@ -39,6 +41,10 @@ COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/next.config.ts ./next.config.ts
+# The migration runner and the SQL it applies, so the same image can run
+# `bun scripts/migrate.ts` (docker-compose.yml's `migrate` service).
+COPY --from=builder /app/scripts/migrate.ts ./scripts/migrate.ts
+COPY --from=builder /app/migrations ./migrations
 
 # .next/cache is the one path the server writes to while serving (ISR output
 # and the fetch cache), so it — and only it — is handed to the runtime user.

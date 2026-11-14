@@ -24,6 +24,12 @@
   "r2_buckets": [
     { "binding": "STORAGE", "bucket_name": "pathors-internal-storage" }
   ],
+  // 自架、用一般 Postgres（非 Neon）跑在 Workers 上時：建一個 Hyperdrive 設定，
+  // 綁成 HYPERDRIVE。src/db/index.ts 看到這個 binding 就改用 node-postgres 走
+  // Hyperdrive，DATABASE_URL 可以不設。我們自己用 Neon HTTP，所以沒有開。
+  // "hyperdrive": [
+  //   { "binding": "HYPERDRIVE", "id": "<wrangler hyperdrive create 回傳的 id>" }
+  // ],
   // Worker 固定在 Neon 的同一個 AWS 區域執行（ap-southeast-1，prod DB 在 team
   // 專案的 ep-dawn-star）。沒設的話 Worker 跑在「離使用者最近」的機房，而 HiNet
   // 的流量常被 Cloudflare 分到美西 SJC / 美東 IAD：一次登入要打好幾次 Neon，
