@@ -233,5 +233,10 @@ const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 export default withNextIntl(nextConfig);
 
 // Enables Cloudflare bindings (env, KV, etc.) during `next dev`.
+// 只在 dev 啟動：它會 spawn workerd（本機的 Workers 模擬器）。`next build` 用不到它，
+// 而在 Docker 的 alpine（musl）映像裡 workerd 的 glibc 執行檔根本跑不起來，
+// 無條件呼叫會讓自架的 `docker compose up` 建置直接失敗。
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
-initOpenNextCloudflareForDev();
+if (process.env.NODE_ENV === "development") {
+  initOpenNextCloudflareForDev();
+}
