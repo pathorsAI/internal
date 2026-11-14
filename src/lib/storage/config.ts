@@ -29,7 +29,7 @@ export class StorageConfigError extends Error {
 
 function nonEmpty(v: string | undefined): string | undefined {
   const t = v?.trim();
-  return t ? t : undefined;
+  return t || undefined;
 }
 
 function parseBool(v: string | undefined): boolean | undefined {

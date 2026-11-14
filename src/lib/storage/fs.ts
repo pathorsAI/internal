@@ -52,6 +52,21 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** 先寫暫存檔再 rename：rename 在同一個檔案系統上是原子的，讀的人不會讀到寫一半的檔案。 */
+async function atomicWrite(target: string, data: Uint8Array | string) {
+  const fsp = await import("node:fs/promises");
+  const path = await import("node:path");
+  await fsp.mkdir(path.dirname(target), { recursive: true });
+  const tmp = `${target}.${crypto.randomUUID()}.tmp`;
+  try {
+    await fsp.writeFile(tmp, data);
+    await fsp.rename(tmp, target);
+  } catch (e) {
+    await fsp.rm(tmp, { force: true });
+    throw e;
+  }
+}
+
 function isNotFound(e: unknown): boolean {
   const code = (e as { code?: string } | null)?.code;
   return code === "ENOENT" || code === "ENOTDIR";
@@ -94,21 +109,6 @@ export function fsDriver(rootDir: string): StorageDriver {
       return JSON.parse(await fsp.readFile(metaPath, "utf8")) as Meta;
     } catch (e) {
       if (isNotFound(e)) return null;
-      throw e;
-    }
-  }
-
-  /** 先寫暫存檔再 rename：rename 在同一個檔案系統上是原子的，讀的人不會讀到寫一半的檔案。 */
-  async function atomicWrite(target: string, data: Uint8Array | string) {
-    const fsp = await import("node:fs/promises");
-    const path = await import("node:path");
-    await fsp.mkdir(path.dirname(target), { recursive: true });
-    const tmp = `${target}.${crypto.randomUUID()}.tmp`;
-    try {
-      await fsp.writeFile(tmp, data);
-      await fsp.rename(tmp, target);
-    } catch (e) {
-      await fsp.rm(tmp, { force: true });
       throw e;
     }
   }

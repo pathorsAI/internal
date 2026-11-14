@@ -186,12 +186,16 @@ type BatchQueries = Readonly<[BatchItem<"pg">, ...BatchItem<"pg">[]]>;
  * 回傳的 tuple 形狀與 `db.batch` 相同：第 i 個元素是第 i 句的結果。
  * 判斷依據是 db 身上有沒有 `batch`，不看環境變數，所以測試注入的 db 也照樣適用。
  */
+function canBatch(db: Db): db is BatchCapableDb {
+  return typeof (db as Partial<BatchCapableDb>).batch === "function";
+}
+
 export async function runBatch<T extends BatchQueries>(
   build: (q: Db) => T,
   db: Db = getDb(),
 ): Promise<BatchResponse<T>> {
-  if ("batch" in db && typeof (db as BatchCapableDb).batch === "function") {
-    return (db as BatchCapableDb).batch(build(db));
+  if (canBatch(db)) {
+    return db.batch(build(db));
   }
   return db.transaction(async (tx) => {
     const results: unknown[] = [];

@@ -46,15 +46,12 @@ COPY --from=builder /app/next.config.ts ./next.config.ts
 COPY --from=builder /app/scripts/migrate.ts ./scripts/migrate.ts
 COPY --from=builder /app/migrations ./migrations
 
-# .next/cache is the one path the server writes to while serving (ISR output
-# and the fetch cache), so it — and only it — is handed to the runtime user.
-RUN mkdir -p .next/cache && chown -R nextjs:nodejs .next/cache
-
-# File storage with STORAGE_DRIVER=fs (the docker-compose default) writes here.
-# Created in the image and owned by the runtime user so that a named volume
-# mounted on it inherits that ownership; otherwise the volume is root-owned and
-# every upload fails with EACCES.
-RUN mkdir -p data/storage && chown -R nextjs:nodejs data
+# The only paths the server writes to are handed to the runtime user:
+# - .next/cache: ISR output and the fetch cache.
+# - data/storage: file storage with STORAGE_DRIVER=fs (the docker-compose
+#   default). Created in the image so a named volume mounted on it inherits this
+#   ownership; otherwise the volume is root-owned and every upload fails with EACCES.
+RUN mkdir -p .next/cache data/storage && chown -R nextjs:nodejs .next/cache data
 
 USER nextjs
 EXPOSE 3000

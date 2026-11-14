@@ -18,11 +18,18 @@ export type S3Config = {
   forcePathStyle: boolean;
 };
 
+/** 去掉結尾的 `/`。不用 regex：`/\/+$/` 在長字串上會回溯（Sonar S5852）。 */
+function trimTrailingSlashes(s: string): string {
+  let end = s.length;
+  while (end > 0 && s[end - 1] === "/") end--;
+  return s.slice(0, end);
+}
+
 /** 物件網址。key 每一段各自 encode，保留 `/` 當路徑分隔。 */
 export function s3ObjectUrl(cfg: S3Config, key: string): string {
   const base = new URL(cfg.endpoint);
   const encodedKey = key.split("/").map(encodeURIComponent).join("/");
-  const basePath = base.pathname.replace(/\/+$/, "");
+  const basePath = trimTrailingSlashes(base.pathname);
   if (cfg.forcePathStyle) {
     return `${base.protocol}//${base.host}${basePath}/${encodeURIComponent(cfg.bucket)}/${encodedKey}`;
   }

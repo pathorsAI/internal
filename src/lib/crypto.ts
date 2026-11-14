@@ -67,6 +67,22 @@ function importAesKey(b64: string, label: string): Promise<CryptoKey> {
   return crypto.subtle.importKey("raw", bytes, "AES-GCM", false, ["encrypt", "decrypt"]);
 }
 
+/** 解析 keyring 的一段 `kid:base64key`；空段回 null，格式錯或用了保留 kid 直接丟錯。 */
+function parseRingEntry(entry: string): { kid: string; b64: string } | null {
+  const trimmed = entry.trim();
+  if (!trimmed) return null;
+  const sep = trimmed.indexOf(":");
+  const kid = sep > 0 ? trimmed.slice(0, sep).trim() : "";
+  const b64 = sep > 0 ? trimmed.slice(sep + 1).trim() : "";
+  if (!KID_PATTERN.test(kid) || !b64) {
+    throw new Error("FIELD_ENCRYPTION_KEYS 格式錯誤，應為 `kid:base64key,kid2:base64key`（kid 限英數、_、-）");
+  }
+  if (kid === LEGACY_KID) {
+    throw new Error(`FIELD_ENCRYPTION_KEYS 不能使用保留的 kid「${LEGACY_KID}」（那是 FIELD_ENCRYPTION_KEY）`);
+  }
+  return { kid, b64 };
+}
+
 // 以「env 原字串」當快取鍵：同一個 isolate 裡 env 不會變，只解析、匯入一次；
 // 測試改了 env 也會自動重建，不必另外提供 reset。
 let cached: { sig: string; ring: Keyring } | null = null;
@@ -80,17 +96,9 @@ function loadKeyring(): Keyring {
   const keys = new Map<string, Promise<CryptoKey>>();
   let activeKid: string | null = null;
   for (const entry of ringRaw.split(",")) {
-    const trimmed = entry.trim();
-    if (!trimmed) continue;
-    const sep = trimmed.indexOf(":");
-    const kid = sep > 0 ? trimmed.slice(0, sep).trim() : "";
-    const b64 = sep > 0 ? trimmed.slice(sep + 1).trim() : "";
-    if (!KID_PATTERN.test(kid) || !b64) {
-      throw new Error("FIELD_ENCRYPTION_KEYS 格式錯誤，應為 `kid:base64key,kid2:base64key`（kid 限英數、_、-）");
-    }
-    if (kid === LEGACY_KID) {
-      throw new Error(`FIELD_ENCRYPTION_KEYS 不能使用保留的 kid「${LEGACY_KID}」（那是 FIELD_ENCRYPTION_KEY）`);
-    }
+    const parsed = parseRingEntry(entry);
+    if (!parsed) continue;
+    const { kid, b64 } = parsed;
     if (keys.has(kid)) throw new Error(`FIELD_ENCRYPTION_KEYS 有重複的 kid「${kid}」`);
     keys.set(kid, importAesKey(b64, `FIELD_ENCRYPTION_KEYS[${kid}]`));
     activeKid ??= kid;

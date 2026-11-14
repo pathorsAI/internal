@@ -49,14 +49,67 @@ function parseArgs(argv: string[]) {
   return { dryRun, markThrough };
 }
 
+function compareBytes(a: string, b: string): number {
+  if (a < b) return -1;
+  return a > b ? 1 : 0;
+}
+
 function loadMigrations(): MigrationFile[] {
   return readdirSync(MIGRATIONS_DIR)
     .filter((f) => f.endsWith(".sql"))
-    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)) // 位元組順序，不受 locale 影響
+    .sort(compareBytes) // 位元組順序，不受 locale 影響
     .map((filename) => {
       const sql = readFileSync(join(MIGRATIONS_DIR, filename), "utf8");
       return { filename, sql, checksum: createHash("sha256").update(sql).digest("hex") };
     });
+}
+
+/** 讀已套用的紀錄。dry run 保證零寫入：連 _migrations 都不建，沒有這張表就當成全部未套用。 */
+async function readApplied(client: Client, dryRun: boolean): Promise<Map<string, string>> {
+  const tableExists = (
+    await client.query<{ exists: boolean }>("SELECT to_regclass('public._migrations') IS NOT NULL AS exists")
+  ).rows[0].exists;
+  if (!tableExists) {
+    if (!dryRun) {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS _migrations (
+          filename text PRIMARY KEY,
+          checksum text NOT NULL,
+          applied_at timestamptz NOT NULL DEFAULT now()
+        )`);
+    }
+    return new Map();
+  }
+  const { rows } = await client.query<AppliedRow>("SELECT filename, checksum FROM _migrations");
+  return new Map(rows.map((r) => [r.filename, r.checksum]));
+}
+
+/** 先全部檢查完再動手：有任何一支被改過就一支都不套。 */
+function assertUnchanged(files: MigrationFile[], applied: Map<string, string>) {
+  const changed = files.filter((f) => applied.has(f.filename) && applied.get(f.filename) !== f.checksum);
+  if (changed.length) {
+    throw new Error(
+      `checksum mismatch for already-applied migration(s): ${changed.map((f) => f.filename).join(", ")}. ` +
+        "Applied migrations must not be edited; add a new migration instead.",
+    );
+  }
+  const missing = [...applied.keys()].filter((name) => !files.some((f) => f.filename === name));
+  if (missing.length) {
+    console.warn(`warning: recorded in _migrations but not on disk: ${missing.join(", ")}`);
+  }
+}
+
+/** 一支 migration 一個交易：SQL 與紀錄一起 commit，失敗就一起 rollback。markOnly 只記錄不執行。 */
+async function applyOne(client: Client, file: MigrationFile, markOnly: boolean) {
+  await client.query("BEGIN");
+  try {
+    if (!markOnly) await client.query(file.sql);
+    await client.query("INSERT INTO _migrations (filename, checksum) VALUES ($1, $2)", [file.filename, file.checksum]);
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw new Error(`${file.filename} failed: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+  }
 }
 
 async function main() {
@@ -72,41 +125,10 @@ async function main() {
   const client = new Client({ connectionString });
   await client.connect();
   try {
-    await client.query("SELECT pg_advisory_lock($1)", [ADVISORY_LOCK_KEY]);
-    // dry run 保證零寫入：連 _migrations 都不建，沒有這張表就當成全部未套用。
     // 鎖是 session 層級的，client.end() 時自動釋放，不用另外 unlock。
-    const tableExists = (
-      await client.query<{ exists: boolean }>("SELECT to_regclass('public._migrations') IS NOT NULL AS exists")
-    ).rows[0].exists;
-    if (!tableExists && !dryRun) {
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS _migrations (
-          filename text PRIMARY KEY,
-          checksum text NOT NULL,
-          applied_at timestamptz NOT NULL DEFAULT now()
-        )`);
-    }
-    const applied = new Map<string, string>(
-      tableExists
-        ? (await client.query<AppliedRow>("SELECT filename, checksum FROM _migrations")).rows.map((r) => [
-            r.filename,
-            r.checksum,
-          ])
-        : [],
-    );
-
-    // 先全部檢查完再動手：有任何一支被改過就一支都不套。
-    const changed = files.filter((f) => applied.has(f.filename) && applied.get(f.filename) !== f.checksum);
-    if (changed.length) {
-      throw new Error(
-        `checksum mismatch for already-applied migration(s): ${changed.map((f) => f.filename).join(", ")}. ` +
-          "Applied migrations must not be edited; add a new migration instead.",
-      );
-    }
-    const missing = [...applied.keys()].filter((name) => !files.some((f) => f.filename === name));
-    if (missing.length) {
-      console.warn(`warning: recorded in _migrations but not on disk: ${missing.join(", ")}`);
-    }
+    await client.query("SELECT pg_advisory_lock($1)", [ADVISORY_LOCK_KEY]);
+    const applied = await readApplied(client, dryRun);
+    assertUnchanged(files, applied);
 
     const pending = files.filter((f) => !applied.has(f.filename));
     if (!pending.length) {
@@ -117,25 +139,11 @@ async function main() {
     const markIndex = markThrough ? pending.findIndex((f) => f.filename === markThrough) : -1;
     for (const [i, file] of pending.entries()) {
       const markOnly = i <= markIndex;
-      const verb = markOnly ? "mark" : "apply";
       if (dryRun) {
-        console.log(`[dry-run] would ${verb} ${file.filename}`);
+        console.log(`[dry-run] would ${markOnly ? "mark" : "apply"} ${file.filename}`);
         continue;
       }
-      await client.query("BEGIN");
-      try {
-        if (!markOnly) await client.query(file.sql);
-        await client.query("INSERT INTO _migrations (filename, checksum) VALUES ($1, $2)", [
-          file.filename,
-          file.checksum,
-        ]);
-        await client.query("COMMIT");
-      } catch (err) {
-        await client.query("ROLLBACK");
-        throw new Error(`${file.filename} failed: ${err instanceof Error ? err.message : String(err)}`, {
-          cause: err,
-        });
-      }
+      await applyOne(client, file, markOnly);
       console.log(`${markOnly ? "marked" : "applied"} ${file.filename}`);
     }
     if (dryRun) console.log(`[dry-run] ${pending.length} pending, nothing written`);
