@@ -1,5 +1,6 @@
 "use client";
 
+import { useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -43,6 +44,7 @@ import {
 import { OrgSwitcher, type OrgOption } from "@/components/org-switcher";
 import { UserMenu } from "@/components/user-menu";
 import { LocaleSwitcher } from "@/components/locale-switcher";
+import { ThemeSwitcher } from "@/components/theme-switcher";
 import { Logo } from "@/components/logo";
 
 // 每天都會開的兩頁放最上面。請款看板是收入循環的日常操作面 —— 請款、開票、
@@ -149,6 +151,32 @@ export function AppSidebar({
     return pathname.startsWith(href);
   };
 
+  // 滑動指示：量出目前選中項目在捲動容器裡的位置，把那塊底色滑過去（.nav-indicator）。
+  // 選中項目自己的底色關掉（下面的 data-[active=true]:bg-transparent），不然會疊兩層。
+  // 側欄收成圖示列、或目前頁面不在側欄裡時，indicator 藏起來。
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [indicator, setIndicator] = useState<{ top: number; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const root = contentRef.current;
+    if (!root) return;
+    const measure = () => {
+      const el = root.querySelector<HTMLElement>(
+        '[data-slot="sidebar-menu-button"][data-active="true"]',
+      );
+      if (!el || el.offsetWidth < 80) {
+        setIndicator(null);
+        return;
+      }
+      const rootRect = root.getBoundingClientRect();
+      const rect = el.getBoundingClientRect();
+      setIndicator({ top: rect.top - rootRect.top + root.scrollTop, height: rect.height });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [pathname]);
+
   return (
     <Sidebar>
       <SidebarHeader>
@@ -159,7 +187,16 @@ export function AppSidebar({
         />
       </SidebarHeader>
 
-      <SidebarContent>
+      <SidebarContent ref={contentRef} className="relative">
+        <div
+          aria-hidden
+          className="nav-indicator"
+          style={
+            indicator
+              ? { transform: `translateY(${indicator.top}px)`, height: indicator.height }
+              : { opacity: 0 }
+          }
+        />
         {groups.map((group) => (
           <SidebarGroup key={group.label}>
             <SidebarGroupLabel>{t(`nav.groups.${group.label}`)}</SidebarGroupLabel>
@@ -167,7 +204,11 @@ export function AppSidebar({
               <SidebarMenu>
                 {group.items.map((item) => (
                   <SidebarMenuItem key={item.href}>
-                    <SidebarMenuButton asChild isActive={isActive(item.href)}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={isActive(item.href)}
+                      className="relative data-[active=true]:bg-transparent"
+                    >
                       <Link href={item.href}>
                         <item.icon />
                         <span>{t(`nav.items.${item.key}`)}</span>
@@ -182,6 +223,7 @@ export function AppSidebar({
       </SidebarContent>
 
       <SidebarFooter>
+        <ThemeSwitcher />
         <LocaleSwitcher />
         <UserMenu />
       </SidebarFooter>

@@ -2,219 +2,644 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-@custom-variant dark (&:is(.dark *));
+/*
+ * internal 設計系統（docs/design-system.md）。
+ * 這個檔有四段：
+ *   1. @theme   —— Tailwind 看得到的 token（顏色、圓角、陰影、字、動效曲線）
+ *   2. :root / .dark —— token 的實際值，亮暗各一份
+ *   3. 外皮（skin）—— 用 [data-slot] 選到 shadcn 元件再調外觀，src/components/ui 原件不改
+ *   4. 配件 —— glow 按鈕、方格紙、聚光卡、雙本記號、進度條、呼吸點
+ * 頁面與元件一律吃 token，不寫死色碼。
+ */
 
-@layer base {
-  button:not(:disabled),
-  [role="button"]:not(:disabled),
-  [data-slot="sidebar-menu-button"]:not(:disabled) {
-    cursor: pointer;
-  }
-  body {
-    letter-spacing: var(--tracking-normal);
-  }
-}
+@custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-mono);
-  --font-heading: var(--font-sans);
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
-  --color-destructive: var(--destructive);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
-  --font-serif: Georgia, serif;
-  --radius: 1.3rem;
-  --tracking-tighter: calc(var(--tracking-normal) - 0.05em);
-  --tracking-tight: calc(var(--tracking-normal) - 0.025em);
-  --tracking-wide: calc(var(--tracking-normal) + 0.025em);
-  --tracking-wider: calc(var(--tracking-normal) + 0.05em);
-  --tracking-widest: calc(var(--tracking-normal) + 0.1em);
-  --tracking-normal: var(--tracking-normal);
-  --shadow-2xl: var(--shadow-2xl);
-  --shadow-xl: var(--shadow-xl);
-  --shadow-lg: var(--shadow-lg);
-  --shadow-md: var(--shadow-md);
-  --shadow: var(--shadow);
-  --shadow-sm: var(--shadow-sm);
-  --shadow-xs: var(--shadow-xs);
-  --shadow-2xs: var(--shadow-2xs);
-  --spacing: var(--spacing);
-  --letter-spacing: var(--letter-spacing);
-  --shadow-offset-y: var(--shadow-offset-y);
-  --shadow-offset-x: var(--shadow-offset-x);
-  --shadow-spread: var(--shadow-spread);
-  --shadow-blur: var(--shadow-blur);
-  --shadow-opacity: var(--shadow-opacity);
-  --color-shadow-color: var(--shadow-color);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-strong: var(--primary-strong);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-subtle-foreground: var(--subtle-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-warning: var(--warning);
   --color-income: var(--income);
   --color-expense: var(--expense);
+  --color-border: var(--border);
+  --color-border-soft: var(--border-soft);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --font-sans: var(--font-inter), var(--font-noto-tc), -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, Menlo, monospace;
+  --font-heading: var(--font-sans);
+
+  /* 圓角：標籤 6、輸入與按鈕 8、選單 10、卡片與 Sheet 12 */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-3xl: 20px;
+  --radius-4xl: 24px;
+
+  /* 層次：xs/sm 給卡片，md 給浮起來的卡，lg/xl 給選單、Sheet、對話框 */
+  --shadow-2xs: 0 1px 1px rgb(var(--shadow-rgb) / calc(var(--shadow-k) * 0.04));
+  --shadow-xs: 0 1px 2px rgb(var(--shadow-rgb) / calc(var(--shadow-k) * 0.05));
+  --shadow-sm: 0 1px 2px rgb(var(--shadow-rgb) / calc(var(--shadow-k) * 0.06)), 0 1px 3px rgb(var(--shadow-rgb) / calc(var(--shadow-k) * 0.04));
+  --shadow-md: 0 4px 12px -2px rgb(var(--shadow-rgb) / calc(var(--shadow-k) * 0.08)), 0 2px 4px -2px rgb(var(--shadow-rgb) / calc(var(--shadow-k) * 0.04));
+  --shadow-lg: 0 12px 32px -8px rgb(var(--shadow-rgb) / calc(var(--shadow-k) * 0.16)), 0 4px 8px -4px rgb(var(--shadow-rgb) / calc(var(--shadow-k) * 0.06));
+  --shadow-xl: 0 24px 56px -12px rgb(var(--shadow-rgb) / calc(var(--shadow-k) * 0.22)), 0 8px 16px -8px rgb(var(--shadow-rgb) / calc(var(--shadow-k) * 0.08));
+
+  /* 動效：三個時長、兩條曲線，全站共用 */
+  --ease-out-soft: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out-soft: cubic-bezier(0.4, 0, 0.2, 1);
+  --animate-rise: ds-rise var(--dur-2) var(--ease-out-soft) both;
+  --animate-fade: ds-fade var(--dur-2) ease-out both;
 }
 
 :root {
-  --background: oklch(1.0000 0 0);
-  --foreground: oklch(0.1884 0.0128 248.5103);
-  --card: oklch(0.9784 0.0011 197.1387);
-  --card-foreground: oklch(0.1884 0.0128 248.5103);
-  --popover: oklch(1.0000 0 0);
-  --popover-foreground: oklch(0.1884 0.0128 248.5103);
-  --primary: oklch(0.6723 0.1606 244.9955);
-  --primary-foreground: oklch(1.0000 0 0);
-  --secondary: oklch(0.1884 0.0128 248.5103);
-  --secondary-foreground: oklch(1.0000 0 0);
-  --muted: oklch(0.9222 0.0013 286.3737);
-  --muted-foreground: oklch(0.5037 0.0150 248.5103);
-  --accent: oklch(0.9392 0.0166 250.8453);
-  --accent-foreground: oklch(0.6723 0.1606 244.9955);
-  --destructive: oklch(0.6188 0.2376 25.7658);
-  --income: oklch(0.6907 0.1554 160.3454);
-  --expense: oklch(0.6188 0.2376 25.7658);
-  --border: oklch(0.9317 0.0118 231.6594);
-  /* input 是表單欄位的邊框色（shadcn Input 用 border-input + bg-transparent）。
-     原本 0.9809 比 --card(0.9784) 還亮，邊框比卡片還淺＝隱形，欄位整個融進卡片。
-     壓到明顯比 card 深、比一般分隔線(--border 0.9317)再深一點，讓欄位讀得出邊界。 */
-  --input: oklch(0.8900 0.0125 231.6594);
-  --ring: oklch(0.6818 0.1584 243.3540);
-  --chart-1: oklch(0.6723 0.1606 244.9955);
-  --chart-2: oklch(0.6907 0.1554 160.3454);
-  --chart-3: oklch(0.8214 0.1600 82.5337);
-  --chart-4: oklch(0.7064 0.1822 151.7125);
-  --chart-5: oklch(0.5919 0.2186 10.5826);
-  --radius: 1.3rem;
-  --sidebar: oklch(0.9784 0.0011 197.1387);
-  --sidebar-foreground: oklch(0.1884 0.0128 248.5103);
-  --sidebar-primary: oklch(0.6723 0.1606 244.9955);
-  --sidebar-primary-foreground: oklch(1.0000 0 0);
-  --sidebar-accent: oklch(0.9392 0.0166 250.8453);
-  --sidebar-accent-foreground: oklch(0.6723 0.1606 244.9955);
-  --sidebar-border: oklch(0.9271 0.0101 238.5177);
-  --sidebar-ring: oklch(0.6818 0.1584 243.3540);
-  --destructive-foreground: oklch(1.0000 0 0);
-  --font-sans: Open Sans, sans-serif;
-  --font-serif: Georgia, serif;
-  --font-mono: Menlo, monospace;
-  --shadow-color: rgba(29,161,242,0.15);
-  --shadow-opacity: 0;
-  --shadow-blur: 0px;
-  --shadow-spread: 0px;
-  --shadow-offset-x: 0px;
-  --shadow-offset-y: 2px;
-  --letter-spacing: 0em;
-  --spacing: 0.25rem;
-  --shadow-2xs: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00);
-  --shadow-xs: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00);
-  --shadow-sm: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00), 0px 1px 2px -1px hsl(202.8169 89.1213% 53.1373% / 0.00);
-  --shadow: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00), 0px 1px 2px -1px hsl(202.8169 89.1213% 53.1373% / 0.00);
-  --shadow-md: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00), 0px 2px 4px -1px hsl(202.8169 89.1213% 53.1373% / 0.00);
-  --shadow-lg: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00), 0px 4px 6px -1px hsl(202.8169 89.1213% 53.1373% / 0.00);
-  --shadow-xl: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00), 0px 8px 10px -1px hsl(202.8169 89.1213% 53.1373% / 0.00);
-  --shadow-2xl: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00);
-  --tracking-normal: 0em;
+  --background: #fbfbfc;
+  --foreground: #15171a;
+  --card: #ffffff;
+  --card-foreground: #15171a;
+  --popover: #ffffff;
+  --popover-foreground: #15171a;
+  --primary: #1469d4;
+  --primary-strong: #2b7fe8;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f2f4;
+  --secondary-foreground: #15171a;
+  --muted: #f3f4f6;
+  --muted-foreground: #646a74;
+  --subtle-foreground: #8a909a;
+  --accent: #eef4fd;
+  --accent-foreground: #0f55b0;
+  --destructive: #c8372d;
+  --destructive-foreground: #ffffff;
+  --warning: #a8690a;
+  --income: #167a4a;
+  --expense: #c8372d;
+  --border: #e4e6ea;
+  --border-soft: #eef0f3;
+  --input: #d5d8de;
+  --ring: #1469d4;
+  --chart-1: #1469d4;
+  --chart-2: #2db6f3;
+  --chart-3: #8a93a3;
+  --chart-4: #167a4a;
+  --chart-5: #b7791f;
+  --sidebar: #f6f7f9;
+  --sidebar-foreground: #454a53;
+  --sidebar-primary: #1469d4;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e8f1fd;
+  --sidebar-accent-foreground: #0f55b0;
+  --sidebar-border: #e4e6ea;
+  --sidebar-ring: #1469d4;
+
+  /* 配件用的光：只有品牌藍一個顏色 */
+  --glow: rgb(20 105 212 / 0.42);
+  --halo: rgb(45 182 243 / 0.16);
+  --grid-line: rgb(20 105 212 / 0.1);
+  --spot: rgb(20 105 212 / 0.08);
+
+  --shadow-rgb: 16 24 40;
+  --shadow-k: 1;
+  --radius: 0.625rem;
+  --dur-1: 120ms;
+  --dur-2: 200ms;
+  --dur-3: 320ms;
 }
 
 .dark {
-  --background: oklch(0 0 0);
-  --foreground: oklch(0.9328 0.0025 228.7857);
-  --card: oklch(0.2097 0.0080 274.5332);
-  --card-foreground: oklch(0.8853 0 0);
-  --popover: oklch(0 0 0);
-  --popover-foreground: oklch(0.9328 0.0025 228.7857);
-  --primary: oklch(0.6692 0.1607 245.0110);
-  --primary-foreground: oklch(1.0000 0 0);
-  --secondary: oklch(0.9622 0.0035 219.5331);
-  --secondary-foreground: oklch(0.1884 0.0128 248.5103);
-  --muted: oklch(0.2090 0 0);
-  --muted-foreground: oklch(0.5637 0.0078 247.9662);
-  --accent: oklch(0.1928 0.0331 242.5459);
-  --accent-foreground: oklch(0.6692 0.1607 245.0110);
-  --destructive: oklch(0.6188 0.2376 25.7658);
-  --income: oklch(0.7227 0.1700 158.0000);
-  --expense: oklch(0.7040 0.1910 22.0000);
-  --border: oklch(0.2674 0.0047 248.0045);
-  /* 深色同理：把邊框色從 0.302 提到 0.34，跟 card(0.2097) 拉開對比；shadcn 的
-     dark:bg-input/30 也以此上色，欄位填色一併變得比卡片明顯。 */
-  --input: oklch(0.3400 0.0288 244.8244);
-  --ring: oklch(0.6818 0.1584 243.3540);
-  --chart-1: oklch(0.6723 0.1606 244.9955);
-  --chart-2: oklch(0.6907 0.1554 160.3454);
-  --chart-3: oklch(0.8214 0.1600 82.5337);
-  --chart-4: oklch(0.7064 0.1822 151.7125);
-  --chart-5: oklch(0.5919 0.2186 10.5826);
-  --sidebar: oklch(0.2097 0.0080 274.5332);
-  --sidebar-foreground: oklch(0.8853 0 0);
-  --sidebar-primary: oklch(0.6818 0.1584 243.3540);
-  --sidebar-primary-foreground: oklch(1.0000 0 0);
-  --sidebar-accent: oklch(0.1928 0.0331 242.5459);
-  --sidebar-accent-foreground: oklch(0.6692 0.1607 245.0110);
-  --sidebar-border: oklch(0.3795 0.0220 240.5943);
-  --sidebar-ring: oklch(0.6818 0.1584 243.3540);
-  --destructive-foreground: oklch(1.0000 0 0);
-  --radius: 1.3rem;
-  --font-sans: Open Sans, sans-serif;
-  --font-serif: Georgia, serif;
-  --font-mono: Menlo, monospace;
-  --shadow-color: rgba(29,161,242,0.25);
-  --shadow-opacity: 0;
-  --shadow-blur: 0px;
-  --shadow-spread: 0px;
-  --shadow-offset-x: 0px;
-  --shadow-offset-y: 2px;
-  --letter-spacing: 0em;
-  --spacing: 0.25rem;
-  --shadow-2xs: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00);
-  --shadow-xs: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00);
-  --shadow-sm: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00), 0px 1px 2px -1px hsl(202.8169 89.1213% 53.1373% / 0.00);
-  --shadow: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00), 0px 1px 2px -1px hsl(202.8169 89.1213% 53.1373% / 0.00);
-  --shadow-md: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00), 0px 2px 4px -1px hsl(202.8169 89.1213% 53.1373% / 0.00);
-  --shadow-lg: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00), 0px 4px 6px -1px hsl(202.8169 89.1213% 53.1373% / 0.00);
-  --shadow-xl: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00), 0px 8px 10px -1px hsl(202.8169 89.1213% 53.1373% / 0.00);
-  --shadow-2xl: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00);
+  --background: #0e0f11;
+  --foreground: #f2f3f5;
+  --card: #16181b;
+  --card-foreground: #f2f3f5;
+  --popover: #1a1c20;
+  --popover-foreground: #f2f3f5;
+  --primary: #3b8af0;
+  --primary-strong: #5aa2f0;
+  --primary-foreground: #ffffff;
+  --secondary: #22252a;
+  --secondary-foreground: #f2f3f5;
+  --muted: #1c1e22;
+  --muted-foreground: #9499a2;
+  --subtle-foreground: #747983;
+  --accent: #14253b;
+  --accent-foreground: #8cc0f7;
+  --destructive: #e5645b;
+  --destructive-foreground: #ffffff;
+  --warning: #e3aa4e;
+  --income: #66c08a;
+  --expense: #f0807a;
+  --border: #26292f;
+  --border-soft: #1e2126;
+  --input: #343840;
+  --ring: #3b8af0;
+  --chart-1: #3b8af0;
+  --chart-2: #5cc8f5;
+  --chart-3: #6f737a;
+  --chart-4: #66c08a;
+  --chart-5: #e3aa4e;
+  --sidebar: #121316;
+  --sidebar-foreground: #c3c7ce;
+  --sidebar-primary: #3b8af0;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #14253b;
+  --sidebar-accent-foreground: #8cc0f7;
+  --sidebar-border: #26292f;
+  --sidebar-ring: #3b8af0;
+
+  --glow: rgb(59 138 240 / 0.6);
+  --halo: rgb(59 138 240 / 0.2);
+  --grid-line: rgb(90 162 240 / 0.13);
+  --spot: rgb(90 162 240 / 0.13);
+
+  --shadow-rgb: 0 0 0;
+  --shadow-k: 4;
+  color-scheme: dark;
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
-  body {
-    @apply bg-background text-foreground;
-  }
   html {
     @apply font-sans;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "cv11", "ss03";
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled),
+  [data-slot="sidebar-menu-button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--primary) 22%, transparent);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* 動效                                                                */
+/* ------------------------------------------------------------------ */
+
+@keyframes ds-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ds-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes ds-draw {
+  from {
+    stroke-dashoffset: var(--ds-len, 400);
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes ds-grow-x {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+@keyframes ds-pulse-ring {
+  from {
+    transform: scale(0.6);
+    opacity: 0.8;
+  }
+  to {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+
+/* 頁面進場：dashboard layout 的 <PageEnter> 以 pathname 當 key，換頁才重播；
+   篩選、翻頁只換 searchParams，不會重播。 */
+.ds-page {
+  animation: ds-rise var(--dur-2) var(--ease-out-soft) both;
+}
+/* 列依序出現：只在剛進頁面的那 900ms 內（.ds-entering）對前 12 列生效。 */
+.ds-entering [data-slot="table-body"] > tr {
+  animation: ds-rise var(--dur-3) var(--ease-out-soft) both;
+}
+.ds-entering [data-slot="table-body"] > tr:nth-child(1) { animation-delay: 30ms; }
+.ds-entering [data-slot="table-body"] > tr:nth-child(2) { animation-delay: 60ms; }
+.ds-entering [data-slot="table-body"] > tr:nth-child(3) { animation-delay: 90ms; }
+.ds-entering [data-slot="table-body"] > tr:nth-child(4) { animation-delay: 120ms; }
+.ds-entering [data-slot="table-body"] > tr:nth-child(5) { animation-delay: 150ms; }
+.ds-entering [data-slot="table-body"] > tr:nth-child(6) { animation-delay: 180ms; }
+.ds-entering [data-slot="table-body"] > tr:nth-child(7) { animation-delay: 210ms; }
+.ds-entering [data-slot="table-body"] > tr:nth-child(8) { animation-delay: 240ms; }
+.ds-entering [data-slot="table-body"] > tr:nth-child(9) { animation-delay: 270ms; }
+.ds-entering [data-slot="table-body"] > tr:nth-child(10) { animation-delay: 300ms; }
+.ds-entering [data-slot="table-body"] > tr:nth-child(11) { animation-delay: 330ms; }
+.ds-entering [data-slot="table-body"] > tr:nth-child(n + 12) { animation-delay: 360ms; }
+
+/* ------------------------------------------------------------------ */
+/* 外皮：調 shadcn 元件的外觀（不改 src/components/ui）。                */
+/* 這一段不放進 @layer，才壓得過元件自己的 utility class。               */
+/* ------------------------------------------------------------------ */
+
+[data-slot="button"] {
+  transition:
+    transform var(--dur-1) var(--ease-out-soft),
+    background-color var(--dur-1) ease,
+    color var(--dur-1) ease,
+    border-color var(--dur-1) ease,
+    box-shadow var(--dur-2) ease;
+}
+[data-slot="button"]:active:not(:disabled) {
+  transform: scale(0.97);
+}
+[data-slot="button"][data-variant="default"] {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.18),
+    0 1px 2px rgb(var(--shadow-rgb) / 0.18);
+}
+
+/* 標籤：6px 圓角、淡底。黑底膠囊會搶走金額的注意力。 */
+[data-slot="badge"] {
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+}
+[data-slot="badge"][data-variant="default"] {
+  background: var(--accent);
+  color: var(--accent-foreground);
+  border-color: color-mix(in srgb, var(--primary) 18%, transparent);
+}
+[data-slot="badge"][data-variant="secondary"] {
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  border-color: var(--border);
+}
+[data-slot="badge"][data-variant="destructive"] {
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
+  color: var(--destructive);
+  border-color: color-mix(in srgb, var(--destructive) 22%, transparent);
+}
+
+/* 表格：表頭小一號、灰；列高 40；數字等寬；hover 淡藍。 */
+[data-slot="table-head"] {
+  height: 2.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+[data-slot="table-header"] {
+  background: color-mix(in srgb, var(--muted) 55%, transparent);
+}
+[data-slot="table-cell"] {
+  padding-block: 0.625rem;
+}
+[data-slot="table-row"] {
+  border-color: var(--border-soft);
+  transition: background-color var(--dur-1) ease;
+}
+[data-slot="table-body"] > [data-slot="table-row"]:hover {
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+[data-slot="input"],
+[data-slot="select-trigger"] {
+  transition:
+    border-color var(--dur-1) ease,
+    box-shadow var(--dur-2) ease;
+}
+
+[data-slot="skeleton"] {
+  background: linear-gradient(
+    90deg,
+    var(--muted) 0%,
+    color-mix(in srgb, var(--muted) 45%, var(--card)) 50%,
+    var(--muted) 100%
+  );
+  background-size: 200% 100%;
+  animation: ds-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes ds-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+/* 浮層背景：壓暗加一點模糊 */
+[data-slot="dialog-overlay"],
+[data-slot="sheet-overlay"],
+[data-slot="alert-dialog-overlay"] {
+  backdrop-filter: blur(3px);
+}
+
+/* ------------------------------------------------------------------ */
+/* 配件                                                                */
+/* ------------------------------------------------------------------ */
+
+/* ① Glow 按鈕（<GlowButton>）：每頁只給唯一的主要動作 */
+.btn-glow[data-slot="button"] {
+  position: relative;
+  overflow: hidden;
+  color: #fff;
+  background: linear-gradient(180deg, var(--primary-strong), var(--primary));
+  box-shadow:
+    0 0 0 1px var(--primary),
+    inset 0 1px 0 rgb(255 255 255 / 0.28),
+    0 1px 2px rgb(0 0 0 / 0.2),
+    0 6px 20px -6px var(--glow);
+}
+.btn-glow[data-slot="button"]::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: -60%;
+  width: 40%;
+  background: linear-gradient(100deg, transparent, rgb(255 255 255 / 0.35), transparent);
+  transform: skewX(-18deg);
+  transition: left 0.5s ease;
+  pointer-events: none;
+}
+.btn-glow[data-slot="button"]:hover:not(:disabled) {
+  box-shadow:
+    0 0 0 1px var(--primary),
+    inset 0 1px 0 rgb(255 255 255 / 0.28),
+    0 1px 2px rgb(0 0 0 / 0.2),
+    0 8px 28px -4px var(--glow),
+    0 0 0 4px var(--halo);
+}
+.btn-glow[data-slot="button"]:hover:not(:disabled)::after {
+  left: 120%;
+}
+
+/* ② 方格紙（頁首帶、登入頁、空狀態）。放在沒有資料的面，不放在表格與表單後面。 */
+.grid-paper {
+  position: relative;
+  isolation: isolate;
+}
+.grid-paper::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 22px 22px;
+  -webkit-mask-image: radial-gradient(ellipse 70% 140% at 88% 0%, #000 18%, transparent 72%);
+  mask-image: radial-gradient(ellipse 70% 140% at 88% 0%, #000 18%, transparent 72%);
+}
+.grid-paper::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  right: -80px;
+  top: -110px;
+  width: 380px;
+  height: 260px;
+  pointer-events: none;
+  background: radial-gradient(closest-side, var(--halo), transparent);
+}
+.grid-paper[data-fade="full"]::before {
+  -webkit-mask-image: radial-gradient(ellipse 90% 90% at 50% 40%, #000 30%, transparent 80%);
+  mask-image: radial-gradient(ellipse 90% 90% at 50% 40%, #000 30%, transparent 80%);
+}
+.dot-paper {
+  position: relative;
+  isolation: isolate;
+}
+.dot-paper::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: radial-gradient(var(--grid-line) 1.2px, transparent 1.2px);
+  background-size: 14px 14px;
+  -webkit-mask-image: radial-gradient(ellipse 60% 90% at 50% 50%, #000 10%, transparent 75%);
+  mask-image: radial-gradient(ellipse 60% 90% at 50% 50%, #000 10%, transparent 75%);
+}
+
+/* ③ 聚光卡（<StatCard>）：--mx/--my 由元件跟著滑鼠寫入 */
+.spot-card {
+  --mx: 50%;
+  --my: -40%;
+  background:
+    radial-gradient(200px circle at var(--mx) var(--my), var(--spot), transparent 70%), var(--card);
+  transition:
+    border-color var(--dur-2) ease,
+    box-shadow var(--dur-2) ease;
+}
+.spot-card:hover {
+  border-color: color-mix(in srgb, var(--primary) 42%, var(--border));
+  box-shadow: var(--shadow-md);
+}
+
+/* ④ 走勢線（<Sparkline>） */
+.sparkline .spark-line {
+  fill: none;
+  stroke: var(--spark, var(--primary));
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  stroke-dasharray: var(--ds-len, 400);
+  animation: ds-draw 0.9s var(--ease-out-soft) both;
+}
+.sparkline .spark-area {
+  fill: var(--spark, var(--primary));
+  opacity: 0.09;
+  animation: ds-fade 0.9s ease-out both;
+}
+.spark-dot {
+  background: var(--spark, var(--primary));
+  box-shadow: 0 0 8px 1px var(--glow);
+}
+
+/* ⑤ 亮頭進度條（<Progress>） */
+.ds-progress {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--muted);
+}
+.ds-progress > i {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: var(--w, 0%);
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--primary), var(--primary-strong));
+  transform-origin: left;
+  animation: ds-grow-x 0.9s var(--ease-out-soft) both;
+}
+.ds-progress > i::after {
+  content: "";
+  position: absolute;
+  right: -1px;
+  top: -2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--primary-strong);
+  box-shadow: 0 0 10px 2px var(--glow);
+}
+.ds-progress[data-state="done"] > i {
+  background: var(--income);
+}
+.ds-progress[data-state="done"] > i::after,
+.ds-progress[data-state="empty"] > i::after {
+  display: none;
+}
+.ds-progress[data-state="over"] > i {
+  background: var(--destructive);
+}
+
+/* ⑥ 側欄的滑動指示（app-sidebar.tsx 量位置、這裡畫） */
+.nav-indicator {
+  position: absolute;
+  left: 0.5rem;
+  right: 0.5rem;
+  top: 0;
+  height: 2rem;
+  border-radius: var(--radius-md);
+  background: var(--sidebar-accent);
+  pointer-events: none;
+  transition:
+    transform var(--dur-3) var(--ease-out-soft),
+    height var(--dur-3) var(--ease-out-soft),
+    opacity var(--dur-2) ease;
+}
+.nav-indicator::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--primary);
+  box-shadow: 0 0 8px var(--glow);
+}
+
+/* ⑦ 雙本記號（<BookMark>）：兩張疊著的頁。both＝兩張、internal＝實心（管理帳）、external＝空心（稅務帳） */
+.book-mark {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 0.875rem;
+  height: 0.875rem;
+}
+.book-mark::before,
+.book-mark::after {
+  content: "";
+  position: absolute;
+  width: 71%;
+  height: 71%;
+  border-radius: 22%;
+}
+.book-mark::before {
+  left: 0;
+  top: 0;
+  background: var(--primary);
+}
+.book-mark::after {
+  right: 0;
+  bottom: 0;
+  border: 1.5px solid var(--primary);
+  background: var(--card);
+}
+.book-mark[data-book="internal"]::after,
+.book-mark[data-book="external"]::before {
+  display: none;
+}
+.book-mark[data-book="internal"]::before {
+  left: 14%;
+  top: 14%;
+}
+.book-mark[data-book="external"]::after {
+  right: 14%;
+  bottom: 14%;
+}
+
+/* ⑧ 狀態點（<StatusDot>）。pulse 只給「逾期」與「同步失敗」。 */
+.status-dot {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dot, var(--subtle-foreground));
+}
+.status-dot[data-pulse="true"]::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 1.5px solid var(--dot, var(--destructive));
+  animation: ds-pulse-ring 1.8s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-page,
+  .ds-entering [data-slot="table-body"] > tr,
+  .sparkline .spark-line,
+  .sparkline .spark-area,
+  .ds-progress > i,
+  [data-slot="skeleton"],
+  .status-dot[data-pulse="true"]::after {
+    animation: none !important;
+  }
+  .btn-glow[data-slot="button"]::after {
+    display: none;
+  }
+  .nav-indicator,
+  [data-slot="button"] {
+    transition: none !important;
   }
 }
 

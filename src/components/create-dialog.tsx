@@ -5,6 +5,7 @@ import { Plus } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { GlowButton } from "@/components/ds/glow-button";
 import {
   Dialog,
   DialogContent,
@@ -72,9 +73,9 @@ export function CreateDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="sm">
+        <GlowButton size="sm">
           <Plus className="size-4" /> {trigger}
-        </Button>
+        </GlowButton>
       </DialogTrigger>
       <DialogContent className={cn("sm:max-w-md", className)}>
         <form onSubmit={submitAction(dispatch)}>

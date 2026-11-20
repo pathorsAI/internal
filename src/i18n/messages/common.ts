@@ -7,6 +7,12 @@ const common = {
   locale: {
     label: { "zh-TW": "語言", en: "Language" },
   },
+  theme: {
+    label: { "zh-TW": "外觀", en: "Appearance" },
+    system: { "zh-TW": "跟隨系統", en: "System" },
+    light: { "zh-TW": "亮色", en: "Light" },
+    dark: { "zh-TW": "深色", en: "Dark" },
+  },
   brand: {
     name: { "zh-TW": "內部管理系統", en: "Internal Console" },
   },

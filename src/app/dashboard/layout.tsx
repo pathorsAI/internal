@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { AppSidebar } from "@/components/app-sidebar";
+import { PageEnter } from "@/components/ds/page-enter";
 import { HeaderBreadcrumb } from "@/components/header-breadcrumb";
 import type { OrgOption } from "@/components/org-switcher";
 import {
@@ -44,7 +45,7 @@ export default async function DashboardLayout({
         />
         {/* min-w-0：SidebarInset 是 flex 子項，沒有它寬表格會把整頁撐寬（表格應在自己的容器裡捲動） */}
         <SidebarInset className="min-w-0">
-          <header className="sticky top-0 z-20 flex h-16 shrink-0 items-center gap-2 border-b bg-background px-4">
+          <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b bg-background/80 px-4 backdrop-blur-md">
             <SidebarTrigger className="-ml-1" />
             <Separator
               orientation="vertical"
@@ -52,8 +53,8 @@ export default async function DashboardLayout({
             />
             <HeaderBreadcrumb />
           </header>
-          <RefreshPendingOverlay className="flex min-w-0 flex-1 flex-col gap-6 p-6">
-            {children}
+          <RefreshPendingOverlay className="flex min-w-0 flex-1 flex-col p-6">
+            <PageEnter className="flex min-w-0 flex-1 flex-col gap-6">{children}</PageEnter>
           </RefreshPendingOverlay>
         </SidebarInset>
       </SidebarProvider>
