@@ -11,7 +11,7 @@ import { AuditMeta } from "@/components/audit-meta";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, SelectField, TextField } from "@/components/form-field";
-import { Badge } from "@/components/ui/badge";
+import { StatusTag } from "@/components/ds/status-dot";
 import { DeleteButton } from "@/components/delete-button";
 import { useRowDialogClose } from "@/components/row-dialog";
 import {
@@ -198,7 +198,7 @@ export function EditTransactionForm({
 
         <div className="flex items-center gap-2 text-sm text-muted-foreground sm:col-span-2">
           {t("form.typeLabel")}
-          <Badge variant="secondary">{typeLabel[txn.type] ?? txn.type}</Badge>
+          <StatusTag>{typeLabel[txn.type] ?? txn.type}</StatusTag>
           <span className="text-xs">{t("form.typeLocked")}</span>
         </div>
 
@@ -266,13 +266,11 @@ function AttachedDocs({ docs }: Readonly<{ docs: TxnDocument[] }>) {
         {docs.map((d) => (
           <li key={d.id} className="flex items-center gap-2 px-3 py-2 text-sm">
             <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="rounded bg-muted px-1.5 py-0.5 text-xs">
+            <span className="rounded-sm bg-muted px-1.5 py-0.5 text-xs">
               {t(`form.docLabel.${docLabelKey(d.docType, d.invoiceKind)}`)}
             </span>
             {d.invoiceKind === "paper" ? (
-              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-700">
-                {t("form.needsNotifyAccountant")}
-              </span>
+              <StatusTag tone="warning">{t("form.needsNotifyAccountant")}</StatusTag>
             ) : null}
             <a
               href={`/api/documents/${d.id}`}

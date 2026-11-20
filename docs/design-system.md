@@ -114,6 +114,6 @@ Do not add an animation library. If a new motion is needed, add a keyframe and a
 
 ## Theme
 
-Light, dark, or follow the system — switched from the sidebar (`<ThemeSwitcher>`), stored in
+Light, dark, or follow the system — switched from the user menu at the bottom of the sidebar (`<ThemeMenuItems>`), stored in
 `localStorage.theme`, applied before first paint by the inline script in `src/app/layout.tsx`.
 Check both themes before shipping a page.

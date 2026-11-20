@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 import { CalendarClock, Info, Link2, Play, RefreshCw, Unlink } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { StatusTag } from "@/components/ds/status-dot";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -109,7 +110,7 @@ export function IntegrationsList({
         </p>
       )}
       <AutoSyncBar canRun={canRunAutoSync} />
-      <ul className="divide-y rounded-lg border bg-card">
+      <ul className="divide-y rounded-xl border bg-card shadow-xs">
         {rows.map((row) => (
           <IntegrationRow
             key={row.id}
@@ -191,22 +192,22 @@ function StatusLine({
   enabled,
 }: Readonly<{ connection: ConnectionData; enabled: boolean }>) {
   const t = useTranslations("integrations");
-  if (!c) return <span>{t("status.notConnected")}</span>;
-  if (c.status === "needs_reauth") {
+  if (!c) return <StatusTag tone="neutral">{t("status.notConnected")}</StatusTag>;
+  if (c.status === "needs_reauth" || c.status === "error") {
     return (
-      <span className="text-destructive">
-        {t("status.needsReauth", { error: c.lastError ?? t("status.unknownError") })}
+      <span className="flex flex-col items-start gap-1">
+        <StatusTag tone="risk" pulse>
+          {c.status === "needs_reauth" ? t("status.needsReauthShort") : t("status.errorShort")}
+        </StatusTag>
+        <span className="text-xs text-destructive">{c.lastError ?? t("status.unknownError")}</span>
       </span>
     );
   }
-  if (c.status === "error") {
-    return (
-      <span className="text-destructive">
-        {t("status.error", { error: c.lastError ?? t("status.unknownError") })}
-      </span>
-    );
-  }
-  return <span>{enabled ? t("status.connected") : t("status.connectedOff")}</span>;
+  return enabled ? (
+    <StatusTag tone="income">{t("status.connected")}</StatusTag>
+  ) : (
+    <StatusTag tone="neutral">{t("status.connectedOff")}</StatusTag>
+  );
 }
 
 /** 「由誰連接 · 上次同步」這行；沒連接時回空陣列（畫面改顯示說明文字）。 */
@@ -263,11 +264,11 @@ function IntegrationRow({
     <li className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
       <div className="flex min-w-0 flex-1 items-start gap-3">
         <LogoTile letter={row.logo.letter} className={row.logo.className} />
-        <div className="min-w-0 space-y-0.5">
-          <p className="font-medium">{name}</p>
-          <p className="text-sm text-muted-foreground">
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-start gap-2">
+            <p className="font-medium">{name}</p>
             <StatusLine connection={c} enabled={optimisticEnabled} />
-          </p>
+          </div>
           {meta.length > 0 ? (
             <p className="text-xs text-muted-foreground">{meta.join(" · ")}</p>
           ) : (
@@ -295,7 +296,13 @@ function IntegrationRow({
         />
         {canManage && !c ? (
           <div className="flex flex-col items-end gap-1">
-            <Button type="button" size="sm" onClick={() => onConnect("connect")} disabled={!row.implemented}>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => onConnect("connect")}
+              disabled={!row.implemented}
+            >
               <Link2 className="size-4" /> {t("actions.connect")}
             </Button>
             {row.implemented ? null : (
@@ -308,7 +315,7 @@ function IntegrationRow({
             <Button
               type="button"
               size="sm"
-              variant={c.status === "connected" ? "outline" : "default"}
+              variant="outline"
               onClick={() => onConnect("reconnect")}
               disabled={!row.implemented || pending}
             >
@@ -419,13 +426,17 @@ function CalendarRow({
     <li className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
       <div className="flex min-w-0 flex-1 items-start gap-3">
         <LogoTile letter="G" className="bg-blue-600 text-white" />
-        <div className="min-w-0 space-y-0.5">
-          <p className="font-medium">{t("providers.googleCalendar.name")}</p>
-          <p className="text-sm text-muted-foreground">
-            {connected
-              ? t("status.calendarConnected", { owner: ownerLabel ?? t("status.unknownMember") })
-              : t("status.notConnected")}
-          </p>
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-start gap-2">
+            <p className="font-medium">{t("providers.googleCalendar.name")}</p>
+            {connected ? (
+              <StatusTag tone="income">
+                {t("status.calendarConnected", { owner: ownerLabel ?? t("status.unknownMember") })}
+              </StatusTag>
+            ) : (
+              <StatusTag tone="neutral">{t("status.notConnected")}</StatusTag>
+            )}
+          </div>
           <p className="text-xs text-muted-foreground">{t("providers.googleCalendar.description")}</p>
         </div>
       </div>

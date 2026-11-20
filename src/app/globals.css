@@ -45,6 +45,9 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+  --color-chart-7: var(--chart-7);
+  --color-chart-8: var(--chart-8);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -113,6 +116,9 @@
   --chart-3: #8a93a3;
   --chart-4: #167a4a;
   --chart-5: #b7791f;
+  --chart-6: #7a5af8;
+  --chart-7: #0e9384;
+  --chart-8: #d6457a;
   --sidebar: #f6f7f9;
   --sidebar-foreground: #454a53;
   --sidebar-primary: #1469d4;
@@ -167,6 +173,9 @@
   --chart-3: #6f737a;
   --chart-4: #66c08a;
   --chart-5: #e3aa4e;
+  --chart-6: #a48afb;
+  --chart-7: #2ed3b7;
+  --chart-8: #f178a6;
   --sidebar: #121316;
   --sidebar-foreground: #c3c7ce;
   --sidebar-primary: #3b8af0;
@@ -227,14 +236,6 @@
   }
   to {
     opacity: 1;
-  }
-}
-@keyframes ds-draw {
-  from {
-    stroke-dashoffset: var(--ds-len, 400);
-  }
-  to {
-    stroke-dashoffset: 0;
   }
 }
 @keyframes ds-grow-x {
@@ -486,13 +487,23 @@
   stroke-linecap: round;
   stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
-  stroke-dasharray: var(--ds-len, 400);
-  animation: ds-draw 0.9s var(--ease-out-soft) both;
+}
+/* 由左到右「畫」出來：用 clip-path 揭開整張 SVG。不用 stroke-dasharray，因為線寬設了
+   non-scaling-stroke 之後 dash 是用螢幕像素算的，卡片一寬線就被截斷。 */
+.sparkline svg {
+  animation: ds-reveal-x 0.9s var(--ease-out-soft) both;
+}
+@keyframes ds-reveal-x {
+  from {
+    clip-path: inset(-4px 100% -4px 0);
+  }
+  to {
+    clip-path: inset(-4px -4px -4px 0);
+  }
 }
 .sparkline .spark-area {
   fill: var(--spark, var(--primary));
   opacity: 0.09;
-  animation: ds-fade 0.9s ease-out both;
 }
 .spark-dot {
   background: var(--spark, var(--primary));
@@ -627,8 +638,7 @@
 @media (prefers-reduced-motion: reduce) {
   .ds-page,
   .ds-entering [data-slot="table-body"] > tr,
-  .sparkline .spark-line,
-  .sparkline .spark-area,
+  .sparkline svg,
   .ds-progress > i,
   [data-slot="skeleton"],
   .status-dot[data-pulse="true"]::after {

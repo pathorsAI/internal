@@ -24,7 +24,7 @@ export async function ReportsNav({ active }: Readonly<{ active: (typeof ITEMS)[n
           className={cn(
             "inline-flex h-[calc(100%-1px)] items-center gap-1.5 rounded-md border border-transparent px-3 text-sm font-medium whitespace-nowrap transition-all focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 focus-visible:outline-ring [&_svg]:size-4",
             active === key
-              ? "bg-background text-foreground shadow-sm dark:border-input dark:bg-input/30"
+              ? "bg-background text-foreground shadow-xs dark:border-input dark:bg-input/30"
               : "text-foreground/60 hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground",
           )}
         >

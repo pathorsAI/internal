@@ -6,10 +6,10 @@ import { AuthShowcase } from "./auth-showcase";
 
 /**
  * 帳號頁面（登入、註冊、忘記密碼、重設密碼、設定密碼）共用的版面：左邊是表單，
- * 右邊是深藍底的產品展示（AuthShowcase）。lg 以下只剩表單，置中滿版。
+ * 右邊是方格紙底的產品展示（AuthShowcase）。lg 以下只剩表單，置中滿版。
  *
- * 左半邊跟著 app 的主題 token 走（bg-background / text-foreground…），右半邊永遠是
- * 深色。只用到 useTranslations（server / client 都能用），所以兩種元件裡都能放。
+ * 兩邊都跟著 app 的主題 token 走（bg-background / text-foreground…），深色主題一起
+ * 切換。各表單的送出鈕是那一頁唯一的 <GlowButton>。只用到 useTranslations（server / client 都能用），所以兩種元件裡都能放。
  *
  * 欄位與按鈕在這幾頁一律 h-11（各表單自己加 className），共用的 ui 元件不動。
  */

@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 /**
  * 表單裡「一個標籤配一個控制項」的固定排版。
  *
- * 這三行（外框 space-y-1.5、Label、控制項）在十幾張表單裡各抄一次，欄位一多就
+ * 這三行（外框 flex gap-1.5、Label、控制項）在十幾張表單裡各抄一次，欄位一多就
  * 開始出現對不齊的變體。收成一個元件之後，要調間距或必填星號只要改一個地方。
  * `wide` 代表在兩欄格線裡橫跨整列。
  */
@@ -36,7 +36,7 @@ export function Field({
   children: ReactNode;
 }>) {
   return (
-    <div className={cn("space-y-1.5", wide && "sm:col-span-2", className)}>
+    <div className={cn("flex flex-col gap-1.5", wide && "sm:col-span-2", className)}>
       <Label htmlFor={htmlFor}>
         {label}
         {required ? <Req /> : null}

@@ -1,18 +1,12 @@
-import { CheckCircle2, AlertTriangle } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { RowDialog } from "@/components/row-dialog";
 import { DeleteButton } from "@/components/delete-button";
 import { deleteReconciliation } from "@/db/mutations";
 import { EditReconciliationForm } from "./edit-reconciliation-form";
 import { PageHeader } from "@/components/page-header";
-import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { StatusTag } from "@/components/ds/status-dot";
+import { StatCard } from "@/components/ds/stat-card";
+import { Progress } from "@/components/ds/progress";
 import {
   Table,
   TableBody,
@@ -23,16 +17,15 @@ import {
 } from "@/components/ui/table";
 import { TableCard } from "@/components/table-card";
 import { EmptyRow } from "@/components/empty-state";
-import { signColor } from "@/components/amount";
+import { Amount } from "@/components/amount";
 import {
   listAccountBalances,
   listReconciliations,
   listBankAccounts,
 } from "@/db/queries";
-import { formatCurrency, formatDate } from "@/lib/format";
+import { formatDate } from "@/lib/format";
 import { NewReconciliationDialog } from "./new-reconciliation-dialog";
 import { requireOrg } from "@/lib/session";
-import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +39,10 @@ export default async function ReconciliationPage() {
     listReconciliations(orgId),
     listBankAccounts(orgId),
   ]);
+  // 對平幾筆 / 共幾筆（全部對帳紀錄），放在表格標題列的進度條
+  const matchedCount = recons.filter(
+    (r) => Math.abs(Number(r.statementBalance) - Number(r.bookBalance)) < EPS,
+  ).length;
 
   return (
     <>
@@ -57,26 +54,38 @@ export default async function ReconciliationPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {balances.map((b) => (
-          <Card key={b.id}>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">{b.name}</CardTitle>
-              <CardDescription>
-                {b.lastReconciledAt
-                  ? t("card.lastReconciled", { date: formatDate(b.lastReconciledAt) })
-                  : t("card.never")}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-semibold tabular-nums">
-                {formatCurrency(b.bookBalance, b.currency)}
-              </div>
-              <p className="text-xs text-muted-foreground">{t("card.currentBookBalance")}</p>
-            </CardContent>
-          </Card>
+          <StatCard
+            key={b.id}
+            label={b.name}
+            value={Number(b.bookBalance)}
+            currency={b.currency}
+            hint={
+              b.lastReconciledAt
+                ? t("card.lastReconciled", { date: formatDate(b.lastReconciledAt) })
+                : t("card.never")
+            }
+          />
         ))}
       </div>
 
-      <TableCard>
+      <TableCard
+        title={<span className="text-muted-foreground">{t("table.title")}</span>}
+        action={
+          recons.length > 0 ? (
+            <span className="flex items-center gap-2">
+              <Progress
+                value={matchedCount}
+                max={recons.length}
+                className="w-24"
+                label={t("table.matched", { matched: matchedCount, total: recons.length })}
+              />
+              <span className="tabular-nums">
+                {t("table.matched", { matched: matchedCount, total: recons.length })}
+              </span>
+            </span>
+          ) : null
+        }
+      >
         <Table>
             <TableHeader>
               <TableRow>
@@ -106,29 +115,30 @@ export default async function ReconciliationPage() {
                             {formatDate(r.asOfDate)}
                           </TableCell>
                           <TableCell>{r.accountName ?? "—"}</TableCell>
-                          <TableCell className="text-right tabular-nums text-muted-foreground">
-                            {formatCurrency(r.bookBalance, r.currency ?? "TWD")}
+                          <TableCell className="text-right text-muted-foreground">
+                            <Amount value={r.bookBalance} currency={r.currency ?? "TWD"} kind="neutral" />
                           </TableCell>
-                          <TableCell className="text-right tabular-nums">
-                            {formatCurrency(r.statementBalance, r.currency ?? "TWD")}
+                          <TableCell className="text-right">
+                            <Amount value={r.statementBalance} currency={r.currency ?? "TWD"} kind="neutral" />
                           </TableCell>
-                          <TableCell
-                            className={cn(
-                              "text-right font-medium tabular-nums",
-                              matched ? "text-muted-foreground" : signColor(diff),
+                          <TableCell className="text-right font-medium">
+                            {matched ? (
+                              <span className="text-subtle-foreground">—</span>
+                            ) : (
+                              // 有差額就是要有人去查的事：紅字，帶正負號（實際 − 帳面）
+                              <Amount
+                                value={diff}
+                                currency={r.currency ?? "TWD"}
+                                kind={diff > 0 ? "income" : "expense"}
+                                className="text-destructive"
+                              />
                             )}
-                          >
-                            {formatCurrency(diff, r.currency ?? "TWD")}
                           </TableCell>
                           <TableCell>
                             {matched ? (
-                              <Badge variant="outline" className="gap-1">
-                                <CheckCircle2 className="size-3" /> {t("status.matched")}
-                              </Badge>
+                              <StatusTag tone="income">{t("status.matched")}</StatusTag>
                             ) : (
-                              <Badge variant="destructive" className="gap-1">
-                                <AlertTriangle className="size-3" /> {t("status.mismatched")}
-                              </Badge>
+                              <StatusTag tone="risk">{t("status.mismatched")}</StatusTag>
                             )}
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground">

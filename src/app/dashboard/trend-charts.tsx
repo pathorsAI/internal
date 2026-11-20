@@ -34,6 +34,10 @@ import { formatCurrency, CURRENCIES, DEFAULT_CURRENCY } from "@/lib/currency";
 
 type AccountOption = { id: number; name: string; currency: string };
 
+/** 圖表畫出來的時間（設計系統的 draw-in），與 tooltip 的外框（同選單、浮層的樣式）。 */
+const DRAW_MS = 500;
+const TOOLTIP_CLASS = "rounded-lg border-border bg-popover text-popover-foreground shadow-lg";
+
 /** "2025-08" → "25/08"（X 軸刻度）；tooltip 用完整 "2025/08"。 */
 const tickLabel = (ym: string) => ym.slice(2).replace("-", "/");
 const fullLabel = (ym: React.ReactNode) => String(ym).replace("-", "/");
@@ -62,7 +66,8 @@ export function TrendCharts({
   const currencyName = (code: string) => tc(code as Parameters<typeof tc>[0]);
   const chartConfig = {
     income: { label: t("trend.tooltip.income"), color: "var(--income)" },
-    expense: { label: t("trend.tooltip.expense"), color: "var(--expense)" },
+    // 支出用中性灰：收支圖裡每個月都有支出，整排紅色沒有重點（同 <Amount> 的規則）
+    expense: { label: t("trend.tooltip.expense"), color: "var(--chart-3)" },
     balance: { label: t("trend.tooltip.balance"), color: "var(--chart-1)" },
   } satisfies ChartConfig;
   const [range, setRange] = useState<"6" | "12">("6");
@@ -231,8 +236,8 @@ export function TrendCharts({
           <CardContent>
             {hasFlow ? (
               <ChartContainer config={chartConfig} className="h-56 w-full">
-                <BarChart data={flowData} margin={{ left: 4, right: 4 }}>
-                  <CartesianGrid vertical={false} />
+                <BarChart data={flowData} margin={{ left: 4, right: 4 }} barGap={3}>
+                  <CartesianGrid vertical={false} stroke="var(--border-soft)" />
                   <XAxis
                     dataKey="month"
                     tickLine={false}
@@ -247,12 +252,33 @@ export function TrendCharts({
                     tickFormatter={(v: number) => compact.format(v)}
                   />
                   <ChartTooltip
+                    cursor={{ fill: "var(--muted)", opacity: 0.6 }}
                     content={
-                      <ChartTooltipContent labelFormatter={fullLabel} formatter={money} />
+                      <ChartTooltipContent
+                        className={TOOLTIP_CLASS}
+                        labelFormatter={fullLabel}
+                        formatter={money}
+                      />
                     }
                   />
-                  <Bar dataKey="income" fill="var(--color-income)" radius={[3, 3, 0, 0]} />
-                  <Bar dataKey="expense" fill="var(--color-expense)" radius={[3, 3, 0, 0]} />
+                  <Bar
+                    dataKey="income"
+                    fill="var(--color-income)"
+                    radius={[4, 4, 0, 0]}
+                    maxBarSize={28}
+                    isAnimationActive="auto"
+                    animationDuration={DRAW_MS}
+                    animationEasing="ease-out"
+                  />
+                  <Bar
+                    dataKey="expense"
+                    fill="var(--color-expense)"
+                    radius={[4, 4, 0, 0]}
+                    maxBarSize={28}
+                    isAnimationActive="auto"
+                    animationDuration={DRAW_MS}
+                    animationEasing="ease-out"
+                  />
                 </BarChart>
               </ChartContainer>
             ) : (
@@ -275,11 +301,11 @@ export function TrendCharts({
                 <AreaChart data={balanceData} margin={{ left: 4, right: 4 }}>
                   <defs>
                     <linearGradient id="fillBalance" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="var(--color-balance)" stopOpacity={0.35} />
-                      <stop offset="95%" stopColor="var(--color-balance)" stopOpacity={0.03} />
+                      <stop offset="0%" stopColor="var(--color-balance)" stopOpacity={0.28} />
+                      <stop offset="100%" stopColor="var(--color-balance)" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid vertical={false} />
+                  <CartesianGrid vertical={false} stroke="var(--border-soft)" />
                   <XAxis
                     dataKey="month"
                     tickLine={false}
@@ -295,8 +321,13 @@ export function TrendCharts({
                     tickFormatter={(v: number) => compact.format(v)}
                   />
                   <ChartTooltip
+                    cursor={{ stroke: "var(--border)" }}
                     content={
-                      <ChartTooltipContent labelFormatter={fullLabel} formatter={money} />
+                      <ChartTooltipContent
+                        className={TOOLTIP_CLASS}
+                        labelFormatter={fullLabel}
+                        formatter={money}
+                      />
                     }
                   />
                   <Area
@@ -305,6 +336,10 @@ export function TrendCharts({
                     stroke="var(--color-balance)"
                     strokeWidth={2}
                     fill="url(#fillBalance)"
+                    activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--card)" }}
+                    isAnimationActive="auto"
+                    animationDuration={DRAW_MS}
+                    animationEasing="ease-out"
                   />
                 </AreaChart>
               </ChartContainer>

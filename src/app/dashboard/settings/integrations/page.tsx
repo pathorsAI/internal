@@ -22,6 +22,7 @@ import { WiseMappingSection } from "./wise-mapping-client";
 import { loadWiseMappingView } from "./wise-mapping-data";
 import { CloudBillingScopeSection } from "./cloud-billing-scope-client";
 import { loadCloudScopeView } from "./cloud-billing-scope-data";
+import { SettingsBody } from "../settings-body";
 
 export const dynamic = "force-dynamic";
 
@@ -109,44 +110,46 @@ export default async function IntegrationsPage() {
   return (
     <>
       <PageHeader title={t("title")} description={t("description")} />
-      <IntegrationsList
-        rows={rows}
-        canRunAutoSync={canManage && rows.some((r) => r.connection?.autoSync)}
-        canManage={canManage}
-        calendar={{ connected: calendarConnected, ownerLabel: calendarOwner }}
-      />
-      {wiseView ? (
-        <section id="wise" className="scroll-mt-20">
-          <WiseMappingSection
-            key={wiseView.key}
-            balances={wiseView.balances}
-            accounts={wiseView.accounts}
-            suggestions={wiseView.suggestions}
-            canManage={canManage}
-            enabled={wiseView.enabled}
-          />
-        </section>
-      ) : null}
-      {cloudViews.map((view) => (
-        <section key={view.provider} id={view.provider} className="scroll-mt-20">
-          {/* 存檔 / 重新探索後重掛，讓勾選回到存檔後的狀態 */}
-          <CloudBillingScopeSection
-            key={JSON.stringify([view.selected, view.candidates.map((c) => c.id), view.bigQuery])}
-            view={view}
-            canManage={canManage}
-          />
-        </section>
-      ))}
-      <section id="google-calendar" className="scroll-mt-20">
-        <CalendarSettingsClient
-          connected={calendarConnected}
-          granted={granted}
-          reminderDays={calendar?.reminderDays ?? 3}
+      <SettingsBody>
+        <IntegrationsList
+          rows={rows}
+          canRunAutoSync={canManage && rows.some((r) => r.connection?.autoSync)}
           canManage={canManage}
-          ownerLabel={calendarOwner}
-          isOwner={calendar?.ownerUserId === userId}
+          calendar={{ connected: calendarConnected, ownerLabel: calendarOwner }}
         />
-      </section>
+        {wiseView ? (
+          <section id="wise" className="scroll-mt-20">
+            <WiseMappingSection
+              key={wiseView.key}
+              balances={wiseView.balances}
+              accounts={wiseView.accounts}
+              suggestions={wiseView.suggestions}
+              canManage={canManage}
+              enabled={wiseView.enabled}
+            />
+          </section>
+        ) : null}
+        {cloudViews.map((view) => (
+          <section key={view.provider} id={view.provider} className="scroll-mt-20">
+            {/* 存檔 / 重新探索後重掛，讓勾選回到存檔後的狀態 */}
+            <CloudBillingScopeSection
+              key={JSON.stringify([view.selected, view.candidates.map((c) => c.id), view.bigQuery])}
+              view={view}
+              canManage={canManage}
+            />
+          </section>
+        ))}
+        <section id="google-calendar" className="scroll-mt-20">
+          <CalendarSettingsClient
+            connected={calendarConnected}
+            granted={granted}
+            reminderDays={calendar?.reminderDays ?? 3}
+            canManage={canManage}
+            ownerLabel={calendarOwner}
+            isOwner={calendar?.ownerUserId === userId}
+          />
+        </section>
+      </SettingsBody>
     </>
   );
 }

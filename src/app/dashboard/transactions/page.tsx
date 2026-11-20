@@ -2,9 +2,10 @@ import { Fragment } from "react";
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { BookBadge } from "@/components/book-badge";
-import { Badge } from "@/components/ui/badge";
+import { StatusTag } from "@/components/ds/status-dot";
 import { TableCard } from "@/components/table-card";
 import { EmptyState } from "@/components/empty-state";
+import { ReceiptText } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -31,7 +32,7 @@ import {
 } from "@/db/queries";
 import { PaginationNav } from "@/components/pagination-nav";
 import type { ContractOption } from "./contract-combobox";
-import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
+import { formatDate, formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { NewTransactionDialog } from "./new-transaction-dialog";
 import { DeleteButton } from "@/components/delete-button";
@@ -39,7 +40,7 @@ import { deleteTransaction } from "@/db/mutations";
 import { RowDialog } from "@/components/row-dialog";
 import { EditTransactionForm } from "./edit-transaction-form";
 import { TransactionFilters } from "./transaction-filters";
-import { txnTypeColor } from "@/components/amount";
+import { Amount, amountKind } from "@/components/amount";
 import { conversionCurrencies, externalSingleLegSide } from "@/lib/external-transfer";
 import { requireOrg } from "@/lib/session";
 import { formatAccountShort } from "@/lib/employee-accounts";
@@ -135,10 +136,10 @@ function TransactionRow({
                     avatarVersion={partyAvatarVersion}
                     size="sm"
                   />
-                  <span className="truncate">{t.partyName}</span>
+                  <span className="truncate font-medium">{t.partyName}</span>
                 </span>
               ) : (
-                <span className="truncate">{t.settleName ?? "—"}</span>
+                <span className="truncate font-medium">{t.settleName ?? "—"}</span>
               )}
               {t.settleToAccountLast5 ? (
                 <span className="truncate text-xs text-muted-foreground">
@@ -151,40 +152,34 @@ function TransactionRow({
                   })}
                 </span>
               ) : null}
-              <div className="flex flex-wrap gap-1">
-                <Badge variant="secondary" className="w-fit font-normal">
-                  {typeText}
-                </Badge>
+              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="truncate text-xs text-muted-foreground">{typeText}</span>
                 {t.needsReview ? (
-                  <Badge
-                    variant="outline"
-                    className="w-fit border-amber-500/50 font-normal text-amber-700 dark:text-amber-400"
-                    title={needsReviewHint(t.externalSource ?? "—")}
-                  >
-                    {needsReviewLabel}
-                  </Badge>
+                  <span title={needsReviewHint(t.externalSource ?? "—")}>
+                    <StatusTag tone="warning">{needsReviewLabel}</StatusTag>
+                  </span>
                 ) : null}
               </div>
             </div>
           </TableCell>
+          <TableCell className="truncate">{t.description ?? "—"}</TableCell>
           <TableCell className="truncate text-muted-foreground">
-            {t.description ?? "—"}
+            {t.categoryName ?? uncategorizedLabel}
           </TableCell>
-          <TableCell className="truncate">{t.categoryName ?? uncategorizedLabel}</TableCell>
-          <TableCell>
+          <TableCell className="overflow-hidden">
             <BookBadge book={t.book} />
           </TableCell>
           <TableCell className="truncate text-xs text-muted-foreground">
             {[t.fromAccount, t.toAccount].filter(Boolean).join(" → ") || "—"}
           </TableCell>
-          <TableCell className="text-xs text-muted-foreground">
+          <TableCell className="text-xs text-subtle-foreground">
             <div className="flex min-w-0 flex-col">
               <span className="truncate">{formatDateTime(t.updatedAt)}</span>
               {updater ? <span className="truncate">{updater}</span> : null}
             </div>
           </TableCell>
-          <TableCell className={cn("text-right font-medium tabular-nums", txnTypeColor(t.type))}>
-            {formatCurrency(t.amount, t.currency)}
+          <TableCell className="text-right font-medium">
+            <Amount value={t.amount} currency={t.currency} kind={amountKind(t.type)} />
           </TableCell>
         </>
       }
@@ -266,12 +261,12 @@ export default async function TransactionsPage({
   // table-fixed 下，欄寬由表頭決定，各月份共用同一組欄寬 → 金額欄永遠對齊
   const COLUMNS: { label: string; width: string; align?: "right" }[] = [
     { label: tr("columns.date"), width: "w-24" },
-    { label: tr("columns.counterparty"), width: "w-44" },
+    { label: tr("columns.counterparty"), width: "w-52" },
     { label: tr("columns.description"), width: "" },
     { label: tr("columns.category"), width: "w-28" },
-    { label: tr("columns.book"), width: "w-20" },
-    { label: tr("columns.account"), width: "w-40" },
-    { label: tr("columns.lastUpdated"), width: "w-36" },
+    { label: tr("columns.book"), width: "w-32" },
+    { label: tr("columns.account"), width: "w-36" },
+    { label: tr("columns.lastUpdated"), width: "w-32" },
     { label: tr("columns.amount"), width: "w-32", align: "right" },
   ];
   const { book, category, account, period, page: pageParam, review, party, ids: idsParam } =
@@ -344,12 +339,7 @@ export default async function TransactionsPage({
 
       {reviewCount > 0 || needsReview ? (
         <div className="flex items-center gap-2 text-sm">
-          <Badge
-            variant="outline"
-            className="border-amber-500/50 font-normal text-amber-700 dark:text-amber-400"
-          >
-            {tr("review.count", { count: reviewCount })}
-          </Badge>
+          <StatusTag tone="warning">{tr("review.count", { count: reviewCount })}</StatusTag>
           <Link
             className="text-muted-foreground underline-offset-2 hover:underline"
             href={{
@@ -374,9 +364,7 @@ export default async function TransactionsPage({
 
       {ids ? (
         <div className="flex items-center gap-2 text-sm">
-          <Badge variant="outline" className="font-normal">
-            {tr("selected.notice", { count: total })}
-          </Badge>
+          <StatusTag tone="primary">{tr("selected.notice", { count: total })}</StatusTag>
           <Link
             className="text-muted-foreground underline-offset-2 hover:underline"
             href="/dashboard/transactions"
@@ -388,7 +376,10 @@ export default async function TransactionsPage({
 
       {groups.length === 0 ? (
         <TableCard>
-          <EmptyState message={total === 0 ? tr("empty.noData") : tr("empty.noPageData")} />
+          <EmptyState
+            icon={ReceiptText}
+            message={total === 0 ? tr("empty.noData") : tr("empty.noPageData")}
+          />
         </TableCard>
       ) : (
         <TableCard>
@@ -411,12 +402,12 @@ export default async function TransactionsPage({
                   <TableRow className="hover:bg-transparent">
                     <TableCell
                       colSpan={COLUMNS.length}
-                      className="bg-muted/50 py-1.5 text-xs"
+                      className="h-8 bg-muted/30 py-1 text-xs text-muted-foreground"
                     >
-                      <span className="font-medium text-foreground">
+                      <span className="font-medium">
                         {tr("table.monthLabel", { year: g.year, month: g.month })}
                       </span>
-                      <span className="ml-2 text-muted-foreground">
+                      <span className="ml-2 text-subtle-foreground">
                         {tr("table.rowsCount", { count: g.rows.length })}
                       </span>
                     </TableCell>

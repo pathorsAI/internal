@@ -1,16 +1,16 @@
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 
-import "./landing-fonts.css";
+import { LogoMark } from "@/components/logo";
 import { LOCALE_SWITCHER_CSS } from "./public-locale-switcher-css";
 import { PublicLocaleSwitcher } from "./public-locale-switcher";
 
 /**
  * 法律文件（/privacy、/terms）共用的排版外殼。
  *
- * 設計沿用 landing page 的那一套：同一組色票 token（取自 globals.css 的產品主題）、
- * 同一組字體（--display / --sans / --mono：Open Sans 與 Geist Mono 由 layout.tsx 的
- * next/font 載入，中文的 Noto Sans TC 來自 ./landing-fonts.css）、同樣的三層主題切換。
+ * 設計沿用 landing page 的那一套：同一組色票 token（直接指向 globals.css 的 app token，
+ * 深色跟著 <html class="dark">）、同一組字體（--display / --sans / --mono：Inter、
+ * Noto Sans TC、Geist Mono，都由 layout.tsx 的 next/font 載入）、同一個標誌（LogoMark）。
  * 刻意「不」整包 import LANDING_CSS —— 那是 400 行的行銷版面樣式，法律文件只需要
  * token 加一份長文排版，所以這裡只重述 token 的值（與 landing-content.ts 的
  * :root 相同），其餘是本檔自己的內文樣式。landing 的色票若有調整，這裡要一起改。
@@ -27,39 +27,24 @@ import { PublicLocaleSwitcher } from "./public-locale-switcher";
 export const LEGAL_UPDATED_AT = "2026-08-26";
 
 const LEGAL_CSS = `:root{
-  --bg:#FFFFFF; --surface:#FFFFFF; --surface-2:#F7F8F8;
-  --ink:#0F1419; --ink-2:#5E656D; --ink-3:#81878D;
-  --line:#E1EAEF; --line-soft:#EEF3F6;
-  --brand:#1E9DF1; --brand-2:#4DACF6; --brand-wash:#E3ECF6; --brand-ink:#FFFFFF; --brand-text:#006EB3;
-  --amber:#A96500; --amber-wash:#FBEFDA;
-  --sh-1:0 1px 2px rgba(15,20,25,.05);
-  --sh-2:0 2px 6px rgba(15,20,25,.05), 0 12px 28px -12px rgba(15,20,25,.16);
-  --sans:"Open Sans","Open Sans Fallback","PingFang TC","Noto Sans TC","Microsoft JhengHei",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --bg:var(--background); --surface:var(--card); --surface-2:var(--sidebar);
+  --ink:var(--foreground); --ink-2:var(--muted-foreground); --ink-3:var(--subtle-foreground);
+  --line:var(--border); --line-soft:var(--border-soft);
+  --brand:var(--primary); --brand-2:var(--primary-strong); --brand-wash:var(--accent); --brand-ink:var(--primary-foreground); --brand-text:var(--accent-foreground);
+  --amber:var(--warning); --amber-wash:color-mix(in srgb,var(--warning) 12%,var(--card));
+  --sh-1:0 1px 2px rgba(16,24,40,.05);
+  --sh-2:0 1px 2px rgba(16,24,40,.04), 0 12px 28px -12px rgba(16,24,40,.14);
+  --sans:var(--font-inter,"Inter"),var(--font-noto-tc,"Noto Sans TC"),-apple-system,BlinkMacSystemFont,"PingFang TC","Microsoft JhengHei","Segoe UI",Roboto,sans-serif;
   --display:var(--sans);
-  --mono:"Geist Mono","Geist Mono Fallback",ui-monospace,SFMono-Regular,Menlo,"PingFang TC","Noto Sans TC",monospace;
-  --cjk:"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;
+  --mono:var(--font-geist-mono,"Geist Mono"),ui-monospace,SFMono-Regular,Menlo,var(--font-noto-tc,"Noto Sans TC"),"PingFang TC",monospace;
+  --cjk:var(--font-noto-tc,"Noto Sans TC"),"PingFang TC","Microsoft JhengHei",sans-serif;
   --pad:clamp(1.25rem,5vw,3rem);
-  --r-s:.78rem; --r-m:1.04rem;
+  --r-s:8px; --r-m:12px;
 }
-@media (prefers-color-scheme:dark){
-  :root:not([data-theme="light"]){
-    --bg:#000000; --surface:#17181C; --surface-2:#0F0F12;
-    --ink:#E7E9EA; --ink-2:#AEB2B4; --ink-3:#72767A;
-    --line:#242628; --line-soft:#191B1C;
-    --brand:#1C9CF0; --brand-2:#60B6FA; --brand-wash:#061622; --brand-ink:#FFFFFF; --brand-text:#1C9CF0;
-    --amber:#E0A44A; --amber-wash:#2B2314;
-    --sh-1:0 1px 2px rgba(0,0,0,.4);
-    --sh-2:0 2px 6px rgba(0,0,0,.4), 0 14px 30px -14px rgba(0,0,0,.7);
-  }
-}
-:root[data-theme="dark"]{
-  --bg:#000000; --surface:#17181C; --surface-2:#0F0F12;
-  --ink:#E7E9EA; --ink-2:#AEB2B4; --ink-3:#72767A;
-  --line:#242628; --line-soft:#191B1C;
-  --brand:#1C9CF0; --brand-2:#60B6FA; --brand-wash:#061622; --brand-ink:#FFFFFF; --brand-text:#1C9CF0;
-  --amber:#E0A44A; --amber-wash:#2B2314;
+:root.dark{
+  --amber-wash:color-mix(in srgb,var(--warning) 14%,var(--card));
   --sh-1:0 1px 2px rgba(0,0,0,.4);
-  --sh-2:0 2px 6px rgba(0,0,0,.4), 0 14px 30px -14px rgba(0,0,0,.7);
+  --sh-2:0 1px 2px rgba(0,0,0,.4), 0 14px 30px -14px rgba(0,0,0,.7);
 }
 
 body{
@@ -83,8 +68,7 @@ body{
 }
 .legal .logo{display:flex; align-items:center; gap:.55rem; color:var(--ink); font-weight:600; font-size:.95rem; letter-spacing:-.02em}
 .legal .logo:hover{text-decoration:none; color:var(--ink)}
-.legal .logo .mark{width:26px; height:26px; border-radius:8px; background:var(--brand); display:grid; place-items:center; flex:none}
-.legal .logo .mark svg{width:16px; height:16px; fill:none; stroke:var(--brand-ink); stroke-width:2.4; stroke-linecap:round; stroke-linejoin:round}
+.legal .logo .mark{width:26px; height:26px; flex:none}
 .legal .bar .alt{margin-left:auto; font-size:.9rem; font-weight:500; color:var(--ink-2)}
 .legal .bar .alt:hover{color:var(--brand-text)}
 
@@ -200,11 +184,8 @@ export async function LegalDoc({ doc, children }: LegalDocProps) {
         <header className="bar">
           <div className="row">
             <Link className="logo" href="/">
-              <span className="mark">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <polyline points="4,17 10,11 14,15 20,6" />
-                </svg>
-              </span>Internal
+              <LogoMark className="mark" />
+              Internal
             </Link>
             <Link className="alt" href={other.href}>
               {otherLabel}

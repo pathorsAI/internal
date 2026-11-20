@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 import { Building2 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
-import { Button } from "@/components/ui/button";
+import { GlowButton } from "@/components/ds/glow-button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/form-field";
 import {
@@ -93,9 +93,9 @@ export function OrgSettingsClient({
             />
           </Field>
           {canEdit && (
-            <Button type="submit" disabled={saving || name.trim() === orgName}>
+            <GlowButton type="submit" disabled={saving || name.trim() === orgName}>
               {saving ? t("org.saving") : t("org.save")}
-            </Button>
+            </GlowButton>
           )}
         </form>
       </CardContent>

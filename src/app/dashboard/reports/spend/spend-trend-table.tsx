@@ -10,7 +10,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { ArrowDown, ArrowUp, ArrowUpDown, ArrowUpRight } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { StatusTag } from "@/components/ds/status-dot";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { TableCard } from "@/components/table-card";
 import { sortTrendItems, transactionsHref, type SpendTrend, type TrendSort } from "@/lib/spend-trend";
@@ -95,7 +95,8 @@ export function SpendTrendTable({
             const color = colorOf(it.key) ?? OTHER_COLOR;
             const isSelected = it.key === selectedKey;
             let changeClass = "text-muted-foreground";
-            if (it.change > 0) changeClass = "text-expense";
+            // 支出變多用墨色（+ 號已經說明方向），變少用收入色；紅色留給要處理的狀態
+            if (it.change > 0) changeClass = "text-foreground";
             else if (it.change < 0) changeClass = "text-income";
             return (
               <TableRow key={it.key} data-state={isSelected ? "selected" : undefined}>
@@ -109,9 +110,9 @@ export function SpendTrendTable({
                     <ItemMark item={it} label={name} color={color} />
                     <span className={cn("truncate", it.kind === "none" && "text-muted-foreground")}>{name}</span>
                     {it.isNew ? (
-                      <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px]">
+                      <StatusTag tone="primary" className="px-1.5 py-0 text-[10px]">
                         {t("new")}
-                      </Badge>
+                      </StatusTag>
                     ) : null}
                   </button>
                 </TableCell>

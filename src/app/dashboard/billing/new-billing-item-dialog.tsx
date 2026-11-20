@@ -7,6 +7,7 @@ import { Plus } from "lucide-react";
 import { createBillingItem, type ActionState } from "@/db/mutations";
 import { submitAction } from "@/lib/form-action";
 import { Button } from "@/components/ui/button";
+import { GlowButton } from "@/components/ds/glow-button";
 import {
   Dialog,
   DialogContent,
@@ -58,9 +59,16 @@ export function NewBillingItemDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="sm" variant={triggerVariant}>
-          <Plus className="size-4" /> {triggerLabel ?? t("newItem.trigger")}
-        </Button>
+        {/* 看板上是這頁唯一的主要動作（光暈）；從合約頁開時是次要按鈕（outline） */}
+        {triggerVariant === "default" ? (
+          <GlowButton size="sm">
+            <Plus className="size-4" /> {triggerLabel ?? t("newItem.trigger")}
+          </GlowButton>
+        ) : (
+          <Button size="sm" variant={triggerVariant}>
+            <Plus className="size-4" /> {triggerLabel ?? t("newItem.trigger")}
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
         <form onSubmit={submitAction(action)}>

@@ -2,7 +2,9 @@ import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { Users } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
-import { Button } from "@/components/ui/button";
+import { GlowButton } from "@/components/ds/glow-button";
+import { StatusTag } from "@/components/ds/status-dot";
+import { Amount } from "@/components/amount";
 import { TableCard } from "@/components/table-card";
 import { EmptyRow } from "@/components/empty-state";
 import {
@@ -52,11 +54,11 @@ export default async function PayrollPage({
         title={t("title")}
         description={t("description")}
       >
-        <Button size="sm" asChild>
+        <GlowButton size="sm" asChild>
           <Link href="/dashboard/employees">
             <Users className="size-4" /> {t("goToEmployees")}
           </Link>
-        </Button>
+        </GlowButton>
       </PageHeader>
 
       <TableCard title={t("table.title")}>
@@ -101,16 +103,16 @@ export default async function PayrollPage({
                   <TableCell className="text-right tabular-nums text-muted-foreground">
                     {formatCurrency(r.nontaxableTotal)}
                   </TableCell>
-                  <TableCell className="text-right font-medium tabular-nums">
-                    {formatCurrency(r.netPay)}
+                  <TableCell className="text-right font-medium">
+                    <Amount value={r.netPay} kind="neutral" />
                   </TableCell>
                   <TableCell>
                     {r.paidTransactionId ? (
-                      <Link href="/dashboard/transactions" className="text-xs text-primary hover:underline">
-                        {t("table.posted")}
+                      <Link href="/dashboard/transactions" className="hover:opacity-80">
+                        <StatusTag tone="income">{t("table.posted")}</StatusTag>
                       </Link>
                     ) : (
-                      <span className="text-xs text-muted-foreground">—</span>
+                      <StatusTag tone="neutral">{t("table.unposted")}</StatusTag>
                     )}
                   </TableCell>
                   <TableCell className="text-right">

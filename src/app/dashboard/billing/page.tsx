@@ -6,7 +6,6 @@ import { TableCard } from "@/components/table-card";
 import { EmptyRow } from "@/components/empty-state";
 import { RowDialog } from "@/components/row-dialog";
 import { DeleteButton } from "@/components/delete-button";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -30,6 +29,9 @@ import { canManageOrg, requireOrgWithRole } from "@/lib/session";
 import { getIntegration } from "@/lib/integrations/store";
 import { getCalendarSettings } from "@/lib/google-calendar";
 import { cn } from "@/lib/utils";
+import { Amount } from "@/components/amount";
+import { Progress } from "@/components/ds/progress";
+import { StatusTag } from "@/components/ds/status-dot";
 import { BillingStatusBadge } from "./billing-status";
 import { SummaryCards, type BoardFilter } from "./summary-cards";
 import { NewBillingItemDialog } from "./new-billing-item-dialog";
@@ -67,24 +69,31 @@ function outstandingLabel(t: T, expected: number, paid: number, currency: string
   return t("amount.settled");
 }
 
-/** 已收 / 應收 + 未收差額，沿用合約頁「收款進度」的資訊密度。 */
+/**
+ * 已收 / 應收 + 未收差額，沿用合約頁「收款進度」的資訊密度。
+ * 收了一部分才畫進度條 —— 沒收或收齊時一條空的 / 滿的線沒有多的資訊。
+ */
 function AmountCell({ row, t }: Readonly<{ row: BillingRow; t: T }>) {
+  const partial = row.paid > 0 && row.paid < row.expected;
   return (
-    <div className="min-w-[150px] space-y-0.5 text-sm tabular-nums">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="font-medium">{formatCurrency(row.paid, row.currency)}</span>
-        <span className="text-xs text-muted-foreground">
+    <div className="ml-auto w-fit min-w-[150px] space-y-0.5 text-right text-sm">
+      <div className="flex items-baseline justify-end gap-1">
+        <Amount value={row.paid} currency={row.currency} kind="neutral" className="font-medium" />
+        <span className="text-xs text-muted-foreground tabular-nums">
           / {formatCurrency(row.expected, row.currency)}
         </span>
       </div>
-      <div className="text-xs text-muted-foreground">
+      {partial ? (
+        <Progress value={row.paid} max={row.expected} className="my-1" />
+      ) : null}
+      <div className="text-xs text-muted-foreground tabular-nums">
         {outstandingLabel(t, row.expected, row.paid, row.currency)}
       </div>
     </div>
   );
 }
 
-/** 發票欄：已開就顯示日期，該開沒開就標紅，不需要開就留白。 */
+/** 發票欄：已開就顯示日期，該開沒開就標待開（琥珀），不需要開就留白。 */
 function InvoiceCell({ row, t }: Readonly<{ row: BillingRow; t: T }>) {
   if (row.invoicedOn) {
     return (
@@ -95,9 +104,7 @@ function InvoiceCell({ row, t }: Readonly<{ row: BillingRow; t: T }>) {
   }
   if (row.needsInvoice) {
     return (
-      <Badge variant="outline" className="border-expense/40 text-expense">
-        {t("table.pendingInvoice")}
-      </Badge>
+      <StatusTag tone="warning">{t("table.pendingInvoice")}</StatusTag>
     );
   }
   return <span className="text-xs text-muted-foreground">—</span>;
@@ -278,7 +285,7 @@ export default async function BillingPage({
               <TableHead>{t("table.columns.customer")}</TableHead>
               <TableHead>{t("table.columns.item")}</TableHead>
               <TableHead>{t("table.columns.dueDate")}</TableHead>
-              <TableHead>{t("table.columns.amount")}</TableHead>
+              <TableHead className="text-right">{t("table.columns.amount")}</TableHead>
               <TableHead>{t("table.columns.status")}</TableHead>
               <TableHead>{t("table.columns.invoice")}</TableHead>
               <TableHead>{t("table.columns.nextAction")}</TableHead>
@@ -308,7 +315,7 @@ export default async function BillingPage({
                     <TableCell
                       className={cn(
                         "text-sm tabular-nums",
-                        row.status === "overdue" && "text-expense",
+                        row.status === "overdue" && "text-destructive",
                       )}
                     >
                       {row.dueDate ? formatDate(row.dueDate) : "—"}

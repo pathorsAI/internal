@@ -2,7 +2,8 @@ import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { TableCard } from "@/components/table-card";
 import { EmptyRow } from "@/components/empty-state";
-import { Badge } from "@/components/ui/badge";
+import { StatusTag } from "@/components/ds/status-dot";
+import { Progress } from "@/components/ds/progress";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -23,16 +24,17 @@ async function GapCell({ gap, currency }: Readonly<{ gap: number | null; currenc
   if (gap == null) return <span className="text-xs text-muted-foreground">—</span>;
   const t = await getTranslations("reports.contractCoverage.gap");
   if (gap > TOLERANCE) {
+    // 漏排是會漏錢的缺口 —— 要有人去補，所以用紅
     return (
-      <Badge variant="outline" className="border-expense/40 text-expense">
-        {t("short", { amount: formatCurrency(gap, currency) })}
-      </Badge>
+      <StatusTag tone="risk">{t("short", { amount: formatCurrency(gap, currency) })}</StatusTag>
     );
   }
   if (gap < -TOLERANCE) {
-    return <Badge variant="outline">{t("over", { amount: formatCurrency(-gap, currency) })}</Badge>;
+    return (
+      <StatusTag tone="warning">{t("over", { amount: formatCurrency(-gap, currency) })}</StatusTag>
+    );
   }
-  return <span className="text-xs text-muted-foreground">{t("done")}</span>;
+  return <StatusTag tone="income">{t("done")}</StatusTag>;
 }
 
 /**
@@ -79,6 +81,15 @@ export async function ContractCoverage({ rows }: Readonly<{ rows: ContractCovera
                   </TableCell>
                   <TableCell className="text-right text-sm tabular-nums">
                     {formatCurrency(r.scheduled, r.currency)}
+                    {/* 排了合約金額的幾成；合約沒設金額就無從比較，不畫 */}
+                    {r.amount != null && r.amount > 0 && (
+                      <Progress
+                        value={r.scheduled}
+                        max={r.amount}
+                        label={t("columns.scheduled")}
+                        className="mt-1 ml-auto w-24"
+                      />
+                    )}
                   </TableCell>
                   <TableCell className="text-right text-sm tabular-nums text-muted-foreground">
                     {formatCurrency(r.billed, r.currency)}

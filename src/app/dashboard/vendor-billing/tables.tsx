@@ -1,11 +1,11 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Badge } from "@/components/ui/badge";
+import { StatusTag } from "@/components/ds/status-dot";
+import { Amount } from "@/components/amount";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { TableCard } from "@/components/table-card";
 import { EmptyRow } from "@/components/empty-state";
-import { formatCurrency } from "@/lib/format";
 import { isReseller } from "@/lib/vendor-billing/account-meta";
 import type { BillingAccountRow, InvoiceRow, PaymentMethodRow } from "@/lib/vendor-billing/service";
 import { InvoiceTxn, ProviderStatus } from "./invoice-list";
@@ -71,7 +71,7 @@ export function AccountsTable({
                     <TableCell className="text-right tabular-nums">
                       <div>{a.resourceCount}</div>
                       {a.missingResourceCount > 0 ? (
-                        <div className="text-xs text-amber-700 dark:text-amber-400">
+                        <div className="text-xs text-warning">
                           {t("cell.missingResources", { count: a.missingResourceCount })}
                         </div>
                       ) : null}
@@ -88,7 +88,7 @@ export function AccountsTable({
                         <span className="flex flex-col">
                           <span
                             className={
-                              a.status === "active" ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"
+                              a.status === "active" ? "text-warning" : "text-muted-foreground"
                             }
                           >
                             {t("cell.notSet")}
@@ -106,9 +106,11 @@ export function AccountsTable({
                           <span className="text-xs text-muted-foreground tabular-nums">
                             {day(a.latestInvoice.invoiceDate)}
                           </span>
-                          <span className="tabular-nums">
-                            {formatCurrency(a.latestInvoice.amount, a.latestInvoice.currency)}
-                          </span>
+                          <Amount
+                            value={a.latestInvoice.amount}
+                            currency={a.latestInvoice.currency}
+                            kind="expense"
+                          />
                           <MatchChip status={a.latestInvoice.matchStatus} />
                         </span>
                       ) : (
@@ -166,9 +168,7 @@ export function MethodsTable({
                     <span className="flex items-center gap-1.5">
                       {m.label}
                       {m.isActive ? null : (
-                        <Badge variant="outline" className="text-muted-foreground">
-                          {t("cell.inactive")}
-                        </Badge>
+                        <StatusTag tone="neutral">{t("cell.inactive")}</StatusTag>
                       )}
                     </span>
                   </TableCell>
@@ -237,12 +237,12 @@ export function InvoicesTable({
                   <TableCell className="max-w-48">
                     <span className="block truncate">{inv.accountName}</span>
                   </TableCell>
-                  <TableCell className="font-medium">{inv.externalRef}</TableCell>
+                  <TableCell className="font-mono text-xs font-medium">{inv.externalRef}</TableCell>
                   <TableCell className="text-xs text-muted-foreground tabular-nums">
                     {period(inv.periodStart, inv.periodEnd)}
                   </TableCell>
-                  <TableCell className="text-right font-medium tabular-nums">
-                    {formatCurrency(inv.amount, inv.currency)}
+                  <TableCell className="text-right font-medium">
+                    <Amount value={inv.amount} currency={inv.currency} kind="expense" />
                   </TableCell>
                   <TableCell>
                     <ProviderStatus invoice={inv} today={today} />

@@ -77,7 +77,7 @@ const settings = {
     },
     clients: {
       hint: { "zh-TW": "這裡列出你個人授權過的 AI 用戶端 —— 不是組織設定，別人授權了什麼你看不到，也看不到你的。", en: "These are the AI clients you personally authorized. This is not an organization setting: you can't see anyone else's connections, and they can't see yours." },
-      hintManage: { "zh-TW": "撤銷會收回你自己的授權，下次連線要重新登入同意；其他人的連線不受影響。", en: "Revoking withdraws your own authorization — you'll be asked to sign in and approve again next time. Other people's connections are unaffected." },
+      hintManage: { "zh-TW": "撤銷會收回你自己的授權，下次連線要重新登入同意；其他人的連線不受影響。", en: " Revoking withdraws your own authorization — you'll be asked to sign in and approve again next time. Other people's connections are unaffected." },
       title: { "zh-TW": "你已連線的用戶端", en: "Your connected clients" },
       count: { "zh-TW": "{count} 筆", en: "{count}" },
       columns: {

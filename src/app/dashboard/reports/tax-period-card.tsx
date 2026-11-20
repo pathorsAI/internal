@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ds/progress";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { TaxPeriodSummary } from "@/db/queries";
@@ -55,6 +56,15 @@ export async function TaxPeriodCard({
       <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
         {period.start} ~ {period.end}
       </p>
+      {/* 這一期該開的發票開了幾成 */}
+      {summary.shouldIssue.amount > 0 && (
+        <Progress
+          value={summary.issued.amount}
+          max={summary.shouldIssue.amount}
+          label={t("issued")}
+          className="mt-3"
+        />
+      )}
 
       <div className="mt-3 divide-y">
         <Line
@@ -71,13 +81,13 @@ export async function TaxPeriodCard({
           label={t("pending")}
           countLabel={t("count", { count: summary.pending.count })}
           amount={summary.pending.amount}
-          tone={summary.pending.count > 0 ? "text-expense" : undefined}
+          tone={summary.pending.count > 0 ? "text-warning" : undefined}
         />
         <Line
           label={t("missing")}
           countLabel={t("count", { count: summary.missing.count })}
           amount={summary.missing.amount}
-          tone={summary.missing.count > 0 ? "text-expense" : undefined}
+          tone={summary.missing.count > 0 ? "text-destructive" : undefined}
         />
       </div>
 

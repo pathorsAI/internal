@@ -10,7 +10,7 @@ import {
   ArrowLeftRight,
   Receipt,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/page-header";
 import {
   getOverview,
@@ -25,12 +25,13 @@ import { requestOrigin } from "@/lib/request-origin";
 import { TrendCharts } from "./trend-charts";
 import { SpendSection } from "./spend-section";
 import { SpendSkeleton } from "./spend-chart";
-import { formatCurrency, formatDate } from "@/lib/format";
-import { signColor } from "@/components/amount";
+import { formatDate } from "@/lib/format";
+import { Amount, amountKind } from "@/components/amount";
 import { EmptyState } from "@/components/empty-state";
 import { BookBadge } from "@/components/book-badge";
+import { StatCard } from "@/components/ds/stat-card";
+import { Sparkline } from "@/components/ds/sparkline";
 import { requireOrg } from "@/lib/session";
-import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -84,6 +85,21 @@ export default async function DashboardPage() {
     a.currency.localeCompare(b.currency),
   );
 
+  // 資產卡的走勢線：用已經抓好的 trends（視窗起點餘額 + 逐月淨流量）推出各幣別每月月底餘額，
+  // 算法同 TrendCharts 的「帳戶餘額走勢」，不另外查資料庫。
+  const accountCurrency = new Map(balances.map((a) => [a.id, a.currency]));
+  const balanceSeries = (currency: string): number[] => {
+    let running = trends.startBalances
+      .filter((b) => accountCurrency.get(b.accountId) === currency)
+      .reduce((sum, b) => sum + b.balance, 0);
+    const netByMonth = new Map<string, number>();
+    for (const f of trends.accountFlows) {
+      if (accountCurrency.get(f.accountId) !== currency) continue;
+      netByMonth.set(f.month, (netByMonth.get(f.month) ?? 0) + f.net);
+    }
+    return trends.months.map((m) => (running += netByMonth.get(m) ?? 0));
+  };
+
   const stats = [
     { label: t("stats.income"), key: "income" as const, icon: TrendingUp },
     { label: t("stats.expense"), key: "expense" as const, icon: TrendingDown },
@@ -107,45 +123,43 @@ export default async function DashboardPage() {
           </Card>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {assetGroups.map((g) => (
-              <Card key={g.currency} className="gap-0 p-0">
-                <CardHeader className="border-b p-4">
-                  <CardTitle className="flex items-baseline justify-between gap-2 text-base">
-                    <span className="text-xs font-medium text-muted-foreground">
-                      {t("assets.totalAssets", {
-                        currency: currencyLabel[g.currency] ?? g.currency,
-                      })}
-                    </span>
-                    <span
-                      className={cn(
-                        "text-xl font-semibold tabular-nums",
-                        signColor(g.total),
-                      )}
-                    >
-                      {formatCurrency(g.total, g.currency)}
-                    </span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="divide-y p-0">
-                  {g.accounts.map((a) => (
-                    <div
-                      key={a.id}
-                      className="flex items-center justify-between gap-3 px-4 py-2.5"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium">{a.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {kindLabel[a.kind] ?? a.kind}
-                        </p>
+            {assetGroups.map((g) => {
+              const spark = balanceSeries(g.currency);
+              return (
+                <StatCard
+                  key={g.currency}
+                  label={t("assets.totalAssets", {
+                    currency: currencyLabel[g.currency] ?? g.currency,
+                  })}
+                  value={g.total}
+                  currency={g.currency}
+                  tone={g.total < 0 ? "risk" : "default"}
+                  icon={<Landmark />}
+                >
+                  {spark.some((v) => v !== 0) ? (
+                    <Sparkline data={spark} className="mt-2" />
+                  ) : null}
+                  <dl className="mt-3 divide-y divide-border-soft border-t border-border-soft">
+                    {g.accounts.map((a) => (
+                      <div
+                        key={a.id}
+                        className="flex items-center justify-between gap-3 py-2 last:pb-0"
+                      >
+                        <dt className="min-w-0">
+                          <p className="truncate text-sm">{a.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {kindLabel[a.kind] ?? a.kind}
+                          </p>
+                        </dt>
+                        <dd className="shrink-0 text-sm tabular-nums">
+                          <Amount value={a.bookBalance} currency={a.currency} kind="neutral" />
+                        </dd>
                       </div>
-                      <span className="shrink-0 text-sm font-medium tabular-nums">
-                        {formatCurrency(a.bookBalance, a.currency)}
-                      </span>
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-            ))}
+                    ))}
+                  </dl>
+                </StatCard>
+              );
+            })}
           </div>
         )}
       </section>
@@ -176,19 +190,18 @@ export default async function DashboardPage() {
                   {currencyLabel[c.currency] ?? c.currency}
                 </span>
                 <div className="grid flex-1 grid-cols-3 gap-4">
-                  {stats.map((m) => {
-                    const value = c[m.key];
-                    // 支出欄位金額為正，但語意為支出（紅）；以負值套用 signColor 維持原色。
-                    const tone = signColor(m.key === "expense" ? -value : value);
-                    return (
-                      <div key={m.label} className="space-y-0.5">
-                        <div className="text-xs text-muted-foreground">{m.label}</div>
-                        <div className={cn("text-base font-semibold tabular-nums", tone)}>
-                          {formatCurrency(value, c.currency)}
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {stats.map((m) => (
+                    <div key={m.label} className="space-y-0.5">
+                      <div className="text-xs text-muted-foreground">{m.label}</div>
+                      {/* 支出欄位金額為正，語意為支出（墨色帶 −）；淨額依正負決定 */}
+                      <Amount
+                        value={c[m.key]}
+                        currency={c.currency}
+                        kind={m.key === "net" ? undefined : m.key}
+                        className="text-base font-semibold"
+                      />
+                    </div>
+                  ))}
                 </div>
               </div>
             ))
@@ -229,9 +242,12 @@ export default async function DashboardPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <BookBadge book={txn.book} />
-                    <span className="text-sm font-medium tabular-nums">
-                      {formatCurrency(txn.amount, txn.currency)}
-                    </span>
+                    <Amount
+                      value={txn.amount}
+                      currency={txn.currency}
+                      kind={amountKind(txn.type)}
+                      className="inline-block min-w-24 text-right text-sm font-medium"
+                    />
                   </div>
                 </div>
               ))

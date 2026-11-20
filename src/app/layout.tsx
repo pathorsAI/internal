@@ -27,7 +27,7 @@ const geistMono = Geist_Mono({
 });
 
 // 在第一次繪製前套上主題，避免深色使用者先閃一下白底。偏好存在 localStorage 的 theme
-// （"light" / "dark"；沒有或 "system" 就跟系統），切換在側欄的 ThemeSwitcher。
+// （"light" / "dark"；沒有或 "system" 就跟系統），切換在側欄底部使用者選單的 ThemeMenuItems。
 const themeScript = `(function(){try{var t=localStorage.getItem("theme");var d=t==="dark"||((!t||t==="system")&&matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.classList.toggle("dark",d)}catch(e){}})()`;
 
 export async function generateMetadata(): Promise<Metadata> {

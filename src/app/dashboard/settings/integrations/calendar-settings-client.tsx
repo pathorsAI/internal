@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 import { CalendarCheck, CalendarPlus, RefreshCw, Unlink } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { GlowButton } from "@/components/ds/glow-button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/form-field";
@@ -124,7 +125,7 @@ export function CalendarSettingsClient({
                   days: reminderDays,
                 })}
               </p>
-              <Button type="button" onClick={sync} disabled={pending}>
+              <Button type="button" variant="outline" onClick={sync} disabled={pending}>
                 <RefreshCw className="size-4" /> {t("calendar.syncNow")}
               </Button>
               <SharingHint ownerLabel={ownerLabel} />
@@ -179,7 +180,7 @@ export function CalendarSettingsClient({
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  <Button type="button" onClick={sync} disabled={pending}>
+                  <Button type="button" variant="outline" onClick={sync} disabled={pending}>
                     <RefreshCw className="size-4" /> {t("calendar.syncNow")}
                   </Button>
                   <Button type="button" variant="outline" onClick={disconnect} disabled={pending}>
@@ -197,9 +198,9 @@ export function CalendarSettingsClient({
           if (!granted) {
             return (
               <div className="space-y-2">
-                <Button type="button" onClick={grant} disabled={pending}>
+                <GlowButton type="button" onClick={grant} disabled={pending}>
                   <CalendarPlus className="size-4" /> {t("calendar.grant")}
-                </Button>
+                </GlowButton>
                 <p className="text-xs text-muted-foreground">
                   {t("calendar.grantNote")}
                 </p>
@@ -208,9 +209,9 @@ export function CalendarSettingsClient({
           }
           return (
             <div className="space-y-2">
-              <Button type="button" onClick={connect} disabled={pending}>
+              <GlowButton type="button" onClick={connect} disabled={pending}>
                 <CalendarCheck className="size-4" /> {t("calendar.connect")}
-              </Button>
+              </GlowButton>
               <p className="text-xs text-muted-foreground">
                 {t("calendar.connectNote")}
               </p>

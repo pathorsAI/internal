@@ -610,8 +610,8 @@ function PreviewCard({ preview: p }: Readonly<{ preview: InvoicePreview }>) {
       </div>
 
       {p.warnings.length > 0 ? (
-        <div className="space-y-1 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
-          <p className="flex items-center gap-1.5 font-medium text-amber-700 dark:text-amber-400">
+        <div className="space-y-1 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm">
+          <p className="flex items-center gap-1.5 font-medium text-warning">
             <AlertTriangle className="size-4" /> {t("warningsTitle")}
           </p>
           <ul className="list-disc space-y-0.5 pl-5">

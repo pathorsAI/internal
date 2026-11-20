@@ -4,7 +4,7 @@ import { getTranslations } from "next-intl/server";
 import { PageHeader } from "@/components/page-header";
 import { TableCard } from "@/components/table-card";
 import { EmptyRow } from "@/components/empty-state";
-import { Badge } from "@/components/ui/badge";
+import { StatusTag } from "@/components/ds/status-dot";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -114,9 +114,7 @@ export default async function InvoiceReconcilePage() {
                     {inv.amountGross == null ? "—" : formatCurrency(inv.amountGross, inv.currency)}
                   </TableCell>
                   <TableCell>
-                    <Badge variant="outline" className="border-expense/40 text-expense">
-                      {t("pending.badge")}
-                    </Badge>
+                    <StatusTag tone="warning">{t("pending.badge")}</StatusTag>
                   </TableCell>
                 </TableRow>
               ))

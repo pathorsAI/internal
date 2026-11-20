@@ -8,6 +8,7 @@ import { AuthShell } from "@/components/auth/auth-shell";
 import { emailRequestError, type EmailRequestError } from "@/components/auth/email-request-error";
 import { formText } from "@/components/auth/form-text";
 import { Button } from "@/components/ui/button";
+import { GlowButton } from "@/components/ds/glow-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useHydrated } from "@/hooks/use-hydrated";
@@ -137,9 +138,9 @@ export function SignupForm({ query }: Readonly<{ query: string }>) {
             {ts(error)}
           </p>
         )}
-        <Button type="submit" className="h-11 w-full" disabled={pending || !hydrated}>
+        <GlowButton type="submit" className="h-11 w-full" disabled={pending || !hydrated}>
           {pending ? t("submitting") : t("submit")}
-        </Button>
+        </GlowButton>
         <div className="text-center text-sm">
           <Link href={loginHref} className="text-muted-foreground underline-offset-4 hover:underline">
             {t("haveAccount")}

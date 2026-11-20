@@ -43,10 +43,12 @@ export function EmptyState({
 /** 表格內的「無資料」列：跨欄置中、點陣底。 */
 export function EmptyRow({
   colSpan,
+  icon: Icon,
   message,
   children,
 }: Readonly<{
   colSpan: number;
+  icon?: React.ComponentType<{ className?: string }>;
   message: React.ReactNode;
   /** 次要提示，例如「點右上角新增」 */
   children?: React.ReactNode;
@@ -54,7 +56,13 @@ export function EmptyRow({
   return (
     <TableRow className="hover:bg-transparent">
       <TableCell colSpan={colSpan} className="p-0">
-        <div className="dot-paper flex h-32 flex-col items-center justify-center gap-1 text-center text-sm text-muted-foreground">
+        <div
+          className={cn(
+            "dot-paper flex flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground",
+            Icon ? "h-40" : "h-32",
+          )}
+        >
+          {Icon ? <EmptyIcon icon={Icon} /> : null}
           <span>{message}</span>
           {children}
         </div>

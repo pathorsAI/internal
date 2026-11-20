@@ -8,6 +8,7 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { formatCurrency } from "@/lib/format";
+import { Amount } from "@/components/amount";
 import { cn } from "@/lib/utils";
 import { isProviderOverdue } from "@/lib/vendor-billing/attention";
 import type { InvoiceAction } from "@/lib/vendor-billing/inputs";
@@ -47,7 +48,7 @@ export function InvoiceTxn({ invoice }: Readonly<{ invoice: InvoiceRow }>) {
   }
   if (invoice.suggestedTransaction) {
     return (
-      <span className="block break-words text-sky-700 dark:text-sky-400">
+      <span className="block break-words text-primary">
         {t("cell.suggestedTxn", { txn: txnText(invoice.suggestedTransaction) })}
       </span>
     );
@@ -227,7 +228,12 @@ export function InvoiceList({
               {day(inv.invoiceDate)}
               {inv.periodStart || inv.periodEnd ? ` · ${period(inv.periodStart, inv.periodEnd)}` : ""}
             </span>
-            <span className="shrink-0 font-medium tabular-nums">{formatCurrency(inv.amount, inv.currency)}</span>
+            <Amount
+              value={inv.amount}
+              currency={inv.currency}
+              kind="expense"
+              className="shrink-0 font-medium"
+            />
           </div>
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <ProviderStatus invoice={inv} today={today} empty={null} />

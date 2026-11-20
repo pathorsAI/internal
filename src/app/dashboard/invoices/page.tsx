@@ -6,12 +6,14 @@ import { TableCard } from "@/components/table-card";
 import { EmptyRow } from "@/components/empty-state";
 import { RowDialog } from "@/components/row-dialog";
 import { DeleteButton } from "@/components/delete-button";
-import { Badge } from "@/components/ui/badge";
+import { StatusTag } from "@/components/ds/status-dot";
+import { Amount } from "@/components/amount";
 import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
   TableCell,
+  TableFooter,
   TableHead,
   TableHeader,
   TableRow,
@@ -23,7 +25,8 @@ import {
   listParties,
 } from "@/db/queries";
 import { deleteInvoice } from "@/db/mutations";
-import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
+import { formatDate, formatDateTime } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { canManageOrg, requireOrgWithRole } from "@/lib/session";
 import { getIntegration } from "@/lib/integrations/store";
 import type { IntegrationSummary } from "@/lib/integrations/types";
@@ -34,35 +37,31 @@ import { SimpanySyncSheet } from "./simpany-sync-sheet";
 
 export const dynamic = "force-dynamic";
 
-const statusVariant: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
-  valid: "secondary",
-  void: "destructive",
-  allowance: "outline",
+type Tone = "neutral" | "primary" | "income" | "warning" | "risk";
+
+const statusTone: Record<string, Tone> = {
+  valid: "income",
+  void: "neutral",
+  allowance: "warning",
 };
 
 async function ExternalStatusBadge({ status }: Readonly<{ status: string }>) {
   const t = await getTranslations("invoices.externalStatus");
   if (status === "n_a") return <span className="text-xs text-muted-foreground">—</span>;
-  if (status === "pending") {
-    return (
-      <Badge variant="outline" className="border-expense/40 text-expense">
-        {t("pending")}
-      </Badge>
-    );
-  }
+  const externalTone: Record<string, Tone> = {
+    pending: "warning",
+    issued: "primary",
+    void: "neutral",
+  };
   const externalLabel: Record<string, string> = {
     pending: t("pending"),
     issued: t("issued"),
     void: t("void"),
   };
-  return <Badge variant="outline">{externalLabel[status] ?? status}</Badge>;
+  return (
+    <StatusTag tone={externalTone[status] ?? "neutral"}>{externalLabel[status] ?? status}</StatusTag>
+  );
 }
-
-const taxChipClass: Record<string, string> = {
-  taxable: "text-muted-foreground",
-  zero_rated: "border-sky-500/40 text-sky-700 dark:text-sky-400",
-  exempt: "border-amber-500/40 text-amber-700 dark:text-amber-400",
-};
 
 /** 發票列的狀態格：課稅別 + 有效 / 作廢（作廢附原因）。 */
 async function InvoiceStatusCell({
@@ -83,11 +82,12 @@ async function InvoiceStatusCell({
   };
   return (
     <div className="flex max-w-[26ch] flex-col gap-1">
-      <div className="flex flex-wrap gap-1">
-        <Badge variant="outline" className={taxChipClass[taxTreatment] ?? ""}>
+      <div className="flex flex-wrap items-center gap-1">
+        {/* 課稅別是屬性不是狀態：不上色、不帶點，只當一個安靜的小標 */}
+        <span className="inline-flex items-center rounded-sm border px-1.5 py-0.5 text-xs whitespace-nowrap text-muted-foreground">
           {taxLabel[taxTreatment] ?? taxTreatment}
-        </Badge>
-        <Badge variant={statusVariant[status] ?? "outline"}>{statusLabel[status] ?? status}</Badge>
+        </span>
+        <StatusTag tone={statusTone[status] ?? "neutral"}>{statusLabel[status] ?? status}</StatusTag>
       </div>
       {status === "void" && voidReason ? (
         <span className="truncate text-xs text-muted-foreground" title={voidReason}>
@@ -156,6 +156,19 @@ export default async function InvoicesPage({
     listInvoiceableBillingItems(orgId),
     getIntegration(orgId, "simpany"),
   ]);
+  // 合計只算有效發票（作廢、折讓不計），依幣別分開加總。
+  const totalsByCurrency = new Map<string, number>();
+  for (const inv of rows) {
+    if (inv.status !== "valid" || inv.amountGross == null) continue;
+    totalsByCurrency.set(
+      inv.currency,
+      (totalsByCurrency.get(inv.currency) ?? 0) + Number(inv.amountGross),
+    );
+  }
+  const totals = [...totalsByCurrency].map(([currency, amount]) => ({
+    currency,
+    amount: Math.round(amount * 100) / 100,
+  }));
   const simpanyUsable = Boolean(simpany?.enabled && simpany.status === "connected");
   const syncRange = defaultSyncRange();
 
@@ -186,13 +199,19 @@ export default async function InvoicesPage({
 
       <SimpanyStatusLine integration={simpany} canManage={canManage} />
 
-      <div className="flex gap-1">
+      {/* 方向切換是分段控制，不是主要動作：選中的一段用淺底，不搶新增鈕的光 */}
+      <div className="inline-flex w-fit gap-0.5 rounded-md border bg-card p-0.5">
         {directions.map((d) => (
           <Button
             key={d.key}
             asChild
             size="sm"
-            variant={direction === d.key ? "default" : "outline"}
+            variant="ghost"
+            aria-current={direction === d.key ? "page" : undefined}
+            className={cn(
+              "h-7 text-muted-foreground",
+              direction === d.key && "bg-accent text-foreground hover:bg-accent",
+            )}
           >
             <Link href={`/dashboard/invoices?direction=${d.key}`}>{d.label}</Link>
           </Button>
@@ -233,10 +252,19 @@ export default async function InvoicesPage({
                       <TableCell className="text-sm tabular-nums text-muted-foreground">
                         {inv.invoiceNumber ?? "—"}
                       </TableCell>
-                      <TableCell className="text-right text-sm tabular-nums">
-                        {inv.amountGross == null
-                          ? "—"
-                          : formatCurrency(Number(inv.amountGross), inv.currency)}
+                      <TableCell className="text-right text-sm">
+                        {inv.amountGross == null ? (
+                          "—"
+                        ) : (
+                          <Amount
+                            value={inv.amountGross}
+                            currency={inv.currency}
+                            kind="neutral"
+                            className={cn(
+                              inv.status === "void" && "text-muted-foreground line-through",
+                            )}
+                          />
+                        )}
                       </TableCell>
                       <TableCell className="max-w-[22ch] truncate text-xs text-muted-foreground">
                         {inv.billingItemTitle ?? inv.contractTitle ?? "—"}
@@ -283,6 +311,27 @@ export default async function InvoicesPage({
               ))
             )}
           </TableBody>
+          {totals.length > 0 ? (
+            <TableFooter>
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={3} className="text-xs font-medium text-muted-foreground">
+                  {t("totals.label")}
+                </TableCell>
+                <TableCell className="text-right text-sm font-semibold">
+                  {totals.map((x) => (
+                    <Amount
+                      key={x.currency}
+                      value={x.amount}
+                      currency={x.currency}
+                      kind="neutral"
+                      className="block"
+                    />
+                  ))}
+                </TableCell>
+                <TableCell colSpan={3} />
+              </TableRow>
+            </TableFooter>
+          ) : null}
         </Table>
       </TableCard>
     </>

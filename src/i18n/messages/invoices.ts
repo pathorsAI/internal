@@ -29,7 +29,10 @@ const invoices = {
     simpany: { "zh-TW": "Simpany", en: "Simpany" },
     status: { "zh-TW": "狀態", en: "Status" },
   },
-  rowCount: { "zh-TW": "{count} 筆", en: "{count} invoices" },
+  rowCount: { "zh-TW": "{count} 筆", en: "{count, plural, one {# invoice} other {# invoices}}" },
+  totals: {
+    label: { "zh-TW": "有效發票合計", en: "Total of valid invoices" },
+  },
   defaultTitle: { "zh-TW": "發票", en: "Invoice" },
   empty: {
     message: { "zh-TW": "尚無發票", en: "No invoices yet" },
@@ -199,7 +202,7 @@ const invoices = {
     footerNote: { "zh-TW": "Simpany 才是發票的真相來源。本系統只負責「該開什麼」與「開了沒」，兩邊不一致時以 Simpany 為準，回來這裡修正紀錄。", en: "Simpany is the source of truth for invoices. This system only tracks what should be issued and whether it was — when the two disagree, trust Simpany and correct the record here." },
     missing: {
       title: { "zh-TW": "該開未開", en: "Should be issued, isn't" },
-      count: { "zh-TW": "{count} 筆", en: "{count} items" },
+      count: { "zh-TW": "{count} 筆", en: "{count, plural, one {# item} other {# items}}" },
       columns: {
         customer: { "zh-TW": "客戶", en: "Client" },
         item: { "zh-TW": "項目", en: "Item" },
@@ -215,7 +218,7 @@ const invoices = {
     },
     pending: {
       title: { "zh-TW": "本系統已建、Simpany 待確認", en: "Created here, awaiting Simpany" },
-      count: { "zh-TW": "{count} 筆", en: "{count} invoices" },
+      count: { "zh-TW": "{count} 筆", en: "{count, plural, one {# invoice} other {# invoices}}" },
       columns: {
         date: { "zh-TW": "日期", en: "Date" },
         counterparty: { "zh-TW": "對象", en: "Counterparty" },

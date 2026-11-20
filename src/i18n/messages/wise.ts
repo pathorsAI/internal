@@ -100,6 +100,7 @@ const wise = {
       transfer: { "zh-TW": "換匯", en: "Conversion" },
     },
     mappedBadge: { "zh-TW": "Wise", en: "Wise" },
+    mappedFailed: { "zh-TW": "Wise 同步失敗", en: "Wise sync failed" },
     activity: {
       applied: {
         "zh-TW": "從 Wise 同步 {count} 筆交易",

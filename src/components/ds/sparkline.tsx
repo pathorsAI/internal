@@ -45,7 +45,7 @@ export function Sparkline({
         className="block size-full overflow-visible"
       >
         <path className="spark-area" d={area} />
-        <path className="spark-line" d={line} pathLength={400} />
+        <path className="spark-line" d={line} />
       </svg>
       <span
         className="spark-dot absolute right-0 size-[5px] translate-x-1/2 -translate-y-1/2 rounded-full"

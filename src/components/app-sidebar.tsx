@@ -44,7 +44,6 @@ import {
 import { OrgSwitcher, type OrgOption } from "@/components/org-switcher";
 import { UserMenu } from "@/components/user-menu";
 import { LocaleSwitcher } from "@/components/locale-switcher";
-import { ThemeSwitcher } from "@/components/theme-switcher";
 import { Logo } from "@/components/logo";
 
 // 每天都會開的兩頁放最上面。請款看板是收入循環的日常操作面 —— 請款、開票、
@@ -69,6 +68,7 @@ export type NavItemKey =
   | "invoices"
   | "reports"
   | "spendAnalysis"
+  | "invoiceReconcile"
   | "employees"
   | "payroll"
   | "members"
@@ -223,7 +223,6 @@ export function AppSidebar({
       </SidebarContent>
 
       <SidebarFooter>
-        <ThemeSwitcher />
         <LocaleSwitcher />
         <UserMenu />
       </SidebarFooter>
