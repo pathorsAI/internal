@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
-import { Badge } from "@/components/ui/badge";
+import { StatusTag } from "@/components/ds/status-dot";
 import { formatCurrency } from "@/lib/format";
 import type { ContractSubscription } from "@/db/queries";
 
-const statusVariant: Record<string, "default" | "secondary" | "outline"> = {
-  active: "default",
-  paused: "secondary",
-  ended: "outline",
+const statusTone: Record<string, "neutral" | "primary" | "warning"> = {
+  active: "primary",
+  paused: "warning",
+  ended: "neutral",
 };
 
 function intervalLabel(
@@ -51,9 +51,9 @@ export async function ContractSubscriptions({
                 {formatCurrency(s.amount, s.currency)} · {intervalLabel(t, s.intervalMonths)}
               </div>
             </div>
-            <Badge variant={statusVariant[s.status] ?? "outline"}>
+            <StatusTag tone={statusTone[s.status] ?? "neutral"}>
               {statusLabels[s.status] ?? s.status}
-            </Badge>
+            </StatusTag>
           </li>
         ))}
       </ul>

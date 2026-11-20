@@ -1,9 +1,8 @@
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { AlertTriangle, Clock, HandCoins, Receipt } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
+import { StatCard } from "@/components/ds/stat-card";
 import { formatCurrency } from "@/lib/format";
-import { cn } from "@/lib/utils";
 import type { BillingBucket, BillingSummary } from "@/db/queries";
 
 export type BoardFilter = "due" | "awaiting" | "overdue" | "invoice";
@@ -26,35 +25,25 @@ export async function SummaryCards({
     label: string;
     hint: string;
     icon: React.ComponentType<{ className?: string }>;
-    accent: string;
   }[] = [
-    {
-      key: "due",
-      label: t("status.due"),
-      hint: t("summary.due.hint"),
-      icon: HandCoins,
-      accent: "text-primary",
-    },
+    { key: "due", label: t("status.due"), hint: t("summary.due.hint"), icon: HandCoins },
     {
       key: "awaiting",
       label: t("summary.awaiting.label"),
       hint: t("summary.awaiting.hint"),
       icon: Clock,
-      accent: "text-muted-foreground",
     },
     {
       key: "overdue",
       label: t("status.overdue"),
       hint: t("summary.overdue.hint"),
       icon: AlertTriangle,
-      accent: "text-expense",
     },
     {
       key: "invoice",
       label: t("summary.invoice.label"),
       hint: t("summary.invoice.hint"),
       icon: Receipt,
-      accent: "text-muted-foreground",
     },
   ];
 
@@ -66,10 +55,12 @@ export async function SummaryCards({
   };
 
   return (
-    <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       {cards.map((c) => {
         const bucket = buckets[c.key];
         const isActive = active === c.key;
+        // 逾期有件數才變紅、才呼吸；零件時跟其他卡一樣安靜
+        const risk = c.key === "overdue" && bucket.count > 0;
         const Icon = c.icon;
         return (
           <Link
@@ -78,24 +69,18 @@ export async function SummaryCards({
             aria-pressed={isActive}
             className="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <Card
-              className={cn(
-                "h-full transition-colors hover:border-primary/40",
-                isActive && "border-primary ring-1 ring-primary",
-              )}
+            <StatCard
+              label={c.label}
+              value={bucket.count}
+              hint={<span className="tabular-nums">{bucketAmount(bucket)}</span>}
+              icon={<Icon />}
+              tone={risk ? "risk" : "default"}
+              pulse={risk}
+              active={isActive}
+              className="h-full transition-colors hover:border-primary/40"
             >
-              <CardContent className="space-y-1">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm text-muted-foreground">{c.label}</span>
-                  <Icon className={cn("size-4", c.accent)} />
-                </div>
-                <div className="text-2xl font-semibold tabular-nums">{bucket.count}</div>
-                <div className="text-xs tabular-nums text-muted-foreground">
-                  {bucketAmount(bucket)}
-                </div>
-                <p className="text-xs text-muted-foreground/80">{c.hint}</p>
-              </CardContent>
-            </Card>
+              <p className="mt-1 text-xs text-subtle-foreground">{c.hint}</p>
+            </StatCard>
           </Link>
         );
       })}

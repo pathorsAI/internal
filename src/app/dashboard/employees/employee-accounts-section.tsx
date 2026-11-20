@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 import { Eye, EyeOff, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { StatusTag } from "@/components/ds/status-dot";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Combobox } from "@/components/combobox";
@@ -216,8 +216,6 @@ function AccountRow({
   const parts = [
     head,
     a.branchCode ? t("branchSuffix", { code: a.branchCode }) : null,
-    `•••• ${a.accountLast5}`,
-    a.currency,
   ].filter(Boolean);
 
   return (
@@ -225,12 +223,15 @@ function AccountRow({
       <div className="flex flex-wrap items-center gap-1.5 text-sm">
         <span className={a.isActive ? "tabular-nums" : "tabular-nums text-muted-foreground"}>
           {parts.join(" · ")}
+          {" · "}
+          <span className="font-mono">•••• {a.accountLast5}</span>
+          {a.currency ? ` · ${a.currency}` : null}
         </span>
-        {a.defaultForSalary ? <Badge variant="secondary" className="font-normal">{t("chips.salary")}</Badge> : null}
+        {a.defaultForSalary ? <StatusTag tone="primary">{t("chips.salary")}</StatusTag> : null}
         {a.defaultForReimbursement ? (
-          <Badge variant="secondary" className="font-normal">{t("chips.reimbursement")}</Badge>
+          <StatusTag tone="primary">{t("chips.reimbursement")}</StatusTag>
         ) : null}
-        {a.isActive ? null : <Badge variant="outline" className="font-normal">{t("chips.inactive")}</Badge>}
+        {a.isActive ? null : <StatusTag tone="neutral">{t("chips.inactive")}</StatusTag>}
       </div>
       {a.accountHolder || a.label || a.note ? (
         <div className="mt-0.5 text-xs text-muted-foreground">
@@ -239,7 +240,7 @@ function AccountRow({
       ) : null}
       {revealed ? (
         <div className="mt-1.5 flex items-center gap-2">
-          <code className="rounded bg-muted px-2 py-1 font-mono text-sm tabular-nums">{revealed}</code>
+          <code className="rounded-md bg-muted px-2 py-1 font-mono text-sm tabular-nums">{revealed}</code>
           <CopyButton value={revealed} label="" className="size-7" />
           <Button type="button" size="sm" variant="ghost" onClick={() => setRevealed(null)}>
             <EyeOff className="size-3.5" /> {t("hide")}
@@ -287,7 +288,12 @@ function DeleteAccountButton({ id }: Readonly<{ id: number }>) {
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
       <AlertDialogTrigger asChild>
-        <Button type="button" size="sm" variant="ghost" className="text-destructive">
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+        >
           <Trash2 className="size-3.5" /> {t("delete")}
         </Button>
       </AlertDialogTrigger>

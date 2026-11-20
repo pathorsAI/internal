@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Mail } from "lucide-react";
 import { authClient, signIn } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
+import { GlowButton } from "@/components/ds/glow-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useHydrated } from "@/hooks/use-hydrated";
@@ -124,7 +125,7 @@ function SignInMethods() {
   if (step === "password") {
     return (
       <form method="post" onSubmit={onPassword} className="space-y-4">
-        <div className="flex items-center gap-2.5 rounded-lg border bg-muted/40 px-3 py-2.5 text-sm">
+        <div className="flex items-center gap-2.5 rounded-md border bg-muted/40 px-3 py-2.5 text-sm">
           <Mail className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <span className="min-w-0 flex-1 truncate">{email}</span>
           <input type="hidden" name="email" value={email} />
@@ -164,9 +165,9 @@ function SignInMethods() {
             autoFocus
           />
         </div>
-        <Button type="submit" className="h-11 w-full" disabled={pending || !hydrated}>
+        <GlowButton type="submit" className="h-11 w-full" disabled={pending || !hydrated}>
           {pending ? t("password.submitting") : t("password.submit")}
-        </Button>
+        </GlowButton>
         <p className="text-center text-sm">
           <Link
             href={authPageHref("/signup", params, { email })}
@@ -207,9 +208,9 @@ function SignInMethods() {
             placeholder={t("email.placeholder")}
           />
         </div>
-        <Button type="submit" className="h-11 w-full" disabled={pending || !hydrated}>
+        <GlowButton type="submit" className="h-11 w-full" disabled={pending || !hydrated}>
           {pending ? t("email.checking") : t("email.continue")}
-        </Button>
+        </GlowButton>
       </form>
 
       <div className="flex items-center gap-3">

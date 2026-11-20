@@ -8,8 +8,8 @@
 //
 // ⚠️ 現在這個檔案才是唯一真實來源。docs/index.html 已在 #51 縮成一張導向
 // internal.pathors.com 的票根（裡面沒有 landing 的結構或 CSS），不用再往那邊同步。
-// 資產：圖片在 public/landing/images/；中文字體的 @font-face 在 src/app/landing-fonts.css
-// （由 page.tsx import）；拉丁字體直接用產品的 Open Sans／Geist Mono（layout.tsx 的 next/font）。
+// 資產：圖片在 public/landing/images/；字體直接用產品的 Inter／Noto Sans TC／Geist Mono
+// （layout.tsx 的 next/font，以 --font-inter／--font-noto-tc／--font-geist-mono 取用）。
 //
 // 與當初原檔相比的差異（留著當紀錄）：
 //   1. src="images/…"                        → src="/landing/images/…"
@@ -29,6 +29,13 @@
 //   - 文案改成「先講頭痛」：功能區塊的 badge 是以前的頭痛（.badge.pain，刻意壓低），
 //     h2 是現在的結果。hero 不放 badge（開源與 GitHub 已經在導覽列和頁尾）。
 //   - 「其他」那格從 8 格變 12 格（多了固定扣款、雲端帳單、電子發票、Wise）。
+//
+// 設計系統改版（2026-11，見 docs/design-system.md）：
+//   - token 不再抄 hex，直接指向 globals.css 的 app token（--background、--primary…），
+//     深色跟著 <html class="dark">（layout.tsx 的 inline script 在第一次繪製前設好）走，
+//     跟產品同一個開關。字體改成 Inter + Noto Sans TC，landing-fonts.css 退場。
+//   - 圓角：按鈕 8px、卡片 12px、標籤 6px，不再有膠囊。hero 底下是方格紙加一團品牌藍光暈；
+//     hero 的主行動是 .btn.glow（照 globals.css 的 .btn-glow 重寫一份），整頁只有這一顆會發光。
 
 import { LOCALE_SWITCHER_CSS } from "./public-locale-switcher-css";
 
@@ -36,60 +43,45 @@ import { LOCALE_SWITCHER_CSS } from "./public-locale-switcher-css";
  * landing 的樣式，後面接上語言切換器的樣式 —— 那塊法律文件也要用，所以住在
  * ./public-locale-switcher-css.ts。
  *
- * 色票取自 src/app/globals.css 的 oklch token（轉成 hex）：--bg/--surface ← background、
- * --surface-2 ← card、--ink ← foreground、--ink-2/--ink-3 ← muted-foreground 上下一階、
- * --line ← border、--brand ← primary、--brand-wash ← accent、--deep* ← 深色主題。
- * --brand-text 是 landing 自己加的：產品藍在白底只有 2.9:1，小字（badge、chip、標籤）
- * 改用同色相壓暗的版本，對比 > 4.5:1。
+ * 色票直接指向 src/app/globals.css 的 app token（這頁在 Next app 裡渲染，globals.css
+ * 一定在）：--bg ← background、--surface ← card、--surface-2/3 ← sidebar／muted、
+ * --ink* ← foreground／muted-foreground／subtle-foreground、--line ← border、
+ * --brand ← primary、--brand-wash/--brand-text ← accent（產品藍在白底的小字改用
+ * accent-foreground，對比 > 4.5:1）、--amber ← warning、--rose ← destructive。
+ * 深色由 <html class="dark"> 切換，app token 自己會換值；這裡只補 landing 獨有的
+ * 淡底色與陰影的深色版。
  *
- * 字體刻意寫字面名稱 "Open Sans"／"Geist Mono"（next/font 註冊的 family 名），而不是
- * var(--font-sans)：globals.css 把 --font-sans 設成 `Open Sans, sans-serif`，結尾的
- * generic family 會搶在中文字體前面，中文就落到系統預設字。中文依序是 PingFang TC
- * （Mac／iOS 原生、不用下載）→ Noto Sans TC（其他平台，來自 landing-fonts.css）。
+ * 字體用 next/font 註冊的變數（--font-inter 等），它們的值只有字體名稱加 fallback、
+ * 沒有結尾的 generic family，所以中文能接著落到 Noto Sans TC；不直接用
+ * var(--font-sans)，免得哪天它被改成以 sans-serif 結尾、把中文字體擋掉。
  */
 export const LANDING_CSS = `:root{
-  --bg:#FFFFFF; --surface:#FFFFFF; --surface-2:#F7F8F8; --surface-3:#EEF0F2;
-  --ink:#0F1419; --ink-2:#5E656D; --ink-3:#81878D;
-  --line:#E1EAEF; --line-soft:#EEF3F6;
-  --brand:#1E9DF1; --brand-2:#4DACF6; --brand-wash:#E3ECF6; --brand-ink:#FFFFFF; --brand-text:#006EB3;
-  --amber:#A96500; --amber-wash:#FBEFDA;
-  --rose:#C0264D; --rose-wash:#FCE7EC;
-  --deep:#000000; --deep-2:#17181C; --deep-ink:#E7E9EA; --deep-line:#242628;
-  --sh-1:0 1px 2px rgba(15,20,25,.05);
-  --sh-2:0 2px 6px rgba(15,20,25,.05), 0 12px 28px -12px rgba(15,20,25,.16);
-  --sh-3:0 4px 12px rgba(15,20,25,.06), 0 32px 64px -24px rgba(15,20,25,.26);
-  --sans:"Open Sans","Open Sans Fallback","PingFang TC","Noto Sans TC","Microsoft JhengHei",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --bg:var(--background); --surface:var(--card); --surface-2:var(--sidebar); --surface-3:var(--muted);
+  --ink:var(--foreground); --ink-2:var(--muted-foreground); --ink-3:var(--subtle-foreground);
+  --line:var(--border); --line-soft:var(--border-soft);
+  --brand:var(--primary); --brand-2:var(--primary-strong); --brand-wash:var(--accent); --brand-ink:var(--primary-foreground); --brand-text:var(--accent-foreground);
+  --amber:var(--warning); --amber-wash:color-mix(in srgb,var(--warning) 12%,var(--card));
+  --rose:var(--destructive); --rose-wash:color-mix(in srgb,var(--destructive) 9%,var(--card));
+  --grid:var(--grid-line);
+  --deep:#0E0F11; --deep-2:#16181B; --deep-ink:#F2F3F5; --deep-line:#26292F;
+  --sh-1:0 1px 2px rgba(16,24,40,.05);
+  --sh-2:0 1px 2px rgba(16,24,40,.04), 0 12px 28px -12px rgba(16,24,40,.14);
+  --sh-3:0 2px 6px rgba(16,24,40,.05), 0 32px 64px -24px rgba(16,24,40,.22);
+  --sans:var(--font-inter,"Inter"),var(--font-noto-tc,"Noto Sans TC"),-apple-system,BlinkMacSystemFont,"PingFang TC","Microsoft JhengHei","Segoe UI",Roboto,sans-serif;
   --display:var(--sans);
-  --mono:"Geist Mono","Geist Mono Fallback",ui-monospace,SFMono-Regular,Menlo,"PingFang TC","Noto Sans TC",monospace;
-  --cjk:"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;
+  --mono:var(--font-geist-mono,"Geist Mono"),ui-monospace,SFMono-Regular,Menlo,var(--font-noto-tc,"Noto Sans TC"),"PingFang TC",monospace;
+  --cjk:var(--font-noto-tc,"Noto Sans TC"),"PingFang TC","Microsoft JhengHei",sans-serif;
   --pad:clamp(1.25rem,5vw,3rem);
-  --r-s:.78rem; --r-m:1.04rem; --r-l:1.3rem;
+  --r-btn:8px; --r-tag:6px; --r-s:8px; --r-m:12px; --r-l:12px;
+  --ease:cubic-bezier(.16,1,.3,1); --t1:120ms; --t2:200ms;
 }
-@media (prefers-color-scheme:dark){
-  :root:not([data-theme="light"]){
-    --bg:#000000; --surface:#17181C; --surface-2:#0F0F12; --surface-3:#1F2024;
-    --ink:#E7E9EA; --ink-2:#AEB2B4; --ink-3:#72767A;
-    --line:#242628; --line-soft:#191B1C;
-    --brand:#1C9CF0; --brand-2:#60B6FA; --brand-wash:#061622; --brand-ink:#FFFFFF; --brand-text:#1C9CF0;
-    --amber:#E0A44A; --amber-wash:#2B2314;
-    --rose:#F5798F; --rose-wash:#2D1620;
-    --deep:#000000; --deep-2:#17181C; --deep-ink:#E7E9EA; --deep-line:#242628;
-    --sh-1:0 1px 2px rgba(0,0,0,.4);
-    --sh-2:0 2px 6px rgba(0,0,0,.4), 0 14px 30px -14px rgba(0,0,0,.7);
-    --sh-3:0 4px 14px rgba(0,0,0,.5), 0 36px 70px -28px rgba(0,0,0,.9);
-  }
-}
-:root[data-theme="dark"]{
-  --bg:#000000; --surface:#17181C; --surface-2:#0F0F12; --surface-3:#1F2024;
-  --ink:#E7E9EA; --ink-2:#AEB2B4; --ink-3:#72767A;
-  --line:#242628; --line-soft:#191B1C;
-  --brand:#1C9CF0; --brand-2:#60B6FA; --brand-wash:#061622; --brand-ink:#FFFFFF; --brand-text:#1C9CF0;
-  --amber:#E0A44A; --amber-wash:#2B2314;
-  --rose:#F5798F; --rose-wash:#2D1620;
-  --deep:#000000; --deep-2:#17181C; --deep-ink:#E7E9EA; --deep-line:#242628;
+:root.dark{
+  --amber-wash:color-mix(in srgb,var(--warning) 14%,var(--card));
+  --rose-wash:color-mix(in srgb,var(--destructive) 14%,var(--card));
+  --deep:#08090A; --deep-2:#121316;
   --sh-1:0 1px 2px rgba(0,0,0,.4);
-  --sh-2:0 2px 6px rgba(0,0,0,.4), 0 14px 30px -14px rgba(0,0,0,.7);
-  --sh-3:0 4px 14px rgba(0,0,0,.5), 0 36px 70px -28px rgba(0,0,0,.9);
+  --sh-2:0 1px 2px rgba(0,0,0,.4), 0 14px 30px -14px rgba(0,0,0,.7);
+  --sh-3:0 2px 8px rgba(0,0,0,.45), 0 36px 70px -28px rgba(0,0,0,.9);
 }
 
 *{box-sizing:border-box}
@@ -129,7 +121,7 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
 /* pill badge — replaces the mono eyebrow-and-rule */
 .badge{
   display:inline-flex; align-items:center; gap:.5rem; margin-bottom:1.1rem;
-  padding:.36rem .8rem .36rem .55rem; border-radius:999px;
+  padding:.3rem .65rem .3rem .55rem; border-radius:var(--r-tag);
   background:var(--brand-wash); color:var(--brand-text);
   font-size:.78rem; font-weight:600; letter-spacing:-.005em; line-height:1.4;
 }
@@ -139,7 +131,7 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
    The marker is a small "no" sign; long phrases wrap inside the label instead of overflowing. */
 .badge.pain{
   align-items:flex-start; max-width:100%; text-align:left;
-  padding:.34rem .8rem .34rem .62rem; border-radius:.9rem;
+  padding:.34rem .8rem .34rem .62rem; border-radius:var(--r-tag);
   background:color-mix(in srgb,var(--ink) 4%,transparent); color:var(--ink-2);
   border:1px solid var(--line); font-weight:500;
 }
@@ -148,16 +140,34 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
 .badge.pain .x::after{content:""; position:absolute; left:50%; top:50%; width:1.5px; height:10px; background:var(--ink-3); transform:translate(-50%,-50%) rotate(-45deg)}
 
 .btn{
-  display:inline-flex; align-items:center; gap:.5rem; text-decoration:none; cursor:pointer;
-  font-family:var(--sans); font-size:.97rem; font-weight:600; letter-spacing:-.01em;
-  padding:.78rem 1.35rem; border-radius:999px; border:1px solid transparent;
-  transition:transform .16s ease, background .16s ease, border-color .16s ease, box-shadow .16s ease;
+  position:relative; display:inline-flex; align-items:center; gap:.5rem; text-decoration:none; cursor:pointer;
+  font-family:var(--sans); font-size:.95rem; font-weight:600; letter-spacing:-.01em;
+  padding:.72rem 1.25rem; border-radius:var(--r-btn); border:1px solid transparent;
+  transition:transform var(--t1) var(--ease), background var(--t2) var(--ease), border-color var(--t2) var(--ease), box-shadow var(--t2) var(--ease), color var(--t2) var(--ease);
 }
-.btn.primary{background:var(--brand); color:var(--brand-ink); box-shadow:var(--sh-2)}
-.btn.primary:hover{background:var(--brand-2); transform:translateY(-2px)}
+.btn:active{transform:scale(.97)}
+.btn.primary{background:var(--brand); color:var(--brand-ink); box-shadow:var(--sh-1)}
+.btn.primary:hover{background:var(--brand-2)}
+/* 整頁唯一的主行動（hero 的登入／進入系統）：照 globals.css 的 .btn-glow 重寫一份 ——
+   這頁不吃 React 元件，<GlowButton> 拿不到。 */
+.btn.glow{
+  overflow:hidden; color:#fff;
+  background:linear-gradient(180deg,var(--brand-2),var(--brand));
+  box-shadow:0 0 0 1px var(--brand), inset 0 1px 0 rgba(255,255,255,.28), 0 1px 2px rgba(0,0,0,.2), 0 6px 20px -6px var(--glow);
+}
+.btn.glow::after{
+  content:""; position:absolute; inset-block:0; left:-60%; width:40%; pointer-events:none;
+  background:linear-gradient(100deg,transparent,rgba(255,255,255,.35),transparent);
+  transform:skewX(-18deg); transition:left .5s ease;
+}
+.btn.glow:hover{
+  background:linear-gradient(180deg,var(--brand-2),var(--brand));
+  box-shadow:0 0 0 1px var(--brand), inset 0 1px 0 rgba(255,255,255,.28), 0 1px 2px rgba(0,0,0,.2), 0 8px 28px -4px var(--glow), 0 0 0 4px var(--halo);
+}
+.btn.glow:hover::after{left:120%}
 .btn.ghost{background:var(--surface); color:var(--ink); border-color:var(--line); box-shadow:var(--sh-1)}
-.btn.ghost:hover{border-color:var(--brand); color:var(--brand-text); transform:translateY(-2px)}
-.btn.sm{padding:.5rem 1rem; font-size:.88rem}
+.btn.ghost:hover{border-color:color-mix(in srgb,var(--brand) 42%,var(--line)); background:var(--surface-2)}
+.btn.sm{padding:.45rem .9rem; font-size:.86rem}
 .btn svg{width:17px; height:17px; fill:currentColor; flex:none}
 .btn.sm svg{width:15px; height:15px}
 .btns{display:flex; flex-wrap:wrap; gap:.7rem}
@@ -181,10 +191,19 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
 
 /* ---------- hero ---------- */
 .hero{padding-top:clamp(3rem,7vw,5.5rem); padding-bottom:0; text-align:center; overflow:hidden}
-.glow{
-  position:absolute; top:-14%; left:50%; transform:translateX(-50%);
-  width:min(1150px,140%); height:640px; pointer-events:none; z-index:0;
-  background:radial-gradient(46% 50% at 50% 50%, color-mix(in srgb,var(--brand) 20%,transparent) 0%, transparent 72%);
+/* hero 底下的方格紙＋品牌藍光暈（.grid-paper 的 landing 版）。div 本身是光暈，::before 是格線。 */
+.hero-paper{
+  position:absolute; inset:0 0 auto; height:min(860px,100%); pointer-events:none; z-index:0;
+  background:
+    radial-gradient(closest-side, var(--halo), transparent) 50% 18% / min(1100px,130%) 560px no-repeat,
+    radial-gradient(closest-side, color-mix(in srgb,var(--brand) 12%,transparent), transparent) 50% 30% / min(760px,110%) 420px no-repeat;
+}
+.hero-paper::before{
+  content:""; position:absolute; inset:0;
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px), linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:22px 22px; background-position:center top;
+  -webkit-mask-image:radial-gradient(ellipse 62% 70% at 50% 28%, #000 25%, transparent 78%);
+  mask-image:radial-gradient(ellipse 62% 70% at 50% 28%, #000 25%, transparent 78%);
 }
 .hero > .tight, .hero > .stage{position:relative; z-index:1}
 .hero h1{margin-bottom:1.25rem}
@@ -200,11 +219,11 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
 .pull{margin-top:calc(clamp(3rem,6vw,5rem) * -1 - clamp(2rem,5vw,4rem))}
 
 /* ---------- segmented control ---------- */
-.seg{display:inline-flex; padding:4px; gap:4px; border-radius:999px; background:var(--surface-2); border:1px solid var(--line)}
+.seg{display:inline-flex; padding:3px; gap:3px; border-radius:var(--r-btn); background:var(--surface-2); border:1px solid var(--line)}
 .seg button{
   font-family:var(--sans); font-size:.85rem; font-weight:600; letter-spacing:-.01em;
-  padding:.44rem 1rem; border:0; border-radius:999px; background:transparent; color:var(--ink-3); cursor:pointer;
-  transition:.18s ease;
+  padding:.4rem .9rem; border:0; border-radius:var(--r-tag); background:transparent; color:var(--ink-2); cursor:pointer;
+  transition:background var(--t2) var(--ease), color var(--t2) var(--ease), box-shadow var(--t2) var(--ease);
 }
 .seg button[aria-selected="true"]{background:var(--surface); color:var(--ink); box-shadow:var(--sh-1)}
 .seg button:hover{color:var(--ink)}
@@ -269,7 +288,7 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
 .chip{
   display:inline-flex; align-items:center; gap:.4rem; white-space:nowrap; flex:none;
   font-size:.78rem; font-weight:600; letter-spacing:-.005em;
-  padding:.26rem .68rem; border-radius:999px; line-height:1.45;
+  padding:.22rem .55rem; border-radius:var(--r-tag); line-height:1.45;
 }
 .chip .dot{width:6px; height:6px; border-radius:50%; background:currentColor}
 .chip.ok{background:var(--brand-wash); color:var(--brand-text)}
@@ -278,8 +297,8 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
 .chip.flat{background:var(--surface-2); color:var(--ink-2); border:1px solid var(--line)}
 /* ---------- problem cards ---------- */
 .trio{display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(265px,1fr))}
-.pcard{padding:1.5rem 1.4rem; border-radius:var(--r-m); background:var(--surface); border:1px solid var(--line); box-shadow:var(--sh-1); transition:transform .2s ease, box-shadow .2s ease}
-.pcard:hover{transform:translateY(-3px); box-shadow:var(--sh-2)}
+.pcard{padding:1.5rem 1.4rem; border-radius:var(--r-m); background:var(--surface); border:1px solid var(--line); box-shadow:var(--sh-1); transition:transform var(--t2) var(--ease), box-shadow var(--t2) var(--ease), border-color var(--t2) var(--ease)}
+.pcard:hover{transform:translateY(-2px); box-shadow:var(--sh-2); border-color:color-mix(in srgb,var(--brand) 28%,var(--line))}
 .pcard h3{margin-bottom:.55rem; font-size:1.12rem}
 .pcard p{margin:0; font-size:.94rem; color:var(--ink-2)}
 
@@ -383,13 +402,13 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
 .term.play .l:nth-child(2){transition-delay:.4s} .term.play .l:nth-child(3){transition-delay:.9s}
 .term.play .l:nth-child(4){transition-delay:1.2s} .term.play .l:nth-child(5){transition-delay:1.4s}
 .term.play .l:nth-child(6){transition-delay:1.6s} .term.play .l:nth-child(7){transition-delay:1.9s}
-.term .q{color:#94CFF9} .term .k{color:#E0A44A} .term .r{color:#F5798F} .term .c{opacity:.42}
+.term .q{color:#8CC0F7} .term .k{color:#E3AA4E} .term .r{color:#F0807A} .term .c{opacity:.42}
 
 /* ---------- tiles ---------- */
 .tiles{display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(255px,1fr))}
 @media(min-width:940px){ .tiles{grid-template-columns:repeat(3,1fr)} }
-.tile{padding:1.4rem 1.35rem; border-radius:var(--r-m); background:var(--surface); border:1px solid var(--line); box-shadow:var(--sh-1); transition:transform .2s ease, box-shadow .2s ease, border-color .2s}
-.tile:hover{transform:translateY(-3px); box-shadow:var(--sh-2); border-color:color-mix(in srgb,var(--brand) 35%,var(--line))}
+.tile{padding:1.4rem 1.35rem; border-radius:var(--r-m); background:var(--surface); border:1px solid var(--line); box-shadow:var(--sh-1); transition:transform var(--t2) var(--ease), box-shadow var(--t2) var(--ease), border-color var(--t2) var(--ease)}
+.tile:hover{transform:translateY(-2px); box-shadow:var(--sh-2); border-color:color-mix(in srgb,var(--brand) 35%,var(--line))}
 .tile h3{font-size:1.05rem; margin-bottom:.5rem}
 .tile p{margin:0; font-size:.92rem; color:var(--ink-2); line-height:1.5}
 
@@ -397,16 +416,26 @@ section{padding-block:clamp(4rem,8vw,7rem); position:relative}
 .finale{
   border-radius:var(--r-l); padding:clamp(2.5rem,6vw,4.5rem) clamp(1.5rem,4vw,3rem); text-align:center;
   /* a deeper shade of the product blue: white copy on the raw brand blue is under 3:1 */
-  --finale:color-mix(in srgb,var(--brand) 72%,#000);
-  background:var(--finale); color:var(--brand-ink); position:relative; overflow:hidden;
+  --finale:color-mix(in srgb,var(--brand) 82%,#000);
+  background:
+    radial-gradient(closest-side, rgba(255,255,255,.14), transparent) 85% -20% / 640px 420px no-repeat,
+    var(--finale);
+  color:var(--brand-ink); position:relative; overflow:hidden; isolation:isolate;
 }
 .finale h2{color:var(--brand-ink); margin-bottom:.9rem; max-width:17ch; margin-inline:auto}
 :lang(zh) .finale h2{max-width:none}
 .finale p{color:var(--brand-ink); opacity:.82; max-width:44ch; margin:0 auto 2rem; font-size:1.08rem}
-.finale .btn.primary{background:var(--brand-ink); color:var(--finale)}
-.finale .btn.primary:hover{background:var(--brand-ink); opacity:.9}
+.finale::before{
+  content:""; position:absolute; inset:0; z-index:-1; pointer-events:none;
+  background-image:linear-gradient(rgba(255,255,255,.08) 1px,transparent 1px), linear-gradient(90deg,rgba(255,255,255,.08) 1px,transparent 1px);
+  background-size:22px 22px;
+  -webkit-mask-image:radial-gradient(ellipse 70% 120% at 85% 0%, #000 15%, transparent 70%);
+  mask-image:radial-gradient(ellipse 70% 120% at 85% 0%, #000 15%, transparent 70%);
+}
+.finale .btn.primary{background:#fff; color:var(--finale); box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.finale .btn.primary:hover{background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.2), 0 0 0 4px rgba(255,255,255,.18)}
 .finale .btn.ghost{background:transparent; color:var(--brand-ink); border-color:color-mix(in srgb,var(--brand-ink) 40%,transparent); box-shadow:none}
-.finale .btn.ghost:hover{border-color:var(--brand-ink); color:var(--brand-ink)}
+.finale .btn.ghost:hover{border-color:var(--brand-ink); color:var(--brand-ink); background:rgba(255,255,255,.06)}
 .finale .btns{justify-content:center}
 .finale .already{margin:1.6rem auto 0; font-size:.95rem; opacity:.75}
 .finale .already a{color:var(--brand-ink); text-decoration:underline; text-underline-offset:3px}
@@ -428,6 +457,8 @@ footer .sp{margin-left:auto}
   html{scroll-behavior:auto}
   *,*::before,*::after{animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important}
   .rv{opacity:1; transform:none}
+  .btn.glow::after{display:none}
+  .btn:active,.pcard:hover,.tile:hover{transform:none}
 }
 
 ` + LOCALE_SWITCHER_CSS;
@@ -439,7 +470,7 @@ footer .sp{margin-left:auto}
 export const LANDING_HTML = `<main id="top">
 
 <section class="hero">
-  <div class="glow" aria-hidden="true"></div>
+  <div class="hero-paper" aria-hidden="true"></div>
   <div class="tight">
     <h1>{{hero.titleA}} <br>{{hero.titleB}}</h1>
     <p class="lede">{{hero.lede}}</p>

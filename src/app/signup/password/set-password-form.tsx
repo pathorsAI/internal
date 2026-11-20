@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { AuthShell } from "@/components/auth/auth-shell";
 import { formText } from "@/components/auth/form-text";
 import { NewPasswordFields } from "@/components/auth/new-password-fields";
-import { Button } from "@/components/ui/button";
+import { GlowButton } from "@/components/ds/glow-button";
 import { useHydrated } from "@/hooks/use-hydrated";
 import { checkNewPassword, type NewPasswordProblem } from "@/lib/password-policy";
 import { setInitialPassword } from "./actions";
@@ -58,9 +58,9 @@ export function SetPasswordForm({ redirectTo }: Readonly<{ redirectTo: string }>
             {t("failed")}
           </p>
         )}
-        <Button type="submit" className="h-11 w-full" disabled={pending || !hydrated}>
+        <GlowButton type="submit" className="h-11 w-full" disabled={pending || !hydrated}>
           {pending ? t("submitting") : t("submit")}
-        </Button>
+        </GlowButton>
       </form>
     </AuthShell>
   );

@@ -4,7 +4,8 @@ import { DeleteButton } from "@/components/delete-button";
 import { deleteContract } from "@/db/mutations";
 import { EditContractForm } from "./edit-contract-form";
 import { PageHeader } from "@/components/page-header";
-import { Badge } from "@/components/ui/badge";
+import { StatusTag } from "@/components/ds/status-dot";
+import { Progress } from "@/components/ds/progress";
 import { TableCard } from "@/components/table-card";
 import { EmptyRow } from "@/components/empty-state";
 import {
@@ -24,7 +25,6 @@ import {
   listSubscriptionsByContract,
 } from "@/db/queries";
 import { formatCurrency, formatDate } from "@/lib/format";
-import { cn } from "@/lib/utils";
 import { NewContractDialog } from "./new-contract-dialog";
 import { ContractFileLink } from "./contract-file-link";
 import { requireOrg } from "@/lib/session";
@@ -33,14 +33,15 @@ import { ContractSubscriptions } from "./contract-subscriptions";
 
 export const dynamic = "force-dynamic";
 
-const statusVariant: Record<string, "default" | "secondary" | "outline"> = {
-  draft: "outline",
-  active: "default",
-  completed: "secondary",
-  cancelled: "outline",
+const statusTone: Record<string, "neutral" | "primary" | "income"> = {
+  draft: "neutral",
+  active: "primary",
+  completed: "income",
+  cancelled: "neutral",
 };
 
 // 收款進度欄：已收 / 合約金額 + 進度條，下方顯示未收與累計成本（成本不從合約金額扣）。
+// 欄寬固定，各列的進度條與數字上下對齊。
 function CollectionCell({
   amount,
   currency,
@@ -55,45 +56,45 @@ function CollectionCell({
   t: Awaited<ReturnType<typeof getTranslations<"contracts">>>;
 }>) {
   const total = amount == null ? null : Number(amount);
-  const pct = total && total > 0 ? Math.min(100, Math.round((received / total) * 100)) : null;
+  const pct = total && total > 0 ? Math.round((received / total) * 100) : null;
   const remaining = total == null ? null : total - received;
-  // 進度條填色依收款狀態:溢收→支出色,已收齊→收入色,進行中→主色;無金額時留一條空軌維持等高。
-  const overCollected = total != null && received > total;
-  const fullyCollected = total != null && received >= total;
-  let barColor = "bg-primary";
-  if (overCollected) barColor = "bg-expense";
-  else if (fullyCollected) barColor = "bg-income";
-  let remainingLabel: string;
+  let remainingLabel: React.ReactNode;
   if (remaining == null) remainingLabel = "—";
   else if (remaining > 0)
     remainingLabel = t("list.collection.unpaid", {
       amount: formatCurrency(remaining, currency),
     });
   else if (remaining < 0)
-    remainingLabel = t("list.collection.overCollected", {
-      amount: formatCurrency(-remaining, currency),
-    });
-  else remainingLabel = t("list.collection.fullyPaid");
+    // 溢收是要人處理的異常，用 destructive；其餘維持灰字。
+    remainingLabel = (
+      <span className="text-destructive">
+        {t("list.collection.overCollected", {
+          amount: formatCurrency(-remaining, currency),
+        })}
+      </span>
+    );
+  else remainingLabel = <span className="text-income">{t("list.collection.fullyPaid")}</span>;
   return (
-    <div className="min-w-[170px] space-y-1">
+    <div className="w-72 space-y-1.5">
       <div className="flex items-baseline justify-between gap-2 text-sm tabular-nums">
         <span className="font-medium">{formatCurrency(received, currency)}</span>
-        <span className="text-xs text-muted-foreground">
+        <span className="truncate text-xs text-muted-foreground">
           {total == null ? t("list.collection.unsetAmount") : `/ ${formatCurrency(total, currency)}`}
         </span>
       </div>
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-        {pct != null && (
-          <div
-            className={cn("h-full rounded-full", barColor)}
-            style={{ width: `${pct}%` }}
-          />
-        )}
+      <div className="flex items-center gap-2">
+        {/* 無金額時留一條空軌維持等高 */}
+        <Progress value={received} max={total ?? 0} className="flex-1" />
+        <span className="w-9 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+          {pct == null ? "—" : `${pct}%`}
+        </span>
       </div>
       <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground tabular-nums">
-        <span>{remainingLabel}</span>
+        <span className="truncate">{remainingLabel}</span>
         {cost > 0 && (
-          <span>{t("list.collection.cost", { amount: formatCurrency(cost, currency) })}</span>
+          <span className="shrink-0">
+            {t("list.collection.cost", { amount: formatCurrency(cost, currency) })}
+          </span>
         )}
       </div>
     </div>
@@ -175,14 +176,14 @@ export default async function ContractsPage() {
                           t={t}
                         />
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
+                      <TableCell className="text-xs whitespace-nowrap text-muted-foreground tabular-nums">
                         {c.startDate ? formatDate(c.startDate) : "—"}
                         {c.endDate ? ` ~ ${formatDate(c.endDate)}` : ""}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={statusVariant[c.status] ?? "outline"}>
+                        <StatusTag tone={statusTone[c.status] ?? "neutral"}>
                           {statusLabels[c.status] ?? c.status}
-                        </Badge>
+                        </StatusTag>
                       </TableCell>
                       <TableCell>
                         {c.fileUrl ? (

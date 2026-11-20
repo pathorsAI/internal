@@ -2,7 +2,7 @@ import { getTranslations } from "next-intl/server";
 import { EmptyRow } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { TableCard } from "@/components/table-card";
-import { Badge } from "@/components/ui/badge";
+import { StatusTag } from "@/components/ds/status-dot";
 import {
   Table,
   TableBody,
@@ -17,11 +17,11 @@ import { requireOrg } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
-const actionVariant: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
-  create: "secondary",
-  update: "outline",
-  delete: "destructive",
-  read: "outline",
+const actionTone: Record<string, "neutral" | "primary" | "income" | "risk"> = {
+  create: "income",
+  update: "primary",
+  delete: "risk",
+  read: "neutral",
 };
 
 export default async function ActivityPage() {
@@ -76,27 +76,31 @@ export default async function ActivityPage() {
             ) : (
               rows.map((r) => (
                 <TableRow key={r.id}>
-                  <TableCell className="whitespace-nowrap text-muted-foreground">
+                  <TableCell className="whitespace-nowrap text-xs text-muted-foreground tabular-nums">
                     {formatDateTime(r.createdAt)}
                   </TableCell>
-                  <TableCell className="whitespace-nowrap">
+                  <TableCell className="whitespace-nowrap font-medium">
                     {r.actorName ?? r.actorEmail ?? (r.channel === "system" ? t("systemActor") : "—")}
                   </TableCell>
                   <TableCell>
                     {r.channel === "mcp" || r.channel === "system" ? (
-                      <Badge variant="secondary">{t(`source.${r.channel}`)}</Badge>
+                      <StatusTag tone={r.channel === "mcp" ? "primary" : "neutral"}>
+                        {t(`source.${r.channel}`)}
+                      </StatusTag>
                     ) : (
-                      <span className="text-muted-foreground">{t("source.web")}</span>
+                      <span className="text-xs text-muted-foreground">{t("source.web")}</span>
                     )}
                   </TableCell>
                   <TableCell>
-                    <Badge variant={actionVariant[r.action] ?? "outline"}>
+                    <StatusTag tone={actionTone[r.action] ?? "neutral"}>
                       {actionLabel[r.action] ?? r.action}
-                    </Badge>
+                    </StatusTag>
                   </TableCell>
                   <TableCell className="whitespace-nowrap">
                     {entityLabel[r.entityType] ?? r.entityType}
-                    {r.entityId == null ? "" : ` #${r.entityId}`}
+                    {r.entityId == null ? null : (
+                      <span className="ml-1 text-xs text-muted-foreground tabular-nums">#{r.entityId}</span>
+                    )}
                   </TableCell>
                   <TableCell className="max-w-[28ch] truncate text-muted-foreground" title={r.summary ?? ""}>
                     {r.summary ?? "—"}

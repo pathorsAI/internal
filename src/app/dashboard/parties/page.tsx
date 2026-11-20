@@ -4,7 +4,6 @@ import { DeleteButton } from "@/components/delete-button";
 import { deleteParty } from "@/db/mutations";
 import { EditPartyForm } from "./edit-party-form";
 import { PageHeader } from "@/components/page-header";
-import { Badge } from "@/components/ui/badge";
 import { TableCard } from "@/components/table-card";
 import { EmptyRow } from "@/components/empty-state";
 import {
@@ -16,29 +15,31 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { listParties, listBankAccounts, type PartyTotal } from "@/db/queries";
-import { formatCurrency } from "@/lib/format";
+import { Amount } from "@/components/amount";
 import { CurrencyFlag } from "@/components/currency-flag";
-import { cn } from "@/lib/utils";
 import { NewPartyDialog } from "./new-party-dialog";
 import { requireOrg } from "@/lib/session";
 import { PartyAvatar } from "@/components/party-avatar";
 
 export const dynamic = "force-dynamic";
 
-/** 依幣別逐行顯示某方向（收款/付款）的累計；不同幣別分開，不換算。 */
+/** 依幣別逐行顯示某方向（收款/付款）的累計；不同幣別分開，不換算。收款綠色帶 +、付款墨色帶 −。 */
 function MoneyLines({
   totals,
   field,
-  tone,
-}: Readonly<{ totals: PartyTotal[]; field: "received" | "paid"; tone: string }>) {
+}: Readonly<{ totals: PartyTotal[]; field: "received" | "paid" }>) {
   const lines = totals.filter((t) => t[field] !== 0);
   if (lines.length === 0) return <span className="text-muted-foreground">—</span>;
   return (
     <div className="flex flex-col items-end gap-0.5">
       {lines.map((t) => (
-        <span key={t.currency} className={cn("flex items-center justify-end gap-1.5 tabular-nums", tone)}>
+        <span key={t.currency} className="flex items-center justify-end gap-1.5">
           <CurrencyFlag currency={t.currency} className="h-3" />
-          {formatCurrency(t[field], t.currency)}
+          <Amount
+            value={t[field]}
+            currency={t.currency}
+            kind={field === "received" ? "income" : "expense"}
+          />
         </span>
       ))}
     </div>
@@ -95,16 +96,16 @@ export default async function PartiesPage() {
                           <span className="truncate">{s.name}</span>
                         </div>
                       </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{labelMap[s.label] ?? s.label}</Badge>
+                      <TableCell className="text-muted-foreground">
+                        {labelMap[s.label] ?? s.label}
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{s.taxId ?? "—"}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground tabular-nums">{s.taxId ?? "—"}</TableCell>
                       <TableCell className="text-right tabular-nums">{s.txnCount}</TableCell>
                       <TableCell className="text-right font-medium">
-                        <MoneyLines totals={s.totals} field="received" tone="text-income" />
+                        <MoneyLines totals={s.totals} field="received" />
                       </TableCell>
                       <TableCell className="text-right font-medium">
-                        <MoneyLines totals={s.totals} field="paid" tone="text-expense" />
+                        <MoneyLines totals={s.totals} field="paid" />
                       </TableCell>
                     </>
                   }

@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { TableCard } from "@/components/table-card";
@@ -20,15 +19,16 @@ import type { IntegrationSummary } from "@/lib/integrations/types";
 import type { SalaryMonthStatus, SalaryReconciliation } from "@/lib/simpany-salary";
 import { currentYearMonth } from "@/lib/simpany-payroll";
 import { cn } from "@/lib/utils";
+import { StatusTag } from "@/components/ds/status-dot";
 import { ArrearsDetailSheet, SalarySyncButton } from "./simpany-salary-client";
 import { SalaryFilingSheet } from "./simpany-salary-filing";
 
-const statusClass: Record<SalaryMonthStatus, string> = {
-  settled: "border-emerald-500/40 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400",
-  draft: "border-sky-500/40 bg-sky-500/5 text-sky-700 dark:text-sky-400",
-  empty: "border-amber-500/40 bg-amber-500/5 text-amber-700 dark:text-amber-400",
-  missing: "border-dashed text-muted-foreground",
-  not_synced: "border-dashed text-muted-foreground/70",
+const statusTone: Record<SalaryMonthStatus, "income" | "primary" | "warning" | "neutral"> = {
+  settled: "income",
+  draft: "primary",
+  empty: "warning",
+  missing: "neutral",
+  not_synced: "neutral",
 };
 
 /**
@@ -56,7 +56,7 @@ export async function SimpanySalarySection({
     <section className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
-          <h2 className="text-base font-semibold">{t("title")}</h2>
+          <h2 className="text-sm font-medium text-muted-foreground">{t("title")}</h2>
           <p className="text-sm text-muted-foreground">{t("description")}</p>
           <p className="text-xs text-muted-foreground">
             {recon.lastSyncedAt
@@ -92,20 +92,23 @@ export async function SimpanySalarySection({
       </div>
 
       <Card className="gap-0 p-3">
-        <div className="mb-2 text-sm font-medium">{t("months.title")}</div>
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-6 lg:grid-cols-12">
+        <div className="mb-2 text-sm font-medium text-muted-foreground">{t("months.title")}</div>
+        <div className="grid grid-cols-3 gap-x-2 gap-y-3 sm:grid-cols-6 lg:grid-cols-12">
           {recon.months.map((m) => (
             <div
               key={m.month}
-              className={cn("flex flex-col gap-0.5 rounded-md border px-2 py-1.5 text-xs", statusClass[m.status])}
+              className={cn(
+                "flex flex-col items-start gap-1 text-xs",
+                m.status === "not_synced" && "text-muted-foreground",
+              )}
               title={m.payday ? t("months.payday", { date: m.payday }) : undefined}
             >
               <span className="font-medium tabular-nums text-foreground">
                 {t("months.month", { month: m.month })}
               </span>
-              <span>{t(`months.status.${m.status}`)}</span>
+              <StatusTag tone={statusTone[m.status]}>{t(`months.status.${m.status}`)}</StatusTag>
               {m.employeeCount > 0 && m.status !== "missing" ? (
-                <span className="tabular-nums opacity-80">
+                <span className="tabular-nums text-muted-foreground">
                   {t("months.filedOf", { filed: m.filedCount, total: m.employeeCount })}
                 </span>
               ) : null}
@@ -144,18 +147,16 @@ export async function SimpanySalarySection({
                   <TableCell>
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="font-medium">{e.name}</span>
-                      {e.isCompanyOwner ? <Badge variant="secondary">{t("arrears.owner")}</Badge> : null}
+                      {e.isCompanyOwner ? <StatusTag tone="primary">{t("arrears.owner")}</StatusTag> : null}
                       {e.employeeId == null ? (
-                        <Badge variant="outline" className="text-muted-foreground">
-                          {t("arrears.unlinked")}
-                        </Badge>
+                        <StatusTag tone="neutral">{t("arrears.unlinked")}</StatusTag>
                       ) : null}
                     </div>
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
                     <div>{formatCurrency(e.totalDeclaredNet)}</div>
                     {e.totalEstimatedNet > 0 ? (
-                      <div className="text-xs text-amber-700 dark:text-amber-400">
+                      <div className="text-xs text-warning">
                         {t("arrears.estimatedExtra", { amount: formatCurrency(e.totalEstimatedNet) })}
                       </div>
                     ) : null}
@@ -167,11 +168,11 @@ export async function SimpanySalarySection({
                     ) : null}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
-                    <div className={e.arrears > 0 ? "font-semibold text-expense" : "text-muted-foreground"}>
+                    <div className={e.arrears > 0 ? "font-semibold text-destructive" : "text-muted-foreground"}>
                       {formatCurrency(e.arrears)}
                     </div>
                     {e.estimatedArrears > 0 ? (
-                      <div className="text-xs text-amber-700 dark:text-amber-400">
+                      <div className="text-xs text-warning">
                         {t("arrears.estimatedExtra", { amount: formatCurrency(e.estimatedArrears) })}
                       </div>
                     ) : null}
@@ -197,7 +198,7 @@ export async function SimpanySalarySection({
                 <TableCell className="text-right font-semibold tabular-nums">
                   {formatCurrency(recon.totals.arrears)}
                   {recon.totals.estimatedArrears > 0 ? (
-                    <div className="text-xs font-normal text-amber-700 dark:text-amber-400">
+                    <div className="text-xs font-normal text-warning">
                       {t("arrears.estimatedExtra", { amount: formatCurrency(recon.totals.estimatedArrears) })}
                     </div>
                   ) : null}

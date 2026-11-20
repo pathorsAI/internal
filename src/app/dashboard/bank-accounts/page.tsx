@@ -4,7 +4,8 @@ import { DeleteButton } from "@/components/delete-button";
 import { deleteBankAccount } from "@/db/mutations";
 import { EditBankAccountForm } from "./edit-bank-account-form";
 import { PageHeader } from "@/components/page-header";
-import { Badge } from "@/components/ui/badge";
+import { StatusTag } from "@/components/ds/status-dot";
+import { Amount } from "@/components/amount";
 import { TableCard } from "@/components/table-card";
 import { EmptyRow } from "@/components/empty-state";
 import {
@@ -16,7 +17,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { listAccountBalances } from "@/db/queries";
-import { formatCurrency } from "@/lib/format";
 import { CurrencyFlag } from "@/components/currency-flag";
 import { NewBankAccountDialog } from "./new-bank-account-dialog";
 import { canManageOrg, requireOrgWithRole } from "@/lib/session";
@@ -25,6 +25,21 @@ import { parseWiseConfig } from "@/lib/wise-sync";
 import { WiseSyncButton } from "./wise-sync-sheet";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * 餘額不帶正負號；只有變成負數（透支、記錯帳）時帶「−」並標紅 —— 那是要有人去處理的。
+ */
+function Balance({ value, currency }: Readonly<{ value: number | string; currency: string }>) {
+  const negative = Number(value) < 0;
+  return (
+    <Amount
+      value={value}
+      currency={currency}
+      kind={negative ? "expense" : "neutral"}
+      className={negative ? "text-destructive" : undefined}
+    />
+  );
+}
 
 export default async function BankAccountsPage() {
   const t = await getTranslations("bankAccounts");
@@ -40,6 +55,8 @@ export default async function BankAccountsPage() {
       .accountMappings.map((m) => m.bankAccountId)
       .filter((id): id is number => id !== null),
   );
+  // 整合斷線（error / needs_reauth）時，對應帳戶上的 Wise 標籤改成紅點脈衝，提示同步失敗。
+  const wiseFailed = Boolean(wise?.enabled && wise.status !== "connected");
   const canSyncWise =
     canManageOrg(role) &&
     Boolean(wise?.enabled && wise.status === "connected") &&
@@ -78,16 +95,19 @@ export default async function BankAccountsPage() {
                         <span className="flex items-center gap-2">
                           {a.name}
                           {wiseMapped.has(a.id) ? (
-                            <Badge variant="outline" className="font-normal">
-                              {tw("sync.mappedBadge")}
-                            </Badge>
+                            <span title={wiseFailed ? (wise?.lastError ?? undefined) : undefined}>
+                              <StatusTag
+                                tone={wiseFailed ? "risk" : "primary"}
+                                pulse={wiseFailed}
+                              >
+                                {wiseFailed ? tw("sync.mappedFailed") : tw("sync.mappedBadge")}
+                              </StatusTag>
+                            </span>
                           ) : null}
                         </span>
                       </TableCell>
-                      <TableCell>
-                        <Badge variant={a.kind === "bank" ? "outline" : "secondary"}>
-                          {a.kind === "bank" ? t("physical") : t("virtual")}
-                        </Badge>
+                      <TableCell className="text-muted-foreground">
+                        {a.kind === "bank" ? t("physical") : t("virtual")}
                       </TableCell>
                       <TableCell>
                         <span className="flex items-center gap-2">
@@ -96,15 +116,15 @@ export default async function BankAccountsPage() {
                         </span>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={a.isActive ? "outline" : "secondary"}>
+                        <StatusTag tone={a.isActive ? "income" : "neutral"}>
                           {a.isActive ? t("active") : t("inactive")}
-                        </Badge>
+                        </StatusTag>
                       </TableCell>
-                      <TableCell className="text-right tabular-nums text-muted-foreground">
-                        {formatCurrency(a.openingBalance, a.currency)}
+                      <TableCell className="text-right text-muted-foreground">
+                        <Balance value={a.openingBalance} currency={a.currency} />
                       </TableCell>
-                      <TableCell className="text-right font-semibold tabular-nums">
-                        {formatCurrency(a.bookBalance, a.currency)}
+                      <TableCell className="text-right font-semibold">
+                        <Balance value={a.bookBalance} currency={a.currency} />
                       </TableCell>
                     </>
                   }

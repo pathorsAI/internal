@@ -118,7 +118,7 @@ function SyncResultView({ result }: Readonly<{ result: SyncResult }>) {
         })}
       </p>
       {result.incomplete ? (
-        <p className="rounded-md bg-amber-500/10 px-3 py-2 text-amber-700 dark:text-amber-400">
+        <p className="rounded-md bg-warning/10 px-3 py-2 text-warning">
           {t("incomplete")}
         </p>
       ) : null}

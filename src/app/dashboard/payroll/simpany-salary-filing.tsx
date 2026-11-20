@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { AlertTriangle, CheckCircle2, Mail, Send } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { StatusTag } from "@/components/ds/status-dot";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -98,11 +98,9 @@ function PreviewTable({ preview }: Readonly<{ preview: SalaryFilingPreview }>) {
               <TableCell className="pl-3">
                 <div className="flex flex-wrap items-center gap-1.5">
                   <span className="font-medium">{e.name}</span>
-                  {e.isCompanyOwner ? <Badge variant="secondary">{t("owner")}</Badge> : null}
+                  {e.isCompanyOwner ? <StatusTag tone="primary">{t("owner")}</StatusTag> : null}
                   {e.ownerFlagChange ? (
-                    <Badge variant="outline" className="border-amber-500/40 text-amber-700 dark:text-amber-400">
-                      {t("ownerChange")}
-                    </Badge>
+                    <StatusTag tone="warning">{t("ownerChange")}</StatusTag>
                   ) : null}
                 </div>
                 <div className="text-xs text-muted-foreground tabular-nums">
@@ -151,7 +149,7 @@ function Notice({
   const cls =
     tone === "risk"
       ? "border-destructive/40 bg-destructive/5 text-destructive"
-      : "border-amber-500/40 bg-amber-500/5 text-amber-800 dark:text-amber-300";
+      : "border-warning/40 bg-warning/5 text-warning";
   return (
     <div className={`space-y-1 rounded-md border px-3 py-2 text-sm ${cls}`}>
       <div className="flex items-center gap-1.5 font-medium">
@@ -199,7 +197,7 @@ function ApplyResultView({ result }: Readonly<{ result: SalaryApplyResult }>) {
   const bad = result.verification.filter((v) => !v.ok);
   return (
     <div className="space-y-2 text-sm">
-      <p className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400">
+      <p className="flex items-center gap-1.5 text-income">
         <CheckCircle2 className="size-4" />
         {t("applied", { names: result.written.join("、") })}
       </p>
@@ -207,7 +205,7 @@ function ApplyResultView({ result }: Readonly<{ result: SalaryApplyResult }>) {
         <p className="text-xs text-muted-foreground">{t("verified")}</p>
       ) : (
         <div className="space-y-1">
-          <p className="text-xs text-amber-800 dark:text-amber-300">{t("mismatch")}</p>
+          <p className="text-xs text-warning">{t("mismatch")}</p>
           <div className="overflow-x-auto rounded-md border">
             <Table className="min-w-[360px]">
               <TableHeader>
@@ -338,7 +336,7 @@ function PayslipPanel({ year, month }: Readonly<{ year: number; month: number }>
 
   return (
     <section className="space-y-3 rounded-md border p-3">
-      <p className="text-sm text-emerald-700 dark:text-emerald-400">{t("settledAlready")}</p>
+      <p className="text-sm text-income">{t("settledAlready")}</p>
       <p className="text-xs text-muted-foreground">{t("payslipsDescription")}</p>
       <Check id="confirm-send" checked={confirm} onChange={setConfirm}>
         {t("confirmSend")}
@@ -425,9 +423,9 @@ function FilingForm({
                   <TableCell className="whitespace-nowrap">
                     <span className="font-medium">{r.name}</span>
                     {r.isCompanyOwner ? (
-                      <Badge variant="secondary" className="ml-1.5">
+                      <StatusTag tone="primary" className="ml-1.5">
                         {t("owner")}
-                      </Badge>
+                      </StatusTag>
                     ) : null}
                   </TableCell>
                   {AMOUNT_FIELDS.map((k) => (

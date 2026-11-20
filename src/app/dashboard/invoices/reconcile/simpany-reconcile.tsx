@@ -7,7 +7,7 @@ import { CheckCircle2, FileUp } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { StatusTag } from "@/components/ds/status-dot";
 import {
   Table,
   TableBody,
@@ -29,14 +29,13 @@ import {
 } from "@/lib/simpany-export";
 import { readXlsxFirstSheet, XlsxError } from "@/lib/xlsx-lite";
 
-const verdictVariant: Record<ReconcileVerdict, "default" | "secondary" | "outline" | "destructive"> =
-  {
-    matched: "secondary",
-    amount_mismatch: "destructive",
-    voided_in_simpany: "destructive",
-    missing_in_simpany: "outline",
-    missing_locally: "destructive",
-  };
+const verdictTone: Record<ReconcileVerdict, "income" | "warning" | "risk"> = {
+  matched: "income",
+  amount_mismatch: "risk",
+  voided_in_simpany: "risk",
+  missing_in_simpany: "warning",
+  missing_locally: "risk",
+};
 
 /**
  * Simpany 匯出檔對帳。
@@ -166,15 +165,15 @@ export function SimpanyReconcile({ local }: Readonly<{ local: LocalInvoice[] }>)
           </p>
         )}
 
-        {error && <p className="text-sm text-expense">{error}</p>}
+        {error && <p className="text-sm text-destructive">{error}</p>}
 
         {counts && (
           <div className="flex flex-wrap gap-2">
             {(Object.keys(VERDICT_LABELS) as ReconcileVerdict[]).map((v) =>
               counts[v] ? (
-                <Badge key={v} variant={verdictVariant[v]}>
-                  {VERDICT_LABELS[v]} {counts[v]}
-                </Badge>
+                <StatusTag key={v} tone={verdictTone[v]}>
+                  {VERDICT_LABELS[v]} <span className="tabular-nums">{counts[v]}</span>
+                </StatusTag>
               ) : null,
             )}
           </div>
@@ -198,7 +197,7 @@ export function SimpanyReconcile({ local }: Readonly<{ local: LocalInvoice[] }>)
             {rows.map((r) => (
               <TableRow key={`${r.verdict}-${r.number}-${r.localId ?? "x"}`}>
                 <TableCell>
-                  <Badge variant={verdictVariant[r.verdict]}>{VERDICT_LABELS[r.verdict]}</Badge>
+                  <StatusTag tone={verdictTone[r.verdict]}>{VERDICT_LABELS[r.verdict]}</StatusTag>
                 </TableCell>
                 <TableCell className="text-sm tabular-nums">{r.number || "—"}</TableCell>
                 <TableCell className="max-w-[20ch] truncate text-sm">{r.name ?? "—"}</TableCell>

@@ -17,9 +17,9 @@ import { cn } from "@/lib/utils";
 const bucketTone: Record<AgingBucket, string> = {
   current: "text-muted-foreground",
   d1_30: "",
-  d31_60: "text-expense/70",
-  d61_90: "text-expense/85",
-  d90p: "text-expense font-medium",
+  d31_60: "text-destructive/70",
+  d61_90: "text-destructive/85",
+  d90p: "text-destructive font-medium",
 };
 
 /**
@@ -94,7 +94,10 @@ export async function ReceivableAging({ rows }: Readonly<{ rows: AgingRow[] }>) 
                   {AGING_BUCKETS.map((b) => (
                     <TableCell
                       key={b}
-                      className={cn("text-right text-sm tabular-nums", bucketTone[b])}
+                      className={cn(
+                        "text-right text-sm tabular-nums",
+                        r.buckets[b] === 0 ? "text-muted-foreground" : bucketTone[b],
+                      )}
                     >
                       {r.buckets[b] === 0 ? "—" : formatCurrency(r.buckets[b], r.currency)}
                     </TableCell>

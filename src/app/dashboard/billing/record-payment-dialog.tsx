@@ -12,6 +12,8 @@ import {
   type PaymentCandidate,
 } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
+import { Amount } from "@/components/amount";
+import { EmptyState } from "@/components/empty-state";
 import {
   Dialog,
   DialogContent,
@@ -111,7 +113,7 @@ export function RecordPaymentDialog({
         )}
 
         {!loading && candidates?.length === 0 && (
-          <p className="py-6 text-center text-sm text-muted-foreground">{t("empty")}</p>
+          <EmptyState icon={Banknote} message={t("empty")} className="rounded-md py-8" />
         )}
 
         {!loading && candidates && candidates.length > 0 && (
@@ -129,9 +131,12 @@ export function RecordPaymentDialog({
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <div className="text-right">
-                    <div className="text-sm tabular-nums">
-                      {formatCurrency(c.amount, c.currency)}
-                    </div>
+                    <Amount
+                      value={c.amount}
+                      currency={c.currency}
+                      kind="income"
+                      className="block text-sm"
+                    />
                     <div
                       className={cn(
                         "text-xs tabular-nums",

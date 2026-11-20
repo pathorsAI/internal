@@ -17,6 +17,7 @@ const payroll = {
     },
     empty: { "zh-TW": "尚無發放紀錄", en: "No payment history yet" },
     posted: { "zh-TW": "已入帳", en: "Posted" },
+    unposted: { "zh-TW": "未入帳", en: "Not posted" },
   },
   simpany: {
     title: { "zh-TW": "Simpany 薪資申報", en: "Simpany salary declarations" },

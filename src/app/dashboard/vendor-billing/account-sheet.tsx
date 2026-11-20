@@ -7,7 +7,7 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
+import { Amount } from "@/components/amount";
 import {
   Select,
   SelectContent,
@@ -25,7 +25,6 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Field } from "@/components/form-field";
 import { AuditMeta } from "@/components/audit-meta";
-import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
   LEDGER_MODES,
@@ -131,7 +130,7 @@ function wireValue(k: FormKey, v: AccountForm[FormKey]): unknown {
 }
 
 function SectionTitle({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <h3 className="text-sm font-medium">{children}</h3>;
+  return <h3 className="text-sm font-medium text-muted-foreground">{children}</h3>;
 }
 
 /** 骨架的區塊與列數（固定的鍵，不用陣列索引當 key）。 */
@@ -275,9 +274,9 @@ function AccountHeader({
       <SheetTitle className="flex flex-wrap items-center gap-2">
         {row.displayName}
         <ProviderBadge provider={row.provider} />
-        <Badge variant="secondary" className="font-normal">
+        <span className="text-xs font-normal text-muted-foreground">
           {t(row.source === "synced" ? "source.synced" : "source.manual")}
-        </Badge>
+        </span>
         <AccountStatusChip status={row.status} />
       </SheetTitle>
       <SheetDescription asChild>
@@ -756,7 +755,7 @@ function DetailSections({
               <li key={`${c.month}-${c.currency}`} className="flex items-center gap-3">
                 <span className="tabular-nums text-muted-foreground">{c.month.slice(0, 7).replace("-", "/")}</span>
                 <span className="text-xs text-muted-foreground">{c.currency}</span>
-                <span className="ml-auto tabular-nums">{formatCurrency(c.amount, c.currency)}</span>
+                <Amount value={c.amount} currency={c.currency} kind="neutral" className="ml-auto" />
               </li>
             ))}
           </ul>

@@ -7,6 +7,12 @@ const common = {
   locale: {
     label: { "zh-TW": "語言", en: "Language" },
   },
+  theme: {
+    label: { "zh-TW": "外觀", en: "Appearance" },
+    system: { "zh-TW": "跟隨系統", en: "System" },
+    light: { "zh-TW": "亮色", en: "Light" },
+    dark: { "zh-TW": "深色", en: "Dark" },
+  },
   brand: {
     name: { "zh-TW": "內部管理系統", en: "Internal Console" },
   },
@@ -37,6 +43,7 @@ const common = {
       invoices: { "zh-TW": "發票", en: "Invoice" },
       reports: { "zh-TW": "報表", en: "Reports" },
       spendAnalysis: { "zh-TW": "支出分析", en: "Spend analysis" },
+      invoiceReconcile: { "zh-TW": "發票對帳", en: "Invoice reconciliation" },
       employees: { "zh-TW": "員工", en: "Employee" },
       payroll: { "zh-TW": "薪資", en: "Payroll" },
       members: { "zh-TW": "成員", en: "Members" },

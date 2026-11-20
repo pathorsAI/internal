@@ -7,6 +7,7 @@ const advances = {
   tooltipContent: { "zh-TW": "員工已代墊並納入帳務（進項），公司尚未撥款", en: "The employee already paid and it's booked (as an input), the company hasn't reimbursed it yet" },
   card: {
     totalLabel: { "zh-TW": "目前未還總額", en: "Total outstanding" },
+    count: { "zh-TW": "{count} 筆未還", en: "{count} outstanding" },
   },
   columns: {
     date: { "zh-TW": "日期", en: "Date" },

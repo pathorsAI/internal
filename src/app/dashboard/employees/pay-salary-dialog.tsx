@@ -26,7 +26,6 @@ import {
 } from "@/components/ui/dialog";
 import { DatePicker } from "@/components/date-picker";
 import { formatCurrency } from "@/lib/format";
-import { signColor } from "@/components/amount";
 import { submitAction } from "@/lib/form-action";
 import { cn } from "@/lib/utils";
 import { formatAccountShort, type MaskedEmployeeAccount } from "@/lib/employee-accounts";
@@ -285,7 +284,7 @@ export function PaySalaryDialog({
 
             <div className="mt-4 flex items-center justify-between rounded-lg border p-3">
               <span className="text-sm text-muted-foreground">{t("paySalary.net")}</span>
-              <span className={cn("text-lg font-semibold tabular-nums", signColor(net))}>
+              <span className={cn("text-lg font-semibold tabular-nums", net < 0 && "text-destructive")}>
                 {formatCurrency(net)}
               </span>
             </div>

@@ -42,7 +42,7 @@ export function ConnectClaudeCard({
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border bg-card p-4 text-card-foreground shadow-sm sm:flex-row sm:items-center">
+    <div className="flex flex-col gap-3 rounded-xl border bg-card p-4 text-card-foreground shadow-xs sm:flex-row sm:items-center">
       <div className="min-w-0 flex-1 space-y-0.5">
         <p className="text-sm font-medium">{t("connectClaude.title")}</p>
         <p className="text-xs text-muted-foreground">{t("connectClaude.body")}</p>

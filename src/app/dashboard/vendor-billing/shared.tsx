@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
+import { StatusTag } from "@/components/ds/status-dot";
 import { Button } from "@/components/ui/button";
 import { TableRow } from "@/components/ui/table";
 import {
@@ -89,22 +90,22 @@ export function ProviderBadge({ provider }: Readonly<{ provider: string }>) {
   return <Badge variant="outline">{t(`provider.${asProvider(provider)}`)}</Badge>;
 }
 
-const matchClass: Record<MatchStatus, string> = {
-  unmatched: "border-amber-500/40 text-amber-700 dark:text-amber-400",
-  suggested: "border-sky-500/40 text-sky-700 dark:text-sky-400",
-  matched: "border-emerald-500/40 text-emerald-700 dark:text-emerald-400",
-  manual: "border-emerald-500/40 text-emerald-700 dark:text-emerald-400",
-  created: "border-emerald-500/40 text-emerald-700 dark:text-emerald-400",
-  ignored: "text-muted-foreground",
+const matchTone: Record<MatchStatus, "warning" | "primary" | "income" | "neutral"> = {
+  unmatched: "warning",
+  suggested: "primary",
+  matched: "income",
+  manual: "income",
+  created: "income",
+  ignored: "neutral",
 };
 
 export function MatchChip({ status }: Readonly<{ status: string }>) {
   const t = useTranslations("vendorBilling");
   const s = asMatch(status);
   return (
-    <Badge variant="outline" className={matchClass[s]}>
+    <StatusTag tone={matchTone[s]} className={s === "ignored" ? "text-muted-foreground" : undefined}>
       {t(`match.${s}`)}
-    </Badge>
+    </StatusTag>
   );
 }
 
@@ -112,18 +113,10 @@ export function MatchChip({ status }: Readonly<{ status: string }>) {
 export function AccountStatusChip({ status }: Readonly<{ status: string }>) {
   const t = useTranslations("vendorBilling");
   if (status === "missing") {
-    return (
-      <Badge variant="outline" className="border-destructive/40 text-destructive">
-        {t("status.missing")}
-      </Badge>
-    );
+    return <StatusTag tone="risk">{t("status.missing")}</StatusTag>;
   }
   if (status === "closed") {
-    return (
-      <Badge variant="outline" className="text-muted-foreground">
-        {t("status.closed")}
-      </Badge>
-    );
+    return <StatusTag tone="neutral">{t("status.closed")}</StatusTag>;
   }
   return null;
 }
@@ -138,17 +131,9 @@ export function ExpiryChip({
   const exp = cardExpiry(month, year, today);
   if (!exp || exp.state === "ok") return null;
   if (exp.state === "expired") {
-    return (
-      <Badge variant="outline" className="border-destructive/40 text-destructive">
-        {t("cell.expired")}
-      </Badge>
-    );
+    return <StatusTag tone="risk">{t("cell.expired")}</StatusTag>;
   }
-  return (
-    <Badge variant="outline" className="border-amber-500/40 text-amber-700 dark:text-amber-400">
-      {t("cell.daysLeft", { days: exp.daysLeft })}
-    </Badge>
-  );
+  return <StatusTag tone="warning">{t("cell.daysLeft", { days: exp.daysLeft })}</StatusTag>;
 }
 
 export function expiryText(month: number | null, year: number | null): string {
@@ -276,7 +261,7 @@ export function FormActions({
         <Button
           type="button"
           variant="ghost"
-          className="text-destructive hover:text-destructive"
+          className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
           onClick={onDelete}
           disabled={saving || deleting}
         >

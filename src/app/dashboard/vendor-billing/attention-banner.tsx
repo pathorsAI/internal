@@ -102,8 +102,8 @@ export function AttentionBanner({
   }
 
   return (
-    <section className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-4 py-3">
-      <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+    <section className="rounded-xl border border-warning/40 bg-warning/5 px-4 py-3">
+      <p className="text-sm font-medium text-warning">
         {t("attention.count", { count: items.length })}
       </p>
       <ul className="mt-1.5 space-y-0.5">

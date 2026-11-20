@@ -67,8 +67,9 @@ export function DeleteButton({
       <AlertDialogTrigger asChild>
         <Button
           type="button"
-          variant="destructive"
+          variant="ghost"
           size="sm"
+          className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
           onClick={(e) => e.stopPropagation()}
         >
           <Trash2 className="size-4" /> {resolvedLabel}

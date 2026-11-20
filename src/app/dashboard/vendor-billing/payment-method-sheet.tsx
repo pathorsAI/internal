@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
+import { StatusTag } from "@/components/ds/status-dot";
 import {
   Select,
   SelectContent,
@@ -116,14 +117,10 @@ function MethodHeader({
       <SheetTitle className="flex flex-wrap items-center gap-2">
         {row.label}
         <Badge variant="outline">{t(`kind.${asKind(row.kind)}`)}</Badge>
-        <Badge variant="secondary" className="font-normal">
+        <span className="text-xs font-normal text-muted-foreground">
           {t(synced ? "source.synced" : "source.manual")}
-        </Badge>
-        {row.isActive ? null : (
-          <Badge variant="outline" className="text-muted-foreground">
-            {t("cell.inactive")}
-          </Badge>
-        )}
+        </span>
+        {row.isActive ? null : <StatusTag tone="neutral">{t("cell.inactive")}</StatusTag>}
         <ExpiryChip month={row.expiryMonth} year={row.expiryYear} today={today} />
       </SheetTitle>
       <SheetDescription className={usedBy ? "text-xs" : "sr-only"}>
