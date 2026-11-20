@@ -43,7 +43,8 @@ sidebar. The codebase, docs and configuration are English.
 
 ## What it looks like
 
-> Screenshots are from a demo organization — the company, clients and figures are all made up.
+> Screenshots are from a demo organization (`scripts/seed-demo-org.ts`) — the company, clients and
+> figures are all made up. They show the Traditional Chinese UI; switch to English from the sidebar.
 
 There is also a [landing page](https://pathorsai.github.io/internal/) that walks through the
 same ideas — it is [`docs/index.html`](docs/index.html), published with GitHub Pages.
