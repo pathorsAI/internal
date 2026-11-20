@@ -8,6 +8,7 @@ const errors = {
     client: { "zh-TW": "請輸入客戶", en: "Enter a client" },
     vendor: { "zh-TW": "請輸入廠商", en: "Enter a vendor" },
     payer: { "zh-TW": "請輸入代墊人", en: "Enter a payer" },
+    payerCompany: { "zh-TW": "請輸入代墊的公司", en: "Enter the company that paid" },
     employeeName: { "zh-TW": "請輸入姓名", en: "Enter a name" },
     employee: { "zh-TW": "缺少員工", en: "Select an employee" },
     account: { "zh-TW": "請選擇帳戶", en: "Select an account" },
@@ -48,6 +49,7 @@ const errors = {
     payslipAlreadyPaid: { "zh-TW": "這位員工本月已發放過了", en: "This employee has already been paid this month" },
   },
   validation: {
+    advanceAlreadyReimbursed: { "zh-TW": "這筆代墊已經記過撥款了", en: "This advance has already been reimbursed" },
     statusInvalid: { "zh-TW": "狀態不正確", en: "Invalid status" },
     scheduleInvalid: { "zh-TW": "扣款方式不正確", en: "Invalid charge schedule" },
     httpUrl: { "zh-TW": "網址須以 http:// 或 https:// 開頭", en: "The link must start with http:// or https://" },

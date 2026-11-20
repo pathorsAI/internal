@@ -24,6 +24,7 @@ describe("buildMergeStatements", () => {
   test("covers every table that references parties", () => {
     expect(s.repoints.map((r) => r.key)).toEqual([
       "transactions",
+      "settledAdvances",
       "projects",
       "subscriptions",
       "contracts",
@@ -60,6 +61,7 @@ describe("countsFromResults", () => {
     const results = [
       [{ ok: 1 }], // guard
       [{ id: 1 }, { id: 2 }], // transactions
+      [{ id: 7 }], // settledAdvances
       [], // projects
       [{ id: 3 }], // subscriptions
       [],
@@ -73,6 +75,7 @@ describe("countsFromResults", () => {
     ];
     expect(countsFromResults(PLAN, results)).toEqual({
       transactions: 2,
+      settledAdvances: 1,
       projects: 0,
       subscriptions: 1,
       contracts: 0,

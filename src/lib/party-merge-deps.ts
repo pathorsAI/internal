@@ -24,6 +24,7 @@ type OrgTable = PgTable & { id: PgColumn; organizationId: PgColumn };
  */
 const REPOINTS: { key: RepointKey; table: OrgTable; prop: string; column: PgColumn }[] = [
   { key: "transactions", table: transactions, prop: "partyId", column: transactions.partyId },
+  { key: "settledAdvances", table: transactions, prop: "settlePartyId", column: transactions.settlePartyId },
   { key: "projects", table: projects, prop: "clientPartyId", column: projects.clientPartyId },
   { key: "subscriptions", table: subscriptions, prop: "customerPartyId", column: subscriptions.customerPartyId },
   { key: "contracts", table: contracts, prop: "customerPartyId", column: contracts.customerPartyId },

@@ -315,6 +315,8 @@ export const transactions = pgTable("transactions", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	partyId: bigint("party_id", { mode: "number" }),
 	settleEmployeeId: bigint("settle_employee_id", { mode: "number" }),
+	// 代墊人是公司（交易對象）時填這欄，跟 settleEmployeeId 二擇一（migrations/0036，chk_txn_settle_one）。
+	settlePartyId: bigint("settle_party_id", { mode: "number" }),
 	relatedToId: bigint("related_to_id", { mode: "number" }),
 	type: text().default('expense').notNull(),
 	// 專案標籤：vendor ≠ project，交易同時帶 party_id（廠商/客戶）與 project_id（專案）。
@@ -354,6 +356,7 @@ export const transactions = pgTable("transactions", {
 	index("idx_txn_supplier").using("btree", table.partyId.asc().nullsLast().op("int8_ops")),
 	index("idx_txn_to").using("btree", table.toAccountId.asc().nullsLast().op("int8_ops")),
 	index("idx_txn_settle").using("btree", table.settleEmployeeId.asc().nullsLast().op("int8_ops")),
+	index("idx_txn_settle_party").using("btree", table.settlePartyId.asc().nullsLast().op("int8_ops")),
 	index("idx_txn_related").using("btree", table.relatedToId.asc().nullsLast().op("int8_ops")),
 	index("idx_txn_subscription").using("btree", table.subscriptionId.asc().nullsLast().op("int8_ops")),
 	index("idx_txn_billing_item").using("btree", table.billingItemId.asc().nullsLast().op("int8_ops")),
@@ -388,12 +391,18 @@ export const transactions = pgTable("transactions", {
 			name: "transactions_settle_employee_id_fkey"
 		}),
 	foreignKey({
+			columns: [table.settlePartyId],
+			foreignColumns: [parties.id],
+			name: "transactions_settle_party_id_fkey"
+		}),
+	foreignKey({
 			columns: [table.relatedToId],
 			foreignColumns: [table.id],
 			name: "transactions_related_to_id_fkey"
 		}),
 	check("chk_txn_book", sql`book = ANY (ARRAY['both'::text, 'internal'::text, 'external'::text])`),
 	check("chk_txn_type", sql`type = ANY (ARRAY['expense'::text, 'income'::text, 'advance'::text, 'reimbursement'::text, 'transfer'::text])`),
+	check("chk_txn_settle_one", sql`settle_employee_id IS NULL OR settle_party_id IS NULL`),
 	check("chk_txn_external_ref_source", sql`external_ref IS NULL OR external_source IS NOT NULL`),
 ]);
 

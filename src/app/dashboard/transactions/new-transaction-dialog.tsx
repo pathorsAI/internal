@@ -35,6 +35,7 @@ import { DatePicker } from "@/components/date-picker";
 import { submitAction } from "@/lib/form-action";
 import { PartyCombobox } from "@/components/party-combobox";
 import { CategoryCombobox } from "./category-combobox";
+import { AdvancePayerField } from "./advance-payer-field";
 import { ContractCombobox, type ContractOption } from "./contract-combobox";
 
 const initial: ActionState = { ok: false };
@@ -314,9 +315,7 @@ function LedgerFields({
                   </Field>
 
                   {scenario === "advance" && (
-                    <Field label={t("form.payer")} required wide>
-                      <PartyCombobox parties={employees} name="settleEmployeeName" placeholder={t("form.payerPlaceholder")} />
-                    </Field>
+                    <AdvancePayerField employees={employees} parties={parties} />
                   )}
 
                   <Field label={t("form.category")} required>

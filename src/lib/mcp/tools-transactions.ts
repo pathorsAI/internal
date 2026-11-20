@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   bankAccounts,
@@ -6,6 +6,7 @@ import {
   contracts,
   documents,
   employees,
+  parties,
   payslips,
   projects,
   subscriptions,
@@ -38,10 +39,12 @@ import {
   type ToolDef,
 } from "./shared";
 import { resolvePayoutAccount } from "@/db/employee-accounts";
+import { hasReimbursement } from "@/db/advance-reimbursed";
 import { summarizeSpendTrend } from "@/lib/spend-trend";
 import { PAYOUT_ACCOUNT_SCHEMA, payoutAccountOutput } from "./tools-employee-accounts";
 import { externalSingleLegSide } from "@/lib/external-transfer";
 import { resolveOrCreateParties, resolveOrCreateParty } from "@/lib/party-resolve";
+import { pickAdvancePayee, summarizeOutstandingByPayee } from "@/lib/advance-payee";
 import {
   assertAccountCurrency,
   findMismatchInMap,
@@ -68,7 +71,11 @@ const TXN_ROW_PROPS: Record<string, unknown> = {
   billedToCompanyTaxId: { type: "boolean" },
   categoryId: { type: ["number", "null"] },
   partyId: { type: ["number", "null"] },
-  settleEmployeeId: { type: ["number", "null"] },
+  settleEmployeeId: { type: ["number", "null"], description: "Employee who fronted an advance / is repaid by a reimbursement." },
+  settlePartyId: {
+    type: ["number", "null"],
+    description: "Company (party) that fronted an advance / is repaid by a reimbursement. Mutually exclusive with settleEmployeeId.",
+  },
   projectId: { type: ["number", "null"] },
   contractId: { type: ["number", "null"] },
   subscriptionId: { type: ["number", "null"] },
@@ -155,13 +162,17 @@ const TXN_LIST_ROW = rowSchema({
   toAccountId: { type: ["number", "null"] },
   partyId: { type: ["number", "null"] },
   settleEmployeeId: { type: ["number", "null"] },
+  settlePartyId: { type: ["number", "null"], description: "Company (party) that fronted an advance." },
   projectId: { type: ["number", "null"] },
   projectName: { type: ["string", "null"] },
   contractId: { type: ["number", "null"] },
   fromAccount: { type: ["string", "null"], description: "Name of fromAccountId." },
   toAccount: { type: ["string", "null"], description: "Name of toAccountId." },
   partyName: { type: ["string", "null"] },
-  settleName: { type: ["string", "null"], description: "Employee who fronted an advance." },
+  settleName: {
+    type: ["string", "null"],
+    description: "Who fronted an advance / is repaid by a reimbursement: the employee's or the company's name.",
+  },
   settleToAccountId: {
     type: ["number", "null"],
     description: "Employee bank account a reimbursement / salary was recorded as paid into.",
@@ -225,14 +236,59 @@ const ADVANCE_ROW = rowSchema({
   amountTwd: { type: ["string", "null"] },
   currency: { type: "string", description: "3-letter code." },
   description: { type: ["string", "null"] },
-  vendorName: { type: ["string", "null"], description: "Who the employee paid." },
+  vendorName: { type: ["string", "null"], description: "Who the payer paid (the original vendor)." },
+  settleKind: {
+    type: ["string", "null"],
+    enum: ["employee", "party", null],
+    description: "Who is owed the money back: an employee or a company (party). null = legacy row with no payer.",
+  },
   settleEmployeeId: {
     type: ["number", "null"],
     description: "Employee owed the money back; see list_employee_bank_accounts for where to repay.",
   },
-  settleName: { type: ["string", "null"], description: "Employee owed the money back." },
+  settlePartyId: { type: ["number", "null"], description: "Company (party) owed the money back." },
+  settleName: { type: ["string", "null"], description: "Employee or company owed the money back." },
   categoryName: { type: ["string", "null"] },
 });
+
+const PAYEE_TOTAL_ROW = rowSchema({
+  key: { type: "string", description: "employee:<id>, party:<id>, or none." },
+  kind: { type: ["string", "null"], enum: ["employee", "party", null] },
+  id: { type: ["number", "null"], description: "Employee or party id." },
+  name: { type: ["string", "null"] },
+  count: { type: "number" },
+  totals: {
+    type: "array",
+    items: rowSchema({ currency: { type: "string" }, amount: { type: "number" } }),
+    description: "Outstanding amount per currency (currencies are never added together).",
+  },
+  totalTwd: { type: "number", description: "TWD total; foreign rows count at their booked TWD amount, rows without one are left out." },
+});
+
+// create_transaction 與 bulk_create_transactions 每一筆共用的輸入欄位（合約／訂閱的說明兩邊不同，各自寫）。
+const TXN_INPUT_PROPS: Record<string, unknown> = {
+  type: { type: "string", enum: [...TXN_TYPES] },
+  txnDate: { type: "string", description: "YYYY-MM-DD." },
+  amount: { type: "number" },
+  currency: { type: "string", description: "3-letter; default TWD." },
+  description: { type: "string" },
+  reported: { type: "boolean", description: "Reported to tax (book=both). Default false." },
+  accountId: { type: "number", description: "expense=paying acct, income=receiving acct." },
+  partyName: { type: "string", description: "Vendor/customer; created if new." },
+  categoryId: { type: "number" },
+  settleEmployeeName: { type: "string", description: "For advance paid by an employee; created if new." },
+  settlePartyId: {
+    type: "number",
+    description: "For advance paid by a company (e.g. an affiliate that paid on your behalf): its party id from list_parties. Use instead of settleEmployeeName.",
+  },
+  settlePartyName: {
+    type: "string",
+    description: "For advance paid by a company, by name (matched by name/alias, created if new). Ignored when settlePartyId is given.",
+  },
+  fromAccountId: { type: "number", description: "For transfer." },
+  toAccountId: { type: "number", description: "For transfer." },
+  projectId: { type: "number", description: "Optional project tag." },
+};
 
 type Db = ReturnType<typeof getDb>;
 
@@ -285,7 +341,35 @@ type TxnFields = {
   categoryId: number | null;
   partyId: number | null;
   settleEmployeeId: number | null;
+  settlePartyId: number | null;
 };
+
+const ADVANCE_PAYEE_ERRORS = {
+  missing: 'advance needs a payer: "settleEmployeeName" (an employee) or "settlePartyId" / "settlePartyName" (a company).',
+  both: 'advance takes either an employee ("settleEmployeeName") or a company ("settlePartyId" / "settlePartyName"), not both.',
+} as const;
+
+/** 代墊人：員工（名稱，查無就建）或公司（party id 驗證屬於本組織；名稱查無就建）。 */
+async function resolveAdvancePayee(
+  db: Db,
+  orgId: string,
+  args: Record<string, unknown>,
+): Promise<Pick<TxnFields, "settleEmployeeId" | "settlePartyId">> {
+  const payee = pickAdvancePayee({
+    employeeName: optString(args, "settleEmployeeName"),
+    partyId: optNumber(args, "settlePartyId"),
+    partyName: optString(args, "settlePartyName"),
+  });
+  if ("error" in payee) throw new Error(ADVANCE_PAYEE_ERRORS[payee.error]);
+  if (payee.kind === "employee") {
+    return { settleEmployeeId: await getOrCreateEmployee(db, orgId, payee.name), settlePartyId: null };
+  }
+  if (payee.id === null) {
+    return { settleEmployeeId: null, settlePartyId: await getOrCreateParty(db, orgId, payee.name ?? "", "vendor") };
+  }
+  await assertInOrg(db, parties, payee.id, orgId, "Settle party");
+  return { settleEmployeeId: null, settlePartyId: payee.id };
+}
 
 // Mirrors mutations.ts resolveTxnFields, with org-scoped FK validation.
 async function resolveTxnFields(
@@ -300,6 +384,7 @@ async function resolveTxnFields(
     categoryId: null,
     partyId: null,
     settleEmployeeId: null,
+    settlePartyId: null,
   };
   if (type === "expense" || type === "income") {
     const isIncome = type === "income";
@@ -328,11 +413,7 @@ async function resolveTxnFields(
       ...blank,
       categoryId,
       partyId: await getOrCreateParty(db, orgId, requireString(args, "partyName"), "vendor"),
-      settleEmployeeId: await getOrCreateEmployee(
-        db,
-        orgId,
-        requireString(args, "settleEmployeeName"),
-      ),
+      ...(await resolveAdvancePayee(db, orgId, args)),
     };
   }
   if (type === "transfer") {
@@ -394,6 +475,8 @@ type Norm = {
   toAccountId: number | null;
   partyName: string | null;
   settleEmployeeName: string | null;
+  settlePartyId: number | null;
+  settlePartyName: string | null;
   billedToCompanyTaxId: boolean;
 };
 
@@ -403,6 +486,7 @@ type BulkTxnSets = {
   projSet: Set<number>;
   contractSet: Set<number>;
   subscriptionSet: Set<number>;
+  partySet: Set<number>;
 };
 
 // A nullable FK, when present, must belong to the org's known ids.
@@ -443,21 +527,37 @@ function fillAdvance(
   n: Norm,
   it: Record<string, unknown>,
   at: string,
-  catSet: Set<number>,
+  sets: Pick<BulkTxnSets, "catSet" | "partySet">,
   partyLabelByName: Map<string, string>,
   employeeNames: Set<string>,
 ) {
+  const { catSet } = sets;
   const categoryId = optNumber(it, "categoryId") ?? null; // 可省略＝未分類
   if (categoryId !== null && !catSet.has(categoryId)) {
     throw new Error(`${at}.categoryId ${categoryId} not found in your organization.`);
   }
   const partyName = requireString(it, "partyName");
   if (!partyLabelByName.has(partyName)) partyLabelByName.set(partyName, "vendor");
-  const emp = requireString(it, "settleEmployeeName");
-  employeeNames.add(emp);
   n.categoryId = categoryId;
   n.partyName = partyName;
-  n.settleEmployeeName = emp;
+  const payee = pickAdvancePayee({
+    employeeName: optString(it, "settleEmployeeName"),
+    partyId: optNumber(it, "settlePartyId"),
+    partyName: optString(it, "settlePartyName"),
+  });
+  if ("error" in payee) throw new Error(`${at}: ${ADVANCE_PAYEE_ERRORS[payee.error]}`);
+  if (payee.kind === "employee") {
+    employeeNames.add(payee.name);
+    n.settleEmployeeName = payee.name;
+  } else if (payee.id !== null) {
+    if (!sets.partySet.has(payee.id)) {
+      throw new Error(`${at}.settlePartyId ${payee.id} not found in your organization.`);
+    }
+    n.settlePartyId = payee.id;
+  } else if (payee.name) {
+    if (!partyLabelByName.has(payee.name)) partyLabelByName.set(payee.name, "vendor");
+    n.settlePartyName = payee.name;
+  }
 }
 
 function fillTransfer(n: Norm, it: Record<string, unknown>, at: string, acctSet: Set<number>) {
@@ -517,12 +617,14 @@ function normalizeBulkTxnItem(
     toAccountId: null,
     partyName: null,
     settleEmployeeName: null,
+    settlePartyId: null,
+    settlePartyName: null,
     billedToCompanyTaxId: optBoolean(it, "billedToCompanyTaxId") === true,
   };
   if (type === "expense" || type === "income") {
     fillIncomeExpense(n, it, at, sets.acctSet, sets.catSet, partyLabelByName);
   } else if (type === "advance") {
-    fillAdvance(n, it, at, sets.catSet, partyLabelByName, employeeNames);
+    fillAdvance(n, it, at, sets, partyLabelByName, employeeNames);
   } else if (type === "transfer") {
     fillTransfer(n, it, at, sets.acctSet);
   }
@@ -747,32 +849,34 @@ export const transactionTools: Record<string, ToolDef> = {
 
   list_outstanding_advances: {
     description:
-      "Employee cash advances (代墊) that have no reimbursement entry booked against them yet. Once the company has repaid the employee, record it with create_reimbursement.",
+      "Advances (代墊／應付未還) that have no reimbursement entry booked against them yet: money an employee or another company (settleKind='party', e.g. an affiliate) paid on the organization's behalf and is still owed. `byPayee` totals what is owed per employee / company. Once it has been repaid, record that with create_reimbursement.",
     inputSchema: { type: "object", properties: { ...ORG_ARG }, additionalProperties: false },
-    outputSchema: listSchema(ADVANCE_ROW),
-    execute: async (args, ctx) =>
-      listResult(await listOutstandingAdvances(await resolveOrg(args, ctx))),
+    outputSchema: {
+      type: "object",
+      properties: {
+        ...listSchema(ADVANCE_ROW).properties,
+        byPayee: {
+          type: "array",
+          items: PAYEE_TOTAL_ROW,
+          description: "Outstanding totals per payer (employee or company), largest TWD total first.",
+        },
+      },
+      required: ["items", "count", "byPayee"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const rows = await listOutstandingAdvances(await resolveOrg(args, ctx));
+      return { ...listResult(rows), byPayee: summarizeOutstandingByPayee(rows) };
+    },
   },
 
   create_transaction: {
     description:
-      "Write one bookkeeping entry into the ledger for money that has already moved elsewhere. This records history; it never sends, collects or transfers anything, and 'transfer' here means a book entry between two of the organization's own ledger accounts. Required per type — expense/income: accountId + partyName; advance: partyName + settleEmployeeName (no account); transfer: fromAccountId + toAccountId. categoryId is optional — omit it to leave the entry 未分類 (unclassified; no need for a separate holding account). Resolve ids with list_bank_accounts / list_categories / list_parties first. 'reported' (計入稅務帳 — include in the tax books) sets the book to 'both' (management + tax), otherwise 'internal' (management books only); transfers are always 'both'. Set billedToCompanyTaxId=true to mark 有報公司統編 (the invoice attachment itself is done in the app). To book a repaid advance use create_reimbursement. When contractId is set, the result carries `contractProgress` (amount/received/remaining/fullyCollected) — if `fullyCollected` is true while the contract is still draft/active, tell the user the contract is now fully collected and ask whether to set it to completed (已完成); on a yes, call update_contract with status='completed'. Never flip the status without asking.",
+      "Write one bookkeeping entry into the ledger for money that has already moved elsewhere. This records history; it never sends, collects or transfers anything, and 'transfer' here means a book entry between two of the organization's own ledger accounts. Required per type — expense/income: accountId + partyName; advance: partyName + the payer — settleEmployeeName for an employee, or settlePartyId / settlePartyName for a company that paid on your behalf (no account; it shows up in list_outstanding_advances until create_reimbursement); transfer: fromAccountId + toAccountId. categoryId is optional — omit it to leave the entry 未分類 (unclassified; no need for a separate holding account). Resolve ids with list_bank_accounts / list_categories / list_parties first. 'reported' (計入稅務帳 — include in the tax books) sets the book to 'both' (management + tax), otherwise 'internal' (management books only); transfers are always 'both'. Set billedToCompanyTaxId=true to mark 有報公司統編 (the invoice attachment itself is done in the app). To book a repaid advance use create_reimbursement. When contractId is set, the result carries `contractProgress` (amount/received/remaining/fullyCollected) — if `fullyCollected` is true while the contract is still draft/active, tell the user the contract is now fully collected and ask whether to set it to completed (已完成); on a yes, call update_contract with status='completed'. Never flip the status without asking.",
     inputSchema: {
       type: "object",
       properties: {
-        type: { type: "string", enum: [...TXN_TYPES] },
-        txnDate: { type: "string", description: "YYYY-MM-DD." },
-        amount: { type: "number" },
-        currency: { type: "string", description: "3-letter; default TWD." },
-        description: { type: "string" },
-        reported: { type: "boolean", description: "Reported to tax (book=both). Default false." },
-        accountId: { type: "number", description: "expense=paying acct, income=receiving acct." },
-        partyName: { type: "string", description: "Vendor/customer; created if new." },
-        categoryId: { type: "number" },
-        settleEmployeeName: { type: "string", description: "For advance; employee created if new." },
-        fromAccountId: { type: "number", description: "For transfer." },
-        toAccountId: { type: "number", description: "For transfer." },
-        projectId: { type: "number", description: "Optional project tag." },
+        ...TXN_INPUT_PROPS,
         contractId: {
           type: "number",
           description:
@@ -842,6 +946,7 @@ export const transactionTools: Record<string, ToolDef> = {
           categoryId: f.categoryId,
           partyId: f.partyId,
           settleEmployeeId: f.settleEmployeeId,
+          settlePartyId: f.settlePartyId,
           projectId: projectId ?? null,
           contractId: contractId ?? null,
           subscriptionId: subscriptionId ?? null,
@@ -863,7 +968,7 @@ export const transactionTools: Record<string, ToolDef> = {
 
   bulk_create_transactions: {
     description:
-      "Write many ledger entries in one call — use this instead of calling create_transaction in a loop. Like create_transaction, this only records entries in the organization's own books; no money is moved. Pass `items`: an array where each element mirrors create_transaction's arguments (type, txnDate, amount, currency?, description?, reported?, accountId?, partyName?, categoryId?, settleEmployeeName?, fromAccountId?, toAccountId?, projectId?, contractId?, subscriptionId?, subscriptionPeriod?). Per-type requirements match create_transaction (expense/income: accountId+partyName; advance: partyName+settleEmployeeName; transfer: fromAccountId+toAccountId); categoryId is optional (omit → 未分類, unclassified). Account/category/project/contract/subscription ids are validated against your org; party/employee names are created on demand and deduped within the batch. subscriptionPeriod (YYYY-MM-DD) is required on any item that sets subscriptionId. All rows are written in a single database insert. Returns the created count, the ids, and — for every contract any item linked to — `contractProgress` (amount/received/remaining/fullyCollected). For each entry with `fullyCollected` true while the contract is still draft/active, tell the user that contract is now fully collected and ask whether to set it to completed (已完成); on a yes, call update_contract with status='completed'. Never flip the status without asking. Max 1000 items per call.",
+      "Write many ledger entries in one call — use this instead of calling create_transaction in a loop. Like create_transaction, this only records entries in the organization's own books; no money is moved. Pass `items`: an array where each element mirrors create_transaction's arguments (type, txnDate, amount, currency?, description?, reported?, accountId?, partyName?, categoryId?, settleEmployeeName?, settlePartyId?, settlePartyName?, fromAccountId?, toAccountId?, projectId?, contractId?, subscriptionId?, subscriptionPeriod?). Per-type requirements match create_transaction (expense/income: accountId+partyName; advance: partyName + settleEmployeeName or settlePartyId/settlePartyName; transfer: fromAccountId+toAccountId); categoryId is optional (omit → 未分類, unclassified). Account/category/project/contract/subscription ids are validated against your org; party/employee names are created on demand and deduped within the batch. subscriptionPeriod (YYYY-MM-DD) is required on any item that sets subscriptionId. All rows are written in a single database insert. Returns the created count, the ids, and — for every contract any item linked to — `contractProgress` (amount/received/remaining/fullyCollected). For each entry with `fullyCollected` true while the contract is still draft/active, tell the user that contract is now fully collected and ask whether to set it to completed (已完成); on a yes, call update_contract with status='completed'. Never flip the status without asking. Max 1000 items per call.",
     inputSchema: {
       type: "object",
       properties: {
@@ -873,19 +978,7 @@ export const transactionTools: Record<string, ToolDef> = {
           items: {
             type: "object",
             properties: {
-              type: { type: "string", enum: [...TXN_TYPES] },
-              txnDate: { type: "string", description: "YYYY-MM-DD." },
-              amount: { type: "number" },
-              currency: { type: "string", description: "3-letter; default TWD." },
-              description: { type: "string" },
-              reported: { type: "boolean", description: "Reported to tax (book=both). Default false." },
-              accountId: { type: "number", description: "expense=paying acct, income=receiving acct." },
-              partyName: { type: "string", description: "Vendor/customer; created if new." },
-              categoryId: { type: "number" },
-              settleEmployeeName: { type: "string", description: "For advance; employee created if new." },
-              fromAccountId: { type: "number", description: "For transfer." },
-              toAccountId: { type: "number", description: "For transfer." },
-              projectId: { type: "number", description: "Optional project tag." },
+              ...TXN_INPUT_PROPS,
               contractId: {
                 type: "number",
                 description:
@@ -942,7 +1035,7 @@ export const transactionTools: Record<string, ToolDef> = {
 
       // Load the org's valid FK ids once, so each row is validated in memory
       // instead of issuing an assertInOrg round trip per row.
-      const [acctRows, catRows, projRows, contractRows, subscriptionRows] = await Promise.all([
+      const [acctRows, catRows, projRows, contractRows, subscriptionRows, partyRows] = await Promise.all([
         db
           .select({ id: bankAccounts.id, name: bankAccounts.name, currency: bankAccounts.currency })
           .from(bankAccounts)
@@ -951,6 +1044,10 @@ export const transactionTools: Record<string, ToolDef> = {
         db.select({ id: projects.id }).from(projects).where(eq(projects.organizationId, orgId)),
         db.select({ id: contracts.id }).from(contracts).where(eq(contracts.organizationId, orgId)),
         db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.organizationId, orgId)),
+        db
+          .select({ id: parties.id })
+          .from(parties)
+          .where(and(eq(parties.organizationId, orgId), isNull(parties.deletedAt))),
       ]);
       const acctSet = new Set(acctRows.map((r) => r.id));
       // 幣別驗證跟 FK 驗證一樣在記憶體裡做，避免每列各發一次 query。
@@ -960,7 +1057,8 @@ export const transactionTools: Record<string, ToolDef> = {
       const contractSet = new Set(contractRows.map((r) => r.id));
       const subscriptionSet = new Set(subscriptionRows.map((r) => r.id));
 
-      const sets: BulkTxnSets = { acctSet, catSet, projSet, contractSet, subscriptionSet };
+      const partySet = new Set(partyRows.map((r) => r.id));
+      const sets: BulkTxnSets = { acctSet, catSet, projSet, contractSet, subscriptionSet, partySet };
       const partyLabelByName = new Map<string, string>();
       const employeeNames = new Set<string>();
       const norms: Norm[] = items.map((raw, i) =>
@@ -982,6 +1080,7 @@ export const transactionTools: Record<string, ToolDef> = {
         categoryId: n.categoryId,
         partyId: n.partyName ? (partyId.get(n.partyName) ?? null) : null,
         settleEmployeeId: n.settleEmployeeName ? (employeeId.get(n.settleEmployeeName) ?? null) : null,
+        settlePartyId: n.settlePartyId ?? (n.settlePartyName ? (partyId.get(n.settlePartyName) ?? null) : null),
         projectId: n.projectId,
         contractId: n.contractId,
         subscriptionId: n.subscriptionId,
@@ -1161,7 +1260,7 @@ export const transactionTools: Record<string, ToolDef> = {
 
   create_reimbursement: {
     description:
-      "Record that an employee advance (代墊) has been repaid: writes a reimbursement entry in the ledger linked to the original advance. Bookkeeping only — it does not send the employee any money; do that through your bank and record it here. Find the advance via list_outstanding_advances.",
+      "Record that an advance (代墊) has been repaid — to the employee or the company (party) that fronted it: writes a reimbursement entry in the ledger linked to the original advance, carrying the same payer. Bookkeeping only — it does not send anyone money; do that through your bank and record it here. Find the advance via list_outstanding_advances. Fails if the advance already has a reimbursement.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1172,7 +1271,7 @@ export const transactionTools: Record<string, ToolDef> = {
         toEmployeeAccountId: {
           type: "number",
           description:
-            "Optional: which of the employee's bank accounts the repayment went into (see list_employee_bank_accounts). Defaults to the employee's reimbursement-default account when omitted. Must belong to the advance's employee and be active.",
+            "Optional, employee advances only: which of the employee's bank accounts the repayment went into (see list_employee_bank_accounts). Defaults to the employee's reimbursement-default account when omitted. Must belong to the advance's employee and be active. Not accepted when the payer is a company.",
         },
         ...ORG_ARG,
       },
@@ -1196,25 +1295,42 @@ export const transactionTools: Record<string, ToolDef> = {
       const [adv] = await db
         .select({
           settleEmployeeId: transactions.settleEmployeeId,
+          settlePartyId: transactions.settlePartyId,
           currency: transactions.currency,
           type: transactions.type,
         })
         .from(transactions)
-        .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, advanceId)))
+        .where(
+          and(
+            eq(transactions.organizationId, orgId),
+            eq(transactions.id, advanceId),
+            isNull(transactions.deletedAt),
+          ),
+        )
         .limit(1);
       if (!adv) throw new Error(`Advance ${advanceId} not found in your organization.`);
       if (adv.type !== "advance") {
         throw new Error(`Transaction ${advanceId} is not an advance (type=${adv.type}).`);
       }
+      if (await hasReimbursement(db, orgId, advanceId)) {
+        throw new Error(`Advance ${advanceId} already has a reimbursement; it is not outstanding.`);
+      }
+      const toEmployeeAccountId = optNumber(args, "toEmployeeAccountId") ?? null;
+      if (adv.settlePartyId != null && toEmployeeAccountId !== null) {
+        throw new Error(
+          `Advance ${advanceId} was paid by a company (party ${adv.settlePartyId}); toEmployeeAccountId only applies to employee advances.`,
+        );
+      }
       const currency = adv.currency ?? "TWD";
       // 撥款的幣別跟著原代墊走，付款帳戶必須是同一種幣別。
       await assertAccountCurrency(db, orgId, currency, [fromAccountId]);
       // 匯入代墊人的哪個帳戶：有指定就驗歸屬與啟用，沒指定就用報銷預設（可能沒有）。
+      // 公司代墊沒有員工帳戶：settleEmployeeId 為 null、也不帶 explicit id → 回 null。
       const payout = await resolvePayoutAccount(
         orgId,
         adv.settleEmployeeId,
         "reimbursement",
-        optNumber(args, "toEmployeeAccountId") ?? null,
+        toEmployeeAccountId,
       );
       const [row] = await db
         .insert(transactions)
@@ -1223,6 +1339,7 @@ export const transactionTools: Record<string, ToolDef> = {
           type: "reimbursement",
           txnDate: payDate,
           settleEmployeeId: adv.settleEmployeeId,
+          settlePartyId: adv.settlePartyId,
           settleToAccountId: payout?.id ?? null,
           amount,
           currency,
