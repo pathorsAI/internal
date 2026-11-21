@@ -8,6 +8,14 @@ import { StatusDot } from "@/components/ds/status-dot";
 
 type Tone = "default" | "primary" | "income" | "risk" | "warning";
 
+const sparkTone: Record<Tone, "primary" | "income" | "risk"> = {
+  default: "primary",
+  primary: "primary",
+  income: "income",
+  risk: "risk",
+  warning: "primary",
+};
+
 const toneText: Record<Tone, string> = {
   default: "text-foreground",
   primary: "text-primary",
@@ -52,24 +60,32 @@ export function StatCard({
   className?: string;
   children?: React.ReactNode;
 }>) {
+  // 聚光：把滑鼠在卡片裡的位置寫進 --mx/--my（.spot-card 的漸層跟著它）。純裝飾，所以用
+  // 原生 listener 掛在元素上、不走 React 的事件屬性 —— 這張卡不是可互動的元件。
   const ref = React.useRef<HTMLDivElement>(null);
-  const onMove = (e: React.MouseEvent<HTMLDivElement>) => {
+  React.useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const r = el.getBoundingClientRect();
-    el.style.setProperty("--mx", `${e.clientX - r.left}px`);
-    el.style.setProperty("--my", `${e.clientY - r.top}px`);
-  };
-  const onLeave = () => {
-    ref.current?.style.removeProperty("--mx");
-    ref.current?.style.removeProperty("--my");
-  };
+    const onMove = (e: PointerEvent) => {
+      const r = el.getBoundingClientRect();
+      el.style.setProperty("--mx", `${e.clientX - r.left}px`);
+      el.style.setProperty("--my", `${e.clientY - r.top}px`);
+    };
+    const onLeave = () => {
+      el.style.removeProperty("--mx");
+      el.style.removeProperty("--my");
+    };
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerleave", onLeave);
+    return () => {
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerleave", onLeave);
+    };
+  }, []);
 
   return (
     <div
       ref={ref}
-      onMouseMove={onMove}
-      onMouseLeave={onLeave}
       data-active={active || undefined}
       className={cn(
         "spot-card flex min-w-0 flex-col rounded-xl border px-4 pt-3.5 pb-3 shadow-xs",
@@ -98,7 +114,7 @@ export function StatCard({
       {spark && spark.length > 1 ? (
         <Sparkline
           data={spark}
-          tone={tone === "income" ? "income" : tone === "risk" ? "risk" : "primary"}
+          tone={sparkTone[tone]}
           className="mt-2"
         />
       ) : null}

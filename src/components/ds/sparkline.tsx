@@ -1,5 +1,11 @@
 import { cn } from "@/lib/utils";
 
+const SPARK_COLOR: Record<"primary" | "income" | "risk", string | undefined> = {
+  primary: undefined,
+  income: "var(--income)",
+  risk: "var(--destructive)",
+};
+
 /**
  * 統計數字底下的走勢線：一條會畫出來的細線，末端一顆亮點。純 SVG，server / client 都能用。
  * 少於兩個點就不畫（沒有「走勢」可言）。
@@ -29,9 +35,8 @@ export function Sparkline({
   });
   const line = xy.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x},${y}`).join(" ");
   const area = `${line} L${W},${H} L0,${H} Z`;
-  const lastY = xy[xy.length - 1][1];
-  const spark =
-    tone === "income" ? "var(--income)" : tone === "risk" ? "var(--destructive)" : undefined;
+  const lastY = xy.at(-1)?.[1] ?? H;
+  const spark = SPARK_COLOR[tone];
 
   return (
     <div

@@ -31,7 +31,7 @@ export function CountUp({
     const el = ref.current;
     if (!el || played.current) return;
     played.current = true;
-    if (value === 0 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (value === 0 || globalThis.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
     const start = performance.now();
     const DURATION = 600;

@@ -30,6 +30,12 @@ export function amountKind(type: string): AmountKind {
   return "neutral";
 }
 
+function kindOfValue(value: number): AmountKind {
+  if (value > 0) return "income";
+  if (value < 0) return "expense";
+  return "neutral";
+}
+
 /**
  * 金額的統一寫法：等寬數字；收入綠色帶「+」、支出墨色帶「−」、中性不帶號。
  * 支出不再用紅色 —— 一張表九成是支出，整片紅字等於沒有重點；紅色留給「逾期」「失敗」
@@ -50,7 +56,7 @@ export function Amount({
 }>) {
   const n = typeof value === "string" ? Number(value) : value;
   const safe = Number.isFinite(n) ? n : 0;
-  const resolved: AmountKind = kind ?? (safe > 0 ? "income" : safe < 0 ? "expense" : "neutral");
+  const resolved: AmountKind = kind ?? kindOfValue(safe);
   const abs = formatCurrency(Math.abs(safe), currency);
   // neutral（餘額、轉帳）不加號，但負值要留著「−」：透支的餘額不能看起來像正的。
   let sign = "";

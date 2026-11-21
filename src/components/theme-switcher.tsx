@@ -26,7 +26,7 @@ function readTheme(): Theme {
 function applyTheme(theme: Theme) {
   const dark =
     theme === "dark" ||
-    (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    (theme === "system" && globalThis.matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.classList.toggle("dark", dark);
 }
 
@@ -34,10 +34,10 @@ function applyTheme(theme: Theme) {
 const listeners = new Set<() => void>();
 function subscribe(onChange: () => void) {
   listeners.add(onChange);
-  window.addEventListener("storage", onChange);
+  globalThis.addEventListener("storage", onChange);
   return () => {
     listeners.delete(onChange);
-    window.removeEventListener("storage", onChange);
+    globalThis.removeEventListener("storage", onChange);
   };
 }
 
@@ -53,7 +53,7 @@ export function ThemeMenuItems() {
   useEffect(() => {
     applyTheme(theme);
     // 選「跟系統」時，系統主題改了要跟著變。
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const media = globalThis.matchMedia("(prefers-color-scheme: dark)");
     const onChange = () => {
       if (readTheme() === "system") applyTheme("system");
     };
