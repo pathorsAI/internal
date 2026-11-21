@@ -5,7 +5,8 @@ import { DeleteButton } from "@/components/delete-button";
 import { deleteSubscription } from "@/db/mutations";
 import { EditSubscriptionForm } from "./edit-subscription-form";
 import { PageHeader } from "@/components/page-header";
-import { Badge } from "@/components/ui/badge";
+import { StatusTag } from "@/components/ds/status-dot";
+import { Amount } from "@/components/amount";
 import { TableCard } from "@/components/table-card";
 import { EmptyRow } from "@/components/empty-state";
 import {
@@ -30,17 +31,19 @@ import { requireOrg } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
-const statusVariant: Record<string, "default" | "secondary" | "outline"> = {
-  active: "default",
-  paused: "secondary",
-  ended: "outline",
+type Tone = "neutral" | "primary" | "income" | "warning" | "risk";
+
+const statusTone: Record<string, Tone> = {
+  active: "primary",
+  paused: "warning",
+  ended: "neutral",
 };
 
-const periodStatusVariant: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
-  paid: "default",
-  partial: "secondary",
-  overdue: "destructive",
-  upcoming: "outline",
+const periodStatusTone: Record<string, Tone> = {
+  paid: "income",
+  partial: "warning",
+  overdue: "risk",
+  upcoming: "neutral",
 };
 
 /**
@@ -63,7 +66,7 @@ function PeriodScheduleTable({
   }
   return (
     <div className="mt-6">
-      <div className="mb-2 text-sm font-medium">{t("schedule.heading")}</div>
+      <div className="mb-2 text-sm font-medium text-muted-foreground">{t("schedule.heading")}</div>
       <div className="rounded-md border">
         <Table>
           <TableHeader>
@@ -83,16 +86,19 @@ function PeriodScheduleTable({
                     <span className="mt-0.5 block text-xs text-muted-foreground">{p.note}</span>
                   ) : null}
                 </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {formatCurrency(p.expected, schedule.currency)}
+                <TableCell className="text-right">
+                  <Amount value={p.expected} currency={schedule.currency} kind="neutral" />
                 </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {formatCurrency(p.paid, schedule.currency)}
+                <TableCell className="text-right">
+                  <Amount value={p.paid} currency={schedule.currency} kind="neutral" />
                 </TableCell>
                 <TableCell>
-                  <Badge variant={periodStatusVariant[p.status] ?? "outline"}>
+                  <StatusTag
+                    tone={periodStatusTone[p.status] ?? "neutral"}
+                    pulse={p.status === "overdue"}
+                  >
                     {periodStatusLabels[p.status] ?? p.status}
-                  </Badge>
+                  </StatusTag>
                 </TableCell>
               </TableRow>
             ))}
@@ -166,13 +172,12 @@ export default async function SubscriptionsPage() {
               <TableHead>{t("list.columns.project")}</TableHead>
               <TableHead>{t("list.columns.contract")}</TableHead>
               <TableHead className="text-right">{t("list.columns.amount")}</TableHead>
-              <TableHead>{t("list.columns.frequency")}</TableHead>
-              <TableHead>{t("list.columns.status")}</TableHead>
+              <TableHead className="pl-6">{t("list.columns.status")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <EmptyRow colSpan={7} message={t("list.empty")} />
+              <EmptyRow colSpan={6} message={t("list.empty")} />
             ) : (
               rows.map((s) => (
                 <RowDialog
@@ -198,16 +203,22 @@ export default async function SubscriptionsPage() {
                           <span className="block truncate">{s.contractTitle ?? "—"}</span>
                         )}
                       </TableCell>
-                      <TableCell className="text-right font-medium tabular-nums">
-                        {formatCurrency(s.amount, s.currency)}
+                      <TableCell className="text-right">
+                        {/* 金額與頻率是同一件事（每月 NT$X），疊在同一格、靠右對齊 */}
+                        <Amount
+                          value={s.amount}
+                          currency={s.currency}
+                          kind="neutral"
+                          className="block font-medium"
+                        />
+                        <span className="block text-xs text-muted-foreground">
+                          {intervalLabel(t as Translator, s.intervalMonths)}
+                        </span>
                       </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {intervalLabel(t as Translator, s.intervalMonths)}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={statusVariant[s.status] ?? "outline"}>
+                      <TableCell className="pl-6">
+                        <StatusTag tone={statusTone[s.status] ?? "neutral"}>
                           {statusLabels[s.status] ?? s.status}
-                        </Badge>
+                        </StatusTag>
                       </TableCell>
                     </>
                   }

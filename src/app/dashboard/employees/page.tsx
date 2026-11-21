@@ -5,6 +5,8 @@ import { deleteEmployee } from "@/db/mutations";
 import { EditEmployeeForm } from "./edit-employee-form";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
+import { StatusTag } from "@/components/ds/status-dot";
+import { Amount } from "@/components/amount";
 import { TableCard } from "@/components/table-card";
 import { EmptyRow } from "@/components/empty-state";
 import {
@@ -49,12 +51,12 @@ function insuranceCell(e: EmployeeRow, labels: InsuranceLabels) {
   return (
     <div className="flex flex-wrap gap-1 text-xs">
       {e.laborInsuredSalary ? (
-        <Badge variant="outline" className="font-normal">
+        <Badge variant="outline" className="font-normal tabular-nums">
           {labels.labor} {formatCurrency(e.laborInsuredSalary)}
         </Badge>
       ) : null}
       {e.healthInsuredSalary ? (
-        <Badge variant="outline" className="font-normal">
+        <Badge variant="outline" className="font-normal tabular-nums">
           {labels.health} {formatCurrency(e.healthInsuredSalary)}
         </Badge>
       ) : null}
@@ -152,9 +154,9 @@ export default async function EmployeesPage() {
                         <div className="flex items-center gap-1.5">
                           {e.name}
                           {e.userId ? (
-                            <Badge variant="secondary" className="font-normal text-xs">
+                            <StatusTag tone="primary" className="font-normal">
                               {memberByUserId.get(e.userId)?.name ?? t("table.linked")}
-                            </Badge>
+                            </StatusTag>
                           ) : null}
                         </div>
                       </TableCell>
@@ -167,12 +169,12 @@ export default async function EmployeesPage() {
                       </TableCell>
                       <TableCell>{insuranceCell(e, insuranceLabels)}</TableCell>
                       <TableCell>
-                        <Badge variant={e.isActive ? "outline" : "secondary"}>
+                        <StatusTag tone={e.isActive ? "income" : "neutral"}>
                           {e.isActive ? t("status.active") : t("status.inactive")}
-                        </Badge>
+                        </StatusTag>
                       </TableCell>
                       <TableCell className="text-right font-medium tabular-nums">
-                        {e.baseSalary ? formatCurrency(e.baseSalary) : "—"}
+                        {e.baseSalary ? <Amount value={e.baseSalary} kind="neutral" /> : "—"}
                       </TableCell>
                     </>
                   }

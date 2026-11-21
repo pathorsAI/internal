@@ -1,7 +1,8 @@
 import { Paperclip, BellRing, CheckCircle2 } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { PageHeader } from "@/components/page-header";
-import { Badge } from "@/components/ui/badge";
+import { StatusTag } from "@/components/ds/status-dot";
+import { Amount } from "@/components/amount";
 import { TableCard } from "@/components/table-card";
 import { EmptyRow } from "@/components/empty-state";
 import {
@@ -13,7 +14,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { listAccountantNotices } from "@/db/queries";
-import { formatCurrency, formatDate } from "@/lib/format";
+import { formatDate } from "@/lib/format";
 import { NotifyButton } from "./notify-button";
 import { requireOrg } from "@/lib/session";
 
@@ -53,8 +54,8 @@ function NoticeTable({
               <TableCell className="max-w-[24ch] truncate text-muted-foreground">
                 {r.description ?? r.categoryName ?? "—"}
               </TableCell>
-              <TableCell className="text-right font-medium tabular-nums">
-                {formatCurrency(r.amount, r.currency)}
+              <TableCell className="text-right font-medium">
+                <Amount value={r.amount} currency={r.currency} kind="neutral" />
               </TableCell>
               <TableCell>
                 {r.r2Key.startsWith("meta/") ? (
@@ -99,10 +100,12 @@ export default async function AccountantNoticesPage() {
       <TableCard
         title={
           <span className="flex items-center gap-2">
-            <BellRing className="size-4 text-amber-600" />
+            <BellRing className="size-4 text-warning" />
             {t("pending.title")}
             {pending.length > 0 ? (
-              <Badge variant="destructive">{pending.length}</Badge>
+              <StatusTag tone="warning" className="tabular-nums">
+                {pending.length}
+              </StatusTag>
             ) : null}
           </span>
         }

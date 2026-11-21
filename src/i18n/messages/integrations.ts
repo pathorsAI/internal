@@ -94,6 +94,8 @@ const integrations = {
     connected: { "zh-TW": "已連接", en: "Connected" },
     needsReauth: { "zh-TW": "需要重新連接：{error}", en: "Needs reconnecting: {error}" },
     error: { "zh-TW": "發生錯誤：{error}", en: "Error: {error}" },
+    needsReauthShort: { "zh-TW": "需要重新連接", en: "Needs reconnecting" },
+    errorShort: { "zh-TW": "同步失敗", en: "Sync failed" },
     unknownError: { "zh-TW": "外部服務拒絕了憑證", en: "the service rejected the credentials" },
     connectedBy: { "zh-TW": "由 {name} 於 {date} 連接", en: "Connected by {name} on {date}" },
     lastSynced: { "zh-TW": "上次成功呼叫：{date}", en: "Last successful call: {date}" },

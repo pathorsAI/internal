@@ -44,7 +44,12 @@ export function RevokeClientButton({
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
       <AlertDialogTrigger asChild>
-        <Button type="button" variant="destructive" size="sm">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+        >
           <Trash2 className="size-4" /> {t("mcp.clients.revoke.trigger")}
         </Button>
       </AlertDialogTrigger>

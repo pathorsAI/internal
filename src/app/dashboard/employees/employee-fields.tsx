@@ -64,7 +64,13 @@ export function EmployeeFields({
       />
       {values?.nationalIdMasked ? (
         <Field label={t("form.nationalIdLabel")} htmlFor="nationalIdMasked">
-          <Input id="nationalIdMasked" value={values.nationalId ?? ""} disabled readOnly />
+          <Input
+            id="nationalIdMasked"
+            value={values.nationalId ?? ""}
+            disabled
+            readOnly
+            className="font-mono"
+          />
         </Field>
       ) : (
         <TextField

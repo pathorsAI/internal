@@ -5,6 +5,7 @@ import { canManageOrg, requireOrgWithRole } from "@/lib/session";
 import { getDb } from "@/db";
 import { organization } from "@/db/auth-schema";
 import { OrgSettingsClient } from "./org-settings-client";
+import { SettingsBody } from "./settings-body";
 
 export const dynamic = "force-dynamic";
 
@@ -22,11 +23,13 @@ export default async function SettingsPage() {
   return (
     <>
       <PageHeader title={t("title")} description={t("description")} />
-      <OrgSettingsClient
-        orgId={orgId}
-        orgName={orgRow[0]?.name ?? ""}
-        canEdit={canManageOrg(role)}
-      />
+      <SettingsBody>
+        <OrgSettingsClient
+          orgId={orgId}
+          orgName={orgRow[0]?.name ?? ""}
+          canEdit={canManageOrg(role)}
+        />
+      </SettingsBody>
     </>
   );
 }

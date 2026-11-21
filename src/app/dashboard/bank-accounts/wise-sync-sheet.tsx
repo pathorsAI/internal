@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 import { Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Amount } from "@/components/amount";
 import {
   Sheet,
   SheetContent,
@@ -15,15 +15,14 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { formatCurrency } from "@/lib/currency";
 import type { SyncResult } from "@/lib/wise-sync";
 import { applyWiseSync, previewWiseSync } from "./wise-sync-actions";
 
-/** 樣本金額前的正負號：收入 +、支出 −、轉帳不加。 */
-function amountSign(type: string): string {
-  if (type === "income") return "+";
-  if (type === "expense") return "−";
-  return "";
+/** 樣本金額的呈現：收入 +、支出 −、轉帳（換匯）不加。 */
+function sampleKind(type: string): "income" | "expense" | "neutral" {
+  if (type === "income") return "income";
+  if (type === "expense") return "expense";
+  return "neutral";
 }
 
 /**
@@ -73,7 +72,7 @@ export function WiseSyncButton() {
 
   return (
     <>
-      <Button type="button" variant="outline" onClick={openSheet}>
+      <Button type="button" variant="outline" size="sm" onClick={openSheet}>
         <RefreshCw className="size-4" /> {t("sync.button")}
       </Button>
       <Sheet open={open} onOpenChange={(o) => !applying && setOpen(o)}>
@@ -175,15 +174,14 @@ export function WiseSyncButton() {
                               <td className="py-2 pr-3">
                                 <div className="flex flex-col gap-1">
                                   <span>{r.partyName ?? "—"}</span>
-                                  <Badge variant="secondary" className="w-fit font-normal">
+                                  <span className="text-xs text-muted-foreground">
                                     {t(`sync.type.${r.type as "income" | "expense" | "transfer"}`)}
-                                  </Badge>
+                                  </span>
                                 </div>
                               </td>
                               <td className="py-2 pr-3 text-muted-foreground">{r.description}</td>
-                              <td className="py-2 text-right tabular-nums whitespace-nowrap">
-                                {amountSign(r.type)}
-                                {formatCurrency(r.amount, r.currency)}
+                              <td className="py-2 text-right">
+                                <Amount value={r.amount} currency={r.currency} kind={sampleKind(r.type)} />
                               </td>
                             </tr>
                           ))}

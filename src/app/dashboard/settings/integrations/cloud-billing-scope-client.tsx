@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 import { Cloud, RefreshCw, Save } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { StatusTag } from "@/components/ds/status-dot";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -67,10 +67,10 @@ function WorkloadIdentityBox({
   t,
 }: Readonly<{ subject: string; command: string | null; t: IntegrationsT }>) {
   return (
-    <div className="space-y-2 rounded-md border p-3 text-sm">
+    <div className="space-y-2 rounded-md bg-muted/50 p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-muted-foreground">{t("scope.auth.subject")}</span>
-        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{subject}</code>
+        <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs">{subject}</code>
       </div>
       {command ? (
         <div className="space-y-1.5">
@@ -78,10 +78,10 @@ function WorkloadIdentityBox({
             <span className="text-muted-foreground">{t("scope.auth.command")}</span>
             <CopyButton value={command} />
           </div>
-          <pre className="overflow-x-auto rounded bg-muted p-2 text-xs whitespace-pre-wrap break-all">{command}</pre>
+          <pre className="overflow-x-auto rounded-md bg-muted p-2 font-mono text-xs whitespace-pre-wrap break-all">{command}</pre>
         </div>
       ) : (
-        <p className="text-xs text-amber-600">{t("scope.auth.invalid")}</p>
+        <p className="text-xs text-warning">{t("scope.auth.invalid")}</p>
       )}
     </div>
   );
@@ -116,11 +116,13 @@ function CandidateRow({
       <label htmlFor={id} className="min-w-0 flex-1 cursor-pointer">
         <span className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
           {candidate.displayName}
-          {candidate.currency ? <Badge variant="outline">{candidate.currency}</Badge> : null}
-          {candidate.reseller ? <Badge variant="secondary">{t("scope.reseller")}</Badge> : null}
-          {candidate.closed ? <Badge variant="outline">{t("scope.closed")}</Badge> : null}
+          {candidate.currency ? (
+            <span className="text-xs font-normal text-muted-foreground">{candidate.currency}</span>
+          ) : null}
+          {candidate.reseller ? <StatusTag tone="primary">{t("scope.reseller")}</StatusTag> : null}
+          {candidate.closed ? <StatusTag tone="neutral">{t("scope.closed")}</StatusTag> : null}
         </span>
-        <span className="block truncate text-xs text-muted-foreground">{candidate.id}</span>
+        <span className="block truncate font-mono text-xs text-muted-foreground">{candidate.id}</span>
       </label>
     </li>
   );
@@ -230,7 +232,7 @@ export function CloudBillingScopeSection({ view, canManage }: Readonly<{ view: C
             ))}
           </ul>
         )}
-        {selected.length === 0 ? <p className="text-xs text-amber-600">{t("scope.empty")}</p> : null}
+        {selected.length === 0 ? <p className="text-xs text-warning">{t("scope.empty")}</p> : null}
 
         {view.provider === "gcp" ? <BigQueryInputs value={bq} onChange={setBq} disabled={locked} t={t} /> : null}
 

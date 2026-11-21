@@ -30,6 +30,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ThemeMenuItems } from "@/components/theme-switcher";
 import {
   SidebarMenu,
   SidebarMenuButton,
@@ -126,6 +127,8 @@ export function UserMenu() {
                 <Badge className="h-5 min-w-5 px-1.5">{pendingCount}</Badge>
               ) : null}
             </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <ThemeMenuItems />
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onSelect={onSignOut}>
               <LogOut className="size-4" />

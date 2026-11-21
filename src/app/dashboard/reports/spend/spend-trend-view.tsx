@@ -18,6 +18,7 @@ import { ChartContainer, ChartTooltip, type ChartConfig } from "@/components/ui/
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/empty-state";
+import { StatCard } from "@/components/ds/stat-card";
 import {
   compositionOf,
   summarizeSpendTrend,
@@ -80,28 +81,6 @@ function Controls({
 
 // ---- 摘要卡 ----
 
-function StatCard({
-  icon: Icon,
-  label,
-  children,
-  footer,
-}: Readonly<{
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  children: React.ReactNode;
-  footer?: React.ReactNode;
-}>) {
-  return (
-    <Card className="gap-2 p-4">
-      <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-        <Icon className="size-3.5" /> {label}
-      </div>
-      <div className="min-w-0">{children}</div>
-      {footer ? <div className="text-xs text-muted-foreground">{footer}</div> : null}
-    </Card>
-  );
-}
-
 function SummaryCards({
   trend,
   colorOf,
@@ -112,63 +91,66 @@ function SummaryCards({
   const { summary, dimension, months } = trend;
   const up = summary.change > 0;
   const top = summary.top;
-  // 支出變多是「壞消息」，用支出色；變少用收入色
-  let changeColor = "text-foreground";
-  if (summary.change > 0) changeColor = "text-expense";
-  else if (summary.change < 0) changeColor = "text-income";
+  // 支出變多是要留意的事（琥珀），變少用收入色；不用紅 —— 紅色留給逾期、失敗這種要人處理的狀態
+  let changeTone: "default" | "warning" | "income" = "default";
+  if (summary.change > 0) changeTone = "warning";
+  else if (summary.change < 0) changeTone = "income";
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <StatCard
-        icon={Wallet}
+        icon={<Wallet />}
         label={t("thisMonth")}
-        footer={`${fullLabel(months.at(-1) ?? "")} · ${t("partialMonth")}`}
-      >
-        <p className="text-2xl font-semibold lg:text-xl 2xl:text-2xl tabular-nums">{money(summary.thisMonth)}</p>
-      </StatCard>
+        value={Math.round(summary.thisMonth)}
+        currency="TWD"
+        hint={`${fullLabel(months.at(-1) ?? "")} · ${t("partialMonth")}`}
+        spark={trend.monthTotals}
+      />
 
       <StatCard
-        icon={up ? TrendingUp : TrendingDown}
+        icon={up ? <TrendingUp /> : <TrendingDown />}
         label={t("vsLastMonth")}
-        footer={t("lastMonthWas", { amount: money(summary.prevMonth) })}
-      >
-        <p className={cn("flex flex-wrap items-baseline gap-x-2 text-2xl font-semibold lg:text-xl 2xl:text-2xl tabular-nums", changeColor)}>
-          <span className="whitespace-nowrap">
-            {summary.change > 0 ? "+" : ""}
-            {money(summary.change)}
-          </span>
-          <span className="text-sm font-medium whitespace-nowrap">
-            {summary.changePct == null ? t("noBase") : signedPercent.format(summary.changePct)}
-          </span>
-        </p>
-      </StatCard>
+        value={Math.round(summary.change)}
+        currency="TWD"
+        suffix={` · ${summary.changePct == null ? t("noBase") : signedPercent.format(summary.changePct)}`}
+        tone={changeTone}
+        hint={t("lastMonthWas", { amount: money(summary.prevMonth) })}
+      />
+
+      {top ? (
+        <StatCard
+          icon={<Trophy />}
+          label={dimension === "category" ? t("topCategory") : t("topParty")}
+          value={Math.round(top.total)}
+          currency="TWD"
+          hint={
+            <span className="flex min-w-0 items-center gap-1.5">
+              <ItemMark item={top} label={label(top)} color={colorOf(top.key)} size="sm" />
+              <span className="truncate font-medium text-foreground">{label(top)}</span>
+              {summary.periodTotal > 0 ? (
+                <span className="shrink-0">
+                  · {t("shareOfPeriod", { share: percent.format(top.total / summary.periodTotal) })}
+                </span>
+              ) : null}
+            </span>
+          }
+          spark={top.monthly}
+        />
+      ) : (
+        <StatCard
+          icon={<Trophy />}
+          label={dimension === "category" ? t("topCategory") : t("topParty")}
+          value={0}
+          currency="TWD"
+        />
+      )}
 
       <StatCard
-        icon={Trophy}
-        label={dimension === "category" ? t("topCategory") : t("topParty")}
-        footer={
-          top && summary.periodTotal > 0
-            ? `${money(top.total)} · ${t("shareOfPeriod", { share: percent.format(top.total / summary.periodTotal) })}`
-            : undefined
-        }
-      >
-        {top ? (
-          <p className="flex min-w-0 items-center gap-2 text-lg font-semibold">
-            <ItemMark item={top} label={label(top)} color={colorOf(top.key)} />
-            <span className="truncate">{label(top)}</span>
-          </p>
-        ) : (
-          <p className="text-2xl font-semibold lg:text-xl 2xl:text-2xl text-muted-foreground">—</p>
-        )}
-      </StatCard>
-
-      <StatCard
-        icon={Sparkles}
+        icon={<Sparkles />}
         label={dimension === "category" ? t("newCategory") : t("newParty")}
-        footer={t("newHint")}
-      >
-        <p className="text-2xl font-semibold lg:text-xl 2xl:text-2xl tabular-nums">{summary.newItems}</p>
-      </StatCard>
+        value={summary.newItems}
+        hint={t("newHint")}
+      />
     </div>
   );
 }
@@ -197,7 +179,7 @@ function StackTooltip({
     .sort((a, b) => b.v - a.v);
   const total = rows.reduce((sum, r) => sum + r.v, 0);
   return (
-    <div className="grid min-w-48 gap-1 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
+    <div className="grid min-w-48 gap-1 rounded-lg border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-lg">
       <div className="font-medium">{fullLabel(typeof label === "string" ? label : "")}</div>
       {rows.map(({ s, v }) => (
         <div key={s.key} className="flex items-center gap-2">
@@ -249,7 +231,7 @@ function StackChart({
       <CardContent className="space-y-3">
         <ChartContainer config={config} className="aspect-auto h-72 w-full">
           <BarChart data={trend.stack} margin={{ left: 4, right: 4 }}>
-            <CartesianGrid vertical={false} />
+            <CartesianGrid vertical={false} stroke="var(--border-soft)" />
             <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} tickFormatter={tickLabel} />
             <YAxis tickLine={false} axisLine={false} width={48} tickFormatter={(v: number) => compact.format(v)} />
             <ChartTooltip cursor={{ fill: "var(--muted)", opacity: 0.5 }} content={<StackTooltip series={series} />} />
@@ -260,8 +242,11 @@ function StackChart({
                 stackId="spend"
                 fill={s.color}
                 fillOpacity={baseOpacity(s) * (faded(s) ? 0.3 : 1)}
-                radius={i === series.length - 1 ? [3, 3, 0, 0] : 0}
-                isAnimationActive={false}
+                radius={i === series.length - 1 ? [4, 4, 0, 0] : 0}
+                maxBarSize={36}
+                isAnimationActive="auto"
+                animationDuration={500}
+                animationEasing="ease-out"
                 className={s.itemKey ? "cursor-pointer" : undefined}
                 onClick={() => (s.itemKey ? onSelect(s.itemKey) : undefined)}
               />
@@ -326,7 +311,7 @@ function MonthAmountTooltip({
 }: Readonly<{ active?: boolean; payload?: ReadonlyArray<{ value?: unknown }>; label?: unknown }>) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="grid gap-1 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
+    <div className="grid gap-1 rounded-lg border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-lg">
       <div className="font-medium">{fullLabel(typeof label === "string" ? label : "")}</div>
       <div className="font-medium tabular-nums">{money(Number(payload[0].value))}</div>
     </div>
@@ -395,7 +380,7 @@ function FocusCard({
       <CardContent className="grid gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <ChartContainer config={config} className="aspect-auto h-56 w-full">
           <BarChart data={data} margin={{ left: 4, right: 4, top: 12 }}>
-            <CartesianGrid vertical={false} />
+            <CartesianGrid vertical={false} stroke="var(--border-soft)" />
             <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} tickFormatter={tickLabel} />
             <YAxis tickLine={false} axisLine={false} width={48} tickFormatter={(v: number) => compact.format(v)} />
             <ChartTooltip
@@ -412,7 +397,14 @@ function FocusCard({
                 className: "fill-muted-foreground text-[10px]",
               }}
             />
-            <Bar dataKey="amount" radius={[3, 3, 0, 0]} isAnimationActive={false}>
+            <Bar
+              dataKey="amount"
+              radius={[4, 4, 0, 0]}
+              maxBarSize={36}
+              isAnimationActive="auto"
+              animationDuration={500}
+              animationEasing="ease-out"
+            >
               {data.map((d) => (
                 <Cell key={d.month} fill={color} fillOpacity={item.kind === "none" ? 0.5 : 0.9} />
               ))}
@@ -453,9 +445,9 @@ function FocusCard({
                       {money(c.total)} <span className="text-muted-foreground">· {percent.format(c.share)}</span>
                     </span>
                   </div>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div className="h-1.5 overflow-hidden rounded-sm bg-muted">
                     <div
-                      className="h-full rounded-full"
+                      className="h-full rounded-sm"
                       style={{ width: `${Math.max(c.share * 100, 1)}%`, background: cColor, opacity: c.kind === "other" ? 0.45 : 0.85 }}
                     />
                   </div>
@@ -549,9 +541,9 @@ export function SpendTrendSkeleton() {
       </div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {["a", "b", "c", "d"].map((k) => (
-          <Card key={k} className="gap-2 p-4">
+          <Card key={k} className="gap-2 px-4 pt-3.5 pb-3">
             <Skeleton className="h-3.5 w-24" />
-            <Skeleton className="h-7 w-32" />
+            <Skeleton className="h-8 w-32" />
             <Skeleton className="h-3 w-20" />
           </Card>
         ))}

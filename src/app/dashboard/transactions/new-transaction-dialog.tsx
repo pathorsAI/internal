@@ -6,6 +6,7 @@ import { Plus, ArrowLeft, Receipt, Banknote, HandCoins, ArrowLeftRight, Papercli
 import { useTranslations } from "next-intl";
 import { createTransaction, type ActionState } from "@/db/mutations";
 import { Button } from "@/components/ui/button";
+import { GlowButton } from "@/components/ds/glow-button";
 import { Input } from "@/components/ui/input";
 import { Field, SelectField, TextField } from "@/components/form-field";
 import {
@@ -123,9 +124,9 @@ export function NewTransactionDialog({
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetTrigger asChild>
-        <Button size="sm">
+        <GlowButton size="sm">
           <Plus className="size-4" /> {t("form.addTransaction")}
-        </Button>
+        </GlowButton>
       </SheetTrigger>
       <SheetContent className="sm:max-w-xl">
         {scenario === null ? (

@@ -10,7 +10,7 @@ import {
   PendingInvitations,
   useUserInvitations,
 } from "@/components/pending-invitations";
-import { Button } from "@/components/ui/button";
+import { GlowButton } from "@/components/ds/glow-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -126,9 +126,9 @@ export default function OnboardingPage() {
                   placeholder={t("create.namePlaceholder")}
                 />
               </div>
-              <Button type="submit" className="w-full" disabled={creating}>
+              <GlowButton type="submit" className="w-full" disabled={creating}>
                 {creating ? t("create.submitting") : t("create.submit")}
-              </Button>
+              </GlowButton>
             </form>
           </CardContent>
         </Card>

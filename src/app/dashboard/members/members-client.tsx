@@ -17,7 +17,8 @@ const LAST_ORG_KEY = "lastOrgId";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/form-field";
-import { Badge } from "@/components/ui/badge";
+import { GlowButton } from "@/components/ds/glow-button";
+import { StatusTag } from "@/components/ds/status-dot";
 import {
   Card,
   CardContent,
@@ -231,7 +232,9 @@ export function MembersClient() {
                   onChange={(e) => setEmail(e.target.value)}
                 />
               </Field>
-              <Field label={t("invite.roleLabel")} className="w-36">
+              {/* Radix 在 trigger 後面塞了隱藏的原生 select，space-y 因此也給 trigger 下緣留了間距，
+                  這格就比 Email 高、底部對不齊；把那段間距拿掉。 */}
+              <Field label={t("invite.roleLabel")} className="w-36 [&>[data-slot=select-trigger]]:mb-0">
                 <Select value={role} onValueChange={(v) => v && setRole(v)}>
                   <SelectTrigger className="w-full">
                     <SelectValue />
@@ -245,9 +248,9 @@ export function MembersClient() {
                   </SelectContent>
                 </Select>
               </Field>
-              <Button type="submit" disabled={inviting}>
+              <GlowButton type="submit" disabled={inviting}>
                 {inviting ? t("invite.submitting") : t("invite.submit")}
-              </Button>
+              </GlowButton>
             </form>
           </CardContent>
         </Card>
@@ -261,9 +264,9 @@ export function MembersClient() {
           {members.length === 0 ? (
             <EmptyState icon={Users} message={t("list.empty")} />
           ) : (
-            <ul className="divide-y rounded-md border">
+            <ul className="divide-y">
               {members.map((m) => (
-                <li key={m.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
+                <li key={m.id} className="flex items-center gap-3 py-2.5 text-sm">
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-medium">
                       {m.user.name || m.user.email}
@@ -275,9 +278,9 @@ export function MembersClient() {
                       {m.user.email}
                     </div>
                   </div>
-                  <Badge variant={m.role === "owner" ? "default" : "secondary"}>
+                  <StatusTag tone={m.role === "owner" ? "primary" : "neutral"}>
                     {roleLabel[m.role] ?? m.role}
-                  </Badge>
+                  </StatusTag>
                 </li>
               ))}
             </ul>
@@ -292,11 +295,17 @@ export function MembersClient() {
             <CardDescription>{t("invitations.description")}</CardDescription>
           </CardHeader>
           <CardContent>
-            <ul className="divide-y rounded-md border">
+            <ul className="divide-y">
               {invitations.map((inv) => (
-                <li key={inv.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
+                <li key={inv.id} className="flex items-center gap-3 py-2.5 text-sm">
                   <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium">{inv.email}</div>
+                    <div
+                      className={
+                        inv.expired ? "truncate text-muted-foreground" : "truncate font-medium"
+                      }
+                    >
+                      {inv.email}
+                    </div>
                     <div className="text-xs text-muted-foreground">
                       {roleLabel[inv.role ?? "member"] ?? inv.role}
                       {!inv.expired && (
@@ -306,9 +315,11 @@ export function MembersClient() {
                       )}
                     </div>
                   </div>
-                  <Badge variant={inv.expired ? "destructive" : "outline"}>
-                    {inv.expired ? t("invitations.expired") : t("invitations.pending")}
-                  </Badge>
+                  {inv.expired ? (
+                    <span className="text-xs text-muted-foreground">{t("invitations.expired")}</span>
+                  ) : (
+                    <StatusTag tone="warning">{t("invitations.pending")}</StatusTag>
+                  )}
                   {canManage && (
                     <>
                       <Button
@@ -354,7 +365,12 @@ export function MembersClient() {
           <CardContent>
             <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
               <AlertDialogTrigger asChild>
-                <Button type="button" variant="destructive" disabled={deleting}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  disabled={deleting}
+                >
                   {deleting
                     ? t("danger.deleting")
                     : t("danger.deleteTrigger", { name: activeOrg?.name ?? t("danger.defaultOrgName") })}

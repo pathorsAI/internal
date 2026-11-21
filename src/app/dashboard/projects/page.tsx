@@ -4,10 +4,10 @@ import { DeleteButton } from "@/components/delete-button";
 import { deleteProject } from "@/db/mutations";
 import { EditProjectForm } from "./edit-project-form";
 import { PageHeader } from "@/components/page-header";
-import { Badge } from "@/components/ui/badge";
+import { StatusTag } from "@/components/ds/status-dot";
 import { TableCard } from "@/components/table-card";
 import { EmptyRow } from "@/components/empty-state";
-import { signColor, txnTypeColor } from "@/components/amount";
+import { Amount } from "@/components/amount";
 import {
   Table,
   TableBody,
@@ -17,16 +17,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { listProjects, listParties } from "@/db/queries";
-import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { NewProjectDialog } from "./new-project-dialog";
 import { requireOrg } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
-const statusVariant: Record<string, "default" | "secondary" | "outline"> = {
-  active: "default",
-  archived: "secondary",
+const statusTone: Record<string, "neutral" | "primary"> = {
+  active: "primary",
+  archived: "neutral",
 };
 
 export default async function ProjectsPage() {
@@ -72,20 +71,22 @@ export default async function ProjectsPage() {
                       <TableCell className="font-medium">{p.name}</TableCell>
                       <TableCell className="text-muted-foreground">{p.clientName ?? "—"}</TableCell>
                       <TableCell>
-                        <Badge variant={statusVariant[p.status] ?? "outline"}>
+                        <StatusTag tone={statusTone[p.status] ?? "neutral"}>
                           {statusLabels[p.status] ?? p.status}
-                        </Badge>
+                        </StatusTag>
                       </TableCell>
-                      <TableCell className={cn("text-right tabular-nums", signColor(p.income))}>
-                        {formatCurrency(p.income)}
+                      <TableCell className="text-right">
+                        <Amount value={p.income} kind="income" />
                       </TableCell>
-                      <TableCell className={cn("text-right tabular-nums", txnTypeColor("expense"))}>
-                        {formatCurrency(p.expense)}
+                      <TableCell className="text-right">
+                        <Amount value={p.expense} kind="expense" />
                       </TableCell>
-                      <TableCell
-                        className={cn("text-right font-medium tabular-nums", signColor(p.net))}
-                      >
-                        {formatCurrency(p.net)}
+                      <TableCell className="text-right">
+                        {/* 淨額為負（虧損）是要人看的，用 destructive；正的照收入綠 */}
+                        <Amount
+                          value={p.net}
+                          className={cn("font-medium", Number(p.net) < 0 && "text-destructive")}
+                        />
                       </TableCell>
                     </>
                   }

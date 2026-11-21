@@ -2,7 +2,7 @@ import { getTranslations } from "next-intl/server";
 import { PageHeader } from "@/components/page-header";
 import { TableCard } from "@/components/table-card";
 import { EmptyRow } from "@/components/empty-state";
-import { signColor, txnTypeColor } from "@/components/amount";
+import { Amount } from "@/components/amount";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -22,7 +22,6 @@ import {
 } from "@/db/queries";
 import { formatCurrency } from "@/lib/format";
 import { requireOrg } from "@/lib/session";
-import { cn } from "@/lib/utils";
 import { shiftTaxPeriod, taxPeriodOf } from "@/lib/vat";
 import { todayStr } from "@/lib/mcp/shared";
 import { ReceivableAging } from "./receivable-aging";
@@ -95,8 +94,9 @@ export default async function ReportsPage() {
                       <Badge variant="outline">{labelMap[v.label] ?? v.label}</Badge>
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{v.txnCount}</TableCell>
-                    <TableCell className="text-right font-medium tabular-nums">
-                      {formatCurrency(v.total)}
+                    <TableCell className="text-right font-medium">
+                      {/* 整張表都是成本，當彙總數字看，不再每列加負號 */}
+                      <Amount value={v.total} kind="neutral" />
                     </TableCell>
                   </TableRow>
                 ))
@@ -124,16 +124,14 @@ export default async function ReportsPage() {
                   <TableRow key={p.id}>
                     <TableCell className="font-medium">{p.name}</TableCell>
                     <TableCell className="text-muted-foreground">{p.clientName ?? "—"}</TableCell>
-                    <TableCell className={cn("text-right tabular-nums", txnTypeColor("income"))}>
-                      {formatCurrency(p.income)}
+                    <TableCell className="text-right">
+                      <Amount value={p.income} kind="income" />
                     </TableCell>
-                    <TableCell className={cn("text-right tabular-nums", txnTypeColor("expense"))}>
-                      {formatCurrency(p.expense)}
+                    <TableCell className="text-right">
+                      <Amount value={p.expense} kind="expense" />
                     </TableCell>
-                    <TableCell
-                      className={cn("text-right font-medium tabular-nums", signColor(p.net))}
-                    >
-                      {formatCurrency(p.net)}
+                    <TableCell className="text-right font-medium">
+                      <Amount value={p.net} />
                     </TableCell>
                   </TableRow>
                 ))

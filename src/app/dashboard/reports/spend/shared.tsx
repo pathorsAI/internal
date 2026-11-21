@@ -12,18 +12,18 @@ import type { CompositionItem, TrendItem } from "@/lib/spend-trend";
 import { cn } from "@/lib/utils";
 
 /**
- * 堆疊序列的顏色。先用主題的 chart token（chart-4 與 chart-2 幾乎同色，跳過），
- * 不夠 8 色再補 4 個同明度、不同色相的顏色；淺色 / 深色主題都看得清楚。
+ * 堆疊序列的顏色：八個都是主題的 chart token（globals.css），淺色 / 深色各有一份。
+ * 順序刻意讓相鄰兩個序列的色相差得遠一點。
  */
 export const SERIES_COLORS = [
   "var(--chart-1)",
   "var(--chart-3)",
   "var(--chart-5)",
   "var(--chart-2)",
-  "oklch(0.62 0.19 300)",
-  "oklch(0.72 0.16 55)",
-  "oklch(0.70 0.12 200)",
-  "oklch(0.68 0.17 340)",
+  "var(--chart-6)",
+  "var(--chart-4)",
+  "var(--chart-7)",
+  "var(--chart-8)",
 ] as const;
 export const OTHER_COLOR = "var(--muted-foreground)";
 

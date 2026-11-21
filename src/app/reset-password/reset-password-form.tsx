@@ -7,7 +7,7 @@ import { authClient } from "@/lib/auth-client";
 import { AuthShell } from "@/components/auth/auth-shell";
 import { formText } from "@/components/auth/form-text";
 import { NewPasswordFields } from "@/components/auth/new-password-fields";
-import { Button } from "@/components/ui/button";
+import { GlowButton } from "@/components/ds/glow-button";
 import { useHydrated } from "@/hooks/use-hydrated";
 import { checkNewPassword, type NewPasswordProblem } from "@/lib/password-policy";
 
@@ -60,9 +60,9 @@ export function ResetPasswordForm({ token }: Readonly<{ token: string | null }>)
       <AuthShell title={t("invalid.title")}>
         <div className="space-y-4">
           <p className="text-sm">{t("invalid.body")}</p>
-          <Button asChild className="h-11 w-full">
+          <GlowButton asChild className="h-11 w-full">
             <Link href="/forgot-password">{t("invalid.action")}</Link>
-          </Button>
+          </GlowButton>
           <div className="text-center text-sm">
             <Link href="/login" className="text-muted-foreground underline-offset-4 hover:underline">
               {ts("backToLogin")}
@@ -82,9 +82,9 @@ export function ResetPasswordForm({ token }: Readonly<{ token: string | null }>)
             {error === "failed" ? t("failed") : ts(error)}
           </p>
         )}
-        <Button type="submit" className="h-11 w-full" disabled={pending || !hydrated}>
+        <GlowButton type="submit" className="h-11 w-full" disabled={pending || !hydrated}>
           {pending ? t("submitting") : t("submit")}
-        </Button>
+        </GlowButton>
       </form>
     </AuthShell>
   );

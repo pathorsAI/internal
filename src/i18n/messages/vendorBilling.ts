@@ -24,6 +24,12 @@ const vendorBilling = {
     reconciled: { "zh-TW": "對帳完成", en: "Matching finished" },
     failed: { "zh-TW": "操作失敗", en: "Something went wrong" },
   },
+  stats: {
+    accounts: { "zh-TW": "計費帳號", en: "Billing accounts" },
+    methods: { "zh-TW": "使用中的付款方式", en: "Active payment methods" },
+    pending: { "zh-TW": "待對帳帳單", en: "Invoices to match" },
+    overdue: { "zh-TW": "逾期帳單", en: "Overdue invoices" },
+  },
   views: {
     accounts: { "zh-TW": "計費帳號", en: "Billing accounts" },
     methods: { "zh-TW": "付款方式", en: "Payment methods" },

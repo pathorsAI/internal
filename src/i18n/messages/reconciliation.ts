@@ -18,6 +18,10 @@ const reconciliation = {
     note: { "zh-TW": "備註", en: "Note" },
   },
   empty: { "zh-TW": "尚無對帳紀錄", en: "No reconciliation records yet" },
+  table: {
+    title: { "zh-TW": "對帳紀錄", en: "Records" },
+    matched: { "zh-TW": "{matched}/{total} 筆對平", en: "{matched}/{total} matched" },
+  },
   editTitle: { "zh-TW": "編輯對帳紀錄", en: "Edit reconciliation record" },
   status: {
     matched: { "zh-TW": "已對平", en: "Matched" },

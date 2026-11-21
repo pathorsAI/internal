@@ -3,7 +3,7 @@ import { getTranslations } from "next-intl/server";
 import { PageHeader } from "@/components/page-header";
 import { CopyButton } from "@/components/copy-button";
 import { AddToClaudeButton } from "@/components/add-to-claude-button";
-import { Badge } from "@/components/ui/badge";
+import { StatusTag } from "@/components/ds/status-dot";
 import {
   Card,
   CardContent,
@@ -27,6 +27,7 @@ import { internalConnectorName, orgMcpUrl } from "@/lib/claude-connector";
 import { requestOrigin } from "@/lib/request-origin";
 import { requireOrg } from "@/lib/session";
 import { RevokeClientButton } from "./revoke-client-button";
+import { SettingsBody } from "../settings-body";
 
 export const dynamic = "force-dynamic";
 
@@ -60,7 +61,7 @@ export default async function McpPage() {
         description={t("mcp.description")}
       />
 
-      <div className="space-y-6">
+      <SettingsBody>
         <Card>
           <CardHeader>
             <CardTitle>{t("mcp.connectionInfo.title")}</CardTitle>
@@ -84,7 +85,7 @@ export default async function McpPage() {
             <div className="space-y-1.5">
               <div className="text-sm font-medium">{t("mcp.connectionInfo.serverUrlLabel")}</div>
               <div className="flex items-center gap-2">
-                <code className="flex-1 truncate rounded-md border bg-muted px-3 py-2 text-sm">
+                <code className="flex-1 truncate rounded-md bg-muted px-3 py-2 font-mono text-sm">
                   {mcpUrl}
                 </code>
                 <CopyButton value={mcpUrl} />
@@ -105,7 +106,7 @@ export default async function McpPage() {
                     return (
                       <li key={o.id} className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
                         <span className="w-32 shrink-0 truncate text-sm">{o.name}</span>
-                        <code className="min-w-0 flex-1 truncate rounded-md border bg-muted px-3 py-2 text-xs">
+                        <code className="min-w-0 flex-1 truncate rounded-md bg-muted px-3 py-2 font-mono text-xs">
                           {url}
                         </code>
                         <CopyButton value={url} label="" />
@@ -121,7 +122,7 @@ export default async function McpPage() {
               </div>
             )}
             <p className="text-xs text-muted-foreground">
-              {t("mcp.connectionInfo.discoveryLabel")}<code className="text-xs">{discoveryUrl}</code>
+              {t("mcp.connectionInfo.discoveryLabel")}<code className="rounded-sm bg-muted px-1 py-0.5 font-mono text-xs">{discoveryUrl}</code>
             </p>
           </CardContent>
         </Card>
@@ -157,26 +158,24 @@ export default async function McpPage() {
                       </TableCell>
                       <TableCell>
                         <span className="inline-flex items-center gap-1.5">
-                          <code className="text-xs text-muted-foreground">
+                          <code className="font-mono text-xs text-muted-foreground">
                             {c.clientId.slice(0, 12)}…
                           </code>
                           <CopyButton value={c.clientId} label="" />
                         </span>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline">
-                          {typeLabel[c.type] ?? c.type}
-                        </Badge>
+                        <span className="text-muted-foreground">{typeLabel[c.type] ?? c.type}</span>
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {c.activeTokens}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={c.disabled ? "secondary" : "default"}>
+                        <StatusTag tone={c.disabled ? "neutral" : "income"}>
                           {c.disabled ? t("mcp.clients.status.disabled") : t("mcp.clients.status.enabled")}
-                        </Badge>
+                        </StatusTag>
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
+                      <TableCell className="text-xs text-muted-foreground tabular-nums">
                         {formatDate(c.createdAt)}
                       </TableCell>
                       <TableCell className="text-right">
@@ -192,7 +191,7 @@ export default async function McpPage() {
             </Table>
           </TableCard>
         </div>
-      </div>
+      </SettingsBody>
     </>
   );
 }

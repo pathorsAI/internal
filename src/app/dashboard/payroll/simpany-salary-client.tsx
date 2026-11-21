@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { RefreshCw } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { StatusTag } from "@/components/ds/status-dot";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -61,7 +61,7 @@ export function SalarySyncButton({ year }: Readonly<{ year: number }>) {
         {pending ? t("pending") : t("button")}
       </Button>
       {unmatched.length > 0 ? (
-        <p className="max-w-sm text-right text-xs text-amber-700 dark:text-amber-400">
+        <p className="max-w-sm text-right text-xs text-warning">
           {t("unmatched", { names: unmatched.join("、") })}
         </p>
       ) : null}
@@ -116,22 +116,13 @@ export function ArrearsDetailSheet({ employee }: Readonly<{ employee: ReconEmplo
                         <span className="tabular-nums">{t("monthShort", { month: m.month })}</span>
                         <span className="ml-2 inline-flex gap-1">
                           {m.filed ? null : (
-                            <Badge variant="outline" className="text-muted-foreground">
-                              {t("unfiled")}
-                            </Badge>
+                            <StatusTag tone="neutral">{t("unfiled")}</StatusTag>
                           )}
                           {m.estimated ? (
-                            <Badge
-                              variant="outline"
-                              className="border-amber-500/40 text-amber-700 dark:text-amber-400"
-                            >
-                              {t("estimated")}
-                            </Badge>
+                            <StatusTag tone="warning">{t("estimated")}</StatusTag>
                           ) : null}
                           {m.due ? null : (
-                            <Badge variant="outline" className="text-muted-foreground">
-                              {t("notDue")}
-                            </Badge>
+                            <StatusTag tone="neutral">{t("notDue")}</StatusTag>
                           )}
                         </span>
                       </TableCell>
@@ -144,7 +135,7 @@ export function ArrearsDetailSheet({ employee }: Readonly<{ employee: ReconEmplo
                       <TableCell
                         className={
                           m.outstanding > 0
-                            ? "pr-3 text-right font-medium tabular-nums text-expense"
+                            ? "pr-3 text-right font-medium tabular-nums text-destructive"
                             : "pr-3 text-right tabular-nums text-muted-foreground"
                         }
                       >
@@ -188,7 +179,7 @@ export function ArrearsDetailSheet({ employee }: Readonly<{ employee: ReconEmplo
                             </div>
                           ))}
                           {p.unapplied > 0 ? (
-                            <div className="text-amber-700 tabular-nums dark:text-amber-400">
+                            <div className="text-warning tabular-nums">
                               {t("unapplied", { amount: formatCurrency(p.unapplied) })}
                             </div>
                           ) : null}

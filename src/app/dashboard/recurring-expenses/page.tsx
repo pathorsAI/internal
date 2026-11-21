@@ -2,7 +2,8 @@ import { getTranslations } from "next-intl/server";
 import { RowDialog } from "@/components/row-dialog";
 import { DeleteButton } from "@/components/delete-button";
 import { PageHeader } from "@/components/page-header";
-import { Badge } from "@/components/ui/badge";
+import { StatusTag } from "@/components/ds/status-dot";
+import { Amount } from "@/components/amount";
 import { TableCard } from "@/components/table-card";
 import { EmptyRow } from "@/components/empty-state";
 import {
@@ -15,7 +16,6 @@ import {
 } from "@/components/ui/table";
 import { deleteRecurringExpense } from "@/db/mutations";
 import { listParties, listRecurringExpenses, type RecurringExpenseRow } from "@/db/queries";
-import { formatCurrency } from "@/lib/format";
 import { nextChargeDate, toRecurringExpense } from "@/lib/recurring-expenses";
 import { canManageOrg, requireOrgWithRole } from "@/lib/session";
 import { taipeiDate } from "@/lib/simpany-sync";
@@ -67,13 +67,17 @@ function RowCells({ row, today, t }: Readonly<{ row: RecurringExpenseRow; today:
         {row.paymentMethodLabel ?? "—"}
         {row.expectedAccountName ? <span className="mt-0.5 block text-xs">{row.expectedAccountName}</span> : null}
       </TableCell>
-      <TableCell className="text-right tabular-nums">
-        {row.expectedAmount !== null && row.currency ? formatCurrency(row.expectedAmount, row.currency) : "—"}
+      <TableCell className="text-right">
+        {row.expectedAmount !== null && row.currency ? (
+          <Amount value={row.expectedAmount} currency={row.currency} kind="expense" />
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
       </TableCell>
       <TableCell>
-        <Badge variant={row.isActive ? "default" : "outline"}>
+        <StatusTag tone={row.isActive ? "primary" : "neutral"}>
           {row.isActive ? t("status.active") : t("status.inactive")}
-        </Badge>
+        </StatusTag>
       </TableCell>
     </>
   );

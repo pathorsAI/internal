@@ -5,8 +5,10 @@ import { useTransition } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
-import { Plus, RefreshCw } from "lucide-react";
+import { AlertTriangle, CreditCard, FileClock, Plus, RefreshCw, Server } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { GlowButton } from "@/components/ds/glow-button";
+import { StatCard } from "@/components/ds/stat-card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/page-header";
 import { cn } from "@/lib/utils";
@@ -86,19 +88,19 @@ function HeaderActions({
   const t = useTranslations("vendorBilling");
   return (
     <>
-      <Button type="button" variant="outline" onClick={onSync} disabled={syncing}>
+      <Button type="button" variant="outline" size="sm" onClick={onSync} disabled={syncing}>
         <RefreshCw className={cn("size-4", syncing && "animate-spin")} />
         {syncing ? t("actions.syncing") : t("actions.syncNow")}
       </Button>
       {view === "accounts" ? (
-        <Button type="button" onClick={onNewAccount}>
+        <GlowButton type="button" size="sm" onClick={onNewAccount}>
           <Plus className="size-4" /> {t("actions.newAccount")}
-        </Button>
+        </GlowButton>
       ) : null}
       {view === "methods" ? (
-        <Button type="button" onClick={onNewMethod}>
+        <GlowButton type="button" size="sm" onClick={onNewMethod}>
           <Plus className="size-4" /> {t("actions.newMethod")}
-        </Button>
+        </GlowButton>
       ) : null}
     </>
   );
@@ -243,6 +245,9 @@ export function VendorBillingClient({
 
   const providers = React.useMemo(() => new Map(accounts.map((a) => [a.id, a.provider])), [accounts]);
   const shownInvoices = React.useMemo(() => filterInvoices(invoices, invoiceFilter), [invoices, invoiceFilter]);
+  const pendingCount = React.useMemo(() => filterInvoices(invoices, "pending").length, [invoices]);
+  const overdueCount = attention.filter((a) => a.kind === "invoice_overdue").length;
+  const activeMethods = methods.filter((m) => m.isActive).length;
 
 
   return (
@@ -264,6 +269,24 @@ export function VendorBillingClient({
           changeView("invoices");
         }}
       />
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label={t("stats.accounts")} value={accounts.length} icon={<Server />} />
+        <StatCard label={t("stats.methods")} value={activeMethods} icon={<CreditCard />} />
+        <StatCard
+          label={t("stats.pending")}
+          value={pendingCount}
+          tone={pendingCount > 0 ? "warning" : "default"}
+          icon={<FileClock />}
+        />
+        <StatCard
+          label={t("stats.overdue")}
+          value={overdueCount}
+          tone={overdueCount > 0 ? "risk" : "default"}
+          pulse={overdueCount > 0}
+          icon={<AlertTriangle />}
+        />
+      </div>
 
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
         <Segmented

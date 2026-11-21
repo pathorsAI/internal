@@ -14,7 +14,7 @@ export const LOCALE_SWITCHER_CSS = `
 .langsw{position:relative; flex:none; display:flex; align-items:center}
 .langsw-trigger{
   display:grid; place-items:center; width:34px; height:34px; padding:0;
-  border:1px solid transparent; border-radius:999px; background:transparent;
+  border:1px solid transparent; border-radius:8px; background:transparent;
   color:var(--ink-2); cursor:pointer;
   transition:color .16s ease, background .16s ease, border-color .16s ease;
 }

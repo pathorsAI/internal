@@ -5,7 +5,6 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { getSession } from "@/lib/session";
 import { messages } from "@/i18n/messages";
 import type { Locale } from "@/i18n/config";
-import "./landing-fonts.css";
 import { LANDING_CSS, LANDING_HTML, LANDING_SCRIPT } from "./landing-content";
 import { LandingNav } from "./landing-nav";
 import { escapeHtml, renderLandingTemplate } from "./landing-template";
@@ -33,8 +32,9 @@ function authCta(signedIn: boolean, className: string, label: string): string {
  *
  * markup / CSS / script 在 ./landing-content（最早搬自 docs/index.html），除了導覽列以外
  * 刻意不轉成 JSX、不套 Tailwind：
- *  - 中文字體的 @font-face 走 ./landing-fonts.css（拉丁字體是 layout.tsx 的 next/font）。用 import 而不是 <link>，是因為手寫
- *    <link rel="stylesheet"> 會繞過 Next 的 CSS 管線（eslint 的 no-css-tags）。
+ *  - 字體是 layout.tsx 的 next/font（Inter／Noto Sans TC／Geist Mono），LANDING_CSS 以
+ *    --font-* 變數取用，不另外載字體。
+ *  - hero 的主行動多一個 .glow（整頁唯一發光的按鈕，見 LANDING_CSS），結尾那顆在藍底上反白。
  *  - <style> 直接寫在 body 內而不是靠 React 的 hoisting，這樣它在文件順序上必定
  *    晚於 head 裡的 globals.css，Tailwind preflight 打平的 h1/p 樣式才會被 landing
  *    自己的規則蓋回來。
@@ -53,7 +53,7 @@ export default async function LandingPage() {
 
   const ctaLabel = signedIn ? t.cta.openApp : t.cta.login;
   const html = renderLandingTemplate(LANDING_HTML, t)
-    .replaceAll("<!--AUTH_CTA_HERO-->", authCta(signedIn, "btn primary", ctaLabel))
+    .replaceAll("<!--AUTH_CTA_HERO-->", authCta(signedIn, "btn primary glow", ctaLabel))
     .replaceAll("<!--AUTH_CTA_FINALE-->", authCta(signedIn, "btn primary", ctaLabel))
     .replaceAll(
       "<!--AUTH_LINK_FOOTER-->",

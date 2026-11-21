@@ -43,6 +43,7 @@ export function NotifyButton({ id, notified }: Readonly<{ id: number; notified: 
     <Button
       type="button"
       size="sm"
+      variant="outline"
       disabled={pending}
       onClick={() => run(markAccountantNotified, t("toast.markedDone"))}
     >

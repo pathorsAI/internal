@@ -150,7 +150,7 @@ function SpendTooltip({
   const row = active ? (payload?.[0]?.payload as Row | undefined) : undefined;
   if (!row) return null;
   return (
-    <div className="grid min-w-40 gap-1 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
+    <div className="grid min-w-40 gap-1 rounded-lg border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-lg">
       <div className="font-medium">{row.label}</div>
       <div className="flex justify-between gap-4">
         <span className="text-muted-foreground">{t("tooltip.amount")}</span>
@@ -233,7 +233,8 @@ export function SpendChart({
   );
   const barValue = (n: number) => (isMobile ? `NT$${compact.format(n)}` : money(n));
   const chartConfig = {
-    total: { label: t("tooltip.amount"), color: "var(--expense)" },
+    // 品牌藍而非紅：這張圖整張都是支出，紅色只留給要人處理的狀態
+    total: { label: t("tooltip.amount"), color: "var(--chart-1)" },
   } satisfies ChartConfig;
 
   const summary = useMemo(() => summarizeSpend(rows, months, range, groupBy), [rows, months, range, groupBy]);
@@ -302,13 +303,15 @@ export function SpendChart({
                   radius={[0, 4, 4, 0]}
                   maxBarSize={22}
                   onClick={(_, index) => go(index)}
-                  isAnimationActive={false}
+                  isAnimationActive="auto"
+                  animationDuration={500}
+                  animationEasing="ease-out"
                 >
                   {data.map((row) => (
                     <Cell
                       key={row.key}
-                      fill={row.kind === "other" || row.kind === "none" ? "var(--muted-foreground)" : "var(--color-total)"}
-                      fillOpacity={row.kind === "other" || row.kind === "none" ? 0.45 : 0.85}
+                      fill={row.kind === "other" || row.kind === "none" ? "var(--chart-3)" : "var(--color-total)"}
+                      fillOpacity={row.kind === "other" || row.kind === "none" ? 0.55 : 0.9}
                       className={row.href ? "cursor-pointer" : undefined}
                     />
                   ))}
