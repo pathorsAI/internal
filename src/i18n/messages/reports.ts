@@ -37,6 +37,14 @@ const reports = {
     noneOutstanding: { "zh-TW": "沒有未收的款項", en: "Nothing outstanding" },
     totalLine: { "zh-TW": "{amounts} 未收", en: "{amounts} outstanding" },
     totalRow: { "zh-TW": "合計（{currency}）", en: "Total ({currency})" },
+    absorbedFees: {
+      "zh-TW": "匯款手續費（吸收）· {year} 年至今（管理帳）：{amounts}",
+      en: "Remittance fees (absorbed) · {year} to date (management book): {amounts}",
+    },
+    absorbedFeesNone: {
+      "zh-TW": "匯款手續費（吸收）· {year} 年至今（管理帳）：無",
+      en: "Remittance fees (absorbed) · {year} to date (management book): none",
+    },
     columns: {
       customer: { "zh-TW": "客戶", en: "Client" },
       total: { "zh-TW": "合計", en: "Total" },

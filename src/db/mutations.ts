@@ -3,16 +3,31 @@
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "next-intl/server";
 import { headers } from "next/headers";
-import { eq, and, isNull, inArray, desc } from "drizzle-orm";
+import { eq, and, isNull, inArray, desc, sql } from "drizzle-orm";
 import type { AnyPgColumn, PgTable } from "drizzle-orm/pg-core";
 import { getDb } from "./index";
-import { billingItemPaidById } from "./queries";
+import { billingItemPaidById, listBillingBoard, listContracts } from "./queries";
+import {
+  AllocationWriteError,
+  listEffectiveAllocations,
+  releaseLegacyMirror,
+  replaceTransactionAllocations,
+} from "./allocations";
+import {
+  isLegacyMirror,
+  parseTargetKey,
+  targetKey,
+  type AllocationInput,
+  type AllocationTarget,
+  type AllocationTargetType,
+} from "@/lib/payment-allocation";
 import {
   parties,
   employees,
   bankAccounts,
   accountReconciliations,
   transactions,
+  paymentAllocations,
   invoices,
   documents,
   categories,
@@ -1377,6 +1392,10 @@ export async function updateTransaction(
       f.toAccountId,
     ]);
     if (currencyError) return { ok: false, error: currencyError };
+
+    // 收款分配（0041）：分配列若只是舊綁定的鏡像，先拿掉，讓這次改的合約／金額直接生效；
+    // 真正拆分過的分配不動（收齊判斷照分配列，跟這裡的合約欄位無關）。
+    if (owned.type === "income") await releaseLegacyMirror(db, orgId, id);
 
     // 表單沒有的連結欄位（訂閱、期別、請款項）不在 patch 裡 → 連結層保留既有值。
     await updateTransactionLinked({ db, orgId, source: "web" }, id, {
@@ -2792,8 +2811,12 @@ export type PaymentCandidate = {
   amount: number;
   currency: string;
   partyName: string | null;
-  /** 與該期應收金額差多少（0 = 完全吻合） */
+  /** 與該期應收金額差多少（0 = 完全吻合）；已經分配過一部分的交易拿「還沒分配的」去比 */
   gap: number;
+  /** 這筆已經分配出去的金額（收款分配，0041）；0 = 還沒分配 */
+  allocated: number;
+  /** 已經拆分給多個應收：不能再用「就是這筆」整筆綁，要走「分配收款」 */
+  split: boolean;
 };
 
 /** 看板「登記收款」的候選交易：還沒綁到任何請款來源的收入。 */
@@ -2821,6 +2844,10 @@ export async function suggestPaymentMatches(input: {
       currency: transactions.currency,
       partyId: transactions.partyId,
       partyName: parties.name,
+      contractId: transactions.contractId,
+      subscriptionId: transactions.subscriptionId,
+      subscriptionPeriod: transactions.subscriptionPeriod,
+      billingItemId: transactions.billingItemId,
     })
     .from(transactions)
     .leftJoin(parties, eq(parties.id, transactions.partyId))
@@ -2830,34 +2857,95 @@ export async function suggestPaymentMatches(input: {
         eq(transactions.type, "income"),
         eq(transactions.currency, input.currency),
         isNull(transactions.deletedAt),
-        isNull(transactions.billingItemId),
-        isNull(transactions.subscriptionId),
+        // 兩種：(1) 還沒綁請款項目／訂閱期別（只綁合約的也算；只分配給合約的也不算綁走）；
+        // (2) 已經分配過、但還有沒分出去的錢。
+        sql`(
+          (${transactions.billingItemId} is null and ${transactions.subscriptionId} is null
+            and not exists (select 1 from ${paymentAllocations} a
+              where a.transaction_id = ${transactions.id} and a.target_type <> 'contract')
+            and (select count(*) from ${paymentAllocations} a where a.transaction_id = ${transactions.id}) <= 1)
+          or (exists (select 1 from ${paymentAllocations} a where a.transaction_id = ${transactions.id})
+            and (select sum(a.amount) from ${paymentAllocations} a
+              where a.transaction_id = ${transactions.id}) < ${transactions.amount})
+        )`,
       ),
     )
     .orderBy(desc(transactions.txnDate))
     .limit(200);
 
+  const allocRows =
+    rows.length === 0
+      ? []
+      : await getDb()
+          .select()
+          .from(paymentAllocations)
+          .where(
+            and(
+              eq(paymentAllocations.organizationId, orgId),
+              inArray(
+                paymentAllocations.transactionId,
+                rows.map((r) => r.id),
+              ),
+            ),
+          );
+  const byTxn = new Map<number, AllocationInput[]>();
+  for (const a of allocRows) {
+    const list = byTxn.get(a.transactionId) ?? [];
+    list.push(allocationInputOfRow(a));
+    byTxn.set(a.transactionId, list);
+  }
+  const shaped = rows.map((r) => {
+    const allocs = byTxn.get(r.id) ?? [];
+    const amount = Number(r.amount);
+    const split =
+      allocs.length > 0 &&
+      !isLegacyMirror(
+        {
+          amount,
+          contractId: r.contractId,
+          subscriptionId: r.subscriptionId,
+          subscriptionPeriod: r.subscriptionPeriod,
+          billingItemId: r.billingItemId,
+        },
+        allocs,
+      );
+    const allocated = split ? Math.round(allocs.reduce((s, a) => s + a.amount, 0) * 100) / 100 : 0;
+    return { ...r, amount, allocated, split, open: Math.round((amount - allocated) * 100) / 100 };
+  });
+
   const samePartyRank = (partyId: number | null) =>
     input.customerPartyId != null && partyId === input.customerPartyId ? 0 : 1;
 
-  return rows
-    .slice()
+  return shaped
     .sort(
       (a, b) =>
         samePartyRank(a.partyId) - samePartyRank(b.partyId) ||
-        Math.abs(Number(a.amount) - input.expected) -
-          Math.abs(Number(b.amount) - input.expected),
+        Math.abs(a.open - input.expected) - Math.abs(b.open - input.expected),
     )
     .slice(0, PAYMENT_MATCH_LIMIT)
     .map((r) => ({
       id: r.id,
       txnDate: r.txnDate,
       description: r.description,
-      amount: Number(r.amount),
+      amount: r.amount,
       currency: r.currency,
       partyName: r.partyName,
-      gap: Math.abs(Number(r.amount) - input.expected),
+      gap: Math.round(Math.abs(r.open - input.expected) * 100) / 100,
+      allocated: r.allocated,
+      split: r.split,
     }));
+}
+
+function allocationInputOfRow(a: typeof paymentAllocations.$inferSelect): AllocationInput {
+  let target: AllocationTarget;
+  if (a.targetType === "subscription_period") {
+    target = { type: "subscription_period", subscriptionId: a.subscriptionId ?? 0, period: a.subscriptionPeriod ?? "" };
+  } else if (a.targetType === "billing_item") {
+    target = { type: "billing_item", billingItemId: a.billingItemId ?? 0 };
+  } else {
+    target = { type: "contract", contractId: a.contractId ?? 0 };
+  }
+  return { target, amount: Number(a.amount), fee: Number(a.fee), note: a.note };
 }
 
 /**
@@ -2887,6 +2975,11 @@ export async function linkPaymentToBillingRow(
       )
       .limit(1);
     if (!txn) return { ok: false, error: t("notFound.transaction") };
+    // 收款分配（0041）：舊綁定的鏡像先拿掉，下面寫的綁定欄位才會生效；真的拆分過的就不能整筆綁。
+    if ((await releaseLegacyMirror(db, orgId, transactionId)) > 0) {
+      const tA = await getTranslations("allocations");
+      return { ok: false, error: tA("error.splitTransaction") };
+    }
     const ctx = { db, orgId, source: "billing_board" as const };
 
     if (rowKey.startsWith("bi:")) {
@@ -2950,6 +3043,217 @@ export async function linkPaymentToBillingRow(
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.match") };
+  }
+}
+
+// ---- 收款分配（migrations/0041）：一筆入帳分給多個應收、吸收手續費 ----
+
+/** Sheet 上一列分配（目標用 targetKey：`sub:<id>:<period>`／`bi:<id>`／`c:<id>`）。 */
+export type AllocationLineInput = { key: string; amount: number; fee: number; note?: string | null };
+
+/** 可以分配的應收。outstanding 不算這筆交易自己已經分給它的（編輯時才看得出還差多少）。 */
+export type AllocationTargetOption = {
+  key: string;
+  kind: AllocationTargetType;
+  label: string;
+  customerName: string | null;
+  /** 跟這筆交易同一個客戶 */
+  sameCustomer: boolean;
+  /** 含稅應收 − 其他交易已收；合約金額未定為 null */
+  outstanding: number | null;
+  /** 這筆交易目前就分給它 */
+  current: boolean;
+};
+
+export type AllocationEditorData = {
+  txn: {
+    id: number;
+    txnDate: string;
+    description: string | null;
+    amount: number;
+    currency: string;
+    partyName: string | null;
+  };
+  /** 目前的有效分配；沒有分配列時是舊綁定退回的那一列（儲存後就變成分配列） */
+  lines: AllocationLineInput[];
+  /** 目前是不是真的有分配列（false＝照舊的單一綁定在算） */
+  hasStoredAllocations: boolean;
+  targets: AllocationTargetOption[];
+};
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/** 打開「分配收款」Sheet 時載入：交易、目前的分配、可以選的應收（同客戶在前）。 */
+export async function loadAllocationEditor(
+  transactionId: number,
+): Promise<{ ok: true; data: AllocationEditorData } | { ok: false; error: string }> {
+  const t = await getTranslations("allocations");
+  try {
+    const { orgId } = await requireOrg();
+    const db = getDb();
+    const [txn] = await db
+      .select({
+        id: transactions.id,
+        type: transactions.type,
+        txnDate: transactions.txnDate,
+        description: transactions.description,
+        amount: transactions.amount,
+        currency: transactions.currency,
+        partyId: transactions.partyId,
+        partyName: parties.name,
+      })
+      .from(transactions)
+      .leftJoin(parties, eq(parties.id, transactions.partyId))
+      .where(
+        and(
+          eq(transactions.organizationId, orgId),
+          eq(transactions.id, transactionId),
+          isNull(transactions.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (!txn) return { ok: false, error: t("error.transactionNotFound") };
+    if (txn.type !== "income") return { ok: false, error: t("error.notIncome") };
+    const currency = txn.currency.trim();
+
+    const [effective, board, contractRows] = await Promise.all([
+      listEffectiveAllocations(orgId, { transactionId }, db),
+      listBillingBoard(orgId, { includeAllHistory: true }),
+      listContracts(orgId),
+    ]);
+
+    const lines: AllocationLineInput[] = [];
+    for (const r of effective) {
+      const key = effectiveRowKey(r);
+      if (key) lines.push({ key, amount: r.amount, fee: r.fee, note: r.note });
+    }
+    // 這筆交易自己已經分給各目標的（含手續費）：算「還差多少」時要加回去。
+    const own = new Map(lines.map((l) => [l.key, round2(l.amount + l.fee)]));
+    const currentKeys = new Set(lines.map((l) => l.key));
+
+    const targets: AllocationTargetOption[] = [];
+    for (const r of board) {
+      if (r.currency.trim() !== currency) continue;
+      const outstanding = round2(r.expected - r.paid + (own.get(r.key) ?? 0));
+      if (outstanding <= 0 && !currentKeys.has(r.key)) continue;
+      targets.push({
+        key: r.key,
+        kind: r.source === "billing_item" ? "billing_item" : "subscription_period",
+        label: r.title,
+        customerName: r.customerName,
+        sameCustomer: txn.partyId != null && r.customerPartyId === txn.partyId,
+        outstanding,
+        current: currentKeys.has(r.key),
+      });
+    }
+    for (const c of contractRows) {
+      if (c.currency.trim() !== currency || c.status === "cancelled") continue;
+      const key = `c:${c.id}`;
+      const outstanding = c.remaining == null ? null : round2(c.remaining + (own.get(key) ?? 0));
+      const open = outstanding == null ? c.status === "active" || c.status === "draft" : outstanding > 0;
+      if (!open && !currentKeys.has(key)) continue;
+      targets.push({
+        key,
+        kind: "contract",
+        label: c.title,
+        customerName: c.customerName,
+        sameCustomer: txn.partyId != null && c.customerPartyId === txn.partyId,
+        outstanding,
+        current: currentKeys.has(key),
+      });
+    }
+    targets.sort(
+      (a, b) =>
+        Number(b.current) - Number(a.current) ||
+        Number(b.sameCustomer) - Number(a.sameCustomer) ||
+        (a.customerName ?? "").localeCompare(b.customerName ?? "") ||
+        a.label.localeCompare(b.label),
+    );
+
+    return {
+      ok: true,
+      data: {
+        txn: {
+          id: txn.id,
+          txnDate: txn.txnDate,
+          description: txn.description,
+          amount: Number(txn.amount),
+          currency,
+          partyName: txn.partyName,
+        },
+        lines,
+        hasStoredAllocations: effective.some((r) => r.source === "allocation"),
+        targets,
+      },
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : t("sheet.loadFailed") };
+  }
+}
+
+function effectiveRowKey(r: {
+  targetType: AllocationTargetType;
+  subscriptionId: number | null;
+  subscriptionPeriod: string | null;
+  billingItemId: number | null;
+  contractId: number | null;
+}): string | null {
+  if (r.targetType === "subscription_period" && r.subscriptionId != null && r.subscriptionPeriod) {
+    return targetKey({ type: "subscription_period", subscriptionId: r.subscriptionId, period: r.subscriptionPeriod });
+  }
+  if (r.targetType === "billing_item" && r.billingItemId != null) {
+    return targetKey({ type: "billing_item", billingItemId: r.billingItemId });
+  }
+  if (r.targetType === "contract" && r.contractId != null) {
+    return targetKey({ type: "contract", contractId: r.contractId });
+  }
+  return null;
+}
+
+/**
+ * 整組替換一筆 income 交易的收款分配（org 內）。空陣列＝清除，退回舊的單一綁定。
+ * 檢查與寫入都在 src/db/allocations.ts 的 replaceTransactionAllocations（MCP 共用）。
+ */
+export async function setTransactionAllocations(
+  transactionId: number,
+  allocations: AllocationLineInput[],
+): Promise<ActionState> {
+  const t = await getTranslations("allocations");
+  const tRec = await getTranslations("lib");
+  try {
+    const { orgId, userId } = await requireOrg();
+    const inputs: AllocationInput[] = [];
+    for (let i = 0; i < allocations.length; i++) {
+      const a = allocations[i];
+      const target = parseTargetKey(a.key);
+      if (!target) return { ok: false, error: t("error.invalidTarget", { line: i + 1 }) };
+      inputs.push({ target, amount: Number(a.amount), fee: Number(a.fee ?? 0), note: a.note ?? null });
+    }
+    const stored = await replaceTransactionAllocations(orgId, transactionId, inputs, userId);
+    const fee = round2(stored.reduce((s, a) => s + a.fee, 0));
+    await logWeb(
+      orgId,
+      "update",
+      "transaction",
+      transactionId,
+      stored.length === 0
+        ? tRec("activity.paymentAllocationCleared")
+        : tRec("activity.paymentAllocated", { count: stored.length, fee: fee.toFixed(2) }),
+    );
+    revalidateBilling();
+    revalidatePath("/dashboard/transactions");
+    revalidatePath("/dashboard/subscriptions");
+    revalidatePath("/dashboard/reports");
+    revalidatePath("/dashboard");
+    await syncCalendarBestEffort(orgId);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof AllocationWriteError) {
+      return { ok: false, error: t(`error.${e.code}`, { line: (e.index ?? 0) + 1 }) };
+    }
+    return { ok: false, error: e instanceof Error ? e.message : t("toast.saveFailed") };
   }
 }
 

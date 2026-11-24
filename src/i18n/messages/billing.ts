@@ -32,6 +32,7 @@ const billing = {
   },
   amount: {
     outstanding: { "zh-TW": "未收 {amount}", en: "{amount} outstanding" },
+    feeAbsorbed: { "zh-TW": "含吸收手續費 {amount}", en: "incl. {amount} absorbed fee" },
     overpaid: { "zh-TW": "溢收 {amount}", en: "{amount} overpaid" },
     settled: { "zh-TW": "已收齊", en: "Fully collected" },
   },
@@ -148,7 +149,7 @@ const billing = {
     trigger: { "zh-TW": "登記收款", en: "Record payment" },
     dialog: {
       title: { "zh-TW": "登記收款", en: "Record payment" },
-      description: { "zh-TW": "尚未收 {amount}{customer}。下面是還沒綁到任何請款項目的收入交易，金額最接近的排在前面。", en: "{amount} outstanding{customer}. Unlinked income transactions are listed below, closest match first." },
+      description: { "zh-TW": "尚未收 {amount}{customer}。下面是還沒綁到任何請款項目、或還沒分配完的收入交易，金額最接近的排在前面。一筆付了好幾項或被扣了手續費，按「分配」。", en: "{amount} outstanding{customer}. Unlinked or not fully allocated income transactions are listed below, closest match first. If one payment covers several charges or is short by a bank fee, use “Allocate”." },
     },
     loading: { "zh-TW": "搜尋可配對的交易…", en: "Searching for matching transactions…" },
     empty: { "zh-TW": "沒有未綁定的收入交易可以配對。錢還沒入帳的話，先到收支紀錄建一筆收入。", en: "No unlinked income transactions to match. If the money hasn't arrived yet, add an income entry in the Ledger first." },

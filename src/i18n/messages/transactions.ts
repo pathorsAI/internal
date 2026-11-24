@@ -135,6 +135,10 @@ const transactions = {
     projectPlaceholder: { "zh-TW": "— 未指定 —", en: "— Unassigned —" },
     contract: { "zh-TW": "合約", en: "Contract" },
     contractHintIncome: { "zh-TW": "綁合約後可在合約頁看到已收 / 未收。", en: "Linking a contract lets you see collected / uncollected amounts on the contract page." },
+    allocationHint: {
+      "zh-TW": "一筆匯款付了好幾項（月費＋用量＋分期），或被扣了手續費？用「分配收款」拆給各個應收。",
+      en: "One payment covering several charges (fee + usage + instalment), or short by a bank fee? Split it with “Allocate payment”.",
+    },
     contractHintOther: { "zh-TW": "可綁合約來追蹤這單花了多少（成本不會從合約金額扣除）。", en: "Link a contract to track how much this line cost (the cost isn't deducted from the contract amount)." },
     description: { "zh-TW": "摘要", en: "Description" },
     descriptionPlaceholder: { "zh-TW": "選填", en: "Optional" },

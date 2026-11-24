@@ -20,6 +20,7 @@ import {
   listProjects,
   summarizeTaxPeriod,
 } from "@/db/queries";
+import { absorbedFeesTotal } from "@/db/allocations";
 import { formatCurrency } from "@/lib/format";
 import { requireOrg } from "@/lib/session";
 import { shiftTaxPeriod, taxPeriodOf } from "@/lib/vat";
@@ -46,14 +47,18 @@ export default async function ReportsPage() {
 
   // 三張新報表都建立在同一份看板資料上 —— 抓一次就好，數字也保證一致。
   const board = await listBillingBoard(orgId, { includeAllHistory: true });
-  const [vendorCosts, projects, coverage, currentTax, previousTax] = await Promise.all([
+  // 匯款手續費（吸收）：收款分配的 fee，管理帳、今年 1/1 到今天（依交易日）。
+  const today = todayStr();
+  const year = today.slice(0, 4);
+  const [vendorCosts, projects, coverage, currentTax, previousTax, absorbed] = await Promise.all([
     listVendorCosts(orgId),
     listProjects(orgId),
     listContractCoverage(orgId, board),
     summarizeTaxPeriod(orgId, board, current.start, current.end),
     summarizeTaxPeriod(orgId, board, previous.start, previous.end),
+    absorbedFeesTotal(orgId, `${year}-01-01`, today),
   ]);
-  const aging = computeReceivableAging(board, todayStr());
+  const aging = computeReceivableAging(board, today);
   const totalVendorCost = vendorCosts.reduce((s, v) => s + v.total, 0);
 
   return (
@@ -62,7 +67,7 @@ export default async function ReportsPage() {
       <ReportsNav active="overview" />
 
       <div className="grid gap-6">
-        <ReceivableAging rows={aging} />
+        <ReceivableAging rows={aging} absorbedFees={{ year, totals: absorbed }} />
 
         <div className="grid gap-6 lg:grid-cols-2">
           <TaxPeriodCard period={current} summary={currentTax} highlight />

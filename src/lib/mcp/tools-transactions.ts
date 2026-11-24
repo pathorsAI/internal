@@ -41,6 +41,7 @@ import {
   type ToolDef,
 } from "./shared";
 import { resolvePayoutAccount } from "@/db/employee-accounts";
+import { releaseLegacyMirror } from "@/db/allocations";
 import { summarizeSpendTrend } from "@/lib/spend-trend";
 import { PAYOUT_ACCOUNT_SCHEMA, payoutAccountOutput } from "./tools-employee-accounts";
 import { externalSingleLegSide } from "@/lib/external-transfer";
@@ -131,7 +132,7 @@ const TXN_ROW_REQUIRED = Object.keys(TXN_ROW_PROPS);
 
 // shared.ts 的 ContractProgress。`action` 只有在「已收滿但狀態還開著」時才附上，
 // 所以不進 required。
-const CONTRACT_PROGRESS_SCHEMA = {
+export const CONTRACT_PROGRESS_SCHEMA = {
   type: "object",
   properties: {
     contractId: { type: "number" },
@@ -141,7 +142,11 @@ const CONTRACT_PROGRESS_SCHEMA = {
     amount: { type: ["number", "null"], description: "Contract amount as stored (basis per amountBasis)." },
     ...taxBreakdownProps(true),
     ...EFFECTIVE_TAX_PROPS,
-    received: { type: "number" },
+    received: {
+      type: "number",
+      description: "已收 incl. absorbed fees: allocations to the contract, its billing items and bound subscriptions' periods.",
+    },
+    feeAbsorbed: { type: "number", description: "Absorbed bank fee / FX shortfall inside `received`." },
     remaining: { type: ["number", "null"], description: "gross − received." },
     fullyCollected: { type: "boolean", description: "received >= gross (and gross > 0)." },
     action: {
@@ -161,6 +166,7 @@ const CONTRACT_PROGRESS_SCHEMA = {
     "taxTreatment",
     "amountBasis",
     "received",
+    "feeAbsorbed",
     "remaining",
     "fullyCollected",
   ],
@@ -755,6 +761,15 @@ async function applyTxnRelationPatch(
       patch.contractId = contractId;
     }
   }
+  if (optNumber(args, "billingItemId") !== undefined) {
+    const billingItemId = requireNumber(args, "billingItemId");
+    if (billingItemId === 0) {
+      patch.billingItemId = null;
+    } else {
+      await assertInOrg(db, billingItems, billingItemId, orgId, "Billing item");
+      patch.billingItemId = billingItemId;
+    }
+  }
   if (optNumber(args, "subscriptionId") !== undefined) {
     const subscriptionId = requireNumber(args, "subscriptionId");
     if (subscriptionId === 0) {
@@ -1310,6 +1325,7 @@ export const transactionTools: Record<string, ToolDef> = {
           amount: transactions.amount,
           currency: transactions.currency,
           contractId: transactions.contractId,
+          billingItemId: transactions.billingItemId,
           fromAccountId: transactions.fromAccountId,
           toAccountId: transactions.toAccountId,
           externalSource: transactions.externalSource,
@@ -1341,15 +1357,29 @@ export const transactionTools: Record<string, ToolDef> = {
           existing.toAccountId,
         ]);
       }
+      // 收款分配（0041）：分配列若只是舊綁定的鏡像（剛好整筆分給同一個目標），先拿掉，這次改的綁定／金額才會生效。
+      if (existing.type === "income") await releaseLegacyMirror(db, orgId, id);
       // 經連結層：換了請款項 / 訂閱 / 合約會重新繼承專案與合約；改了金額、日期會重新比對候選。
       const updated = await updateTransactionLinked({ db, orgId, source: "mcp" }, id, patch);
       if (!updated) throw new Error(`Transaction ${id} not found in your organization.`);
       const { row, report } = updated;
       const out = { ...row, ...linkOutput(report) };
-      // 進度受影響的合約：原本綁的（可能被解綁或金額變動）＋改綁的新合約。
-      const touchedContractIds = [existing.contractId, row.contractId].filter(
-        (cid): cid is number => cid != null,
+      // 進度受影響的合約：原本綁的（可能被解綁或金額變動）＋改綁的新合約，
+      // 以及原本／改綁的請款項目所屬的合約（請款項目的已收會累計到它的合約）。
+      const itemIds = [existing.billingItemId, row.billingItemId].filter(
+        (bid): bid is number => bid != null,
       );
+      const itemContracts = itemIds.length
+        ? await db
+            .select({ contractId: billingItems.contractId })
+            .from(billingItems)
+            .where(and(eq(billingItems.organizationId, orgId), inArray(billingItems.id, itemIds)))
+        : [];
+      const touchedContractIds = [
+        existing.contractId,
+        row.contractId,
+        ...itemContracts.map((r) => r.contractId),
+      ].filter((cid): cid is number => cid != null);
       const contractProgress = await getContractProgress(db, orgId, touchedContractIds);
       return contractProgress.length ? { ...out, contractProgress } : out;
     },

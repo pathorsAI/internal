@@ -651,6 +651,54 @@ export const billingItems = pgTable("billing_items", {
 	check("chk_billing_item_status", sql`status = ANY (ARRAY['scheduled'::text, 'billed'::text, 'paid'::text, 'cancelled'::text])`),
 ]);
 
+// ---- 收款分配（migrations/0041）：一筆入帳分給多個應收，並記下吸收的手續費／匯差。
+// 一列 = 這筆入帳分給某一個應收（訂閱期別／請款項目／合約）的金額；fee 不是錢，是「同意少收」。
+// 有分配列的交易只看分配列，沒有的退回舊的單一綁定欄位（規則見 src/lib/payment-allocation.ts）。
+// organization / user 的 FK 在 DB 端，這裡不宣告（auth-schema 另檔，避免循環 import）。
+export const paymentAllocations = pgTable("payment_allocations", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "payment_allocations_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id").notNull(),
+	transactionId: bigint("transaction_id", { mode: "number" }).notNull(),
+	targetType: text("target_type").notNull(),
+	subscriptionId: bigint("subscription_id", { mode: "number" }),
+	subscriptionPeriod: date("subscription_period"),
+	billingItemId: bigint("billing_item_id", { mode: "number" }),
+	contractId: bigint("contract_id", { mode: "number" }),
+	amount: numeric({ precision: 18, scale: 2 }).notNull(),
+	fee: numeric({ precision: 18, scale: 2 }).default('0').notNull(),
+	note: text(),
+	createdByUserId: text("created_by_user_id"),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_allocation_txn").using("btree", table.transactionId.asc().nullsLast().op("int8_ops")),
+	index("idx_allocation_sub").using("btree", table.subscriptionId.asc().nullsLast().op("int8_ops"), table.subscriptionPeriod.asc().nullsLast().op("date_ops")).where(sql`subscription_id IS NOT NULL`),
+	index("idx_allocation_item").using("btree", table.billingItemId.asc().nullsLast().op("int8_ops")).where(sql`billing_item_id IS NOT NULL`),
+	index("idx_allocation_contract").using("btree", table.contractId.asc().nullsLast().op("int8_ops")).where(sql`contract_id IS NOT NULL`),
+	index("idx_allocation_org").using("btree", table.organizationId.asc().nullsLast().op("text_ops")),
+	foreignKey({
+			columns: [table.transactionId],
+			foreignColumns: [transactions.id],
+			name: "payment_allocations_transaction_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.subscriptionId],
+			foreignColumns: [subscriptions.id],
+			name: "payment_allocations_subscription_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.billingItemId],
+			foreignColumns: [billingItems.id],
+			name: "payment_allocations_billing_item_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.contractId],
+			foreignColumns: [contracts.id],
+			name: "payment_allocations_contract_id_fkey"
+		}).onDelete("cascade"),
+	check("chk_allocation_target", sql`(target_type = 'subscription_period' AND subscription_id IS NOT NULL AND subscription_period IS NOT NULL AND billing_item_id IS NULL AND contract_id IS NULL) OR (target_type = 'billing_item' AND billing_item_id IS NOT NULL AND subscription_id IS NULL AND subscription_period IS NULL AND contract_id IS NULL) OR (target_type = 'contract' AND contract_id IS NOT NULL AND subscription_id IS NULL AND subscription_period IS NULL AND billing_item_id IS NULL)`),
+	check("chk_allocation_amounts", sql`amount >= 0 AND fee >= 0 AND amount + fee > 0`),
+]);
+
 // ---- 操作紀錄（audit log）：org 內誰對哪個 entity 做了 create/update/delete，
 // web 與 OAuth MCP 都記錄，用來追查亂紀錄 / 亂刪除。----
 export const activityLog = pgTable("activity_log", {

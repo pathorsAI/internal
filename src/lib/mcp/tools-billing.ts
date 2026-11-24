@@ -124,7 +124,15 @@ const BILLING_BOARD_ROW = rowSchema({
     type: "number",
     description: "應收 = gross (含稅, what the customer actually pays). status/partial/paid compare `paid` against this.",
   },
-  paid: { type: "number", description: "已收, computed from linked ledger transactions." },
+  paid: {
+    type: "number",
+    description:
+      "已收 incl. absorbed fees: payment allocations to this charge (amount + fee; an income transaction without allocations counts through its single binding, full amount). See set_payment_allocations.",
+  },
+  feeAbsorbed: {
+    type: "number",
+    description: "The part of `paid` that is an absorbed bank fee / FX shortfall (allocation `fee`), not money.",
+  },
   currency: { type: "string", description: "3-letter code." },
   ...EFFECTIVE_TAX_PROPS,
   ownTaxTreatment: { ...STORED_TAX_PROPS.taxTreatment, description: "The row's own stored 營業稅別 (subscription periods: the subscription's); null = inherit." },
