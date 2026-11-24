@@ -43,7 +43,7 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 import { OrgSwitcher, type OrgOption } from "@/components/org-switcher";
-import { UserMenu } from "@/components/user-menu";
+import { UserMenu, type MenuUser } from "@/components/user-menu";
 import { LocaleSwitcher } from "@/components/locale-switcher";
 import { Logo } from "@/components/logo";
 
@@ -54,6 +54,7 @@ import { Logo } from "@/components/logo";
 export type NavItemKey =
   | "dashboard"
   | "ai"
+  | "account"
   | "billing"
   | "transactions"
   | "parties"
@@ -134,9 +135,11 @@ const groups = [
 export function AppSidebar({
   initialOrganizations,
   initialActiveOrgId,
+  initialUser,
 }: Readonly<{
   initialOrganizations: OrgOption[];
   initialActiveOrgId: string | null;
+  initialUser: MenuUser | null;
 }>) {
   const t = useTranslations("common");
   const pathname = usePathname();
@@ -228,7 +231,7 @@ export function AppSidebar({
 
       <SidebarFooter>
         <LocaleSwitcher />
-        <UserMenu />
+        <UserMenu initialUser={initialUser} />
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>

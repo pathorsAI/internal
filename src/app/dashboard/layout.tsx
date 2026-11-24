@@ -34,8 +34,13 @@ export default async function DashboardLayout({
     id: o.id,
     name: o.name,
     slug: o.slug,
+    logo: o.logo ?? null,
   }));
   const initialActiveOrgId = session?.session.activeOrganizationId ?? null;
+  // 左下角使用者列第一屏就畫出本人，不等 client 端的 useSession 回來（否則會先閃「未登入」）
+  const initialUser = session
+    ? { name: session.user.name, email: session.user.email, image: session.user.image ?? null }
+    : null;
 
   return (
     <RefreshPendingProvider>
@@ -43,6 +48,7 @@ export default async function DashboardLayout({
         <AppSidebar
           initialOrganizations={initialOrganizations}
           initialActiveOrgId={initialActiveOrgId}
+          initialUser={initialUser}
         />
         {/* min-w-0：SidebarInset 是 flex 子項，沒有它寬表格會把整頁撐寬（表格應在自己的容器裡捲動） */}
         <SidebarInset className="min-w-0">

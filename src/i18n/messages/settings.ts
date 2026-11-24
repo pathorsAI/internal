@@ -1,3 +1,4 @@
+import { avatarFieldStrings } from "./avatar-field";
 import type { Dictionary } from "./dictionary";
 
 const settings = {
@@ -12,15 +13,17 @@ const settings = {
   },
   org: {
     title: { "zh-TW": "基本資料", en: "Basic info" },
-    descriptionEditable: { "zh-TW": "修改組織名稱", en: "Edit the organization name" },
+    descriptionEditable: { "zh-TW": "修改組織名稱與 logo", en: "Edit the organization name and logo" },
     descriptionReadOnly: { "zh-TW": "只有擁有者或管理員可以修改組織資料", en: "Only owners or admins can edit organization info" },
     nameLabel: { "zh-TW": "組織名稱", en: "Organization name" },
+    logoLabel: { "zh-TW": "組織 logo", en: "Organization logo" },
+    logo: avatarFieldStrings({ "zh-TW": "logo", en: "logo" }),
     save: { "zh-TW": "儲存", en: "Save" },
     saving: { "zh-TW": "儲存中…", en: "Saving…" },
     toast: {
       nameRequired: { "zh-TW": "組織名稱不可空白", en: "Organization name cannot be blank" },
       updateFailed: { "zh-TW": "更新失敗", en: "Failed to update" },
-      updated: { "zh-TW": "已更新組織名稱", en: "Organization name updated" },
+      updated: { "zh-TW": "已更新組織資料", en: "Organization updated" },
     },
   },
   calendar: {

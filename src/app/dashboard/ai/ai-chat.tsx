@@ -30,13 +30,15 @@ import type {
 import { cn } from "@/lib/utils";
 import { deleteConversation } from "./actions";
 import { CHAT_FRAME } from "./frame";
-import { AssistantMessage, UserMessage } from "./messages";
+import { AssistantMessage, UserMessage, type ChatUser } from "./messages";
 
 type Props = Readonly<{
   conversationId: string | null;
   initialMessages: UiMessage[];
   initialConversations: UiConversation[];
   canWrite: boolean;
+  /** 發問的人（本人）：使用者訊息旁的頭像。 */
+  user: ChatUser;
 }>;
 
 /** 讀 NDJSON 串流，一行一個事件。 */
@@ -110,7 +112,7 @@ function cancelPendingCards(messages: UiMessage[]): UiMessage[] {
   );
 }
 
-export function AiChat({ conversationId, initialMessages, initialConversations, canWrite }: Props) {
+export function AiChat({ conversationId, initialMessages, initialConversations, canWrite, user }: Props) {
   const t = useTranslations("ai");
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -325,7 +327,7 @@ export function AiChat({ conversationId, initialMessages, initialConversations, 
             ) : (
               messages.map((m, i) =>
                 m.kind === "user" ? (
-                  <UserMessage key={m.id} text={m.text} />
+                  <UserMessage key={m.id} text={m.text} user={user} />
                 ) : (
                   <AssistantMessage
                     key={m.id}

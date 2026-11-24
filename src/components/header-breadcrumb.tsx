@@ -22,6 +22,7 @@ import type { NavItemKey } from "@/components/app-sidebar";
 const routeKeys: Record<string, NavItemKey> = {
   "/dashboard": "dashboard",
   "/dashboard/ai": "ai",
+  "/dashboard/account": "account",
   "/dashboard/transactions": "transactions",
   "/dashboard/parties": "parties",
   "/dashboard/categories": "categories",

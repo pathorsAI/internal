@@ -15,7 +15,7 @@ export default async function SettingsPage() {
   // Guard: redirects to /login or /onboarding when needed.
   const { orgId, role } = await requireOrgWithRole();
   const orgRow = await getDb()
-    .select({ name: organization.name })
+    .select({ name: organization.name, logo: organization.logo })
     .from(organization)
     .where(eq(organization.id, orgId))
     .limit(1);
@@ -27,6 +27,7 @@ export default async function SettingsPage() {
         <OrgSettingsClient
           orgId={orgId}
           orgName={orgRow[0]?.name ?? ""}
+          orgLogo={orgRow[0]?.logo ?? null}
           canEdit={canManageOrg(role)}
         />
       </SettingsBody>
