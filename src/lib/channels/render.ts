@@ -396,7 +396,13 @@ function formatString(key: string, v: string, locale: Locale): string {
 
 function formatArray(key: string, v: readonly unknown[]): string {
   if (key === "documentIds") return v.map((x) => `#${Number(x)}`).join("、");
-  return v.map((x) => (typeof x === "object" ? JSON.stringify(x) : String(x))).join("、");
+  return v
+    .map((x) => {
+      if (typeof x === "string") return x;
+      if (typeof x === "number" || typeof x === "boolean" || typeof x === "bigint") return x.toString();
+      return JSON.stringify(x) ?? "";
+    })
+    .join("、");
 }
 
 function formatValue(key: string, v: unknown, locale: Locale): string {
