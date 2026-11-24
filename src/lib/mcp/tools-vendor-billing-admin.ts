@@ -10,7 +10,6 @@ import { summarizeCloudSync, syncCloudBilling } from "@/lib/vendor-billing/sync"
 import {
   listResult,
   listSchema,
-  optBoolean,
   ORG_ARG,
   requireNumber,
   resolveOrg,
@@ -18,6 +17,7 @@ import {
   type ToolDef,
 } from "./shared";
 import { assertToolManager, auditIntegrationCall, toolAuditLog } from "./tools-integrations";
+import { CONFIRM_ARG, requireConfirm } from "./tools-settings";
 
 // ---- 廠商計費頁的管理動作（網頁 src/app/dashboard/vendor-billing/actions.ts 的 MCP 版）----
 //
@@ -26,16 +26,6 @@ import { assertToolManager, auditIntegrationCall, toolAuditLog } from "./tools-i
 // 同一份 service（src/lib/vendor-billing/*），寫入限 owner / admin。
 
 const WHAT = "修改廠商計費資料";
-
-function requireConfirm(args: Record<string, unknown>, what: string) {
-  if (optBoolean(args, "confirm") !== true) {
-    throw new Error(`${what} cannot be undone. Ask the user to confirm, then call again with confirm: true.`);
-  }
-}
-
-const CONFIRM_ARG = {
-  confirm: { type: "boolean", description: "Must be true. Ask the user to confirm first." },
-} as const;
 
 const TXN_BRIEF = rowSchema({
   id: { type: "number", description: "Transaction id; pass to resolve_vendor_invoice as transactionId." },

@@ -60,14 +60,14 @@ const CLOUD_PROVIDER_ARG = {
   provider: { type: "string", enum: ["azure", "gcp"], description: "Cloud billing integration." },
 } as const;
 
-const CONFIRM_ARG = {
+export const CONFIRM_ARG = {
   confirm: {
     type: "boolean",
     description: "Must be true. Ask the user to confirm first; this cannot be undone from here.",
   },
 } as const;
 
-function requireConfirm(args: Record<string, unknown>, what: string) {
+export function requireConfirm(args: Record<string, unknown>, what: string) {
   if (optBoolean(args, "confirm") !== true) {
     throw new Error(`${what} cannot be undone. Ask the user to confirm, then call again with confirm: true.`);
   }
