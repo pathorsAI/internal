@@ -19,7 +19,8 @@ import {
   getMonthlyTrends,
   listMyOrgs,
 } from "@/db/queries";
-import { ConnectClaudeCard } from "./connect-claude-card";
+import { AgentConnectRow } from "@/components/ai/agent-connect-row";
+import { AiPromptForm } from "@/components/ai/prompt-form";
 import { internalConnectorName, orgMcpUrl } from "@/lib/claude-connector";
 import { requestOrigin } from "@/lib/request-origin";
 import { TrendCharts } from "./trend-charts";
@@ -37,6 +38,7 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const t = await getTranslations("dashboard");
+  const tAi = await getTranslations("ai.prompt");
   const { orgId, userId } = await requireOrg();
   const [overview, balances, recent, trends, myOrgs, h] = await Promise.all([
     getOverview(orgId),
@@ -47,7 +49,7 @@ export default async function DashboardPage() {
     headers(),
   ]);
 
-  // 「接上 Claude」提示卡用目前組織的固定網址；找不到目前組織就讓按鈕導去 MCP 設定頁。
+  // 外部 agent 列用目前組織的固定 MCP 網址；找不到目前組織就只留 MCP 設定頁的連結。
   const activeOrg = myOrgs.find((o) => o.id === orgId);
   const claudeConnector = activeOrg
     ? {
@@ -110,7 +112,12 @@ export default async function DashboardPage() {
     <>
       <PageHeader title={t("title")} description={t("description")} />
 
-      <ConnectClaudeCard connector={claudeConnector} />
+      {/* 問 AI 的入口放最上面：送出後帶著問題到 /dashboard/ai；下方 logo 列接外部 agent。 */}
+      <section className="mx-auto w-full max-w-3xl space-y-4 py-2">
+        <h2 className="text-lg font-semibold tracking-tight">{tAi("heading")}</h2>
+        <AiPromptForm />
+        <AgentConnectRow connector={claudeConnector} />
+      </section>
 
       {/* 資產總覽：每種幣別一張卡，顯示總資產（含期初餘額）與各帳戶餘額 */}
       <section className="space-y-2">

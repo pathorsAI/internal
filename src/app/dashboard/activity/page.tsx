@@ -83,8 +83,8 @@ export default async function ActivityPage() {
                     {r.actorName ?? r.actorEmail ?? (r.channel === "system" ? t("systemActor") : "—")}
                   </TableCell>
                   <TableCell>
-                    {r.channel === "mcp" || r.channel === "system" ? (
-                      <StatusTag tone={r.channel === "mcp" ? "primary" : "neutral"}>
+                    {r.channel === "mcp" || r.channel === "ai" || r.channel === "system" ? (
+                      <StatusTag tone={r.channel === "system" ? "neutral" : "primary"}>
                         {t(`source.${r.channel}`)}
                       </StatusTag>
                     ) : (

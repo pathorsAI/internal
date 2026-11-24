@@ -1,4 +1,5 @@
 import { headers } from "next/headers";
+import { AiCommand } from "@/components/ai/ai-command";
 import { AppSidebar } from "@/components/app-sidebar";
 import { PageEnter } from "@/components/ds/page-enter";
 import { HeaderBreadcrumb } from "@/components/header-breadcrumb";
@@ -57,6 +58,7 @@ export default async function DashboardLayout({
             <PageEnter className="flex min-w-0 flex-1 flex-col gap-6">{children}</PageEnter>
           </RefreshPendingOverlay>
         </SidebarInset>
+        <AiCommand />
       </SidebarProvider>
     </RefreshPendingProvider>
   );

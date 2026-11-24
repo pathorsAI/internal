@@ -2,6 +2,7 @@ import type { Locale } from "../config";
 import { localize, type Localized } from "./dictionary";
 import common from "./common";
 import dashboard from "./dashboard";
+import ai from "./ai";
 import transactions from "./transactions";
 import billing from "./billing";
 import contracts from "./contracts";
@@ -34,6 +35,7 @@ import legal from "./legal";
 const catalogue = {
   common,
   dashboard,
+  ai,
   transactions,
   billing,
   contracts,

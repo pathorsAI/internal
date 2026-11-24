@@ -26,6 +26,7 @@ import {
   Settings,
   Plug,
   History,
+  Sparkles,
 } from "lucide-react";
 
 import {
@@ -52,6 +53,7 @@ import { Logo } from "@/components/logo";
 /** 對應 common.nav.items 的鍵；header-breadcrumb 用同一組鍵維持頁名一致。 */
 export type NavItemKey =
   | "dashboard"
+  | "ai"
   | "billing"
   | "transactions"
   | "parties"
@@ -79,6 +81,7 @@ export type NavItemKey =
 
 const daily = [
   { key: "dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { key: "ai", href: "/dashboard/ai", icon: Sparkles },
   { key: "billing", href: "/dashboard/billing", icon: CalendarClock },
 ] as const satisfies { key: NavItemKey; href: string; icon: typeof LayoutDashboard }[];
 

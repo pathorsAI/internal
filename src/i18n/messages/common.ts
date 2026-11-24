@@ -27,6 +27,7 @@ const common = {
     },
     items: {
       dashboard: { "zh-TW": "總覽", en: "Overview" },
+      ai: { "zh-TW": "AI 助理", en: "AI assistant" },
       billing: { "zh-TW": "請款看板", en: "Billing board" },
       transactions: { "zh-TW": "收支紀錄", en: "Ledger" },
       parties: { "zh-TW": "交易對象", en: "Counterparty" },
