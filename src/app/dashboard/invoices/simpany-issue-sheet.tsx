@@ -27,6 +27,7 @@ import {
 import { formatCurrency, formatDateTime } from "@/lib/format";
 import type { InvoicePreview, IssueResult } from "@/lib/simpany-issue";
 import type { SimpanyZeroTaxReason } from "@/lib/integrations/simpany";
+import type { AmountBasis, TaxTreatment } from "@/lib/tax-treatment";
 import {
   cancelSimpanyDraftAction,
   issueSimpanyAction,
@@ -46,6 +47,19 @@ type Step =
   | { name: "done"; result: IssueResult };
 
 const AUTO = "auto";
+
+/**
+ * 開立表單的預設課稅別：應稅／零稅率／免稅直接帶入；「不加收營業稅」沒有對應的發票課稅別，
+ * 維持原本的自動判斷（外幣無統編 → 零稅率，否則應稅）。
+ */
+function defaultInvoiceTreatment(treatment: TaxTreatment): string {
+  return treatment === "none" ? AUTO : treatment;
+}
+
+/** 金額含稅／未稅：應稅照這筆的金額基準；其他課稅別沒有稅額，維持原本的預設（含稅）。 */
+function defaultInvoiceBasis(treatment: TaxTreatment, basis: AmountBasis): "gross" | "net" {
+  return treatment === "taxable" ? basis : "gross";
+}
 
 /** 預設的零稅率原因（Simpany 清單還沒載入或載入失敗時用）。 */
 const FALLBACK_ZERO_TAX_REASONS: SimpanyZeroTaxReason[] = [
@@ -127,14 +141,20 @@ export function SimpanyIssueSheet({
   customerName,
   customerTaxId,
   title,
-  expected,
+  amount: rawAmount,
+  taxTreatment: effectiveTreatment,
+  amountBasis,
   currency,
 }: Readonly<{
   source: SimpanyIssueSource;
   customerName: string | null;
   customerTaxId: string | null;
   title: string;
-  expected: number;
+  /** 這一筆的原樣金額（請款項目 amount／訂閱該期金額），基準看 amountBasis */
+  amount: number;
+  /** 有效稅別（綁合約跟合約，否則自己，NULL 沿用組織）：決定課稅別與含稅／未稅的預設 */
+  taxTreatment: TaxTreatment;
+  amountBasis: AmountBasis;
   currency: string;
 }>) {
   const t = useTranslations("invoices.simpany.issue");
@@ -155,11 +175,15 @@ export function SimpanyIssueSheet({
   const [name, setName] = useState(customerName ?? "");
   const [address, setAddress] = useState("");
   const [emails, setEmails] = useState("");
-  const [taxTreatment, setTaxTreatment] = useState<string>(AUTO);
+  const [taxTreatment, setTaxTreatment] = useState<string>(() =>
+    defaultInvoiceTreatment(effectiveTreatment),
+  );
   const [zeroRateReason, setZeroRateReason] = useState("72");
   const [itemName, setItemName] = useState(title);
-  const [amount, setAmount] = useState(String(expected));
-  const [basis, setBasis] = useState<"gross" | "net">("gross");
+  const [amount, setAmount] = useState(String(rawAmount));
+  const [basis, setBasis] = useState<"gross" | "net">(() =>
+    defaultInvoiceBasis(effectiveTreatment, amountBasis),
+  );
   const [exchangeRate, setExchangeRate] = useState("");
   const [remark, setRemark] = useState("");
 
@@ -227,6 +251,8 @@ export function SimpanyIssueSheet({
   function onOpenChange(next: boolean) {
     if (pending) return;
     setOpen(next);
+    // 預設就是零稅率（跟著合約的稅別）時，打開就先載原因清單。
+    if (next && taxTreatment === "zero_rated") ensureReasons();
     if (!next) {
       if (step.name === "preview") void cancelSimpanyDraftAction(step.preview.draftId);
       setStep({ name: "form" });

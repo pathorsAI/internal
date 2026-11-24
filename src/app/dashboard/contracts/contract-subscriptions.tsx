@@ -3,6 +3,7 @@ import { getTranslations } from "next-intl/server";
 import { StatusTag } from "@/components/ds/status-dot";
 import { formatCurrency } from "@/lib/format";
 import type { ContractSubscription } from "@/db/queries";
+import { TaxBreakdown } from "@/components/tax-breakdown";
 
 const statusTone: Record<string, "neutral" | "primary" | "warning"> = {
   active: "primary",
@@ -47,9 +48,11 @@ export async function ContractSubscriptions({
               >
                 {s.name}
               </Link>
+              {/* 每期客戶實際要付的含稅金額 */}
               <div className="text-xs text-muted-foreground tabular-nums">
-                {formatCurrency(s.amount, s.currency)} · {intervalLabel(t, s.intervalMonths)}
+                {formatCurrency(s.gross, s.currency)} · {intervalLabel(t, s.intervalMonths)}
               </div>
+              <TaxBreakdown net={s.net} tax={s.tax} />
             </div>
             <StatusTag tone={statusTone[s.status] ?? "neutral"}>
               {statusLabels[s.status] ?? s.status}

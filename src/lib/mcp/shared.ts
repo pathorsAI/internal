@@ -3,6 +3,9 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { contracts, transactions } from "@/db/schema";
 import { resolveOrgId } from "./org";
+import { getOrgTaxSetting } from "@/db/org-tax";
+import { collectionProgress, effectiveTaxSetting, taxedAmountOrNull } from "@/lib/tax-amounts";
+import type { AmountBasis, TaxTreatment } from "@/lib/tax-treatment";
 
 /** 用 API key 呼叫時才有：金鑰綁定的組織與權限範圍（src/lib/api-keys.ts）。 */
 export type ToolApiKey = {
@@ -96,6 +99,92 @@ export function rowSchema(properties: Record<string, unknown>): JsonSchemaObject
     required: Object.keys(properties),
     additionalProperties: false,
   };
+}
+
+// ---- 營業稅別（migrations/0040、src/lib/tax-treatment.ts） ----
+
+export const TAX_TREATMENT_ENUM = ["taxable", "zero_rated", "exempt", "none"] as const;
+export const AMOUNT_BASIS_ENUM = ["net", "gross"] as const;
+
+/** 列表工具回的有效稅別兩欄（已解析過沿用，永遠有值）。 */
+export const EFFECTIVE_TAX_PROPS = {
+  taxTreatment: {
+    type: "string",
+    enum: [...TAX_TREATMENT_ENUM],
+    description:
+      "Effective 營業稅別 (resolved: bound contract → own field → org default). taxable = 應稅 5%, zero_rated = 零稅率, exempt = 免稅, none = 不加收營業稅.",
+  },
+  amountBasis: {
+    type: "string",
+    enum: [...AMOUNT_BASIS_ENUM],
+    description: "Effective basis of `amount`: net = 未稅 (tax is added on top), gross = 含稅 (tax is inside).",
+  },
+} as const;
+
+/** net / tax / gross 三個數字（金額可為 null 時用 nullable）。 */
+export function taxBreakdownProps(nullable = false) {
+  const type = nullable ? ["number", "null"] : "number";
+  return {
+    net: { type, description: "未稅 — use this for revenue estimates." },
+    tax: { type, description: "稅額 (5% when taxable, else 0)." },
+    gross: { type, description: "含稅應收 — what the customer actually pays; compare received income against this." },
+  };
+}
+
+/** 整列 `.returning()` 時那兩欄的原樣（NULL = 沿用）。 */
+export const STORED_TAX_PROPS = {
+  taxTreatment: {
+    type: ["string", "null"],
+    enum: [...TAX_TREATMENT_ENUM, null],
+    description: "Stored 營業稅別; null = inherit (bound contract, else org default).",
+  },
+  amountBasis: {
+    type: ["string", "null"],
+    enum: [...AMOUNT_BASIS_ENUM, null],
+    description: "Stored amount basis; null = inherit.",
+  },
+} as const;
+
+/** create_/update_ 的稅別輸入參數。 */
+export const TAX_INPUT_PROPS = {
+  taxTreatment: {
+    type: ["string", "null"],
+    enum: [...TAX_TREATMENT_ENUM, null],
+    description:
+      "營業稅別: taxable (應稅 5%) | zero_rated (零稅率) | exempt (免稅) | none (不加收營業稅). Omit or null to inherit — the bound contract's setting if a contract is linked, otherwise the organization default.",
+  },
+  amountBasis: {
+    type: ["string", "null"],
+    enum: [...AMOUNT_BASIS_ENUM, null],
+    description:
+      "Whether `amount` is net (未稅, default) or gross (含稅). `amount` is net unless amountBasis=gross. Omit or null to inherit (contract if bound, else org default).",
+  },
+} as const;
+
+/**
+ * 讀 create/update 的稅別參數：沒帶這個 key → undefined（不動）；明確 null 或空字串 → null（沿用）；
+ * 其他值必須在 enum 內。
+ */
+export function optTaxArgs(args: Record<string, unknown>): {
+  taxTreatment?: string | null;
+  amountBasis?: string | null;
+} {
+  const out: { taxTreatment?: string | null; amountBasis?: string | null } = {};
+  const read = (key: "taxTreatment" | "amountBasis", allowed: readonly string[]) => {
+    if (!(key in args) || args[key] === undefined) return;
+    const v = args[key];
+    if (v === null || v === "") {
+      out[key] = null;
+      return;
+    }
+    if (typeof v !== "string" || !allowed.includes(v)) {
+      throw new Error(`"${key}" must be one of: ${allowed.join(", ")} (or null to inherit).`);
+    }
+    out[key] = v;
+  };
+  read("taxTreatment", TAX_TREATMENT_ENUM);
+  read("amountBasis", AMOUNT_BASIS_ENUM);
+  return out;
 }
 
 // ---- arg helpers (lightweight validation, no extra deps) ----
@@ -274,8 +363,16 @@ export type ContractProgress = {
   title: string;
   status: string;
   currency: string;
+  /** 合約金額原樣（基準看 amountBasis） */
   amount: number | null;
+  net: number | null;
+  tax: number | null;
+  /** 含稅應收：收齊判斷拿這個比 */
+  gross: number | null;
+  taxTreatment: TaxTreatment;
+  amountBasis: AmountBasis;
   received: number;
+  /** gross − received */
   remaining: number | null;
   fullyCollected: boolean;
   /** Present only when the contract is collected in full but still open. */
@@ -300,6 +397,7 @@ export async function getContractProgress(
   const ids = [...new Set(contractIds)];
   if (ids.length === 0) return [];
   const receivedSum = sql<string>`coalesce(sum(${transactions.amount}) filter (where ${transactions.type} = 'income'), 0)`;
+  const orgTax = await getOrgTaxSetting(orgId);
   const rows = await db
     .select({
       contractId: contracts.id,
@@ -307,6 +405,8 @@ export async function getContractProgress(
       status: contracts.status,
       currency: contracts.currency,
       amount: contracts.amount,
+      taxTreatment: contracts.taxTreatment,
+      amountBasis: contracts.amountBasis,
       received: receivedSum,
     })
     .from(contracts)
@@ -329,15 +429,20 @@ export async function getContractProgress(
   return rows.map((r) => {
     const amount = r.amount == null ? null : Number(r.amount);
     const received = Number(r.received);
-    const remaining = amount == null ? null : amount - received;
-    // amount 0/未填的合約沒有「收滿」可言，不要誤報。
-    const fullyCollected = amount !== null && amount > 0 && received >= amount;
+    const taxed = taxedAmountOrNull(
+      amount,
+      effectiveTaxSetting(orgTax, { taxTreatment: r.taxTreatment, amountBasis: r.amountBasis }),
+      r.currency,
+    );
+    // 入帳是含稅的錢，一律跟含稅應收比；amount 0/未填的合約沒有「收滿」可言，不要誤報。
+    const { remaining, fullyCollected } = collectionProgress(taxed.gross, received);
     const progress: ContractProgress = {
       contractId: r.contractId,
       title: r.title,
       status: r.status,
       currency: r.currency,
       amount,
+      ...taxed,
       received,
       remaining,
       fullyCollected,

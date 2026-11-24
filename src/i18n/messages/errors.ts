@@ -49,6 +49,7 @@ const errors = {
   },
   validation: {
     statusInvalid: { "zh-TW": "狀態不正確", en: "Invalid status" },
+    taxSettingInvalid: { "zh-TW": "稅別或金額基準不正確", en: "Invalid VAT treatment or amount basis" },
     scheduleInvalid: { "zh-TW": "扣款方式不正確", en: "Invalid charge schedule" },
     httpUrl: { "zh-TW": "網址須以 http:// 或 https:// 開頭", en: "The link must start with http:// or https://" },
     categoryKindInvalid: { "zh-TW": "分類別不正確", en: "Invalid category type" },
@@ -83,6 +84,7 @@ const errors = {
   forbidden: {
     manageEmployees: { "zh-TW": "只有組織的擁有者或管理員可以修改員工資料", en: "Only organization owners and admins can change employee records" },
     manageRecurringExpenses: { "zh-TW": "只有組織的擁有者或管理員可以修改固定支出", en: "Only organization owners and admins can change recurring expenses" },
+    manageOrgSettings: { "zh-TW": "只有組織的擁有者或管理員可以修改組織設定", en: "Only organization owners and admins can change organization settings" },
   },
   employeeAccount: {
     kindInvalid: { "zh-TW": "帳戶類型不正確", en: "Invalid account type" },

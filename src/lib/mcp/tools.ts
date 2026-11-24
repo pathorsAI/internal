@@ -9,8 +9,17 @@ import {
   listMyOrgs,
   upsertSubscriptionPeriod,
 } from "@/db/queries";
+import { getOrgTaxSetting } from "@/db/org-tax";
+import {
+  collectionProgress,
+  effectiveTaxSetting,
+  taxedAmount,
+  taxedAmountOrNull,
+} from "@/lib/tax-amounts";
 import {
   assertInOrg,
+  EFFECTIVE_TAX_PROPS,
+  taxBreakdownProps,
   nextChargeDate,
   optNumber,
   optString,
@@ -62,6 +71,8 @@ const SUBSCRIPTION_LIST_ROW: JsonSchemaObject = rowSchema({
     type: ["string", "null"],
     description: "YYYY-MM-DD; null unless the subscription is active and still running.",
   },
+  ...taxBreakdownProps(),
+  ...EFFECTIVE_TAX_PROPS,
 });
 
 const CONTRACT_LIST_ROW: JsonSchemaObject = rowSchema({
@@ -74,9 +85,11 @@ const CONTRACT_LIST_ROW: JsonSchemaObject = rowSchema({
   status: { type: "string", enum: ["draft", "active", "completed", "cancelled"] },
   fileUrl: { type: ["string", "null"] },
   customer: { type: ["string", "null"], description: "Customer party name." },
+  ...taxBreakdownProps(true),
+  ...EFFECTIVE_TAX_PROPS,
   received: { type: "number", description: "已收: linked income in the contract currency." },
   cost: { type: "number", description: "Linked expense/advance; reference only." },
-  remaining: { type: ["number", "null"], description: "未收 = amount − received; null when amount is unset." },
+  remaining: { type: ["number", "null"], description: "未收 = gross − received; null when amount is unset." },
 });
 
 const PROJECT_LIST_ROW: JsonSchemaObject = rowSchema({
@@ -200,7 +213,9 @@ const billingTools: Record<string, ToolDef> = {
               customer: { type: ["string", "null"] },
               label: { type: "string" },
               // 金額直接來自 numeric 欄位，drizzle 回的是字串。
-              amount: { type: "string" },
+              amount: { type: "string", description: "Stored amount (basis per amountBasis)." },
+              ...taxBreakdownProps(),
+              ...EFFECTIVE_TAX_PROPS,
               currency: { type: "string" },
               date: { type: "string", description: "Charge / due date, YYYY-MM-DD." },
               daysUntilDue: { type: "number" },
@@ -211,6 +226,11 @@ const billingTools: Record<string, ToolDef> = {
               "customer",
               "label",
               "amount",
+              "net",
+              "tax",
+              "gross",
+              "taxTreatment",
+              "amountBasis",
               "currency",
               "date",
               "daysUntilDue",
@@ -230,6 +250,7 @@ const billingTools: Record<string, ToolDef> = {
       const today = todayStr();
       const horizon = format(addDays(parseISO(today), days), "yyyy-MM-dd");
 
+      const orgTax = await getOrgTaxSetting(orgId);
       const subRows = await db
         .select({
           id: subscriptions.id,
@@ -240,9 +261,15 @@ const billingTools: Record<string, ToolDef> = {
           startDate: subscriptions.startDate,
           endDate: subscriptions.endDate,
           customer: parties.name,
+          contractId: subscriptions.contractId,
+          taxTreatment: subscriptions.taxTreatment,
+          amountBasis: subscriptions.amountBasis,
+          contractTaxTreatment: contracts.taxTreatment,
+          contractAmountBasis: contracts.amountBasis,
         })
         .from(subscriptions)
         .leftJoin(parties, eq(subscriptions.customerPartyId, parties.id))
+        .leftJoin(contracts, eq(subscriptions.contractId, contracts.id))
         .where(
           and(
             eq(subscriptions.organizationId, orgId),
@@ -257,6 +284,11 @@ const billingTools: Record<string, ToolDef> = {
         customer: string | null;
         label: string;
         amount: string;
+        net: number;
+        tax: number;
+        gross: number;
+        taxTreatment: string;
+        amountBasis: string;
         currency: string;
         date: string;
         daysUntilDue: number;
@@ -272,9 +304,15 @@ const billingTools: Record<string, ToolDef> = {
           currency: billingItems.currency,
           dueDate: billingItems.dueDate,
           customer: parties.name,
+          contractId: billingItems.contractId,
+          taxTreatment: billingItems.taxTreatment,
+          amountBasis: billingItems.amountBasis,
+          contractTaxTreatment: contracts.taxTreatment,
+          contractAmountBasis: contracts.amountBasis,
         })
         .from(billingItems)
         .leftJoin(parties, eq(billingItems.customerPartyId, parties.id))
+        .leftJoin(contracts, eq(billingItems.contractId, contracts.id))
         .where(
           and(
             eq(billingItems.organizationId, orgId),
@@ -291,6 +329,14 @@ const billingTools: Record<string, ToolDef> = {
           customer: b.customer,
           label: b.title,
           amount: b.amount,
+          ...taxedAmount(
+            Number(b.amount),
+            effectiveTaxSetting(orgTax, b, b.contractId, {
+              taxTreatment: b.contractTaxTreatment,
+              amountBasis: b.contractAmountBasis,
+            }),
+            b.currency,
+          ),
           currency: b.currency,
           date: b.dueDate,
           daysUntilDue: differenceInCalendarDays(parseISO(b.dueDate), parseISO(today)),
@@ -306,6 +352,14 @@ const billingTools: Record<string, ToolDef> = {
           customer: s.customer,
           label: `${s.name} (every ${s.intervalMonths}mo)`,
           amount: s.amount,
+          ...taxedAmount(
+            Number(s.amount),
+            effectiveTaxSetting(orgTax, s, s.contractId, {
+              taxTreatment: s.contractTaxTreatment,
+              amountBasis: s.contractAmountBasis,
+            }),
+            s.currency,
+          ),
           currency: s.currency,
           date: next,
           daysUntilDue: differenceInCalendarDays(parseISO(next), parseISO(today)),
@@ -318,14 +372,14 @@ const billingTools: Record<string, ToolDef> = {
         windowDays: days,
         upcomingCount: items.length,
         upcoming: items,
-        note: "subscription_projected rows are computed from the subscription schedule; billing_item rows are explicitly scheduled charges that have not been billed yet. Overdue items are NOT included here — use list_billing_status for those.",
+        note: "gross is what the customer pays (含稅); net is 未稅. subscription_projected rows are computed from the subscription schedule; billing_item rows are explicitly scheduled charges that have not been billed yet. Overdue items are NOT included here — use list_billing_status for those.",
       };
     },
   },
 
   list_subscriptions: {
     description:
-      "Recurring subscriptions / retainers with their interval and the next computed charge date. Filter by status (active/paused/ended).",
+      "Recurring subscriptions / retainers with their interval and the next computed charge date. Filter by status (active/paused/ended). Each row carries the effective 營業稅別 and the per-period amount split into net (未稅, for revenue / MRR) and gross (含稅, what the customer pays per period).",
     inputSchema: {
       type: "object",
       properties: {
@@ -351,6 +405,7 @@ const billingTools: Record<string, ToolDef> = {
             isNull(subscriptions.deletedAt),
           )
         : and(eq(subscriptions.organizationId, orgId), isNull(subscriptions.deletedAt));
+      const orgTax = await getOrgTaxSetting(orgId);
       const rows = await db
         .select({
           id: subscriptions.id,
@@ -364,6 +419,10 @@ const billingTools: Record<string, ToolDef> = {
           customer: parties.name,
           contractId: subscriptions.contractId,
           contractTitle: contracts.title,
+          ownTaxTreatment: subscriptions.taxTreatment,
+          ownAmountBasis: subscriptions.amountBasis,
+          contractTaxTreatment: contracts.taxTreatment,
+          contractAmountBasis: contracts.amountBasis,
         })
         .from(subscriptions)
         .leftJoin(parties, eq(subscriptions.customerPartyId, parties.id))
@@ -371,20 +430,32 @@ const billingTools: Record<string, ToolDef> = {
         .where(where)
         .orderBy(asc(subscriptions.startDate));
       return listResult(
-        rows.map((s) => ({
-          ...s,
-          nextChargeDate:
-            s.status === "active"
-              ? nextChargeDate(s.startDate, s.intervalMonths, today, s.endDate)
-              : null,
-        })),
+        rows.map(
+          ({ ownTaxTreatment, ownAmountBasis, contractTaxTreatment, contractAmountBasis, ...s }) => ({
+            ...s,
+            nextChargeDate:
+              s.status === "active"
+                ? nextChargeDate(s.startDate, s.intervalMonths, today, s.endDate)
+                : null,
+            ...taxedAmount(
+              Number(s.amount),
+              effectiveTaxSetting(
+                orgTax,
+                { taxTreatment: ownTaxTreatment, amountBasis: ownAmountBasis },
+                s.contractId,
+                { taxTreatment: contractTaxTreatment, amountBasis: contractAmountBasis },
+              ),
+              s.currency,
+            ),
+          }),
+        ),
       );
     },
   },
 
   get_subscription_schedule: {
     description:
-      "Per-period collection status for one subscription: lists each billing period (from start_date + interval_months, up to and including the next due one) with 應收/已收 and a status — paid (已收滿), partial (部分), overdue (未收且已到期), upcoming (未到期). Income transactions linked to the subscription via subscriptionId + subscriptionPeriod count toward that period's 已收. Use this to answer 'which 期/季 is collected vs outstanding'. totalOutstanding sums the未收 of every non-upcoming period.",
+      "Per-period collection status for one subscription: lists each billing period (from start_date + interval_months, up to and including the next due one) with 應收/已收 and a status — paid (已收滿), partial (部分), overdue (未收且已到期), upcoming (未到期). Income transactions linked to the subscription via subscriptionId + subscriptionPeriod count toward that period's 已收. Use this to answer 'which 期/季 is collected vs outstanding'. totalOutstanding sums the未收 of every non-upcoming period. Each period's `expected` is the gross receivable (含稅): `amount` (the default or a set_subscription_period override, in the subscription's amountBasis) plus 5% when taxable; `net`/`tax` split it.",
     inputSchema: {
       type: "object",
       properties: {
@@ -409,6 +480,8 @@ const billingTools: Record<string, ToolDef> = {
         endDate: { type: ["string", "null"] },
         status: { type: "string", enum: ["active", "paused", "ended"] },
         nextChargeDate: { type: ["string", "null"] },
+        ...taxBreakdownProps(),
+        ...EFFECTIVE_TAX_PROPS,
         periods: {
           type: "array",
           items: {
@@ -416,7 +489,13 @@ const billingTools: Record<string, ToolDef> = {
             properties: {
               periodStart: { type: "string", description: "YYYY-MM-DD." },
               periodLabel: { type: "string" },
-              expected: { type: "number", description: "應收 for the period." },
+              amount: {
+                type: "number",
+                description: "The period amount as entered (default or override), in the subscription's amountBasis.",
+              },
+              net: { type: "number", description: "未稅." },
+              tax: { type: "number", description: "稅額." },
+              expected: { type: "number", description: "應收 for the period = gross (含稅)." },
               paid: { type: "number", description: "已收 for the period." },
               status: {
                 type: "string",
@@ -434,6 +513,9 @@ const billingTools: Record<string, ToolDef> = {
             required: [
               "periodStart",
               "periodLabel",
+              "amount",
+              "net",
+              "tax",
               "expected",
               "paid",
               "status",
@@ -459,6 +541,11 @@ const billingTools: Record<string, ToolDef> = {
         "endDate",
         "status",
         "nextChargeDate",
+        "net",
+        "tax",
+        "gross",
+        "taxTreatment",
+        "amountBasis",
         "periods",
         "totalOutstanding",
       ],
@@ -475,13 +562,16 @@ const billingTools: Record<string, ToolDef> = {
 
   set_subscription_period: {
     description:
-      "Set (upsert) the expected amount 應收 for one billing period of a subscription. Use for irregular periods (e.g. a 2-month transition quarter). periodStart is the period's start date.",
+      "Set (upsert) the amount for one billing period of a subscription. Use for irregular periods (e.g. a 2-month transition quarter). periodStart is the period's start date. expectedAmount is in the subscription's effective amountBasis (net/未稅 unless the subscription or its contract says gross); the 應收 shown by get_subscription_schedule adds 5% tax on top when taxable.",
     inputSchema: {
       type: "object",
       properties: {
         subscriptionId: { type: "number" },
         periodStart: { type: "string", description: "The period's start date (YYYY-MM-DD)." },
-        expectedAmount: { type: "number", description: "應收 for this period." },
+        expectedAmount: {
+          type: "number",
+          description: "Amount for this period, same basis as the subscription amount (net unless amountBasis=gross).",
+        },
         note: { type: "string", description: "Optional reason for the override." },
         ...ORG_ARG,
       },
@@ -552,7 +642,7 @@ const billingTools: Record<string, ToolDef> = {
 
   list_contracts: {
     description:
-      "Client contracts with amount, term (start/end), status (draft/active/completed/cancelled), and collection progress: received (已收, sum of linked income txns in the contract currency), remaining (未收 = amount - received), and cost (linked expense/advance — for reference only, NOT deducted from the amount). Status is stored, not derived: a contract stays active even after 未收 hits 0. Whenever a row is still draft/active with remaining <= 0, point it out to the user and ask whether to close it with update_contract status='completed' (已完成).",
+      "Client contracts with amount, term (start/end), status (draft/active/completed/cancelled), effective 營業稅別 (taxTreatment/amountBasis) with the amount split into net (未稅, use for revenue) / tax / gross (含稅, what the customer pays), and collection progress: received (已收, sum of linked income txns in the contract currency), remaining (未收 = gross - received), and cost (linked expense/advance — for reference only, NOT deducted from the amount). Status is stored, not derived: a contract stays active even after 未收 hits 0. Whenever a row is still draft/active with remaining <= 0, point it out to the user and ask whether to close it with update_contract status='completed' (已完成).",
     inputSchema: {
       type: "object",
       properties: {
@@ -591,6 +681,8 @@ const billingTools: Record<string, ToolDef> = {
           status: contracts.status,
           fileUrl: contracts.fileUrl,
           customer: parties.name,
+          ownTaxTreatment: contracts.taxTreatment,
+          ownAmountBasis: contracts.amountBasis,
           received: receivedSum,
           cost: costSum,
         })
@@ -607,11 +699,17 @@ const billingTools: Record<string, ToolDef> = {
         .where(where)
         .groupBy(contracts.id, parties.name)
         .orderBy(desc(contracts.id));
+      const orgTax = await getOrgTaxSetting(orgId);
       return listResult(
-        rows.map((r) => {
+        rows.map(({ ownTaxTreatment, ownAmountBasis, ...r }) => {
           const received = Number(r.received);
-          const remaining = r.amount == null ? null : Number(r.amount) - received;
-          return { ...r, received, cost: Number(r.cost), remaining };
+          const taxed = taxedAmountOrNull(
+            r.amount,
+            effectiveTaxSetting(orgTax, { taxTreatment: ownTaxTreatment, amountBasis: ownAmountBasis }),
+            r.currency,
+          );
+          const { remaining } = collectionProgress(taxed.gross, received);
+          return { ...r, ...taxed, received, cost: Number(r.cost), remaining };
         }),
       );
     },

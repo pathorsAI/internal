@@ -1,12 +1,21 @@
 "use client";
 
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Field, SelectField } from "@/components/form-field";
 import { DatePicker } from "@/components/date-picker";
 import { CurrencySelect } from "@/components/currency-select";
 import { PartyField } from "@/components/party-combobox";
-import { SelectItem } from "@/components/ui/select";
+import { TaxFields, TaxFollowsContract } from "@/components/tax-fields";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { TaxSetting } from "@/lib/tax-treatment";
 
 export type Option = { id: number; name: string };
 
@@ -26,6 +35,9 @@ export type BillingItemFormValues = {
   needsInvoice: boolean;
   status: string;
   note: string | null;
+  /** 這筆自己存的稅別（NULL＝沿用）。綁了合約時不顯示、跟著合約。 */
+  taxTreatment: string | null;
+  amountBasis: string | null;
 };
 
 /**
@@ -38,6 +50,7 @@ export function BillingItemFields({
   projects,
   values,
   hideContract = false,
+  orgTax,
 }: Readonly<{
   parties: Option[];
   contracts: Option[];
@@ -45,8 +58,15 @@ export function BillingItemFields({
   values?: BillingItemFormValues;
   /** 從合約頁開啟時合約已固定，改用 hidden input 帶值，這裡就不再渲染下拉。 */
   hideContract?: boolean;
+  /** 組織的稅別預設，「沿用」選項顯示用 */
+  orgTax: TaxSetting;
 }>) {
   const t = useTranslations("billing");
+  // 綁不綁合約決定稅別欄位要不要出現，所以合約下拉要受控。
+  const [contractId, setContractId] = useState(
+    values?.contractId == null ? "none" : String(values.contractId),
+  );
+  const boundToContract = hideContract || contractId !== "none";
 
   return (
     <>
@@ -68,18 +88,22 @@ export function BillingItemFields({
       </Field>
 
       {!hideContract && (
-        <SelectField
-          name="contractId"
-          label={t("form.fields.contract")}
-          placeholder={t("common.unspecified")}
-          defaultValue={values?.contractId == null ? undefined : String(values.contractId)}
-        >
-          {contracts.map((c) => (
-            <SelectItem key={c.id} value={String(c.id)}>
-              {c.name}
-            </SelectItem>
-          ))}
-        </SelectField>
+        <Field label={t("form.fields.contract")}>
+          <Select name="contractId" value={contractId} onValueChange={setContractId}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder={t("common.unspecified")} />
+            </SelectTrigger>
+            <SelectContent>
+              {/* Radix Select 不收空字串：「不綁定」送 "none"，mutations 轉回 null。 */}
+              <SelectItem value="none">{t("common.unspecified")}</SelectItem>
+              {contracts.map((c) => (
+                <SelectItem key={c.id} value={String(c.id)}>
+                  {c.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
       )}
 
       <SelectField
@@ -108,6 +132,16 @@ export function BillingItemFields({
       <Field label={t("form.fields.currency")}>
         <CurrencySelect defaultValue={values?.currency} />
       </Field>
+      {/* 綁了合約就跟著合約，不送這兩個欄位（update 時就不會動到這筆自己的值）。 */}
+      {boundToContract ? (
+        <TaxFollowsContract />
+      ) : (
+        <TaxFields
+          treatment={values?.taxTreatment}
+          basis={values?.amountBasis}
+          orgDefault={orgTax}
+        />
+      )}
 
       <Field label={t("form.fields.dueDate")}>
         <DatePicker

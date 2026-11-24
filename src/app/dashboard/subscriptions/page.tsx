@@ -26,6 +26,8 @@ import {
   type SubscriptionSchedule,
 } from "@/db/queries";
 import { formatCurrency } from "@/lib/format";
+import { getOrgTaxSetting } from "@/db/org-tax";
+import { TaxBreakdown } from "@/components/tax-breakdown";
 import { NewSubscriptionDialog } from "./new-subscription-dialog";
 import { requireOrg } from "@/lib/session";
 
@@ -87,7 +89,9 @@ function PeriodScheduleTable({
                   ) : null}
                 </TableCell>
                 <TableCell className="text-right">
+                  {/* 應收是含稅 gross；有稅額才多一行拆解 */}
                   <Amount value={p.expected} currency={schedule.currency} kind="neutral" />
+                  <TaxBreakdown net={p.net} tax={p.tax} />
                 </TableCell>
                 <TableCell className="text-right">
                   <Amount value={p.paid} currency={schedule.currency} kind="neutral" />
@@ -125,11 +129,12 @@ function intervalLabel(t: Translator, months: number) {
 export default async function SubscriptionsPage() {
   const { orgId } = await requireOrg();
   const t = await getTranslations("subscriptions");
-  const [rows, parties, projects, contracts] = await Promise.all([
+  const [rows, parties, projects, contracts, orgTax] = await Promise.all([
     listSubscriptions(orgId),
     listParties(orgId),
     listProjects(orgId),
     listContracts(orgId),
+    getOrgTaxSetting(orgId),
   ]);
   const partyOptions = parties.map((p) => ({ id: p.id, name: p.name }));
   const projectOptions = projects.map((p) => ({ id: p.id, name: p.name }));
@@ -160,6 +165,7 @@ export default async function SubscriptionsPage() {
           parties={partyOptions}
           projects={projectOptions}
           contracts={contractOptions}
+          orgTax={orgTax}
         />
       </PageHeader>
 
@@ -204,9 +210,10 @@ export default async function SubscriptionsPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        {/* 金額與頻率是同一件事（每月 NT$X），疊在同一格、靠右對齊 */}
+                        {/* 金額與頻率是同一件事（每月 NT$X），疊在同一格、靠右對齊。
+                            主行是客戶每期實際要付的含稅金額，有稅額才多一行未稅＋稅。 */}
                         <Amount
-                          value={s.amount}
+                          value={s.gross}
                           currency={s.currency}
                           kind="neutral"
                           className="block font-medium"
@@ -214,6 +221,7 @@ export default async function SubscriptionsPage() {
                         <span className="block text-xs text-muted-foreground">
                           {intervalLabel(t as Translator, s.intervalMonths)}
                         </span>
+                        <TaxBreakdown net={s.net} tax={s.tax} />
                       </TableCell>
                       <TableCell className="pl-6">
                         <StatusTag tone={statusTone[s.status] ?? "neutral"}>
@@ -249,10 +257,13 @@ export default async function SubscriptionsPage() {
                       endDate: s.endDate,
                       status: s.status,
                       note: s.note,
+                      taxTreatment: s.ownTaxTreatment,
+                      amountBasis: s.ownAmountBasis,
                     }}
                     parties={partyOptions}
                     projects={projectOptions}
                     contracts={contractOptions}
+                    orgTax={orgTax}
                     footer={<DeleteButton action={deleteSubscription} id={s.id} />}
                   />
                   <PeriodScheduleTable

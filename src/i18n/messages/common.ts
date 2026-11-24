@@ -129,6 +129,25 @@ const common = {
       en: "Accepting switches you to that organization",
     },
   },
+  // 營業稅別（合約／訂閱／請款項目與組織預設共用，migrations/0040）
+  tax: {
+    treatmentLabel: { "zh-TW": "稅別", en: "VAT treatment" },
+    basisLabel: { "zh-TW": "金額基準", en: "Amount basis" },
+    treatment: {
+      taxable: { "zh-TW": "應稅 5%", en: "Taxable 5%" },
+      zero_rated: { "zh-TW": "零稅率", en: "Zero-rated" },
+      exempt: { "zh-TW": "免稅", en: "Exempt" },
+      none: { "zh-TW": "不加收營業稅", en: "No VAT charged" },
+    },
+    basis: {
+      net: { "zh-TW": "未稅", en: "Excl. tax (net)" },
+      gross: { "zh-TW": "含稅", en: "Incl. tax (gross)" },
+    },
+    inherit: { "zh-TW": "沿用組織預設", en: "Use organization default" },
+    inheritWithValue: { "zh-TW": "沿用組織預設（{value}）", en: "Organization default ({value})" },
+    followsContract: { "zh-TW": "稅別跟隨合約", en: "VAT treatment follows the contract" },
+    breakdown: { "zh-TW": "未稅 {net}＋稅 {tax}", en: "{net} net + {tax} tax" },
+  },
 } satisfies Dictionary;
 
 export default common;

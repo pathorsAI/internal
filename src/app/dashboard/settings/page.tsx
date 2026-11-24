@@ -5,6 +5,8 @@ import { canManageOrg, requireOrgWithRole } from "@/lib/session";
 import { getDb } from "@/db";
 import { organization } from "@/db/auth-schema";
 import { OrgSettingsClient } from "./org-settings-client";
+import { OrgTaxSettings } from "./org-tax-settings";
+import { resolveTaxSetting } from "@/lib/tax-treatment";
 import { SettingsBody } from "./settings-body";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +17,11 @@ export default async function SettingsPage() {
   // Guard: redirects to /login or /onboarding when needed.
   const { orgId, role } = await requireOrgWithRole();
   const orgRow = await getDb()
-    .select({ name: organization.name })
+    .select({
+      name: organization.name,
+      taxTreatment: organization.taxTreatment,
+      amountBasis: organization.amountBasis,
+    })
     .from(organization)
     .where(eq(organization.id, orgId))
     .limit(1);
@@ -27,6 +33,12 @@ export default async function SettingsPage() {
         <OrgSettingsClient
           orgId={orgId}
           orgName={orgRow[0]?.name ?? ""}
+          canEdit={canManageOrg(role)}
+        />
+        <OrgTaxSettings
+          setting={resolveTaxSetting({
+            org: { treatment: orgRow[0]?.taxTreatment, basis: orgRow[0]?.amountBasis },
+          })}
           canEdit={canManageOrg(role)}
         />
       </SettingsBody>

@@ -5,6 +5,8 @@ import { formatCurrency, formatDate } from "@/lib/format";
 import type { BillingRow } from "@/db/queries";
 import { BillingStatusBadge } from "../billing/billing-status";
 import { NewBillingItemDialog } from "../billing/new-billing-item-dialog";
+import { TaxBreakdown } from "@/components/tax-breakdown";
+import type { TaxSetting } from "@/lib/tax-treatment";
 
 /**
  * 合約編輯視窗裡的「分期請款」區塊：列出掛在這張合約下的請款項目，
@@ -15,7 +17,9 @@ export async function ContractBillingItems({
   rows,
   parties,
   projects,
+  orgTax,
 }: Readonly<{
+  orgTax: TaxSetting;
   contractId: number;
   rows: BillingRow[];
   parties: { id: number; name: string }[];
@@ -33,6 +37,7 @@ export async function ContractBillingItems({
           contractId={contractId}
           triggerLabel={t("billingItems.addButton")}
           triggerVariant="outline"
+          orgTax={orgTax}
         />
       </div>
 
@@ -53,9 +58,13 @@ export async function ContractBillingItems({
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                <span className="text-xs tabular-nums text-muted-foreground">
-                  {formatCurrency(r.paid, r.currency)} / {formatCurrency(r.expected, r.currency)}
-                </span>
+                {/* 應收是含稅 gross，有稅額才多一行未稅＋稅 */}
+                <div className="text-right">
+                  <span className="text-xs tabular-nums text-muted-foreground">
+                    {formatCurrency(r.paid, r.currency)} / {formatCurrency(r.expected, r.currency)}
+                  </span>
+                  <TaxBreakdown net={r.net} tax={r.tax} />
+                </div>
                 <BillingStatusBadge status={r.status} />
               </div>
             </li>

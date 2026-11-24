@@ -8,6 +8,7 @@ import {
   type BillingItemFormValues,
   type Option,
 } from "./billing-item-fields";
+import type { TaxSetting } from "@/lib/tax-treatment";
 
 export function EditBillingItemForm({
   id,
@@ -16,7 +17,9 @@ export function EditBillingItemForm({
   contracts,
   projects,
   footer,
+  orgTax,
 }: Readonly<{
+  orgTax: TaxSetting;
   id: number;
   values: BillingItemFormValues;
   parties: Option[];
@@ -41,6 +44,7 @@ export function EditBillingItemForm({
         contracts={contracts}
         projects={projects}
         values={values}
+        orgTax={orgTax}
       />
     </EditForm>
   );

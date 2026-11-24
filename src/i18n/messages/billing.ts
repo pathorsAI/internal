@@ -134,6 +134,7 @@ const billing = {
     basis: {
       gross: { "zh-TW": "請款金額為含稅", en: "Billing amount is tax-inclusive" },
       net: { "zh-TW": "請款金額為未稅", en: "Billing amount is tax-exclusive" },
+      notax: { "zh-TW": "零稅率／免稅（無稅額）", en: "Zero-rated / exempt (no tax)" },
     },
     summary: {
       net: { "zh-TW": "未稅", en: "Excl. tax" },
