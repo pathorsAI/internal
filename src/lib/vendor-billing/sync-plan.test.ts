@@ -26,11 +26,13 @@ describe("cost lines", () => {
   });
   test("duplicate keys are summed (one upsert row per key)", () => {
     const rows = aggregateCostLines([
-      { month: "2026-09-01", resourceExternalId: "", resourceName: UNALLOCATED_LABEL, service: "", amount: -12, currency: "TWD" },
-      { month: "2026-09-01", resourceExternalId: "", resourceName: UNALLOCATED_LABEL, service: "", amount: -3.5, currency: "TWD" },
-      { month: "2026-09-01", resourceExternalId: "aaa", resourceName: "x", service: "VM", amount: 10, currency: "TWD" },
+      { month: "2026-09-01", resourceExternalId: "", resourceName: UNALLOCATED_LABEL, service: "", amount: -12, grossAmount: -12, promotionCredit: 0, currency: "TWD" },
+      { month: "2026-09-01", resourceExternalId: "", resourceName: UNALLOCATED_LABEL, service: "", amount: -3.5, grossAmount: -1.5, promotionCredit: -2, currency: "TWD" },
+      { month: "2026-09-01", resourceExternalId: "aaa", resourceName: "x", service: "VM", amount: 10, grossAmount: 10, promotionCredit: 0, currency: "TWD" },
     ]);
     expect(rows).toHaveLength(2);
     expect(rows[0].amount).toBe(-15.5);
+    expect(rows[0].grossAmount).toBe(-13.5);
+    expect(rows[0].promotionCredit).toBe(-2);
   });
 });

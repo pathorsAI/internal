@@ -109,6 +109,11 @@ const vendorBilling = {
     providerStatus: { "zh-TW": "平台狀態", en: "Platform status" },
     matchStatus: { "zh-TW": "對帳狀態", en: "Match status" },
     transaction: { "zh-TW": "交易", en: "Transaction" },
+    month: { "zh-TW": "月份", en: "Month" },
+    currency: { "zh-TW": "幣別", en: "Currency" },
+    usage: { "zh-TW": "用量", en: "Usage" },
+    promotionCredit: { "zh-TW": "抵用點數", en: "Promotion credits" },
+    paid: { "zh-TW": "實付", en: "Paid" },
   },
   cell: {
     missingResources: { "zh-TW": "{count} 個不見了", en: "{count} gone" },
@@ -175,6 +180,11 @@ const vendorBilling = {
           en: "Still unmatched 45 days after the invoice date: create an expense to review",
         },
       },
+    },
+    bookPromotionCredits: { "zh-TW": "抵用點數記進管理帳", en: "Book promotion credits in the management books" },
+    bookPromotionCreditsHelp: {
+      "zh-TW": "每個結束的月份，被點數抵掉的用量記一筆支出、點數記一筆收入，只進管理帳，稅務帳不受影響。關掉只停止新建，既有的不刪。",
+      en: "For each closed month, the usage covered by credits is booked as an expense and the credits as income, in the management books only; the tax books are unaffected. Turning it off only stops new entries; existing ones stay.",
     },
     note: { "zh-TW": "備註", en: "Note" },
     resources: { "zh-TW": "資源", en: "Resources" },

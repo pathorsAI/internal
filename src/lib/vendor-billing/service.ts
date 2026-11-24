@@ -12,7 +12,8 @@ import {
   vendorCostLines,
   vendorInvoices,
 } from "@/db/schema";
-import { matchPartiesOf, parseMatchPartyIds, parseRejectedTransactionIds, withRejected } from "./account-meta";
+import { notPromotionTransaction } from "./promotion-ledger";
+import { booksPromotionCredits, matchPartiesOf, parseMatchPartyIds, parseRejectedTransactionIds, withRejected } from "./account-meta";
 import { computeAttention, type AttentionItem } from "./attention";
 import { assertOrgRefs, billingAccountRefs, invoiceResolutionRefs, paymentMethodRefs } from "./guards";
 import {
@@ -66,6 +67,8 @@ export type BillingAccountRow = {
   source: string;
   status: string;
   ledgerMode: string;
+  /** GCP：抵用點數記進管理帳（其他平台永遠 false）。 */
+  bookPromotionCredits: boolean;
   partyId: number | null;
   partyName: string | null;
   matchPartyIds: number[];
@@ -230,6 +233,7 @@ export async function listBillingAccounts(
       source: a.source,
       status: a.status,
       ledgerMode: a.ledgerMode,
+      bookPromotionCredits: booksPromotionCredits(a.provider, a.meta),
       partyId: a.partyId,
       partyName: partyName ?? null,
       matchPartyIds: parseMatchPartyIds(a.meta),
@@ -396,24 +400,40 @@ export async function listPaymentMethods(orgId: string): Promise<PaymentMethodRo
   }));
 }
 
-/** 最近幾個月的費用（每月 × 幣別合計）；純分析資料。 */
-export async function costByMonth(
-  orgId: string,
-  billingAccountId: number,
-  months = 6,
-): Promise<{ month: string; currency: string; amount: number }[]> {
+export type MonthlyCost = {
+  month: string;
+  currency: string;
+  /** 沒有抵用點數時要付的錢（用量）。 */
+  grossAmount: number;
+  /** 抵用點數（負數；Azure 永遠 0）。 */
+  promotionCredit: number;
+  /** 實付 = grossAmount + promotionCredit。 */
+  amount: number;
+};
+
+/** 最近幾個月的費用（每月 × 幣別合計：用量／抵用點數／實付）；純分析資料。 */
+export async function costByMonth(orgId: string, billingAccountId: number, months = 6): Promise<MonthlyCost[]> {
   const rows = await getDb()
     .select({
       month: vendorCostLines.month,
       currency: vendorCostLines.currency,
       amount: sql<string>`sum(${vendorCostLines.amount})`,
+      grossAmount: sql<string>`sum(COALESCE(${vendorCostLines.grossAmount}, ${vendorCostLines.amount}))`,
+      promotionCredit: sql<string>`sum(${vendorCostLines.promotionCredit})`,
     })
     .from(vendorCostLines)
     .where(and(eq(vendorCostLines.organizationId, orgId), eq(vendorCostLines.billingAccountId, billingAccountId)))
     .groupBy(vendorCostLines.month, vendorCostLines.currency)
     .orderBy(desc(vendorCostLines.month))
     .limit(months * 2);
-  return rows.map((r) => ({ month: r.month, currency: r.currency.trim(), amount: Math.round(Number(r.amount) * 100) / 100 }));
+  const r2 = (v: string) => Math.round(Number(v) * 100) / 100;
+  return rows.map((r) => ({
+    month: r.month,
+    currency: r.currency.trim(),
+    grossAmount: r2(r.grossAmount),
+    promotionCredit: r2(r.promotionCredit),
+    amount: r2(r.amount),
+  }));
 }
 
 export async function getBillingAccount(orgId: string, id: number) {
@@ -447,6 +467,7 @@ export async function listLinkCandidates(orgId: string, invoiceId: number): Prom
         eq(transactions.type, "expense"),
         isNull(transactions.deletedAt),
         partyIds.length ? inArray(transactions.partyId, partyIds) : undefined,
+        notPromotionTransaction,
         gte(transactions.txnDate, addDays(row.inv.invoiceDate, -15)),
         lte(transactions.txnDate, addDays(row.inv.invoiceDate, GROUP_WINDOW_DAYS)),
       ),
@@ -557,7 +578,7 @@ async function insertBillingAccount(db: Db, orgId: string, patch: BillingAccount
       status: patch.status ?? "active",
       source: "manual",
       lastVerifiedAt: sql`now()`,
-      meta: patch.matchPartyIds ? { matchPartyIds: patch.matchPartyIds } : {},
+      meta: metaPatchOf(patch),
       note: patch.note ?? null,
     })
     .onConflictDoNothing()
@@ -578,12 +599,21 @@ const ACCOUNT_COLUMNS = [
   "note",
 ] as const;
 
-/** 只放有傳的欄位；matchPartyIds 寫進 meta（jsonb 合併，不動 meta 的其他鍵）。 */
+/** 存在 meta 裡的設定（matchPartyIds、bookPromotionCredits）；只放有傳的。 */
+function metaPatchOf(patch: BillingAccountPatch): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (patch.matchPartyIds !== undefined) out.matchPartyIds = patch.matchPartyIds;
+  if (patch.bookPromotionCredits !== undefined) out.bookPromotionCredits = patch.bookPromotionCredits;
+  return out;
+}
+
+/** 只放有傳的欄位；meta 的設定用 jsonb 合併，不動 meta 的其他鍵。 */
 function accountUpdateSet(patch: BillingAccountPatch): Record<string, unknown> {
   const set: Record<string, unknown> = { updatedAt: sql`now()` };
   for (const k of ACCOUNT_COLUMNS) if (patch[k] !== undefined) set[k] = patch[k];
-  if (patch.matchPartyIds !== undefined) {
-    set.meta = sql`${vendorBillingAccounts.meta} || ${JSON.stringify({ matchPartyIds: patch.matchPartyIds })}::jsonb`;
+  const metaPatch = metaPatchOf(patch);
+  if (Object.keys(metaPatch).length > 0) {
+    set.meta = sql`${vendorBillingAccounts.meta} || ${JSON.stringify(metaPatch)}::jsonb`;
   }
   return set;
 }

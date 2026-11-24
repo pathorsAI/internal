@@ -253,8 +253,8 @@ const integrations = {
       projectId: { "zh-TW": "專案 ID", en: "Project ID" },
       dataset: { "zh-TW": "Dataset", en: "Dataset" },
       hint: {
-        "zh-TW": "每個帳號的資料表 gcp_billing_export_v1_<帳號> 會自動偵測。",
-        en: "Each account's table gcp_billing_export_v1_<account> is detected automatically.",
+        "zh-TW": "每個帳號的資料表會自動偵測：標準表 gcp_billing_export_v1_<帳號>，沒有的話用明細表 gcp_billing_export_resource_v1_<帳號>。",
+        en: "Each account's table is detected automatically: the standard gcp_billing_export_v1_<account>, or the detailed gcp_billing_export_resource_v1_<account> if there is no standard one.",
       },
     },
     auth: {

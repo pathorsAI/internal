@@ -74,7 +74,12 @@ export type CostLineInput = {
   resourceExternalId: string;
   resourceName: string | null;
   service: string;
+  /** 淨額 = grossAmount + promotionCredit。 */
   amount: number;
+  /** 沒有抵用點數時的金額（Azure = amount）。 */
+  grossAmount: number;
+  /** 抵用點數（負數；Azure = 0）。 */
+  promotionCredit: number;
   currency: string;
 };
 
@@ -82,13 +87,17 @@ export type CostLineInput = {
  * 同一個 (月, 資源, 服務) 合併成一列 —— 同一次 upsert 裡出現重複鍵，Postgres 會拒絕。
  * 同鍵不同幣別的極端情況：保留第一個幣別、金額照加（Azure / GCP 一個帳號只有一種幣別）。
  */
+const round4 = (n: number) => Math.round(n * 10_000) / 10_000;
+
 export function aggregateCostLines(rows: readonly CostLineInput[]): CostLineInput[] {
   const map = new Map<string, CostLineInput>();
   for (const r of rows) {
     const key = `${r.month}|${r.resourceExternalId}|${r.service}`;
     const cur = map.get(key);
     if (cur) {
-      cur.amount = Math.round((cur.amount + r.amount) * 10_000) / 10_000;
+      cur.amount = round4(cur.amount + r.amount);
+      cur.grossAmount = round4(cur.grossAmount + r.grossAmount);
+      cur.promotionCredit = round4(cur.promotionCredit + r.promotionCredit);
       cur.resourceName ??= r.resourceName;
     } else {
       map.set(key, { ...r });

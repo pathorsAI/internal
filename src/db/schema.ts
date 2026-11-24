@@ -984,7 +984,12 @@ export const vendorCostLines = pgTable("vendor_cost_lines", {
 	resourceExternalId: text("resource_external_id").default('').notNull(),
 	resourceName: text("resource_name"),
 	service: text().default('').notNull(),
+	// 淨額 = grossAmount + promotionCredit（migrations/0037）
 	amount: numeric({ precision: 18, scale: 4 }).notNull(),
+	// 沒有抵用點數時要付的錢；NULL（0037 前的舊程式寫入）視同 amount
+	grossAmount: numeric("gross_amount", { precision: 18, scale: 4 }),
+	// GCP PROMOTION credits 加總（負數），Azure 為 0
+	promotionCredit: numeric("promotion_credit", { precision: 18, scale: 4 }).default('0').notNull(),
 	currency: char({ length: 3 }).notNull(),
 	source: text().notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
