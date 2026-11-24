@@ -19,7 +19,7 @@ export function chatOpenUrl(p: ChatProvider, code?: string): string | null {
   }
   const cfg = whatsappConfig();
   if (!cfg) return null;
-  const number = cfg.displayNumber.replace(/\D/g, "");
+  const number = cfg.displayNumber.replaceAll(/\D/g, "");
   if (!number) return null;
   const base = `https://wa.me/${number}`;
   return code ? `${base}?text=${encodeURIComponent(bindMessage(code))}` : base;

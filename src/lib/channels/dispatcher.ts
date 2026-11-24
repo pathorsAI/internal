@@ -168,6 +168,11 @@ function ts(s: string | null | undefined): number {
   return parsePgTimestamp(s);
 }
 
+/** 卡片還開著且沒過期（expiresAt 解析不了就當過期）。 */
+function isLiveCard(card: ChatCardRow): boolean {
+  return card.status === "open" && ts(card.expiresAt) > Date.now();
+}
+
 function isMark(r: ChatBufferRow): boolean {
   return r.kind === "button" && r.text === NEW_CONVERSATION_MARK;
 }
@@ -206,7 +211,7 @@ function safeFileName(name: string): string {
 /** 送訊息的小幫手：記著 reply token（只能用一次），送出的每一則都記進 chat_message_refs。 */
 class Replier {
   private replyToken?: string;
-  private replyTokenAt?: number;
+  private readonly replyTokenAt?: number;
 
   constructor(
     private readonly deps: DispatcherDeps,
@@ -402,18 +407,18 @@ async function handleUnlinked(
     );
     return;
   }
-  await bind(code, event.provider, event.externalUserId, event.displayName ?? null, adapter, replier, s, deps);
+  await bind(
+    { code, provider: event.provider, externalId: event.externalUserId, displayName: event.displayName ?? null },
+    { adapter, replier, s, deps },
+  );
 }
 
+type BindRequest = { code: string; provider: ChatProvider; externalId: string; displayName: string | null };
+type BindContext = { adapter: ChannelAdapter; replier: Replier; s: BotStrings; deps: DispatcherDeps };
+
 async function bind(
-  code: string,
-  provider: ChatProvider,
-  externalId: string,
-  displayName: string | null,
-  adapter: ChannelAdapter,
-  replier: Replier,
-  s: BotStrings,
-  deps: DispatcherDeps,
+  { code, provider, externalId, displayName }: BindRequest,
+  { adapter, replier, s, deps }: BindContext,
 ): Promise<void> {
   const name = displayName ?? (adapter.profileName ? await adapter.profileName(externalId) : null);
   const result = await deps.db.redeemChatLinkCode({ provider, code, externalId, displayName: name });
@@ -668,7 +673,7 @@ async function runFlush(
     await replyTurnError(err, events, replier, s, deps);
     return;
   }
-  await deliver(collectTurn(events), conversationId, identity, org, userName, replier, s, locale, deps);
+  await deliver(collectTurn(events), { conversationId, identity, org, actorName: userName, replier, s, locale, deps });
 }
 
 type Merged = MergedChatBuffer;
@@ -691,7 +696,7 @@ async function buildQuestion(
     }
     if (ref.cardId) {
       const card = await deps.db.getChatCard(ref.cardId);
-      if (card && card.status === "open" && ts(card.expiresAt) > Date.now()) {
+      if (card && isLiveCard(card)) {
         // 回覆一張還開著的確認卡：當成要修改它，舊卡先收掉。
         await deps.db.closeChatCard(card.id);
         prefixes.push(s.quotedCard((ref.snippet ?? "").replaceAll("\n", "；")));
@@ -742,19 +747,22 @@ function errorText(code: TurnOutput["error"], s: BotStrings): string | null {
   return s.error;
 }
 
+type DeliverContext = {
+  conversationId: string | null;
+  identity: ChatIdentityRow;
+  org: OrgContext;
+  actorName: string;
+  replier: Replier;
+  s: BotStrings;
+  locale: Locale;
+  deps: DispatcherDeps;
+  /** 接在模型文字與錯誤之後的固定訊息（「已取消」等）。 */
+  extra?: readonly string[];
+};
+
 /** 一題的結果送出去：文字（含快速選項）＋確認卡（3 張以上多一張「全部確認」）。 */
-async function deliver(
-  out: TurnOutput,
-  conversationId: string | null,
-  identity: ChatIdentityRow,
-  org: OrgContext,
-  actorName: string,
-  replier: Replier,
-  s: BotStrings,
-  locale: Locale,
-  deps: DispatcherDeps,
-  extra: string[] = [],
-): Promise<void> {
+async function deliver(out: TurnOutput, ctx: DeliverContext): Promise<void> {
+  const { conversationId, identity, org, actorName, replier, s, locale, deps, extra = [] } = ctx;
   const msgs: OutboundMessage[] = [];
   const body = out.texts.join("\n\n");
   if (body) {
@@ -831,7 +839,10 @@ async function runCommand(
 ): Promise<void> {
   switch (command.kind) {
     case "bind":
-      await bind(command.code, identity.provider, identity.externalId, null, adapter, replier, s, deps);
+      await bind(
+        { code: command.code, provider: identity.provider, externalId: identity.externalId, displayName: null },
+        { adapter, replier, s, deps },
+      );
       return;
     case "switchOrg":
       await sendOrgPicker(identity, replier, s, deps, s.pickOrg);
@@ -896,7 +907,7 @@ async function handleButton(
     await replier.text(s.cardNotYours);
     return;
   }
-  if (card.status !== "open" || !(ts(card.expiresAt) > Date.now())) {
+  if (!isLiveCard(card)) {
     if (card.status === "open") await deps.db.closeChatCard(card.id, "expired");
     await replier.text(s.cardGone);
     return;
@@ -925,7 +936,7 @@ async function acquireForButton(identityId: string, deps: DispatcherDeps): Promi
 
 async function runCardAction(
   card: ChatCardRow,
-  action: "confirm" | "edit" | "cancel" | "all",
+  action: CardAction,
   identity: ChatIdentityRow,
   _adapter: ChannelAdapter,
   replier: Replier,
@@ -944,34 +955,12 @@ async function runCardAction(
     await replier.text(s.cardGone);
     return;
   }
-  if (action === "all") {
-    // 單張卡也一併收掉（已經按過的那幾張，引擎會回 not_found，這裡略過）。
-    const ids = new Set(card.toolCallIds);
-    for (const c of await deps.db.listOpenChatCards(identity.id)) {
-      if (c.toolCallIds.every((id) => ids.has(id))) await deps.db.closeChatCard(c.id);
-    }
-  }
+  if (action === "all") await closeCoveredCards(card, identity, deps);
 
-  const approve = action === "confirm" || action === "all";
   const userName = (await deps.directory.getUserName(identity.userId)) ?? identity.displayName ?? "";
   const events: ChatEvent[] = [];
   try {
-    for (const toolCallId of card.toolCallIds) {
-      const before = events.length;
-      await deps.runTurn({
-        owner: { orgId: org.orgId, userId: identity.userId },
-        role: org.role,
-        channel: identity.provider,
-        conversationId: card.conversationId,
-        confirm: { toolCallId, approve },
-        locale,
-        orgName: org.orgName,
-        userName,
-        emit: (e) => events.push(e),
-      });
-      // 批次裡已經單獨按過的那幾張：引擎回 not_found，不算錯。
-      if (card.toolCallIds.length > 1) dropNotFound(events, before);
-    }
+    await confirmToolCalls(card, action, { deps, identity, org, locale, userName, events });
   } catch (err) {
     if (deps.isTurnNotFound?.(err)) {
       await replier.text(s.cardGone);
@@ -982,6 +971,63 @@ async function runCardAction(
   }
 
   const out = collectTurn(events);
+  const extra = cardActionExtras(out, action, s);
+  await deliver(out, {
+    conversationId: card.conversationId,
+    identity,
+    org,
+    actorName: userName,
+    replier,
+    s,
+    locale,
+    deps,
+    extra,
+  });
+}
+
+type CardAction = "confirm" | "edit" | "cancel" | "all";
+
+/** 「全部確認」：批次涵蓋的單張卡也一併收掉（已經按過的那幾張，引擎會回 not_found，這裡略過）。 */
+async function closeCoveredCards(card: ChatCardRow, identity: ChatIdentityRow, deps: DispatcherDeps): Promise<void> {
+  const ids = new Set(card.toolCallIds);
+  for (const c of await deps.db.listOpenChatCards(identity.id)) {
+    if (c.toolCallIds.every((id) => ids.has(id))) await deps.db.closeChatCard(c.id);
+  }
+}
+
+type ConfirmRun = {
+  deps: DispatcherDeps;
+  identity: ChatIdentityRow;
+  org: OrgContext;
+  locale: Locale;
+  userName: string;
+  events: ChatEvent[];
+};
+
+/** 卡片上的每個工具呼叫依序送確認／取消給引擎，事件收進 run.events。 */
+async function confirmToolCalls(card: ChatCardRow, action: CardAction, run: ConfirmRun): Promise<void> {
+  const { deps, identity, org, locale, userName, events } = run;
+  const approve = action === "confirm" || action === "all";
+  for (const toolCallId of card.toolCallIds) {
+    const before = events.length;
+    await deps.runTurn?.({
+      owner: { orgId: org.orgId, userId: identity.userId },
+      role: org.role,
+      channel: identity.provider,
+      conversationId: card.conversationId,
+      confirm: { toolCallId, approve },
+      locale,
+      orgName: org.orgName,
+      userName,
+      emit: (e) => events.push(e),
+    });
+    // 批次裡已經單獨按過的那幾張：引擎回 not_found，不算錯。
+    if (card.toolCallIds.length > 1) dropNotFound(events, before);
+  }
+}
+
+/** 模型沒說話時補的固定訊息：失敗原因、「已確認」、「請說要改什麼」、「已取消」。 */
+function cardActionExtras(out: TurnOutput, action: CardAction, s: BotStrings): string[] {
   const extra: string[] = [];
   if (out.texts.length === 0 && !out.error) {
     const failed = out.results.find((r) => r.status === "error");
@@ -990,7 +1036,7 @@ async function runCardAction(
   }
   if (action === "edit") extra.push(s.editPrompt);
   else if (action === "cancel" && out.texts.length === 0) extra.push(s.cancelled);
-  await deliver(out, card.conversationId, identity, org, userName, replier, s, locale, deps, extra);
+  return extra;
 }
 
 function dropNotFound(events: ChatEvent[], from: number): void {

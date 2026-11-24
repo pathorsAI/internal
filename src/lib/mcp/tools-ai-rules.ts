@@ -234,8 +234,8 @@ export const aiRuleTools: Record<string, ToolDef> = {
       const row = await updateAiRule(orgId, ctx.userId, id, {
         match,
         action,
-        ...(text !== undefined ? { text: text.slice(0, 500) } : {}),
-        ...(disabled !== undefined ? { disabled } : {}),
+        ...(text === undefined ? {} : { text: text.slice(0, 500) }),
+        ...(disabled === undefined ? {} : { disabled }),
       });
       if (!row) throw new Error(`Rule ${id} not found.`);
       return ruleOut(row);

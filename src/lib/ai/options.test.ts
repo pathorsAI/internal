@@ -28,4 +28,27 @@ describe("parseOptions", () => {
     expect(parseOptions("q [[選項：這是一個非常非常非常非常非常長的選項文字超過二十字]]").options[0].length).toBe(20);
     expect(parseOptions("q [[選項： | ]]").options).toEqual([]);
   });
+
+  test("tidies whitespace around removed markers like before", () => {
+    expect(parseOptions("a  \n\n\n\nb \t\n[[ OPTIONS ： x ]]").text).toBe("a\n\nb");
+    expect(parseOptions("[[選項：a]b]]").options).toEqual([]);
+    expect(parseOptions("[[[選項：a]]").text).toBe("[");
+    expect(parseOptions("[[選項 x]] [[選項：y]]")).toEqual({ text: "[[選項 x]]", options: ["y"] });
+  });
+
+  test("long malicious input finishes in milliseconds", () => {
+    const inputs = [
+      "[[選項：".repeat(50_000),
+      `[[選項：${" ".repeat(200_000)}`,
+      `${" \t".repeat(100_000)}x`,
+      `[[${" ".repeat(100_000)}選項${" ".repeat(100_000)}`,
+      "[[".repeat(100_000),
+      `${"\n".repeat(100_000)}[[options: a|b]]`,
+    ];
+    for (const input of inputs) {
+      const started = performance.now();
+      parseOptions(input);
+      expect(performance.now() - started).toBeLessThan(200);
+    }
+  });
 });

@@ -49,6 +49,14 @@ function mmss(s: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
+/** 狀態欄：尚未啟用 → 已綁定 → 未綁定。 */
+function AccountStatus({ enabled, linked }: Readonly<{ enabled: boolean; linked: boolean }>) {
+  const t = useTranslations("settings.chat");
+  if (!enabled) return <StatusTag tone="neutral">{t("status.disabled")}</StatusTag>;
+  if (linked) return <StatusTag tone="income">{t("status.linked")}</StatusTag>;
+  return <StatusTag tone="neutral">{t("status.unlinked")}</StatusTag>;
+}
+
 export function ChatAccountsTable({
   rows,
   currentOrgName,
@@ -78,13 +86,7 @@ export function ChatAccountsTable({
               <TableRow key={r.provider}>
                 <TableCell className="font-medium">{PROVIDER_NAME[r.provider]}</TableCell>
                 <TableCell>
-                  {!r.enabled ? (
-                    <StatusTag tone="neutral">{t("status.disabled")}</StatusTag>
-                  ) : r.identity ? (
-                    <StatusTag tone="income">{t("status.linked")}</StatusTag>
-                  ) : (
-                    <StatusTag tone="neutral">{t("status.unlinked")}</StatusTag>
-                  )}
+                  <AccountStatus enabled={r.enabled} linked={Boolean(r.identity)} />
                 </TableCell>
                 <TableCell className="text-muted-foreground">
                   {r.identity ? (r.identity.displayName ?? t("unnamed")) : "—"}
@@ -106,7 +108,8 @@ export function ChatAccountsTable({
                     >
                       {t("unlink.trigger")}
                     </Button>
-                  ) : r.enabled ? (
+                  ) : null}
+                  {!r.identity && r.enabled ? (
                     <Button type="button" variant="outline" size="sm" onClick={() => setBinding(r.provider)}>
                       {t("bind.trigger")}
                     </Button>
@@ -197,12 +200,7 @@ function BindSheet({
           <SheetTitle>{t("bind.title", { provider: name })}</SheetTitle>
         </SheetHeader>
         <div className="flex-1 space-y-6 overflow-y-auto px-4 pb-6">
-          {!issued ? (
-            <p className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" aria-hidden />
-              {t("bind.issuing")}
-            </p>
-          ) : (
+          {issued ? (
             <>
               <div className="space-y-1">
                 <div className="text-sm font-medium text-muted-foreground">{t("bind.codeLabel")}</div>
@@ -255,6 +253,11 @@ function BindSheet({
                 </>
               )}
             </>
+          ) : (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" aria-hidden />
+              {t("bind.issuing")}
+            </p>
           )}
         </div>
       </SheetContent>

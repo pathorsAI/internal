@@ -183,3 +183,72 @@ describe("指令", () => {
     expect(parseCommand("幫我切換組織到派斯")).toBeNull();
   });
 });
+
+/** 跑一次並回傳毫秒數。 */
+function timed(fn: () => unknown): number {
+  const t0 = performance.now();
+  fn();
+  return performance.now() - t0;
+}
+
+describe("regex 邊界與惡意長輸入（不能超線性回溯）", () => {
+  const N = 20_000;
+  /** 線性的實作在這個長度是幾十毫秒；改寫前的 regex 同樣輸入要 3–47 秒。上限放寬避免 CI 機器慢誤報。 */
+  const LIMIT_MS = 1000;
+
+  test("表格分隔線：各種寫法", () => {
+    const table = (sep: string) => markdownToChat(`| a | b |\n${sep}\n| 1 | 2 |`, BASE, 100_000);
+    expect(table("|---|---|")).toBe("a：1\nb：2");
+    expect(table("| :--- | ---: |")).toBe("a：1\nb：2");
+    expect(table("---|---")).toBe("a：1\nb：2");
+    expect(table(":--:|--")).toBe("a：1\nb：2");
+    // 不是分隔線：只有一個 -、空格子、雙直線，原樣保留
+    expect(table("|-|-|")).toBe("| a | b |\n|-|-|\n| 1 | 2 |");
+    expect(table("|---||---|")).toBe("| a | b |\n|---||---|\n| 1 | 2 |");
+    expect(table("||")).toBe("| a | b |\n||\n| 1 | 2 |");
+  });
+
+  test("表格分隔線：很長的惡意輸入", () => {
+    const evil = `| a |\n|${"--- ".repeat(N)}x`;
+    expect(timed(() => markdownToChat(evil, BASE, 10))).toBeLessThan(LIMIT_MS);
+    const evil2 = `| a |\n${"|--".repeat(N)}|x`;
+    expect(timed(() => markdownToChat(evil2, BASE, 10))).toBeLessThan(LIMIT_MS);
+  });
+
+  test("連結：標題、圖片、空字、未收尾", () => {
+    expect(markdownToChat('[說明](/a "標題")', BASE)).toBe(`說明：${BASE}/a`);
+    expect(markdownToChat("![](/img.png)", BASE)).toBe(`${BASE}/img.png`);
+    expect(markdownToChat("a[b](c d)e", BASE)).toBe("a[b](c d)e");
+    expect(markdownToChat("[a [b](/x)", BASE)).toBe(`a [b：${BASE}/x`);
+    expect(markdownToChat("[x](/a) [y](/b)", BASE)).toBe(`x：${BASE}/a y：${BASE}/b`);
+    expect(markdownToChat("[未收尾 [x](", BASE)).toBe("[未收尾 [x](");
+  });
+
+  test("連結：很長的惡意輸入", () => {
+    for (const evil of ["[".repeat(N), `${"[".repeat(N)}]`, "[](".repeat(N), `[a](${"b".repeat(N)} "${"c".repeat(N)}`, "![".repeat(N)]) {
+      expect(timed(() => markdownToChat(evil, BASE, 10))).toBeLessThan(LIMIT_MS);
+    }
+  });
+
+  test("行尾空白：很長的空白後面不是換行", () => {
+    expect(markdownToChat("a \t \nb", BASE)).toBe("a\nb");
+    const evil = `${" ".repeat(N)}x`;
+    expect(timed(() => markdownToChat(evil, BASE, 10))).toBeLessThan(LIMIT_MS);
+    const evil2 = `${"\t \t".repeat(N)}x\n`;
+    expect(timed(() => markdownToChat(evil2, BASE, 10))).toBeLessThan(LIMIT_MS);
+  });
+
+  test("網址後補空白：很多網址接在一起", () => {
+    expect(markdownToChat("http://a.b/http://c.d查", BASE)).toBe("http://a.b/http://c.d 查");
+    const evil = "http://".repeat(N);
+    expect(timed(() => markdownToChat(evil, BASE, 10))).toBeLessThan(LIMIT_MS);
+  });
+
+  test("綁定碼：很長的空白與冒號", () => {
+    expect(parseBindCommand("綁定 : 123456")).toBe("123456");
+    expect(parseBindCommand("綁定 :: 123456")).toBeNull();
+    const evil = `綁定${" ".repeat(N)}：${" ".repeat(N)}12345x`;
+    expect(timed(() => parseBindCommand(evil))).toBeLessThan(LIMIT_MS);
+    expect(parseBindCommand(evil)).toBeNull();
+  });
+});

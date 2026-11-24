@@ -110,33 +110,44 @@ function replyPayload(id: string, title: string): InboundPayload {
   return { kind: "button", payload: id };
 }
 
+function imagePayload(image: WaMessage["image"]): InboundPayload {
+  if (!image?.id) return { kind: "unsupported", what: "image" };
+  return {
+    kind: "media",
+    media: { id: image.id, ...(image.mime_type ? { mime: image.mime_type } : {}) },
+    ...(image.caption ? { caption: image.caption } : {}),
+  };
+}
+
+function documentPayload(doc: WaMessage["document"]): InboundPayload {
+  if (!doc?.id) return { kind: "unsupported", what: "document" };
+  return {
+    kind: "media",
+    media: {
+      id: doc.id,
+      ...(doc.mime_type ? { mime: doc.mime_type } : {}),
+      ...(doc.filename ? { fileName: doc.filename } : {}),
+    },
+    ...(doc.caption ? { caption: doc.caption } : {}),
+  };
+}
+
+function interactivePayload(interactive: WaMessage["interactive"]): InboundPayload {
+  const r = interactive?.button_reply ?? interactive?.list_reply;
+  if (!r?.id) return { kind: "unsupported", what: "interactive" };
+  return replyPayload(r.id, r.title ?? "");
+}
+
 function payloadOf(m: WaMessage): InboundPayload {
   switch (m.type) {
     case "text":
       return { kind: "text", text: m.text?.body ?? "" };
     case "image":
-      if (!m.image?.id) return { kind: "unsupported", what: "image" };
-      return {
-        kind: "media",
-        media: { id: m.image.id, ...(m.image.mime_type ? { mime: m.image.mime_type } : {}) },
-        ...(m.image.caption ? { caption: m.image.caption } : {}),
-      };
+      return imagePayload(m.image);
     case "document":
-      if (!m.document?.id) return { kind: "unsupported", what: "document" };
-      return {
-        kind: "media",
-        media: {
-          id: m.document.id,
-          ...(m.document.mime_type ? { mime: m.document.mime_type } : {}),
-          ...(m.document.filename ? { fileName: m.document.filename } : {}),
-        },
-        ...(m.document.caption ? { caption: m.document.caption } : {}),
-      };
-    case "interactive": {
-      const r = m.interactive?.button_reply ?? m.interactive?.list_reply;
-      if (!r?.id) return { kind: "unsupported", what: "interactive" };
-      return replyPayload(r.id, r.title ?? "");
-    }
+      return documentPayload(m.document);
+    case "interactive":
+      return interactivePayload(m.interactive);
     case "button":
       // template 訊息的 quick reply 按鈕：當成使用者打了那段字。
       return { kind: "text", text: m.button?.text ?? m.button?.payload ?? "" };
@@ -145,12 +156,49 @@ function payloadOf(m: WaMessage): InboundPayload {
   }
 }
 
+/** 一則 WhatsApp 訊息 → InboundEvent；缺寄件人或訊息 id 回 null。 */
+function toInboundEvent(m: WaMessage, names: ReadonlyMap<string, string>): InboundEvent | null {
+  if (!m.from || !m.id) return null;
+  const ts = Number(m.timestamp);
+  const name = names.get(m.from);
+  const isGroup = Boolean(m.group_id);
+  return {
+    ...payloadOf(m),
+    provider: "whatsapp",
+    eventId: m.id,
+    messageId: m.id,
+    externalUserId: m.from,
+    ...(name ? { displayName: name } : {}),
+    isGroup,
+    ...(isGroup && m.group_id ? { group: { id: m.group_id, type: "group" as const } } : {}),
+    ...(m.context?.id ? { quotedMessageId: m.context.id } : {}),
+    receivedAt: Number.isFinite(ts) && ts > 0 ? ts * 1000 : Date.now(),
+  } as InboundEvent;
+}
+
+type WaChange = { field?: string; value?: WaValue };
+
+/** 一個 change 裡的訊息；不是 messages、或是別支號碼的就回空陣列。 */
+function changeEvents(change: WaChange, phoneNumberId?: string): InboundEvent[] {
+  const v = change.value;
+  if (change.field !== "messages" || !v) return [];
+  const ownNumber = v.metadata?.phone_number_id;
+  if (phoneNumberId && ownNumber && ownNumber !== phoneNumberId) return [];
+  const names = new Map((v.contacts ?? []).map((c) => [c.wa_id ?? "", c.profile?.name ?? ""]));
+  const out: InboundEvent[] = [];
+  for (const m of v.messages ?? []) {
+    const event = toInboundEvent(m, names);
+    if (event) out.push(event);
+  }
+  return out;
+}
+
 /**
  * webhook body → 事件。只收我們這支號碼（phoneNumberId 有給就比對）的 messages；
  * statuses（sent／delivered／read）略過。
  */
 export function parseWhatsAppWebhook(raw: string, phoneNumberId?: string): InboundEvent[] {
-  let body: { object?: string; entry?: { changes?: { field?: string; value?: WaValue }[] }[] };
+  let body: { object?: string; entry?: { changes?: WaChange[] }[] };
   try {
     body = JSON.parse(raw) as typeof body;
   } catch {
@@ -159,30 +207,7 @@ export function parseWhatsAppWebhook(raw: string, phoneNumberId?: string): Inbou
   if (body.object !== "whatsapp_business_account") return [];
   const out: InboundEvent[] = [];
   for (const entry of body.entry ?? []) {
-    for (const change of entry.changes ?? []) {
-      if (change.field !== "messages" || !change.value) continue;
-      const v = change.value;
-      if (phoneNumberId && v.metadata?.phone_number_id && v.metadata.phone_number_id !== phoneNumberId) continue;
-      const names = new Map((v.contacts ?? []).map((c) => [c.wa_id ?? "", c.profile?.name ?? ""]));
-      for (const m of v.messages ?? []) {
-        if (!m.from || !m.id) continue;
-        const ts = Number(m.timestamp);
-        const name = names.get(m.from);
-        const isGroup = Boolean(m.group_id);
-        out.push({
-          ...payloadOf(m),
-          provider: "whatsapp",
-          eventId: m.id,
-          messageId: m.id,
-          externalUserId: m.from,
-          ...(name ? { displayName: name } : {}),
-          isGroup,
-          ...(isGroup && m.group_id ? { group: { id: m.group_id, type: "group" as const } } : {}),
-          ...(m.context?.id ? { quotedMessageId: m.context.id } : {}),
-          receivedAt: Number.isFinite(ts) && ts > 0 ? ts * 1000 : Date.now(),
-        } as InboundEvent);
-      }
-    }
+    for (const change of entry.changes ?? []) out.push(...changeEvents(change, phoneNumberId));
   }
   return out;
 }
@@ -241,13 +266,14 @@ export function cardToWhatsApp(card: ConfirmCard, locale: Locale): WaPayload {
 function textWithOptions(text: string, options: { label: string; text: string }[]): BuiltWaMessage[] {
   if (options.length === 0) return [{ payload: textPayload(text), snippet: text }];
   if (options.length > WA_BUTTONS_MAX) {
-    const listed = `${text}\n\n${options.map((o, i) => `${i + 1}. ${o.label}`).join("\n")}`;
+    const numbered = options.map((o, i) => `${i + 1}. ${o.label}`).join("\n");
+    const listed = `${text}\n\n${numbered}`;
     return [{ payload: textPayload(listed), snippet: listed }];
   }
   const buttons = options.map((o) => ({ id: `${QUICK_REPLY_PREFIX}${o.text}`, title: o.label }));
   if (text.length <= WA_BODY_MAX) return [{ payload: buttonsPayload(text, buttons), snippet: text }];
   // 太長放不進按鈕訊息的 body：先送全文，再送一則只有最後一段的按鈕訊息。
-  const tail = text.split("\n").filter(Boolean).at(-1) ?? text;
+  const tail = text.split("\n").findLast(Boolean) ?? text;
   return [
     { payload: textPayload(text), snippet: text },
     { payload: buttonsPayload(clip(tail, WA_BODY_MAX), buttons), snippet: tail },
@@ -336,7 +362,7 @@ export function createWhatsAppAdapter(
     async downloadMedia(media: InboundMedia, maxBytes: number) {
       const metaRes = await fetchImpl(`${WHATSAPP_GRAPH_API}/${encodeURIComponent(media.id)}`, { headers: auth });
       if (!metaRes.ok) throw new Error(`WhatsApp media ${metaRes.status}: ${(await metaRes.text()).slice(0, 300)}`);
-      const meta = (await metaRes.json()) as { url?: string; mime_type?: string; file_size?: number };
+      const meta: { url?: string; mime_type?: string; file_size?: number } = await metaRes.json();
       if (!meta.url) throw new Error("WhatsApp media has no url.");
       if (typeof meta.file_size === "number" && meta.file_size > maxBytes) return null;
       const res = await fetchImpl(meta.url, { headers: auth });

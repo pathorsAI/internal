@@ -4,7 +4,7 @@
  */
 import type { Locale } from "@/i18n/config";
 
-type Strings = {
+export type BotStrings = {
   groupNotSupported: string;
   notLinked: (settingsUrl: string) => string;
   welcome: (settingsUrl: string) => string;
@@ -51,7 +51,7 @@ type Strings = {
   moreRows: (n: number) => string;
 };
 
-const zh: Strings = {
+const zh: BotStrings = {
   groupNotSupported: "群組裡我不處理帳務，請私訊我。",
   notLinked: (url) => `還沒綁定 internal 帳號。請到 ${url} 產生綁定碼，再把「綁定 123456」傳給我。`,
   welcome: (url) =>
@@ -107,7 +107,7 @@ const zh: Strings = {
   moreRows: (n) => `還有 ${n} 個欄位，請到網頁看`,
 };
 
-const en: Strings = {
+const en: BotStrings = {
   groupNotSupported: "I don't handle bookkeeping in groups. Please message me directly.",
   notLinked: (url) => `This chat isn't linked yet. Generate a code at ${url}, then send me "綁定 123456".`,
   welcome: (url) =>
@@ -163,11 +163,9 @@ const en: Strings = {
   moreRows: (n) => `${n} more fields on the web`,
 };
 
-export function botStrings(locale: Locale): Strings {
+export function botStrings(locale: Locale): BotStrings {
   return locale === "en" ? en : zh;
 }
-
-export type BotStrings = Strings;
 
 // ---------------------------------------------------------------------------
 // 指令：合併後的文字「整則就是指令」才算。兩種語言的寫法都認，不看使用者語系。
@@ -183,14 +181,17 @@ export type BotCommand =
 /** 全形數字、全形空白 → 半形，去頭尾空白。 */
 function normalize(s: string): string {
   return s
-    .replaceAll(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+    .replaceAll(/[０-９]/g, (c) => String.fromCodePoint((c.codePointAt(0) ?? 0) - 0xfee0))
     .replaceAll(/[　\s]+/g, " ")
     .trim();
 }
 
-/** 「綁定 123456」：容許全形空白、全形數字、沒有空白、`綁定：123456`。 */
+/**
+ * 「綁定 123456」：容許全形空白、全形數字、沒有空白、`綁定：123456`。
+ * normalize 已把連續空白收成一個半形空白，所以這裡每個位置最多一個空白，量詞都有上限、不會回溯。
+ */
 export function parseBindCommand(text: string): string | null {
-  const m = /^(?:綁定|绑定|bind|link)\s*[:：]?\s*(\d{6})$/i.exec(normalize(text));
+  const m = /^(?:綁定|绑定|bind|link) ?[:：]? ?(\d{6})$/i.exec(normalize(text));
   return m ? m[1] : null;
 }
 

@@ -31,27 +31,27 @@ export function qrPath(modules: readonly (readonly boolean[])[], margin: number)
   return parts.join("");
 }
 
+/** 整張 QR code 的 SVG 原始碼（白底、深色模組）。 */
+export function qrSvg(value: string, margin = 2): string {
+  const modules = qrModules(value);
+  const dim = modules.length + margin * 2;
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${dim} ${dim}" shape-rendering="crispEdges">` +
+    `<rect width="${dim}" height="${dim}" rx="1" fill="#fff"/>` +
+    `<path d="${qrPath(modules, margin)}" fill="#111"/>` +
+    `</svg>`
+  );
+}
+
+/** 用 `<img alt>` 包 SVG data URI：螢幕閱讀器直接讀 alt，畫面跟內嵌 SVG 一樣。 */
 export function QrCode({
   value,
   size = 176,
   label,
   className,
 }: Readonly<{ value: string; size?: number; label: string; className?: string }>) {
-  const modules = qrModules(value);
-  const margin = 2;
-  const dim = modules.length + margin * 2;
-  return (
-    <svg
-      role="img"
-      aria-label={label}
-      width={size}
-      height={size}
-      viewBox={`0 0 ${dim} ${dim}`}
-      shapeRendering="crispEdges"
-      className={className}
-    >
-      <rect width={dim} height={dim} rx={1} fill="#fff" />
-      <path d={qrPath(modules, margin)} fill="#111" />
-    </svg>
-  );
+  const src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(qrSvg(value))}`;
+  // data URI 不經 next/image 最佳化，用原生 img 即可。
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={src} alt={label} width={size} height={size} className={className} />;
 }

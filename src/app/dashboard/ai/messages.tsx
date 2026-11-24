@@ -215,7 +215,7 @@ export function AssistantMessage({
       ))}
       {text ? <Markdown text={text} /> : null}
       {showOptions ? (
-        <div role="group" aria-label={tOptions("label")} className="flex flex-wrap gap-2">
+        <fieldset aria-label={tOptions("label")} className="m-0 flex min-w-0 flex-wrap gap-2 border-0 p-0">
           {options.map((o) => (
             <Button
               key={o}
@@ -229,7 +229,7 @@ export function AssistantMessage({
               {o}
             </Button>
           ))}
-        </div>
+        </fieldset>
       ) : null}
       {empty && streaming ? (
         <p className="inline-flex items-center gap-2 text-sm text-muted-foreground">

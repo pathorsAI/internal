@@ -29,6 +29,13 @@ const PAGES: [path: string, what: string][] = [
   ["/dashboard/activity", "activity log"],
 ];
 
+/** 這個人在組織裡有沒有員工資料（決定 submit_advance 能不能用）；不知道就不寫。 */
+function employeeLine(hasEmployee: boolean | undefined): string {
+  if (hasEmployee === undefined) return "";
+  if (hasEmployee) return " Employee record in this organization: yes (they can submit their own advances with submit_advance).";
+  return " Employee record in this organization: none — submit_advance will fail; tell them an owner or admin has to link their account on the Employees page.";
+}
+
 /** 只接受站內 dashboard 路徑，避免把任意字串塞進 system prompt。 */
 export function sanitizePage(page: unknown): string | null {
   if (typeof page !== "string") return null;
@@ -119,13 +126,7 @@ export function systemPrompt(opts: {
   ];
   if (opts.userName !== undefined || opts.hasEmployee !== undefined) {
     const who = opts.userName ? `Current user: ${opts.userName}.` : "";
-    const emp =
-      opts.hasEmployee === undefined
-        ? ""
-        : opts.hasEmployee
-          ? " Employee record in this organization: yes (they can submit their own advances with submit_advance)."
-          : " Employee record in this organization: none — submit_advance will fail; tell them an owner or admin has to link their account on the Employees page.";
-    lines.push(`${who}${emp}`.trim());
+    lines.push(`${who}${employeeLine(opts.hasEmployee)}`.trim());
   }
   if (canUseWrites(opts.role)) {
     lines.push(

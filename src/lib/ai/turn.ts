@@ -101,7 +101,10 @@ export class TurnNotFoundError extends Error {
 /** 對話標題：第一題的前 60 字（一行）；只有附件就用「附件」。 */
 export function titleFrom(message: string, hasAttachments = false, locale: Locale = "zh-TW"): string {
   const oneLine = message.replaceAll(/\s+/g, " ").trim();
-  if (!oneLine) return hasAttachments ? (locale === "en" ? "Attachment" : "附件") : "";
+  if (!oneLine) {
+    if (!hasAttachments) return "";
+    return locale === "en" ? "Attachment" : "附件";
+  }
   return oneLine.length > 60 ? `${oneLine.slice(0, 59)}…` : oneLine;
 }
 

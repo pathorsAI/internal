@@ -58,31 +58,149 @@ function splitRow(line: string): string[] {
     .map((c) => c.trim());
 }
 
-const TABLE_SEPARATOR = /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+const SEPARATOR_CELL = /^:?-{2,}:?$/;
+
+/**
+ * 表格分隔線（`|---|:--:|`）。逐格判斷而不是一條大 regex：
+ * 原本 `\s*` 夾在可重疊的量詞間，很長的惡意輸入會超線性回溯。
+ */
+function isTableSeparator(line: string): boolean {
+  let t = line.trim();
+  if (t.startsWith("|")) t = t.slice(1);
+  if (t.endsWith("|")) t = t.slice(0, -1);
+  return t.split("|").every((cell) => SEPARATOR_CELL.test(cell.trim()));
+}
+
+function isTableStart(lines: readonly string[], i: number): boolean {
+  return lines[i].trim().startsWith("|") && i + 1 < lines.length && isTableSeparator(lines[i + 1]);
+}
+
+function tableRowText(line: string, headers: readonly string[]): string {
+  return splitRow(line)
+    .map((c, k) => {
+      if (!c) return "";
+      const header = headers[k] || `#${k + 1}`;
+      return `${header}：${c}`;
+    })
+    .filter(Boolean)
+    .join("\n");
+}
 
 /** 表格（header＋分隔線＋列）轉成「欄：值」行，列之間空一行。 */
 function tablesToLines(lines: string[]): string[] {
   const out: string[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.trim().startsWith("|") && i + 1 < lines.length && TABLE_SEPARATOR.test(lines[i + 1].trim())) {
-      const headers = splitRow(line);
-      i += 2;
-      const rows: string[] = [];
-      for (; i < lines.length && lines[i].trim().startsWith("|"); i++) {
-        const cells = splitRow(lines[i]);
-        const pairs = cells
-          .map((c, k) => (c ? `${headers[k] || `#${k + 1}`}：${c}` : ""))
-          .filter(Boolean);
-        rows.push(pairs.join("\n"));
-      }
-      i -= 1;
-      out.push(rows.join("\n\n"));
+  let i = 0;
+  while (i < lines.length) {
+    if (!isTableStart(lines, i)) {
+      out.push(lines[i]);
+      i += 1;
       continue;
     }
-    out.push(line);
+    const headers = splitRow(lines[i]);
+    const rows: string[] = [];
+    let j = i + 2;
+    while (j < lines.length && lines[j].trim().startsWith("|")) {
+      rows.push(tableRowText(lines[j], headers));
+      j += 1;
+    }
+    out.push(rows.join("\n\n"));
+    i = j;
   }
   return out;
+}
+
+function isSpace(ch: string | undefined): boolean {
+  return ch !== undefined && /\s/.test(ch);
+}
+
+/** `replaceLinks` 掃描時記住的失敗位置，讓每一格最多只被看一次。 */
+type LinkScan = { text: string; failedUntil: number; noQuoteFrom: number };
+
+/**
+ * `[字](網址)` 或 `[字](網址 "標題")` 從 `]`（`close`）之後比對；成功回傳結尾位置與網址。
+ * 等同 `\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)`，但用掃描：
+ * 網址掃到 j 停下之後的結果只跟 j 之後的字有關，所以失敗時記下 j，之後網址起點 ≤ j 的嘗試直接判失敗。
+ */
+function matchLinkTail(scan: LinkScan, close: number): { end: number; href: string } | null {
+  const { text } = scan;
+  const hrefStart = close + 2;
+  if (text[close + 1] !== "(" || hrefStart <= scan.failedUntil) return null;
+  let j = hrefStart;
+  while (j < text.length && text[j] !== ")" && !isSpace(text[j])) j += 1;
+  const m = j === hrefStart ? null : linkEnd(scan, j);
+  if (!m) {
+    scan.failedUntil = j;
+    return null;
+  }
+  return { end: m, href: text.slice(hrefStart, j) };
+}
+
+/** 網址在 j 結束之後：`)`，或 `空白"標題")`。回傳結尾位置。 */
+function linkEnd(scan: LinkScan, j: number): number | null {
+  const { text } = scan;
+  if (text[j] === ")") return j + 1;
+  if (!isSpace(text[j])) return null;
+  let k = j;
+  while (isSpace(text[k])) k += 1;
+  if (text[k] !== '"' || k >= scan.noQuoteFrom) return null;
+  const quoteEnd = text.indexOf('"', k + 1);
+  if (quoteEnd === -1) {
+    scan.noQuoteFrom = k;
+    return null;
+  }
+  return text[quoteEnd + 1] === ")" ? quoteEnd + 2 : null;
+}
+
+/**
+ * 圖片、連結：`[字](網址)` → `字：網址`（字就是網址時只留網址）。
+ * 用 indexOf 掃描取代 regex：`[` 很多卻沒有收尾時，regex 每個起點都要掃到底（O(n²)）。
+ * 同一個 `]` 之前的所有 `[` 結果都一樣，失敗就直接跳過那個 `]`，整體線性。
+ */
+function replaceLinks(text: string, baseUrl: string): string {
+  const scan: LinkScan = { text, failedUntil: -1, noQuoteFrom: Infinity };
+  let out = "";
+  let last = 0;
+  let open = text.indexOf("[");
+  while (open !== -1) {
+    const close = text.indexOf("]", open + 1);
+    if (close === -1) break;
+    const m = matchLinkTail(scan, close);
+    if (!m) {
+      open = text.indexOf("[", close + 1);
+      continue;
+    }
+    const start = open > last && text[open - 1] === "!" ? open - 1 : open;
+    out += text.slice(last, start) + linkText(text.slice(open + 1, close), m.href, baseUrl);
+    last = m.end;
+    open = text.indexOf("[", last);
+  }
+  return out + text.slice(last);
+}
+
+function linkText(label: string, href: string, baseUrl: string): string {
+  const url = absolutize(href, baseUrl);
+  const l = label.trim();
+  return !l || l === href || l === url ? url : `${l}：${url}`;
+}
+
+/** 網址後面緊接中文（「…/advances查看」）：聊天 app 會把中文也認成網址的一部分，點了 404。補一個空白。 */
+function spaceAfterUrls(text: string): string {
+  return text.replaceAll(/https?:\/\/[\x21-\x7E]+/g, (m: string, offset: number) => {
+    const next = text.codePointAt(offset + m.length) ?? 0;
+    return next > 0x7f ? `${m} ` : m;
+  });
+}
+
+/** 每行去掉行尾空白與 tab（取代 `/[ \t]+\n/`：一長串空白後面不是換行時會超線性回溯）。 */
+function trimLineEnds(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => {
+      let end = line.length;
+      while (end > 0 && (line[end - 1] === " " || line[end - 1] === "\t")) end -= 1;
+      return line.slice(0, end);
+    })
+    .join("\n");
 }
 
 /**
@@ -100,21 +218,13 @@ export function markdownToChat(md: string, baseUrl: string, maxChars = MAX_CHAT_
         .replace(/^\s*>\s?/, ""), // 引用
     )
     .join("\n");
-  text = text
-    // 圖片、連結：[字](網址) → 字：網址（字就是網址時只留網址）
-    .replaceAll(/!?\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (_m, label: string, href: string) => {
-      const url = absolutize(href, baseUrl);
-      const l = label.trim();
-      return !l || l === href || l === url ? url : `${l}：${url}`;
-    })
+  text = replaceLinks(text, baseUrl)
     .replaceAll(/\*\*([^*\n]+)\*\*/g, "$1")
     .replaceAll(/__([^_\n]+)__/g, "$1")
     .replaceAll(/(^|[^*\w])\*([^*\n]+)\*(?=[^*\w]|$)/g, "$1$2")
     .replaceAll(/~~([^~\n]+)~~/g, "$1")
-    .replaceAll(/`([^`\n]+)`/g, "$1")
-    // 網址後面緊接中文（「…/advances查看」）：聊天 app 會把中文也認成網址的一部分，點了 404。補一個空白。
-    .replaceAll(/(https?:\/\/[\x21-\x7E]+)(?=[^\x00-\x7F])/g, "$1 ")
-    .replaceAll(/[ \t]+\n/g, "\n")
+    .replaceAll(/`([^`\n]+)`/g, "$1");
+  text = trimLineEnds(spaceAfterUrls(text))
     .replaceAll(/\n{3,}/g, "\n\n")
     .trim();
   return ellipsis(maskAccountNumbers(text), maxChars);
@@ -268,20 +378,33 @@ const VALUE_LABELS: Record<string, Record<string, { "zh-TW": string; en: string 
   },
 };
 
+function formatBoolean(v: boolean, locale: Locale): string {
+  if (locale === "en") return v ? "Yes" : "No";
+  return v ? "是" : "否";
+}
+
+function formatNumber(key: string, v: number): string {
+  if (SENSITIVE_KEY.test(key)) return maskTail(String(v));
+  return /amount/i.test(key) ? v.toLocaleString("en-US") : String(v);
+}
+
+function formatString(key: string, v: string, locale: Locale): string {
+  const mapped = VALUE_LABELS[key]?.[v]?.[locale];
+  if (mapped) return mapped;
+  return SENSITIVE_KEY.test(key) ? maskTail(v) : maskAccountNumbers(v);
+}
+
+function formatArray(key: string, v: readonly unknown[]): string {
+  if (key === "documentIds") return v.map((x) => `#${String(x)}`).join("、");
+  return v.map((x) => (typeof x === "object" ? JSON.stringify(x) : String(x))).join("、");
+}
+
 function formatValue(key: string, v: unknown, locale: Locale): string {
   if (v === null || v === undefined || v === "") return "—";
-  if (typeof v === "boolean") return locale === "en" ? (v ? "Yes" : "No") : v ? "是" : "否";
-  if (typeof v === "number" && SENSITIVE_KEY.test(key)) return maskTail(String(v));
-  if (typeof v === "number") return key === "amount" || /amount/i.test(key) ? v.toLocaleString("en-US") : String(v);
-  if (typeof v === "string") {
-    const mapped = VALUE_LABELS[key]?.[v]?.[locale];
-    if (mapped) return mapped;
-    return SENSITIVE_KEY.test(key) ? maskTail(v) : maskAccountNumbers(v);
-  }
-  if (Array.isArray(v)) {
-    if (key === "documentIds") return v.map((x) => `#${String(x)}`).join("、");
-    return v.map((x) => (typeof x === "object" ? JSON.stringify(x) : String(x))).join("、");
-  }
+  if (typeof v === "boolean") return formatBoolean(v, locale);
+  if (typeof v === "number") return formatNumber(key, v);
+  if (typeof v === "string") return formatString(key, v, locale);
+  if (Array.isArray(v)) return formatArray(key, v);
   return maskAccountNumbers(JSON.stringify(v));
 }
 
@@ -337,10 +460,15 @@ export function batchCard(
   };
 }
 
+function rowToText(r: ConfirmCardRow): string {
+  const note = r.note ? `（${r.note}）` : "";
+  return `${r.label}：${r.value}${note}`;
+}
+
 /** 卡片的純文字描述（引用確認卡時放進題目、WhatsApp 卡片內文）。 */
 export function cardToText(card: Pick<ConfirmCard, "title" | "rows" | "ruleHint">, locale: Locale): string {
   const s = botStrings(locale);
-  const lines = [card.title, ...card.rows.map((r) => `${r.label}：${r.value}${r.note ? `（${r.note}）` : ""}`)];
+  const lines = [card.title, ...card.rows.map(rowToText)];
   if (card.ruleHint) lines.push(`${s.ruleHintLabel}：${card.ruleHint}`);
   return lines.join("\n");
 }

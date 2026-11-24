@@ -87,23 +87,58 @@ type LineEvent = {
   postback?: { data?: string };
 };
 
-function payloadOf(ev: LineEvent): InboundPayload | null {
-  const m = ev.message;
-  if (ev.type === "message" && m) {
-    if (m.type === "text") return { kind: "text" as const, text: m.text ?? "" };
-    if (m.type === "image" && m.id) return { kind: "media" as const, media: { id: m.id, mime: "image/jpeg" } };
-    if (m.type === "file" && m.id) {
-      return {
-        kind: "media" as const,
-        media: { id: m.id, fileName: m.fileName, ...(typeof m.fileSize === "number" ? { size: m.fileSize } : {}) },
-      };
-    }
-    return { kind: "unsupported" as const, what: m.type };
+function messagePayload(m: NonNullable<LineEvent["message"]>): InboundPayload {
+  if (m.type === "text") return { kind: "text" as const, text: m.text ?? "" };
+  if (m.type === "image" && m.id) return { kind: "media" as const, media: { id: m.id, mime: "image/jpeg" } };
+  if (m.type === "file" && m.id) {
+    const size = typeof m.fileSize === "number" ? { size: m.fileSize } : {};
+    return { kind: "media" as const, media: { id: m.id, fileName: m.fileName, ...size } };
   }
+  return { kind: "unsupported" as const, what: m.type };
+}
+
+function payloadOf(ev: LineEvent): InboundPayload | null {
+  if (ev.type === "message" && ev.message) return messagePayload(ev.message);
   if (ev.type === "postback") return { kind: "button" as const, payload: ev.postback?.data ?? "" };
   if (ev.type === "follow") return { kind: "follow" as const };
   if (ev.type === "join") return { kind: "unsupported" as const, what: "join" };
   return null;
+}
+
+/** 群組／聊天室事件帶上群組資訊（之後要離開群組用）。 */
+function groupOf(src: LineSource, isGroup: boolean): { group?: { id: string; type: "group" | "room" } } {
+  const groupId = src.groupId ?? src.roomId;
+  if (!isGroup || !groupId) return {};
+  return { group: { id: groupId, type: src.type === "room" ? "room" : "group" } };
+}
+
+/** 平台給的 webhookEventId 優先；舊事件沒有就用訊息 id，再不然自己組一個。 */
+function eventIdOf(ev: LineEvent, externalUserId: string): string {
+  return ev.webhookEventId ?? ev.message?.id ?? `${ev.type}:${externalUserId}:${String(ev.timestamp ?? "")}`;
+}
+
+/** 一個 LINE 事件 → InboundEvent；standby、不處理的事件類型、沒有使用者的一對一事件回 null。 */
+function toInboundEvent(ev: LineEvent): InboundEvent | null {
+  if (ev.mode === "standby") return null; // 別的 channel 在處理這個聊天
+  const payload = payloadOf(ev);
+  if (!payload) return null;
+  const src = ev.source ?? {};
+  const isGroup = src.type === "group" || src.type === "room";
+  const externalUserId = src.userId ?? "";
+  if (!externalUserId && !isGroup) return null;
+  const message = ev.message;
+  return {
+    ...payload,
+    provider: "line",
+    eventId: eventIdOf(ev, externalUserId),
+    ...(message?.id ? { messageId: message.id } : {}),
+    externalUserId,
+    isGroup,
+    ...groupOf(src, isGroup),
+    ...(ev.replyToken ? { replyToken: ev.replyToken } : {}),
+    ...(message?.quotedMessageId ? { quotedMessageId: message.quotedMessageId } : {}),
+    receivedAt: typeof ev.timestamp === "number" ? ev.timestamp : Date.now(),
+  } as InboundEvent;
 }
 
 /** webhook body → 事件。unfollow、leave、已讀、standby 模式的事件直接略過。 */
@@ -116,28 +151,8 @@ export function parseLineWebhook(raw: string): InboundEvent[] {
   }
   const out: InboundEvent[] = [];
   for (const ev of body.events ?? []) {
-    if (ev.mode === "standby") continue; // 別的 channel 在處理這個聊天
-    const payload = payloadOf(ev);
-    if (!payload) continue;
-    const src = ev.source ?? {};
-    const isGroup = src.type === "group" || src.type === "room";
-    const externalUserId = src.userId ?? "";
-    if (!externalUserId && !isGroup) continue;
-    const groupId = src.groupId ?? src.roomId;
-    const eventId =
-      ev.webhookEventId ?? ev.message?.id ?? `${ev.type}:${externalUserId}:${String(ev.timestamp ?? "")}`;
-    out.push({
-      ...payload,
-      provider: "line",
-      eventId,
-      ...(ev.message?.id ? { messageId: ev.message.id } : {}),
-      externalUserId,
-      isGroup,
-      ...(isGroup && groupId ? { group: { id: groupId, type: src.type === "room" ? "room" : "group" } } : {}),
-      ...(ev.replyToken ? { replyToken: ev.replyToken } : {}),
-      ...(ev.message?.quotedMessageId ? { quotedMessageId: ev.message.quotedMessageId } : {}),
-      receivedAt: typeof ev.timestamp === "number" ? ev.timestamp : Date.now(),
-    } as InboundEvent);
+    const event = toInboundEvent(ev);
+    if (event) out.push(event);
   }
   return out;
 }
@@ -317,6 +332,11 @@ class LineApiError extends Error {
   }
 }
 
+function sentIds(res: unknown): string[] {
+  const list = (res as { sentMessages?: { id?: string }[] } | null)?.sentMessages ?? [];
+  return list.map((m) => m.id ?? "");
+}
+
 export function createLineAdapter(cfg: LineConfig, fetchImpl: FetchLike = (u, i) => fetch(u, i)): ChannelAdapter {
   const auth = { Authorization: `Bearer ${cfg.accessToken}` };
 
@@ -333,11 +353,6 @@ export function createLineAdapter(cfg: LineConfig, fetchImpl: FetchLike = (u, i)
     } catch {
       return {};
     }
-  }
-
-  function sentIds(res: unknown): string[] {
-    const list = (res as { sentMessages?: { id?: string }[] } | null)?.sentMessages ?? [];
-    return list.map((m) => m.id ?? "");
   }
 
   return {
@@ -406,7 +421,7 @@ export function createLineAdapter(cfg: LineConfig, fetchImpl: FetchLike = (u, i)
       try {
         const res = await fetchImpl(`${LINE_API}/v2/bot/profile/${encodeURIComponent(userId)}`, { headers: auth });
         if (!res.ok) return null;
-        const p = (await res.json()) as { displayName?: string };
+        const p: { displayName?: string } = await res.json();
         return p.displayName ?? null;
       } catch {
         return null;

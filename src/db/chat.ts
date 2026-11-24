@@ -167,7 +167,7 @@ export const LINK_CODE_TTL_MINUTES = 10;
 /** 產生一組 6 位數綁定碼（000000–999999，均勻分布，用 crypto 亂數）。 */
 export function generateLinkCode(): string {
   // 拒絕取樣：2^32 不是 10^6 的倍數，丟掉尾巴那段避免偏差。
-  const limit = Math.floor(0x1_0000_0000 / 1_000_000) * 1_000_000;
+  const limit = Math.floor(2 ** 32 / 1_000_000) * 1_000_000;
   const buf = new Uint32Array(1);
   for (;;) {
     crypto.getRandomValues(buf);
@@ -269,7 +269,7 @@ export async function redeemChatLinkCode(input: {
     .from(chatLinkCodes)
     .where(eq(chatLinkCodes.codeHash, codeHash))
     .limit(1);
-  if (!found || found.provider !== input.provider) return { ok: false, reason: "invalid" };
+  if (found?.provider !== input.provider) return { ok: false, reason: "invalid" };
 
   const existing = await findChatIdentity(input.provider, input.externalId);
   const check = checkLinkCode(found, existing);
@@ -605,6 +605,20 @@ export type MergedChatBuffer = {
   lastKind: ChatBufferKind | null;
 };
 
+/** 值有意義（不是 null／空字串）且還沒出現過才放進去。 */
+function pushUnique<T>(list: T[], value: T | null | undefined): void {
+  if (value === null || value === undefined || value === "") return;
+  if (!list.includes(value)) list.push(value);
+}
+
+/** 一則暫存訊息貢獻的文字：文字訊息本身，或照片的說明文字（WhatsApp caption）；按鈕列不算。 */
+function bufferRowText(r: ChatBufferRow): string | null {
+  if (r.kind !== "text" && r.kind !== "media") return null;
+  const text = r.text?.trim();
+  if (!text) return null;
+  return text;
+}
+
 /** 把暫存區的幾則訊息合成一題（純函式）。按鈕列會被略過（它們不該在暫存區）。 */
 export function mergeChatBuffer(rows: readonly ChatBufferRow[]): MergedChatBuffer {
   const texts: string[] = [];
@@ -612,13 +626,11 @@ export function mergeChatBuffer(rows: readonly ChatBufferRow[]): MergedChatBuffe
   const quoted: string[] = [];
   const external: string[] = [];
   for (const r of rows) {
-    if (r.externalMessageId && !external.includes(r.externalMessageId)) external.push(r.externalMessageId);
-    if (r.quotedExternalId && !quoted.includes(r.quotedExternalId)) quoted.push(r.quotedExternalId);
-    if (r.kind === "text" && r.text?.trim()) texts.push(r.text.trim());
-    if (r.kind === "media") {
-      if (r.documentId !== null && !documentIds.includes(r.documentId)) documentIds.push(r.documentId);
-      if (r.text?.trim()) texts.push(r.text.trim()); // 照片的說明文字（WhatsApp caption）
-    }
+    pushUnique(external, r.externalMessageId);
+    pushUnique(quoted, r.quotedExternalId);
+    if (r.kind === "media") pushUnique(documentIds, r.documentId);
+    const text = bufferRowText(r);
+    if (text) texts.push(text);
   }
   const last = rows.at(-1) ?? null;
   return {

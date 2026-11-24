@@ -69,7 +69,7 @@ export function bytesToBase64(bytes: Uint8Array): string {
   let bin = "";
   const CHUNK = 0x8000;
   for (let i = 0; i < bytes.length; i += CHUNK) {
-    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+    bin += String.fromCodePoint(...bytes.subarray(i, i + CHUNK));
   }
   return btoa(bin);
 }
@@ -246,30 +246,39 @@ export function toUiMessages(rows: readonly AiMessageRow[]): UiMessage[] {
   const toolRows = new Map(rows.filter((r) => r.role === "tool").map((r) => [r.toolCallId, r]));
   const out: UiMessage[] = [];
   for (const r of rows) {
-    if (r.role === "user") {
-      out.push({
-        kind: "user",
-        id: `m${r.id}`,
-        text: r.content ?? "",
-        ...(r.attachments?.length ? { attachments: r.attachments } : {}),
-      });
-      continue;
-    }
-    if (r.role !== "assistant") continue;
-    const bubble = currentBubble(out, `m${r.id}`);
-    if (r.content) bubble.text = bubble.text ? `${bubble.text}\n\n${r.content}` : r.content;
-    for (const c of r.toolCalls ?? []) {
-      const t = toolRows.get(c.id);
-      const status = t?.status ?? "cancelled";
-      bubble.tools.push(
-        uiToolCall(
-          c,
-          status,
-          status === "error" ? errorText(t?.content ?? null) : undefined,
-          status === "pending" ? pendingRuleHint(t?.content ?? null) : undefined,
-        ),
-      );
-    }
+    if (r.role === "user") out.push(userBubble(r));
+    else if (r.role === "assistant") appendAssistant(currentBubble(out, `m${r.id}`), r, toolRows);
   }
   return out;
+}
+
+function userBubble(r: AiMessageRow): UiMessage {
+  return {
+    kind: "user",
+    id: `m${r.id}`,
+    text: r.content ?? "",
+    ...(r.attachments?.length ? { attachments: r.attachments } : {}),
+  };
+}
+
+/** 一則 assistant 訊息接進泡泡：文字接在後面，工具呼叫依序帶上它的結果狀態。 */
+function appendAssistant(
+  bubble: AssistantBubble,
+  r: AiMessageRow,
+  toolRows: ReadonlyMap<string | null, AiMessageRow>,
+): void {
+  if (r.content) bubble.text = bubble.text ? `${bubble.text}\n\n${r.content}` : r.content;
+  for (const c of r.toolCalls ?? []) {
+    const t = toolRows.get(c.id);
+    const status = t?.status ?? "cancelled";
+    const content = t?.content ?? null;
+    bubble.tools.push(
+      uiToolCall(
+        c,
+        status,
+        status === "error" ? errorText(content) : undefined,
+        status === "pending" ? pendingRuleHint(content) : undefined,
+      ),
+    );
+  }
 }

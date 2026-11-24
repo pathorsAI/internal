@@ -23,9 +23,7 @@ export async function handleWebhook(req: Request, adapter: ChannelAdapter | null
   } catch (err) {
     // 進不了佇列：撤回去重紀錄並回 500，平台會重送（LINE redelivery、WhatsApp 重試）。
     console.error("[channels/webhook] enqueue failed", err);
-    {
-      await forgetInboundEvents(adapter.provider, jobs.map((j) => (j.kind === "event" ? j.event.eventId : ""))).catch(() => {});
-    }
+    await forgetInboundEvents(adapter.provider, jobs.map((j) => (j.kind === "event" ? j.event.eventId : ""))).catch(() => {});
     return new Response("Retry", { status: 500 });
   }
   return new Response("OK", { status: 200 });

@@ -22,6 +22,17 @@ export async function generateMetadata(): Promise<Metadata> {
   return { title: t("metaTitle") };
 }
 
+/** 分類規則指向的分類：目前的名稱 → 建規則當下記的名稱 → `#id` → 「—」。 */
+function categoryTarget(
+  id: number | undefined,
+  savedName: string | undefined,
+  names: ReadonlyMap<number, string>,
+): string {
+  const known = typeof id === "number" ? names.get(id) : undefined;
+  const fallback = id ? `#${String(id)}` : "—";
+  return known ?? savedName ?? fallback;
+}
+
 /**
  * AI 規則：使用者在對話裡教 AI 的事（「Google Workspace 都歸軟體工具」「我的代墊預設用公司卡」）。
  * 組織規則大家都看得到、只有 owner／admin 能停用或刪除；個人規則只有本人看得到。
@@ -34,14 +45,12 @@ export default async function AiRulesPage() {
     listAiRules(orgId, userId, { includeDisabled: true }),
     listCategories(orgId),
   ]);
-  const categoryName = new Map(categories.map((c) => [c.id, c.name]));
+  const categoryName = new Map<number, string>(categories.map((c) => [c.id, c.name]));
   const manage = canManageOrg(role);
 
   const effect = (r: AiRuleRow): string => {
     if (r.kind !== "category") return t(`kind.${r.kind}`);
-    const id = r.action.categoryId;
-    const target =
-      (typeof id === "number" ? categoryName.get(id) : undefined) ?? r.action.categoryName ?? (id ? `#${id}` : "—");
+    const target = categoryTarget(r.action.categoryId, r.action.categoryName, categoryName);
     const cond = ruleConditionLabel(r, locale);
     return cond ? `${cond} → ${target}` : target;
   };

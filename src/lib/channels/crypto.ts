@@ -26,7 +26,7 @@ export function base64ToBytes(s: string): Uint8Array | null {
   try {
     const bin = atob(s.trim());
     const out = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.codePointAt(i) ?? 0; // atob 的輸出每個字元都是 0–255
     return out;
   } catch {
     return null;
@@ -36,7 +36,7 @@ export function base64ToBytes(s: string): Uint8Array | null {
 export function bytesToBase64(bytes: Uint8Array): string {
   let bin = "";
   for (let i = 0; i < bytes.byteLength; i += 0x8000) {
-    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    bin += String.fromCodePoint(...bytes.subarray(i, i + 0x8000)); // 位元組 0–255，與 fromCharCode 結果相同
   }
   return btoa(bin);
 }
