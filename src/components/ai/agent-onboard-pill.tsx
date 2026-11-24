@@ -33,13 +33,12 @@ export function AgentOnboardPill({
   const t = useTranslations("ai.onboard");
   const rawLocale = useLocale();
   const locale = isLocale(rawLocale) ? rawLocale : "zh-TW";
-  // 伺服器端與 hydrate 前讀不到 localStorage：先佔一樣高的空位，大多數人（沒關掉的）
-  // 不會看到下方內容往下跳；已經關掉的人只會在 hydrate 後收掉這 32px。
+  // 伺服器端讀不到 localStorage：一律先畫出來（大多數人沒關掉，第一屏就是最終版面、不會跳），
+  // hydrate 後才確認是否已關掉；關掉過的人只會在 hydrate 那一刻收起。
   const hydrated = useHydrated();
   const [closed, setClosed] = useState(false);
 
-  if (!hydrated) return <div className="h-8" aria-hidden />;
-  if (closed || readDismissed()) return null;
+  if (closed || (hydrated && readDismissed())) return null;
 
   async function copy() {
     const prompt = buildSetupPrompt({ locale, mcpUrl: connector.url, connectorName: connector.name });
