@@ -57,8 +57,8 @@ export type IntegrationConfig = Record<string, unknown>;
 /** 靜態目錄的一筆：UI 要畫出這個整合所需的一切，不含任何實作。 */
 export type IntegrationCatalogEntry = {
   id: IntegrationProviderId;
-  /** 清單上的 logo 方塊：一個字 + Tailwind 底色 / 字色 class。 */
-  logo: { letter: string; className: string };
+  /** 清單上的 logo：官方品牌圖檔（public/integrations/，各家官網或品牌頁下載，見該資料夾 README）；letter 是圖載不到時的替代文字。 */
+  logo: { letter: string; src: string };
   /** 連接時要輸入的機密欄位（加密存放）。 */
   credentialFields: readonly IntegrationField[];
   /** 連接時可一併輸入的非機密設定（明文存 config）。沒有就省略。 */
