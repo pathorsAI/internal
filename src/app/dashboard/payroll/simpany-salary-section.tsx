@@ -57,7 +57,6 @@ export async function SimpanySalarySection({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
           <h2 className="text-sm font-medium text-muted-foreground">{t("title")}</h2>
-          <p className="text-sm text-muted-foreground">{t("description")}</p>
           <p className="text-xs text-muted-foreground">
             {recon.lastSyncedAt
               ? t("lastSynced", { date: formatDateTime(recon.lastSyncedAt) })
@@ -218,7 +217,6 @@ export async function SimpanySalarySection({
           title={t("unallocated.title")}
           action={formatCurrency(recon.totals.unallocated)}
         >
-          <p className="border-b px-4 py-2 text-xs text-muted-foreground">{t("unallocated.description")}</p>
           <Table>
             <TableHeader>
               <TableRow>

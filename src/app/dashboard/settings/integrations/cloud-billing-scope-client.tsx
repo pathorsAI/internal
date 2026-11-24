@@ -210,7 +210,6 @@ export function CloudBillingScopeSection({ view, canManage }: Readonly<{ view: C
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <p className="max-w-prose text-sm text-muted-foreground">{t("scope.description")}</p>
         {canManage ? null : <p className="text-xs text-muted-foreground">{t("scope.readOnly")}</p>}
         <ScopeMeta view={view} t={t} />
         {auth?.mode === "workload_identity" ? <WorkloadIdentityBox subject={auth.subject} command={auth.command} t={t} /> : null}

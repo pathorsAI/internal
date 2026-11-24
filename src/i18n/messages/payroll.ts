@@ -20,10 +20,6 @@ const payroll = {
   },
   simpany: {
     title: { "zh-TW": "Simpany 薪資申報", en: "Simpany salary declarations" },
-    description: {
-      "zh-TW": "同步 Simpany 的每月薪資申報，對照實際發出的薪資算出欠薪；owner / admin 也可以在這裡準備、寫入並送出每月申報。",
-      en: "Syncs monthly salary declarations from Simpany and reconciles them against what was paid; owners and admins can also prepare, write and submit each month's filing here.",
-    },
     prevYear: { "zh-TW": "上一年", en: "Previous year" },
     nextYear: { "zh-TW": "下一年", en: "Next year" },
     lastSynced: { "zh-TW": "上次同步 {date}", en: "Last synced {date}" },
@@ -219,10 +215,6 @@ const payroll = {
     },
     unallocated: {
       title: { "zh-TW": "未指定員工的薪資支出", en: "Salary payments not linked to an employee" },
-      description: {
-        "zh-TW": "分類是「薪資費用」但沒有綁員工、對象也對不到員工姓名。到交易頁把對象或撥款員工改好，就會算進對帳。",
-        en: "Categorised as 薪資費用 but not linked to an employee and the party name doesn't match one. Set the party or employee on the transaction to include it.",
-      },
       columns: {
         date: { "zh-TW": "日期", en: "Date" },
         description: { "zh-TW": "說明", en: "Description" },

@@ -7,7 +7,6 @@ import { StatusTag } from "@/components/ds/status-dot";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -62,9 +61,6 @@ export default async function McpPage() {
         <Card>
           <CardHeader>
             <CardTitle>{t("mcp.connectionInfo.title")}</CardTitle>
-            <CardDescription>
-              {t("mcp.connectionInfo.description")}
-            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {onlyOrg && (
@@ -125,10 +121,6 @@ export default async function McpPage() {
         </Card>
 
         <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            {t("mcp.clients.hint")}
-            {t("mcp.clients.hintManage")}
-          </p>
           <TableCard title={t("mcp.clients.title")} action={t("mcp.clients.count", { count: clients.length })}>
             <Table>
               <TableHeader>

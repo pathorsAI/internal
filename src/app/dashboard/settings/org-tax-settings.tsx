@@ -55,9 +55,7 @@ export function OrgTaxSettings({
           <Percent className="size-5 text-muted-foreground" />
           {t("title")}
         </CardTitle>
-        <CardDescription>
-          {canEdit ? t("descriptionEditable") : t("descriptionReadOnly")}
-        </CardDescription>
+        {canEdit ? null : <CardDescription>{t("descriptionReadOnly")}</CardDescription>}
       </CardHeader>
       <CardContent>
         {canEdit ? (

@@ -7,7 +7,6 @@ const account = {
   metaTitle: { "zh-TW": "個人設定 · Internal", en: "Your profile · Internal" },
   profile: {
     title: { "zh-TW": "頭像", en: "Profile picture" },
-    description: { "zh-TW": "只有你自己可以更改", en: "Only you can change it" },
     nameLabel: { "zh-TW": "名稱", en: "Name" },
     emailLabel: { "zh-TW": "Email", en: "Email" },
   },
