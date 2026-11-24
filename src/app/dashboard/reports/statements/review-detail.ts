@@ -4,25 +4,39 @@
  */
 import type { LedgerInputs, ReviewItem } from "@/lib/ledger/types";
 
-export function reviewDetail(inputs: LedgerInputs, item: ReviewItem): string {
+function transactionParts(inputs: LedgerInputs, id: number): string[] {
+  const txn = inputs.transactions.find((x) => x.id === id);
+  if (!txn) return [];
   const parts: string[] = [];
-  const p = item.params;
-  if (item.sourceType === "transaction" && item.sourceId !== null) {
-    const txn = inputs.transactions.find((x) => x.id === item.sourceId);
-    if (txn) {
-      if (txn.partyId !== null && inputs.partyNames[txn.partyId]) parts.push(inputs.partyNames[txn.partyId]);
-      if (txn.description) parts.push(txn.description);
-      if (txn.currency !== inputs.settings.functionalCurrency) parts.push(`${txn.currency} ${txn.amount.toLocaleString("en-US")}`);
-    }
-  } else if (item.sourceType === "invoice" && item.sourceId !== null) {
-    const inv = inputs.invoices.find((x) => x.id === item.sourceId);
-    if (inv?.invoiceNumber) parts.push(inv.invoiceNumber);
-    if (inv?.partyId != null && inputs.partyNames[inv.partyId]) parts.push(inputs.partyNames[inv.partyId]);
-  }
-  if (parts.length === 0) {
-    for (const k of ["account", "invoiceNumber", "currency"]) {
-      if (p[k] !== undefined && p[k] !== "") parts.push(String(p[k]));
-    }
-  }
-  return parts.join(" · ");
+  if (txn.partyId !== null && inputs.partyNames[txn.partyId]) parts.push(inputs.partyNames[txn.partyId]);
+  if (txn.description) parts.push(txn.description);
+  if (txn.currency !== inputs.settings.functionalCurrency) parts.push(`${txn.currency} ${txn.amount.toLocaleString("en-US")}`);
+  return parts;
+}
+
+function invoiceParts(inputs: LedgerInputs, id: number): string[] {
+  const inv = inputs.invoices.find((x) => x.id === id);
+  const parts: string[] = [];
+  if (inv?.invoiceNumber) parts.push(inv.invoiceNumber);
+  if (inv?.partyId != null && inputs.partyNames[inv.partyId]) parts.push(inputs.partyNames[inv.partyId]);
+  return parts;
+}
+
+function sourceParts(inputs: LedgerInputs, item: ReviewItem): string[] {
+  if (item.sourceId === null) return [];
+  if (item.sourceType === "transaction") return transactionParts(inputs, item.sourceId);
+  if (item.sourceType === "invoice") return invoiceParts(inputs, item.sourceId);
+  return [];
+}
+
+/** 來源查不到東西時，退回 params 裡的帳戶／發票號碼／幣別。 */
+function paramParts(params: ReviewItem["params"]): string[] {
+  return ["account", "invoiceNumber", "currency"]
+    .filter((k) => params[k] !== undefined && params[k] !== "")
+    .map((k) => String(params[k]));
+}
+
+export function reviewDetail(inputs: LedgerInputs, item: ReviewItem): string {
+  const parts = sourceParts(inputs, item);
+  return (parts.length === 0 ? paramParts(item.params) : parts).join(" · ");
 }

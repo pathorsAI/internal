@@ -9,6 +9,10 @@ import { round2 } from "../round";
 import type { LedgerInputs, LedgerKind, Statement, StatementRow } from "../types";
 import { balances, orderedSections, row, sectionBlock, sumWhere } from "./common";
 
+type Kind = "asset" | "liability" | "equity";
+
+const TOTAL_LABEL: Record<Kind, string> = { asset: "totals.assets", liability: "totals.liabilities", equity: "totals.equity" };
+
 export type BalanceSheetData = { balances: Map<number, number>; prior: number; current: number };
 
 export function balanceSheetData(inputs: LedgerInputs, ledger: LedgerKind, asOf: string, ctx: Ctx = createCtx(inputs)): BalanceSheetData {
@@ -31,7 +35,7 @@ export function balanceSheet(inputs: LedgerInputs, ledger: LedgerKind, asOf: str
   const main = balanceSheetData(inputs, ledger, asOf, ctx);
   const cmp = compareAsOf ? balanceSheetData(inputs, ledger, compareAsOf, ctx) : null;
   const sections = orderedSections(ctx, "balance_sheet");
-  const equityKey = equitySectionKey(inputs.accounts, new Map(sections.map((s) => [s.key, s]))) ?? sections.filter((s) => s.sign === -1).pop()?.key;
+  const equityKey = equitySectionKey(inputs.accounts, new Map(sections.map((s) => [s.key, s]))) ?? sections.findLast((s) => s.sign === -1)?.key;
   const exclude = new Set([ctx.sys("retained_earnings")]);
   // 股東往來是借方餘額（公司付了股東的錢、或政府帳上的股東取用）時，依台灣表達列在流動資產，不列成負的負債。
   // 以報表日（asOf）的餘額決定位置，比較欄跟著同一列。
@@ -39,15 +43,18 @@ export function balanceSheet(inputs: LedgerInputs, ledger: LedgerKind, asOf: str
   const reclass = (main.balances.get(shareholderId) ?? 0) > 0.005 ? new Set([shareholderId]) : new Set<number>();
   const firstAssetKey = sections.find((s) => s.sign === 1 && s.key !== equityKey)?.key;
 
-  const kindOf = (key: string): "asset" | "liability" | "equity" => (key === equityKey ? "equity" : sections.find((s) => s.key === key)!.sign === 1 ? "asset" : "liability");
+  const kindOf = (key: string): Kind => {
+    if (key === equityKey) return "equity";
+    return sections.find((s) => s.key === key)!.sign === 1 ? "asset" : "liability";
+  };
   const lastIdx = (k: "asset" | "liability") => sections.map((s) => kindOf(s.key)).lastIndexOf(k);
   const lastAsset = lastIdx("asset");
   const lastLiab = lastIdx("liability");
   const totals = { asset: [0, 0], liability: [0, 0], equity: [0, 0] } as Record<string, [number, number]>;
 
   const rows: StatementRow[] = [];
-  const pushTotal = (k: "asset" | "liability" | "equity") => {
-    const label = k === "asset" ? "totals.assets" : k === "liability" ? "totals.liabilities" : "totals.equity";
+  const pushTotal = (k: Kind) => {
+    const label = TOTAL_LABEL[k];
     rows.push(row(label, "total", label, totals[k][0], cmp ? totals[k][1] : null));
   };
   sections.forEach((s, idx) => {

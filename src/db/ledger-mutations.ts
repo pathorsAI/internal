@@ -37,9 +37,9 @@ function revalidateLedger() {
 
 type T = Awaited<ReturnType<typeof getTranslations<"accounting">>>;
 
-const GL_TYPES: GlAccountType[] = ["asset", "liability", "equity", "revenue", "expense"];
-const CASH_FLOWS: CashFlowClass[] = ["cash", "operating", "investing", "financing", "none"];
-const VAT_REGIMES: VatRegime[] = ["general", "small_scale", "none"];
+const GL_TYPES: ReadonlySet<GlAccountType> = new Set(["asset", "liability", "equity", "revenue", "expense"]);
+const CASH_FLOWS: ReadonlySet<CashFlowClass> = new Set(["cash", "operating", "investing", "financing", "none"]);
+const VAT_REGIMES: ReadonlySet<VatRegime> = new Set(["general", "small_scale", "none"]);
 const ENTRY_LEDGERS = ["both", "government", "management"] as const;
 const ENTRY_KINDS = ["manual", "opening", "adjustment"] as const;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -65,7 +65,7 @@ function errorText(e: unknown): string {
       parts.push(cur.message);
       cur = (cur as Error & { cause?: unknown }).cause;
     } else {
-      parts.push(String(cur));
+      parts.push(typeof cur === "object" ? JSON.stringify(cur) : String(cur));
       break;
     }
   }
@@ -119,7 +119,7 @@ export async function saveAccountingSettings(input: AccountingSettingsInput): Pr
     if (!JURISDICTION_CODES.includes(input.jurisdiction)) return { ok: false, error: t("errors.invalid") };
     const mod = getJurisdiction(input.jurisdiction);
     if (!mod.frameworks.some((f) => f.code === input.framework)) return { ok: false, error: t("errors.invalid") };
-    if (!VAT_REGIMES.includes(input.vatRegime)) return { ok: false, error: t("errors.invalid") };
+    if (!VAT_REGIMES.has(input.vatRegime)) return { ok: false, error: t("errors.invalid") };
     const fy = Number(input.fiscalYearStartMonth);
     if (!Number.isInteger(fy) || fy < 1 || fy > 12) return { ok: false, error: t("errors.invalid") };
     const booksStart = input.booksStartDate || null;
@@ -180,7 +180,7 @@ async function validateGlAccount(orgId: string, input: GlAccountInput, t: T): Pr
   const name = input.name?.trim();
   if (!code || !/^[0-9A-Za-z.-]{1,20}$/.test(code)) return t("errors.codeInvalid");
   if (!name) return t("errors.nameRequired");
-  if (!GL_TYPES.includes(input.type) || !CASH_FLOWS.includes(input.cashFlow)) return t("errors.invalid");
+  if (!GL_TYPES.has(input.type) || !CASH_FLOWS.has(input.cashFlow)) return t("errors.invalid");
   const settings = await getAccountingSettings(orgId);
   const section = getJurisdiction(settings.jurisdiction).sections.find((s) => s.key === input.section);
   if (!section) return t("errors.sectionInvalid");
@@ -360,6 +360,44 @@ export async function upsertFxRates(input: { currency: string; text: string }): 
   }
 }
 
+const isWiseDate = (v: unknown): v is string => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+
+/** 該幣別最早一筆交易的日期；沒有交易就是今天。 */
+async function earliestTxnDate(orgId: string, currency: string): Promise<string> {
+  const [row] = await getDb()
+    .select({ d: sql<string>`min(${transactions.txnDate})` })
+    .from(transactions)
+    .where(and(eq(transactions.organizationId, orgId), eq(transactions.currency, currency), isNull(transactions.deletedAt)));
+  return row?.d ?? todayInTaipei();
+}
+
+function addDays(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/** 從 Wise 抓 from..to 的每日匯率（日期 → 匯率）。Wise 一次最多回幾百筆：每 180 天一段。 */
+async function fetchWiseDailyRates(
+  orgId: string,
+  currency: string,
+  functionalCurrency: string,
+  from: string,
+  to: string,
+): Promise<Map<string, number>> {
+  const { getWiseClient } = await import("@/lib/integrations/wise");
+  const { client } = await getWiseClient(orgId);
+  const byDate = new Map<string, number>();
+  for (let start = from; start <= to; ) {
+    let end = addDays(start, 180);
+    if (end >= to) end = to;
+    const rates = await client.getDailyRates(currency, functionalCurrency, `${start}T00:00:00+0000`, `${end}T23:59:59+0000`);
+    for (const r of rates) if (r.rate > 0) byDate.set(r.time.slice(0, 10), r.rate);
+    start = addDays(end, 1);
+  }
+  return byDate;
+}
+
 /**
  * 從已連接的 Wise 匯入每日匯率（1 外幣 = ? 本位幣）。Wise 只給讀取權限，這支只打 GET /v1/rates。
  * 預設範圍：總帳起始日（沒有就最早一筆該幣別交易）到今天；已有的日期覆寫成 Wise 的值（手動輸入的不覆寫）。
@@ -372,31 +410,11 @@ export async function importFxRatesFromWise(input: { currency: string; from?: st
     if (!currency || !/^[A-Z]{3}$/.test(currency)) return { ok: false, error: t("errors.currencyInvalid") };
     const settings = await getAccountingSettings(orgId);
     if (currency === settings.functionalCurrency) return { ok: false, error: t("errors.currencyFunctional") };
-    const isDate = (v: unknown): v is string => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
-    let from = isDate(input.from) ? input.from : settings.booksStartDate;
-    if (!from) {
-      const [row] = await getDb()
-        .select({ d: sql<string>`min(${transactions.txnDate})` })
-        .from(transactions)
-        .where(and(eq(transactions.organizationId, orgId), eq(transactions.currency, currency), isNull(transactions.deletedAt)));
-      from = row?.d ?? todayInTaipei();
-    }
-    const to = isDate(input.to) ? input.to : todayInTaipei();
+    let from = isWiseDate(input.from) ? input.from : settings.booksStartDate;
+    if (!from) from = await earliestTxnDate(orgId, currency);
+    const to = isWiseDate(input.to) ? input.to : todayInTaipei();
     if (from > to) return { ok: false, error: t("errors.invalid") };
-    const { getWiseClient } = await import("@/lib/integrations/wise");
-    const { client } = await getWiseClient(orgId);
-    // Wise 一次最多回幾百筆：每 180 天一段
-    const byDate = new Map<string, number>();
-    for (let start = from; start <= to; ) {
-      const endD = new Date(`${start}T00:00:00Z`);
-      endD.setUTCDate(endD.getUTCDate() + 180);
-      const end = endD.toISOString().slice(0, 10) < to ? endD.toISOString().slice(0, 10) : to;
-      const rates = await client.getDailyRates(currency, settings.functionalCurrency, `${start}T00:00:00+0000`, `${end}T23:59:59+0000`);
-      for (const r of rates) if (r.rate > 0) byDate.set(r.time.slice(0, 10), r.rate);
-      const next = new Date(`${end}T00:00:00Z`);
-      next.setUTCDate(next.getUTCDate() + 1);
-      start = next.toISOString().slice(0, 10);
-    }
+    const byDate = await fetchWiseDailyRates(orgId, currency, settings.functionalCurrency, from, to);
     if (byDate.size === 0) return { ok: false, error: t("errors.rateEmpty") };
     await getDb()
       .insert(fxRates)

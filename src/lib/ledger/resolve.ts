@@ -4,6 +4,7 @@
  */
 import { FxTable } from "./fx";
 import { getJurisdiction } from "./jurisdictions";
+import { compareStrings } from "./periods";
 import type { JurisdictionModule, SectionDef } from "./module";
 import type {
   FixedAsset,
@@ -49,6 +50,13 @@ const SYS_TYPE: Record<SystemKey, GlAccountType> = {
   depreciation_expense: "expense",
 };
 
+/** 分類沒對到科目時的退路：換匯 → 兌換損益；收入 → 待分類收入；其他 → 待分類費用。 */
+function uncategorizedKey(kind: string): SystemKey {
+  if (kind === "transfer") return "fx_gain_loss";
+  if (kind === "income") return "uncategorized_income";
+  return "uncategorized_expense";
+}
+
 export type Mapping = { glAccountId: number; isDefault: boolean };
 
 export type Ctx = {
@@ -87,8 +95,8 @@ export function createCtx(inputs: LedgerInputs): Ctx {
     const cached = sysCache.get(key);
     if (cached != null) return cached;
     let id = bySys.get(key);
-    for (const alt of SYS_FALLBACK[key] ?? []) if (id == null) id = bySys.get(alt);
-    if (id == null) id = inputs.accounts.find((a) => a.type === SYS_TYPE[key])?.id;
+    for (const alt of SYS_FALLBACK[key] ?? []) id ??= bySys.get(alt);
+    id ??= inputs.accounts.find((a) => a.type === SYS_TYPE[key])?.id;
     const result = id ?? -1;
     sysCache.set(key, result);
     return result;
@@ -98,8 +106,7 @@ export function createCtx(inputs: LedgerInputs): Ctx {
     if (cat.glAccountId != null && accounts.has(cat.glAccountId)) return { glAccountId: cat.glAccountId, isDefault: false };
     const byDefault = byCode.get(jm.defaultCategoryCode(cat));
     if (byDefault) return { glAccountId: byDefault.id, isDefault: true };
-    const key: SystemKey = cat.kind === "transfer" ? "fx_gain_loss" : cat.kind === "income" ? "uncategorized_income" : "uncategorized_expense";
-    return { glAccountId: sys(key), isDefault: true };
+    return { glAccountId: sys(uncategorizedKey(cat.kind)), isDefault: true };
   };
 
   const bankAccountGl = (bank: LedgerBankAccount): Mapping => {
@@ -127,7 +134,7 @@ export function createCtx(inputs: LedgerInputs): Ctx {
     return s;
   };
 
-  const txnDates = inputs.transactions.map((t) => t.txnDate.slice(0, 10)).sort();
+  const txnDates = inputs.transactions.map((t) => t.txnDate.slice(0, 10)).sort(compareStrings);
   const booksStart = inputs.settings.booksStartDate?.slice(0, 10) ?? txnDates[0] ?? null;
 
   const assetsBySourceTxn = new Map<number, FixedAsset>();
@@ -165,8 +172,8 @@ export function equitySectionKey(accounts: GlAccount[], sections: Map<string, Se
 export function line(glAccountId: number, amount: number, extra: Partial<PostingLine> = {}): PostingLine {
   return {
     glAccountId,
-    debit: amount > 0 ? amount : 0,
-    credit: amount < 0 ? -amount : 0,
+    debit: Math.max(amount, 0),
+    credit: Math.max(-amount, 0),
     currency: null,
     fxAmount: null,
     partyId: null,

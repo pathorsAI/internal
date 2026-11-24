@@ -5,7 +5,7 @@
 import { postDepreciation } from "./depreciation";
 import { postInvoices, type LinkedPayment } from "./invoices";
 import { postOpenings } from "./opening";
-import { monthEndOf, ym } from "./periods";
+import { compareStrings, monthEndOf, ym } from "./periods";
 import { postTransaction, review } from "./post";
 import { createCtx, type Ctx } from "./resolve";
 import { postRevaluations } from "./revaluation";
@@ -21,42 +21,21 @@ export type InternalBuildOptions = {
   ctx?: Ctx;
 };
 
-const byDateKey = (a: Posting, b: Posting) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+const byDateKey = (a: Posting, b: Posting) => compareStrings(a.date, b.date) || compareStrings(a.key, b.key);
+
+function pushTo<K, V>(map: Map<K, V[]>, key: K, value: V): void {
+  const list = map.get(key) ?? [];
+  list.push(value);
+  map.set(key, list);
+}
 
 export function buildInternal(inputs: LedgerInputs, ledger: LedgerKind, asOf: string, opts: InternalBuildOptions = {}): BuildResult & { ctx: Ctx } {
   const ctx = opts.ctx ?? createCtx(inputs);
-  const start = ctx.booksStart;
-  const engine: Posting[] = [];
-  const reviews: ReviewItem[] = [];
+  const txns = postAllTransactions(inputs, ctx, ledger);
+  const engine: Posting[] = [...txns.postings];
+  const reviews: ReviewItem[] = [...txns.reviews];
 
-  // 交易
-  const linked = new Map<number, LinkedPayment[]>();
-  const transferKindByDate = new Map<string, number[]>();
-  for (const t of inputs.transactions) {
-    const cat = t.categoryId != null ? ctx.categories.get(t.categoryId) : undefined;
-    if (cat?.kind === "transfer" && (t.type === "income" || t.type === "expense")) {
-      const list = transferKindByDate.get(t.txnDate.slice(0, 10)) ?? [];
-      list.push(t.id);
-      transferKindByDate.set(t.txnDate.slice(0, 10), list);
-    }
-  }
-  for (const t of inputs.transactions) {
-    const date = t.txnDate.slice(0, 10);
-    if (start && date < start) continue; // 起始日前的交易併進期初
-    const r = postTransaction(ctx, t, ledger);
-    reviews.push(...r.review);
-    if (r.posting) engine.push(r.posting);
-    if (t.type === "income" && t.invoiceId != null) {
-      const list = linked.get(t.invoiceId) ?? [];
-      list.push({ txn: t, amount: r.functionalAmount });
-      linked.set(t.invoiceId, list);
-    }
-    if (r.posting && (transferKindByDate.get(date)?.length ?? 0) === 1 && transferKindByDate.get(date)![0] === t.id) {
-      reviews.push(review("fx_transfer_one_sided", "warning", ledger, "transaction", t.id, date, r.functionalAmount, {}));
-    }
-  }
-
-  const inv = postInvoices(ctx, ledger, linked);
+  const inv = postInvoices(ctx, ledger, txns.linked);
   engine.push(...inv.postings);
   reviews.push(...inv.review);
   const open = postOpenings(ctx, ledger);
@@ -70,23 +49,65 @@ export function buildInternal(inputs: LedgerInputs, ledger: LedgerKind, asOf: st
   // 明確設定起始日時，起始日前的折舊不提（那段已併進期初）；預設起始日（最早交易）不切，免得切掉更早取得的財產
   const explicitStart = inputs.settings.booksStartDate?.slice(0, 10) ?? null;
   const base: Posting[] = engine.filter((p) => !closed.has(ym(p.date)) && !(explicitStart && p.sourceType === "depreciation" && p.date < explicitStart));
-  const bankByGl = inferBankByGl(ctx);
-  for (const e of inputs.entries) {
-    if (e.kind === "snapshot") {
-      if (e.ledger !== ledger) continue;
-      const month = e.snapshotYear != null && e.snapshotMonth != null ? `${e.snapshotYear}-${String(e.snapshotMonth).padStart(2, "0")}` : ym(e.entryDate);
-      if (!closed.has(month)) continue;
-      base.push(storedToPosting(e, ledger, true, bankByGl));
-    } else if (e.ledger === ledger || e.ledger === "both") {
-      base.push(storedToPosting(e, ledger, false, bankByGl));
-    }
-  }
+  base.push(...storedPostings(inputs, ctx, ledger, closed));
 
   const inRange = base.filter((p) => p.date <= asOf);
   const reval = postRevaluations(ctx, ledger, inRange, asOf, opts.boundaries ?? []);
   reviews.push(...reval.review);
   const postings = [...inRange, ...reval.postings].sort(byDateKey);
   return { postings, review: reviews.filter((r) => !r.date || r.date <= asOf), ctx };
+}
+
+/** 分類是換匯的 income／expense，依日期分組（同一天只有一筆 → 換匯只有一邊）。 */
+function transferKindByDate(inputs: LedgerInputs, ctx: Ctx): Map<string, number[]> {
+  const out = new Map<string, number[]>();
+  for (const t of inputs.transactions) {
+    const cat = t.categoryId == null ? undefined : ctx.categories.get(t.categoryId);
+    if (cat?.kind === "transfer" && (t.type === "income" || t.type === "expense")) pushTo(out, t.txnDate.slice(0, 10), t.id);
+  }
+  return out;
+}
+
+/** 交易 → 分錄；順便收集綁了發票的收款，給 postInvoices 用。 */
+function postAllTransactions(inputs: LedgerInputs, ctx: Ctx, ledger: LedgerKind): { postings: Posting[]; reviews: ReviewItem[]; linked: Map<number, LinkedPayment[]> } {
+  const start = ctx.booksStart;
+  const postings: Posting[] = [];
+  const reviews: ReviewItem[] = [];
+  const linked = new Map<number, LinkedPayment[]>();
+  const transfersByDate = transferKindByDate(inputs, ctx);
+  for (const t of inputs.transactions) {
+    const date = t.txnDate.slice(0, 10);
+    if (start && date < start) continue; // 起始日前的交易併進期初
+    const r = postTransaction(ctx, t, ledger);
+    reviews.push(...r.review);
+    if (r.posting) postings.push(r.posting);
+    if (t.type === "income" && t.invoiceId != null) pushTo(linked, t.invoiceId, { txn: t, amount: r.functionalAmount });
+    const sameDay = transfersByDate.get(date);
+    if (r.posting && sameDay?.length === 1 && sameDay[0] === t.id) {
+      reviews.push(review("fx_transfer_one_sided", "warning", ledger, { sourceType: "transaction", sourceId: t.id, date, amount: r.functionalAmount }, {}));
+    }
+  }
+  return { postings, reviews, linked };
+}
+
+/** 快照存的是哪個月：有存年月用年月，否則看分錄日。 */
+function snapshotMonthOf(e: StoredEntry): string {
+  if (e.snapshotYear != null && e.snapshotMonth != null) return `${e.snapshotYear}-${String(e.snapshotMonth).padStart(2, "0")}`;
+  return ym(e.entryDate);
+}
+
+/** 已結帳月份的快照＋這本帳的手動分錄。 */
+function storedPostings(inputs: LedgerInputs, ctx: Ctx, ledger: LedgerKind, closed: Set<string>): Posting[] {
+  const bankByGl = inferBankByGl(ctx);
+  const out: Posting[] = [];
+  for (const e of inputs.entries) {
+    if (e.kind === "snapshot") {
+      if (e.ledger === ledger && closed.has(snapshotMonthOf(e))) out.push(storedToPosting(e, ledger, true, bankByGl));
+    } else if (e.ledger === ledger || e.ledger === "both") {
+      out.push(storedToPosting(e, ledger, false, bankByGl));
+    }
+  }
+  return out;
 }
 
 /** 快照與手動分錄沒有存 bankAccountId 時，科目只對到一個銀行帳戶就推回那個帳戶。 */

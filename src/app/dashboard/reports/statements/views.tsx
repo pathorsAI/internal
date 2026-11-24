@@ -311,10 +311,17 @@ function SimpleTable({
   empty,
 }: Readonly<{
   headers: { label: string; right?: boolean }[];
-  rows: React.ReactNode[][];
+  /** 每列一個穩定的 key；cells 跟 headers 一一對應 */
+  rows: { key: string | number; cells: React.ReactNode[] }[];
   total?: React.ReactNode[];
   empty: string;
 }>) {
+  const cellsOf = (cells: React.ReactNode[]) =>
+    headers.map((h, j) => (
+      <TableCell key={h.label} className={h.right ? "text-right" : undefined}>
+        {cells[j]}
+      </TableCell>
+    ));
   return (
     <TableCard>
       <div className="min-w-0 overflow-x-auto">
@@ -332,24 +339,14 @@ function SimpleTable({
             {rows.length === 0 ? (
               <EmptyRow colSpan={headers.length} message={empty} />
             ) : (
-              rows.map((cells, i) => (
-                <TableRow key={i} className="hover:bg-transparent">
-                  {cells.map((c, j) => (
-                    <TableCell key={j} className={headers[j]?.right ? "text-right" : undefined}>
-                      {c}
-                    </TableCell>
-                  ))}
+              rows.map((row) => (
+                <TableRow key={row.key} className="hover:bg-transparent">
+                  {cellsOf(row.cells)}
                 </TableRow>
               ))
             )}
             {total && rows.length > 0 ? (
-              <TableRow className={rowClass("total")}>
-                {total.map((c, j) => (
-                  <TableCell key={j} className={headers[j]?.right ? "text-right" : undefined}>
-                    {c}
-                  </TableCell>
-                ))}
-              </TableRow>
+              <TableRow className={rowClass("total")}>{cellsOf(total)}</TableRow>
             ) : null}
           </TableBody>
         </Table>
@@ -399,12 +396,15 @@ export async function NotesView({ data }: Readonly<{ data: NotesData }>) {
             { label: t("cash.fxBalance"), right: true },
             { label: t("cash.balance", { currency: data.functionalCurrency }), right: true },
           ]}
-          rows={data.cash.map((c) => [
-            c.name,
-            <span key="c" className="tabular-nums">{c.currency}</span>,
-            c.fxBalance === null ? "—" : <Amount key="f" value={c.fxBalance} currency={c.currency} kind="neutral" />,
-            money(c.balance),
-          ])}
+          rows={data.cash.map((c) => ({
+            key: c.bankAccountId,
+            cells: [
+              c.name,
+              <span key="c" className="tabular-nums">{c.currency}</span>,
+              c.fxBalance === null ? "—" : <Amount key="f" value={c.fxBalance} currency={c.currency} kind="neutral" />,
+              money(c.balance),
+            ],
+          }))}
           total={[t("total"), "", "", money(data.cashTotal)]}
           empty={t("cash.empty")}
         />
@@ -413,7 +413,7 @@ export async function NotesView({ data }: Readonly<{ data: NotesData }>) {
       <NoteSection n={4} title={t("receivables.title")}>
         <SimpleTable
           headers={[{ label: t("receivables.party") }, { label: t("receivables.balance"), right: true }]}
-          rows={data.receivables.map((r) => [r.name ?? unknown, money(r.balance)])}
+          rows={data.receivables.map((r) => ({ key: r.partyId ?? "none", cells: [r.name ?? unknown, money(r.balance)] }))}
           total={[t("total"), money(data.receivablesTotal)]}
           empty={t("receivables.empty")}
         />
@@ -422,7 +422,7 @@ export async function NotesView({ data }: Readonly<{ data: NotesData }>) {
       <NoteSection n={5} title={t("employees.title")}>
         <SimpleTable
           headers={[{ label: t("employees.employee") }, { label: t("employees.balance"), right: true }]}
-          rows={data.employeeAdvances.map((r) => [r.name ?? unknown, money(r.balance)])}
+          rows={data.employeeAdvances.map((r) => ({ key: r.employeeId ?? "none", cells: [r.name ?? unknown, money(r.balance)] }))}
           total={[t("total"), money(data.employeeAdvancesTotal)]}
           empty={t("employees.empty")}
         />
@@ -451,17 +451,20 @@ export async function NotesView({ data }: Readonly<{ data: NotesData }>) {
             { label: t("ppe.accumulated"), right: true },
             { label: t("ppe.net"), right: true },
           ]}
-          rows={data.fixedAssets.map((a) => [
-            <span key="n">
-              {a.name}
-              {a.disposedOn ? <span className="ml-1 text-xs text-muted-foreground">{t("ppe.disposed", { date: a.disposedOn })}</span> : null}
-            </span>,
-            <span key="d" className="tabular-nums">{a.acquiredOn}</span>,
-            <span key="l" className="tabular-nums">{t("ppe.months", { count: a.usefulLifeMonths })}</span>,
-            money(a.cost),
-            money(a.accumulated),
-            money(a.net),
-          ])}
+          rows={data.fixedAssets.map((a) => ({
+            key: a.id,
+            cells: [
+              <span key="n">
+                {a.name}
+                {a.disposedOn ? <span className="ml-1 text-xs text-muted-foreground">{t("ppe.disposed", { date: a.disposedOn })}</span> : null}
+              </span>,
+              <span key="d" className="tabular-nums">{a.acquiredOn}</span>,
+              <span key="l" className="tabular-nums">{t("ppe.months", { count: a.usefulLifeMonths })}</span>,
+              money(a.cost),
+              money(a.accumulated),
+              money(a.net),
+            ],
+          }))}
           total={[
             t("total"),
             "",

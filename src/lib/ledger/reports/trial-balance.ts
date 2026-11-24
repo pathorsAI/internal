@@ -2,7 +2,7 @@
 import { createCtx } from "../resolve";
 import { round2 } from "../round";
 import type { EquityChangesRow, LedgerInputs, LedgerKind, LedgerLine, Period, TrialBalanceRow } from "../types";
-import { balances, sumWhere } from "./common";
+import { balances, byCode, sumWhere } from "./common";
 import { periodPostings } from "./income-statement";
 
 export function trialBalance(inputs: LedgerInputs, ledger: LedgerKind, period: Period): TrialBalanceRow[] {
@@ -19,7 +19,7 @@ export function trialBalance(inputs: LedgerInputs, ledger: LedgerKind, period: P
     }
   }
   const out: TrialBalanceRow[] = [];
-  for (const a of [...inputs.accounts].sort((x, y) => (x.code < y.code ? -1 : x.code > y.code ? 1 : 0))) {
+  for (const a of [...inputs.accounts].sort(byCode)) {
     const o = opening.get(a.id) ?? 0;
     const d = round2(debit.get(a.id) ?? 0);
     const c = round2(credit.get(a.id) ?? 0);

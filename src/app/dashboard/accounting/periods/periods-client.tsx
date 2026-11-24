@@ -31,6 +31,7 @@ export function PeriodActions({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
+  const actionLabel = closed ? t("periods.reopen") : t("periods.close");
 
   function confirm() {
     start(async () => {
@@ -59,7 +60,7 @@ export function PeriodActions({
       <AlertDialogTrigger asChild>
         <Button type="button" variant={closed ? "ghost" : "outline"} size="sm">
           {closed ? <LockOpen className="size-4" /> : <Lock className="size-4" />}
-          {closed ? t("periods.reopen") : t("periods.close")}
+          {actionLabel}
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
@@ -83,7 +84,7 @@ export function PeriodActions({
               confirm();
             }}
           >
-            {pending ? t("common.saving") : closed ? t("periods.reopen") : t("periods.close")}
+            {pending ? t("common.saving") : actionLabel}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

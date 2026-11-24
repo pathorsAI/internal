@@ -100,6 +100,7 @@ function EntrySheet({
 
   const update = (key: number, patch: Partial<Line>) =>
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  const removeLine = (key: number) => setLines((prev) => prev.filter((x) => x.key !== key));
 
   function save(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -226,7 +227,7 @@ function EntrySheet({
                     aria-label={t("journal.removeLine")}
                     disabled={lines.length <= 2}
                     className="text-muted-foreground"
-                    onClick={() => setLines((prev) => prev.filter((x) => x.key !== l.key))}
+                    onClick={() => removeLine(l.key)}
                   >
                     <X className="size-4" />
                   </Button>

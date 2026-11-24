@@ -26,6 +26,8 @@ export default async function FxRatesPage() {
     listForeignCurrencies(orgId, base),
   ]);
   const currencies = [...new Set(rates.map((r) => r.currency))];
+  const sourceLabels: Record<string, string> = { manual: t("fx.sourceManual"), wise: t("fx.sourceWise") };
+  const sourceLabel = (source: string) => sourceLabels[source] ?? source;
 
   return (
     <>
@@ -69,7 +71,7 @@ export default async function FxRatesPage() {
                       {r.rate.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 6 })}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {r.source === "manual" ? t("fx.sourceManual") : r.source === "wise" ? t("fx.sourceWise") : r.source}
+                      {sourceLabel(r.source)}
                     </TableCell>
                     <TableCell className="text-right">
                       <DeleteButton

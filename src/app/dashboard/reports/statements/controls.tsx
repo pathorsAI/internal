@@ -128,34 +128,14 @@ export function StatementControls({
             </Select>
 
             {periodKey === "custom" ? (
-              <form
-                className="flex items-center gap-1.5"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  push({ period: "custom", from: asOf ? null : from, to });
-                }}
-              >
-                {asOf ? null : (
-                  <Input
-                    type="date"
-                    value={from}
-                    onChange={(e) => setFrom(e.target.value)}
-                    className="h-8 w-36 tabular-nums"
-                    aria-label={t("controls.from")}
-                  />
-                )}
-                {asOf ? null : <span className="text-muted-foreground">–</span>}
-                <Input
-                  type="date"
-                  value={to}
-                  onChange={(e) => setTo(e.target.value)}
-                  className="h-8 w-36 tabular-nums"
-                  aria-label={asOf ? t("controls.asOfLabel") : t("controls.to")}
-                />
-                <Button type="submit" variant="outline" size="sm">
-                  {t("controls.apply")}
-                </Button>
-              </form>
+              <CustomRangeForm
+                asOf={asOf}
+                from={from}
+                to={to}
+                onFromChange={setFrom}
+                onToChange={setTo}
+                onApply={() => push({ period: "custom", from: asOf ? null : from, to })}
+              />
             ) : null}
 
             {NO_COMPARE.has(report) ? null : (
@@ -189,5 +169,54 @@ export function StatementControls({
         </div>
       </div>
     </div>
+  );
+}
+
+/** 自訂期間：期間型報表填起訖，時點型報表（資產負債表等）只填截止日。 */
+function CustomRangeForm({
+  asOf,
+  from,
+  to,
+  onFromChange,
+  onToChange,
+  onApply,
+}: Readonly<{
+  asOf: boolean;
+  from: string;
+  to: string;
+  onFromChange: (v: string) => void;
+  onToChange: (v: string) => void;
+  onApply: () => void;
+}>) {
+  const t = useTranslations("statements");
+  return (
+    <form
+      className="flex items-center gap-1.5"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onApply();
+      }}
+    >
+      {asOf ? null : (
+        <Input
+          type="date"
+          value={from}
+          onChange={(e) => onFromChange(e.target.value)}
+          className="h-8 w-36 tabular-nums"
+          aria-label={t("controls.from")}
+        />
+      )}
+      {asOf ? null : <span className="text-muted-foreground">–</span>}
+      <Input
+        type="date"
+        value={to}
+        onChange={(e) => onToChange(e.target.value)}
+        className="h-8 w-36 tabular-nums"
+        aria-label={asOf ? t("controls.asOfLabel") : t("controls.to")}
+      />
+      <Button type="submit" variant="outline" size="sm">
+        {t("controls.apply")}
+      </Button>
+    </form>
   );
 }

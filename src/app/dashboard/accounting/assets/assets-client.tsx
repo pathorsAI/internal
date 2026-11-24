@@ -52,6 +52,13 @@ function formOf(a: FixedAssetRow | null, today: string): Form {
   };
 }
 
+/** 資產科目顯示：自己有綁就用自己的，否則用預設科目；都沒有回 null。 */
+function accountLabel(a: FixedAssetRow, fallback: { code: string; name: string } | null): string | null {
+  if (a.assetAccountCode) return `${a.assetAccountCode} ${a.assetAccountName}`;
+  if (fallback) return `${fallback.code} ${fallback.name}`;
+  return null;
+}
+
 type SharedProps = {
   accounts: AccountOption[];
   defaultAccount: { code: string; name: string } | null;
@@ -301,11 +308,7 @@ export function FixedAssetsTable({
                     </TableCell>
                     <TableCell className="text-xs tabular-nums">{formatDate(a.acquiredOn)}</TableCell>
                     <TableCell className="text-muted-foreground">
-                      {a.assetAccountCode
-                        ? `${a.assetAccountCode} ${a.assetAccountName}`
-                        : props.defaultAccount
-                          ? `${props.defaultAccount.code} ${props.defaultAccount.name}`
-                          : t("common.none")}
+                      {accountLabel(a, props.defaultAccount) ?? t("common.none")}
                     </TableCell>
                     <TableCell className="text-right">
                       <Amount value={a.cost} currency={currency} kind="neutral" />

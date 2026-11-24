@@ -19,24 +19,25 @@ import type { XlsxCell, XlsxSheet } from "@/lib/xlsx-write";
 const bold = (v: string | number | null): XlsxCell => ({ v, bold: true });
 
 function headerRows(t: LooseT, inputs: LedgerInputs, params: StatementParams, title: string, sub: string): XlsxCell[][] {
-  return [
-    [bold(inputs.orgName)],
-    [bold(title)],
-    [sub],
-    [`${t(`ledger.${params.ledger}`)} · ${t("print.unit", { currency: inputs.settings.functionalCurrency })}`],
-    [],
-  ];
+  const ledgerName = t(`ledger.${params.ledger}`);
+  const unit = t("print.unit", { currency: inputs.settings.functionalCurrency });
+  return [[bold(inputs.orgName)], [bold(title)], [sub], [`${ledgerName} · ${unit}`], []];
 }
+
+/** 一張報表分頁：名稱、副標、報表本體、本期／比較期欄位標題。 */
+type StatementSheetSpec = {
+  name: string;
+  sub: string;
+  statement: Statement;
+  currentLabel: string;
+  compareLabel: string | null;
+};
 
 function statementSheet(
   t: LooseT,
   inputs: LedgerInputs,
   params: StatementParams,
-  name: string,
-  sub: string,
-  statement: Statement,
-  currentLabel: string,
-  compareLabel: string | null,
+  { name, sub, statement, currentLabel, compareLabel }: StatementSheetSpec,
 ): XlsxSheet {
   const hasCompare = compareLabel !== null;
   const head: XlsxCell[] = [bold(t("table.code")), bold(t("table.name")), bold(currentLabel)];
@@ -94,36 +95,27 @@ export function buildStatementsWorkbook(
     ],
   };
 
-  const bsSheet = statementSheet(
-    t,
-    inputs,
-    params,
-    t("reports.bs"),
-    asOfSub,
-    balanceSheet(inputs, params.ledger, asOf, comparePeriod?.to ?? null),
-    t("table.asOf", { date: asOf }),
-    comparePeriod ? t("table.asOf", { date: comparePeriod.to }) : null,
-  );
-  const isSheet = statementSheet(
-    t,
-    inputs,
-    params,
-    t("reports.is"),
-    periodSub,
-    incomeStatement(inputs, params.ledger, period, comparePeriod),
-    periodText(period),
-    comparePeriod ? periodText(comparePeriod) : null,
-  );
-  const cfSheet = statementSheet(
-    t,
-    inputs,
-    params,
-    t("reports.cf"),
-    periodSub,
-    cashFlowStatement(inputs, params.ledger, period, comparePeriod),
-    periodText(period),
-    comparePeriod ? periodText(comparePeriod) : null,
-  );
+  const bsSheet = statementSheet(t, inputs, params, {
+    name: t("reports.bs"),
+    sub: asOfSub,
+    statement: balanceSheet(inputs, params.ledger, asOf, comparePeriod?.to ?? null),
+    currentLabel: t("table.asOf", { date: asOf }),
+    compareLabel: comparePeriod ? t("table.asOf", { date: comparePeriod.to }) : null,
+  });
+  const isSheet = statementSheet(t, inputs, params, {
+    name: t("reports.is"),
+    sub: periodSub,
+    statement: incomeStatement(inputs, params.ledger, period, comparePeriod),
+    currentLabel: periodText(period),
+    compareLabel: comparePeriod ? periodText(comparePeriod) : null,
+  });
+  const cfSheet = statementSheet(t, inputs, params, {
+    name: t("reports.cf"),
+    sub: periodSub,
+    statement: cashFlowStatement(inputs, params.ledger, period, comparePeriod),
+    currentLabel: periodText(period),
+    compareLabel: comparePeriod ? periodText(comparePeriod) : null,
+  });
 
   // 權益變動表
   const eq = equityChanges(inputs, params.ledger, period);

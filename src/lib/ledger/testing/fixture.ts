@@ -114,7 +114,7 @@ export function inputs(p: Partial<Omit<LedgerInputs, "settings">> & { settings?:
     partyNames: {},
     employeeNames: {},
     ...p,
-    settings: { ...defaultSettings(), ...(p.settings ?? {}) },
+    settings: { ...defaultSettings(), ...p.settings },
   };
 }
 

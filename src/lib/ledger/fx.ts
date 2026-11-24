@@ -1,5 +1,5 @@
 /** 匯率查詢：當天或之前最近一筆；本位幣永遠是 1。 */
-import { daysBetween } from "./periods";
+import { compareStrings, daysBetween } from "./periods";
 import { round2 } from "./round";
 import type { FxRate } from "./types";
 
@@ -9,20 +9,20 @@ export const FX_STALE_DAYS = 7;
 export type RateHit = { rate: number; date: string; estimated: boolean };
 
 export class FxTable {
-  private byCurrency = new Map<string, { date: string; rate: number }[]>();
+  private readonly byCurrency = new Map<string, { date: string; rate: number }[]>();
 
   constructor(
     rates: FxRate[],
-    private functional: string,
+    private readonly functional: string,
   ) {
     for (const r of rates) {
-      if (!(r.rate > 0)) continue;
+      if (Number.isNaN(r.rate) || r.rate <= 0) continue;
       const cur = r.currency.toUpperCase();
       const list = this.byCurrency.get(cur) ?? [];
       list.push({ date: r.date.slice(0, 10), rate: r.rate });
       this.byCurrency.set(cur, list);
     }
-    for (const list of this.byCurrency.values()) list.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    for (const list of this.byCurrency.values()) list.sort((a, b) => compareStrings(a.date, b.date));
   }
 
   isFunctional(currency: string | null | undefined): boolean {

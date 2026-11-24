@@ -31,18 +31,22 @@ function ymOf(year: number, month: number): string {
 
 /** 從 (year, month) 起連續 count 個月。 */
 function monthsFrom(year: number, month: number, count: number): Month[] {
-  const out: Month[] = [];
-  let y = year;
-  let m = month;
-  for (let i = 0; i < count; i++) {
-    out.push({ year: y, month: m, ym: ymOf(y, m) });
-    m += 1;
-    if (m > 12) {
-      m = 1;
-      y += 1;
-    }
-  }
-  return out;
+  const start = year * 12 + (month - 1);
+  return Array.from({ length: count }, (_, i) => {
+    const y = Math.floor((start + i) / 12);
+    const m = ((start + i) % 12) + 1;
+    return { year: y, month: m, ym: ymOf(y, m) };
+  });
+}
+
+type PeriodState = "closed" | "future" | "open";
+
+const PERIOD_TONE = { closed: "income", future: "neutral", open: "warning" } as const;
+
+function periodState(isClosed: boolean, future: boolean): PeriodState {
+  if (isClosed) return "closed";
+  if (future) return "future";
+  return "open";
 }
 
 async function safeChecks(orgId: string, asOf: string): Promise<Check[] | null> {
@@ -77,14 +81,21 @@ export default async function PeriodsPage() {
   const closed = new Set(periods.filter((p) => p.status === "closed").map((p) => ymOf(p.year, p.month)));
   const openWithTxns = Object.keys(txnCounts)
     .filter((ym) => !closed.has(ym))
-    .sort();
+    .sort((a, b) => a.localeCompare(b));
 
   // 檢查：最近一個還沒結帳、且已經到了的月份的月底
   const latestOpen = [...months].reverse().find((m) => m.ym <= currentYm && !closed.has(m.ym));
   const asOf = latestOpen ? monthEnd(latestOpen.year, latestOpen.month) : today;
-  const checks = await safeChecks(orgId, asOf < today ? asOf : today);
+  // 檢查日不晚於今天
+  let checkDate = today;
+  if (asOf < today) checkDate = asOf;
+  const checks = await safeChecks(orgId, checkDate);
 
-  const fiscalYears = [months.slice(12).reverse(), months.slice(0, 12).reverse()];
+  // 新的年度在前；每個年度內新的月份在前，標題用年度第一個月的年份
+  const fiscalYears = [
+    { year: months[12].year, list: months.slice(12).reverse() },
+    { year: months[0].year, list: months.slice(0, 12).reverse() },
+  ];
 
   return (
     <>
@@ -95,7 +106,7 @@ export default async function PeriodsPage() {
       <Card className="gap-3 py-4">
         <CardHeader className="px-4">
           <CardTitle className="text-sm font-medium">
-            {t("periods.checksTitle", { date: formatDate(asOf < today ? asOf : today) })}
+            {t("periods.checksTitle", { date: formatDate(checkDate) })}
           </CardTitle>
         </CardHeader>
         <CardContent className="px-4">
@@ -124,8 +135,7 @@ export default async function PeriodsPage() {
         </CardContent>
       </Card>
 
-      {fiscalYears.map((list) => {
-        const label = list[list.length - 1].year;
+      {fiscalYears.map(({ year: label, list }) => {
         return (
           <TableCard key={label} title={t("periods.fiscalYear", { year: label })}>
             <div className="overflow-x-auto">
@@ -147,17 +157,12 @@ export default async function PeriodsPage() {
                     const future = m.ym > currentYm;
                     const earlierOpen = openWithTxns.filter((ym) => ym < m.ym).length;
                     const periodLabel = formatYearMonth(m.year, m.month);
+                    const state = periodState(isClosed, future);
                     return (
                       <TableRow key={m.ym}>
                         <TableCell className="font-medium tabular-nums">{periodLabel}</TableCell>
                         <TableCell>
-                          {isClosed ? (
-                            <StatusTag tone="income">{t("periods.closed")}</StatusTag>
-                          ) : future ? (
-                            <StatusTag tone="neutral">{t("periods.future")}</StatusTag>
-                          ) : (
-                            <StatusTag tone="warning">{t("periods.open")}</StatusTag>
-                          )}
+                          <StatusTag tone={PERIOD_TONE[state]}>{t(`periods.${state}`)}</StatusTag>
                         </TableCell>
                         <TableCell className="text-right tabular-nums">{txnCounts[m.ym] ?? 0}</TableCell>
                         <TableCell className="text-xs text-muted-foreground tabular-nums">

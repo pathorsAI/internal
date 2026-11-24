@@ -453,6 +453,7 @@ export type ManualEntryRow = {
   createdAt: string;
   total: number;
   lines: {
+    id: number;
     glAccountId: number;
     code: string;
     name: string;
@@ -480,6 +481,7 @@ export async function listManualEntries(orgId: string, limit = 200): Promise<Man
   if (headers.length === 0) return [];
   const lines = await db
     .select({
+      id: journalLines.id,
       entryId: journalLines.entryId,
       glAccountId: journalLines.glAccountId,
       code: glAccounts.code,
@@ -495,7 +497,7 @@ export async function listManualEntries(orgId: string, limit = 200): Promise<Man
   const byEntry = new Map<number, ManualEntryRow["lines"]>();
   for (const l of lines) {
     const list = byEntry.get(l.entryId) ?? [];
-    list.push({ glAccountId: l.glAccountId, code: l.code, name: l.name, debit: n(l.debit), credit: n(l.credit), memo: l.memo });
+    list.push({ id: l.id, glAccountId: l.glAccountId, code: l.code, name: l.name, debit: n(l.debit), credit: n(l.credit), memo: l.memo });
     byEntry.set(l.entryId, list);
   }
   return headers.map((h) => {
@@ -536,18 +538,17 @@ export function straightLineDepreciation(asset: FixedAsset, asOf: string): { mon
   if (asset.disposedOn && asset.disposedOn < end) {
     const [dy, dm] = asset.disposedOn.split("-").map(Number);
     // 處分當月也提（月底那筆）
-    end = monthEnd(dy, dm) < asOf ? monthEnd(dy, dm) : asOf;
+    const disposedMonthEnd = monthEnd(dy, dm);
+    if (disposedMonthEnd < asOf) end = disposedMonthEnd;
   }
+  // 從取得當月起逐月往後數（以「年×12＋月序」的月份序號走，避免手動進位）
+  const startIndex = ay * 12 + (am - 1);
   let months = 0;
-  let y = ay;
-  let m = am;
-  while (months < asset.usefulLifeMonths && monthEnd(y, m) <= end) {
+  while (
+    months < asset.usefulLifeMonths &&
+    monthEnd(Math.floor((startIndex + months) / 12), ((startIndex + months) % 12) + 1) <= end
+  ) {
     months += 1;
-    m += 1;
-    if (m > 12) {
-      m = 1;
-      y += 1;
-    }
   }
   const accumulated =
     months >= asset.usefulLifeMonths ? Math.round(depreciable * 100) / 100 : Math.round(monthly * months * 100) / 100;

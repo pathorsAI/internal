@@ -8,7 +8,7 @@
  */
 import { createCtx, type Ctx } from "../resolve";
 import { round2 } from "../round";
-import type { LedgerInputs, LedgerKind, Period, Statement, StatementRow } from "../types";
+import type { LedgerInputs, LedgerKind, Period, Posting, PostingLine, Statement, StatementRow } from "../types";
 import { row } from "./common";
 import { periodPostings } from "./income-statement";
 
@@ -24,6 +24,41 @@ export type CashFlowData = {
   closingCash: number;
 };
 
+function bucketOf(cf: string | undefined): Bucket {
+  if (cf === "operating") return "operating";
+  if (cf === "investing") return "investing";
+  return "financing";
+}
+
+/** 現金科目行：期末一定累計；期初前的算期初，期內的外幣評價算匯率影響。 */
+function applyCashLine(d: CashFlowData, p: Posting, net: number, before: boolean): void {
+  d.closingCash += net;
+  if (before) d.openingCash += net;
+  else if (p.sourceType === "fx_revaluation") d.fxEffect += net;
+}
+
+/** 期內的非現金行，依規則分到淨利／折舊／各區。 */
+function applyNonCashLine(d: CashFlowData, ctx: Ctx, p: Posting, l: PostingLine, net: number): void {
+  if (ctx.isPL(l.glAccountId)) {
+    d.netIncome -= net;
+    if (p.sourceType === "fx_revaluation") d.unrealizedFx += net;
+    return;
+  }
+  if (p.sourceType === "fx_revaluation") return;
+  if (p.sourceType === "depreciation") {
+    d.depreciation -= net;
+    return;
+  }
+  const bucket = bucketOf(ctx.accounts.get(l.glAccountId)?.cashFlow);
+  d.changes[bucket].set(l.glAccountId, (d.changes[bucket].get(l.glAccountId) ?? 0) - net);
+}
+
+function applyLine(d: CashFlowData, ctx: Ctx, p: Posting, l: PostingLine, before: boolean): void {
+  const net = l.debit - l.credit;
+  if (ctx.accounts.get(l.glAccountId)?.cashFlow === "cash") applyCashLine(d, p, net, before);
+  else if (!before) applyNonCashLine(d, ctx, p, l, net);
+}
+
 export function cashFlowData(inputs: LedgerInputs, ledger: LedgerKind, period: Period, ctx: Ctx): CashFlowData {
   const postings = periodPostings(inputs, ledger, period, ctx);
   const d: CashFlowData = {
@@ -35,33 +70,10 @@ export function cashFlowData(inputs: LedgerInputs, ledger: LedgerKind, period: P
     openingCash: 0,
     closingCash: 0,
   };
-  const isCash = (id: number) => ctx.accounts.get(id)?.cashFlow === "cash";
   for (const p of postings) {
     if (p.date > period.to) continue;
     const before = p.date < period.from;
-    for (const l of p.lines) {
-      const net = l.debit - l.credit;
-      if (isCash(l.glAccountId)) {
-        d.closingCash += net;
-        if (before) d.openingCash += net;
-        else if (p.sourceType === "fx_revaluation") d.fxEffect += net;
-        continue;
-      }
-      if (before) continue;
-      if (ctx.isPL(l.glAccountId)) {
-        d.netIncome -= net;
-        if (p.sourceType === "fx_revaluation") d.unrealizedFx += net;
-        continue;
-      }
-      if (p.sourceType === "fx_revaluation") continue;
-      if (p.sourceType === "depreciation") {
-        d.depreciation -= net;
-        continue;
-      }
-      const cf = ctx.accounts.get(l.glAccountId)?.cashFlow;
-      const bucket: Bucket = cf === "operating" ? "operating" : cf === "investing" ? "investing" : "financing";
-      d.changes[bucket].set(l.glAccountId, (d.changes[bucket].get(l.glAccountId) ?? 0) - net);
-    }
+    for (const l of p.lines) applyLine(d, ctx, p, l, before);
   }
   // 期末現金直接加總現金科目（不從各區推），報表上「期初 + 淨變動 = 期末」才是真的檢查
   d.closingCash = round2(d.closingCash);
@@ -109,8 +121,10 @@ export function cashFlowStatement(inputs: LedgerInputs, ledger: LedgerKind, peri
   const [inv, cinv] = block("investing", []);
   const [fin, cfin] = block("financing", []);
   if (nz(main.fxEffect, c(cmp?.fxEffect))) rows.push(row("cf.fx_effect", "account", "cf.fx_effect", main.fxEffect, c(cmp?.fxEffect)));
-  rows.push(row("cf.net_change", "total", "cf.net_change", op + inv + fin + main.fxEffect, cmp ? cop + cinv + cfin + cmp.fxEffect : null));
-  rows.push(row("cf.opening_cash", "account", "cf.opening_cash", main.openingCash, c(cmp?.openingCash)));
-  rows.push(row("cf.closing_cash", "total", "cf.closing_cash", main.closingCash, c(cmp?.closingCash)));
+  rows.push(
+    row("cf.net_change", "total", "cf.net_change", op + inv + fin + main.fxEffect, cmp ? cop + cinv + cfin + cmp.fxEffect : null),
+    row("cf.opening_cash", "account", "cf.opening_cash", main.openingCash, c(cmp?.openingCash)),
+    row("cf.closing_cash", "total", "cf.closing_cash", main.closingCash, c(cmp?.closingCash)),
+  );
   return { kind: "cash_flow", ledger, period, comparePeriod: compare, rows };
 }

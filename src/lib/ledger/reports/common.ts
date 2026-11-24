@@ -22,6 +22,13 @@ export function orderedSections(ctx: Ctx, statement: SectionDef["statement"]): S
   return ctx.module.sections.filter((s) => s.statement === statement).sort((a, b) => a.order - b.order);
 }
 
+/** 依科目代碼排序（字串比較，相同為 0）。 */
+export function byCode(a: { code: string }, b: { code: string }): number {
+  if (a.code < b.code) return -1;
+  if (a.code > b.code) return 1;
+  return 0;
+}
+
 export const row = (
   key: string,
   kind: StatementRow["kind"],
@@ -47,7 +54,7 @@ export function sectionBlock(
   let compareTotal = 0;
   const accounts = ctx.inputs.accounts
     .filter((a) => (ctx.sectionOf(a.id)?.key === section.key || opts.include?.has(a.id)) && !opts.exclude?.has(a.id))
-    .sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
+    .sort(byCode);
   for (const a of accounts) {
     const amt = section.sign * (main.get(a.id) ?? 0);
     const c = cmp ? section.sign * (cmp.get(a.id) ?? 0) : null;

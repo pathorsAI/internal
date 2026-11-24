@@ -6,7 +6,7 @@ import { nativeFor, review } from "./post";
 import { addDays } from "./periods";
 import { line, type Ctx } from "./resolve";
 import { round2 } from "./round";
-import type { LedgerKind, Posting, ReviewItem } from "./types";
+import type { LedgerBankAccount, LedgerKind, LedgerTransaction, Posting, ReviewItem } from "./types";
 
 export function postOpenings(ctx: Ctx, ledger: LedgerKind): { postings: Posting[]; review: ReviewItem[] } {
   const postings: Posting[] = [];
@@ -15,25 +15,7 @@ export function postOpenings(ctx: Ctx, ledger: LedgerKind): { postings: Posting[
   if (!start) return { postings, review: reviews };
   const date = addDays(start, -1);
 
-  const native = new Map<number, number>();
-  for (const b of ctx.inputs.bankAccounts) native.set(b.id, b.openingBalance || 0);
-  for (const t of ctx.inputs.transactions) {
-    if (t.txnDate.slice(0, 10) >= start) continue;
-    const conv = ctx.fx.toFunctional(t.amount, t.currency, t.amountTwd, t.txnDate.slice(0, 10));
-    const add = (accountId: number | null, sign: 1 | -1) => {
-      const bank = accountId != null ? ctx.banks.get(accountId) : undefined;
-      if (!bank) return;
-      // 同幣別不需要匯率；跨幣別換不了就略過（期初少算，靠對帳檢查抓）
-      const n = conv ? nativeFor(ctx, t, bank, conv.amount) : bank.currency.toUpperCase() === t.currency.toUpperCase() ? t.amount : null;
-      if (n != null) native.set(bank.id, (native.get(bank.id) ?? 0) + sign * n);
-    };
-    if (t.type === "income") add(t.toAccountId, 1);
-    else if (t.type === "expense" || t.type === "reimbursement") add(t.fromAccountId, -1);
-    else if (t.type === "transfer") {
-      add(t.toAccountId, 1);
-      add(t.fromAccountId, -1);
-    }
-  }
+  const native = nativeBalances(ctx, start);
 
   for (const bank of ctx.inputs.bankAccounts) {
     if (ledger === "government" && bank.ledgerScope !== "government") continue;
@@ -42,7 +24,7 @@ export function postOpenings(ctx: Ctx, ledger: LedgerKind): { postings: Posting[
     const foreign = !ctx.fx.isFunctional(bank.currency);
     const hit = ctx.fx.rateAt(bank.currency, date);
     if (!hit) {
-      reviews.push(review("missing_fx", "error", ledger, "opening", bank.id, date, n, { currency: bank.currency, account: bank.name }));
+      reviews.push(review("missing_fx", "error", ledger, { sourceType: "opening", sourceId: bank.id, date, amount: n }, { currency: bank.currency, account: bank.name }));
       continue;
     }
     const amount = round2(n * hit.rate);
@@ -60,7 +42,40 @@ export function postOpenings(ctx: Ctx, ledger: LedgerKind): { postings: Posting[
         line(ctx.openingEquityId, -amount),
       ],
     });
-    reviews.push(review("opening_balance", "info", ledger, "opening", bank.id, date, amount, { account: bank.name, native: n, currency: bank.currency }));
+    reviews.push(review("opening_balance", "info", ledger, { sourceType: "opening", sourceId: bank.id, date, amount }, { account: bank.name, native: n, currency: bank.currency }));
   }
   return { postings, review: reviews };
+}
+
+/** 每個帳戶在起始日前的原幣餘額：opening_balance ＋ 起始日前所有交易的原幣淨額。 */
+function nativeBalances(ctx: Ctx, start: string): Map<number, number> {
+  const native = new Map<number, number>();
+  for (const b of ctx.inputs.bankAccounts) native.set(b.id, b.openingBalance || 0);
+  for (const t of ctx.inputs.transactions) {
+    if (t.txnDate.slice(0, 10) < start) accumulate(ctx, native, t);
+  }
+  return native;
+}
+
+function accumulate(ctx: Ctx, native: Map<number, number>, t: LedgerTransaction): void {
+  const conv = ctx.fx.toFunctional(t.amount, t.currency, t.amountTwd, t.txnDate.slice(0, 10));
+  const add = (accountId: number | null, sign: 1 | -1) => {
+    const bank = accountId == null ? undefined : ctx.banks.get(accountId);
+    if (!bank) return;
+    const n = nativeOn(ctx, t, bank, conv);
+    if (n != null) native.set(bank.id, (native.get(bank.id) ?? 0) + sign * n);
+  };
+  if (t.type === "income") add(t.toAccountId, 1);
+  else if (t.type === "expense" || t.type === "reimbursement") add(t.fromAccountId, -1);
+  else if (t.type === "transfer") {
+    add(t.toAccountId, 1);
+    add(t.fromAccountId, -1);
+  }
+}
+
+/** 同幣別不需要匯率；跨幣別換不了就略過（期初少算，靠對帳檢查抓）。 */
+function nativeOn(ctx: Ctx, t: LedgerTransaction, bank: LedgerBankAccount, conv: { amount: number } | null): number | null {
+  if (conv) return nativeFor(ctx, t, bank, conv.amount);
+  if (bank.currency.toUpperCase() === t.currency.toUpperCase()) return t.amount;
+  return null;
 }

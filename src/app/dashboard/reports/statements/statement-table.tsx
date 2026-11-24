@@ -53,38 +53,16 @@ export function StatementTable({
             {rows.length === 0 ? (
               <EmptyRow colSpan={colSpan} icon={FileSpreadsheet} message={t("table.empty")} />
             ) : (
-              rows.map((row) => {
-                const clickable = !!drill && row.kind === "account" && row.glAccountId !== null;
-                const label = rowLabel(lt, row);
-                const isHeader = row.kind === "header";
-                return (
-                  <TableRow
-                    key={row.key}
-                    className={cn(rowClass(row.kind), clickable && "cursor-pointer", !clickable && row.kind === "account" && "hover:bg-transparent")}
-                    onClick={
-                      clickable
-                        ? () => setTarget({ glAccountId: row.glAccountId as number, code: row.code, name: row.label })
-                        : undefined
-                    }
-                  >
-                    <TableCell className="tabular-nums text-muted-foreground">{row.code ?? ""}</TableCell>
-                    <TableCell style={{ paddingLeft: `${16 + Math.max(0, row.level) * 16}px` }}>{label}</TableCell>
-                    <TableCell className="text-right">
-                      {isHeader ? null : <Amount value={row.amount} kind="neutral" />}
-                    </TableCell>
-                    {hasCompare ? (
-                      <TableCell className="text-right text-muted-foreground">
-                        {isHeader || row.compareAmount === null ? null : <Amount value={row.compareAmount} kind="neutral" />}
-                      </TableCell>
-                    ) : null}
-                    {hasCompare ? (
-                      <TableCell className="text-right tabular-nums text-muted-foreground">
-                        {isHeader ? null : formatPercent(changeRatio(row.amount, row.compareAmount), locale)}
-                      </TableCell>
-                    ) : null}
-                  </TableRow>
-                );
-              })
+              rows.map((row) => (
+                <StatementTableRow
+                  key={row.key}
+                  row={row}
+                  label={rowLabel(lt, row)}
+                  hasCompare={hasCompare}
+                  locale={locale}
+                  onDrill={drill ? setTarget : undefined}
+                />
+              ))
             )}
           </TableBody>
         </Table>
@@ -93,6 +71,48 @@ export function StatementTable({
         <AccountLedgerSheet target={target} ledger={drill.ledger} period={drill.period} onClose={() => setTarget(null)} />
       ) : null}
     </TableCard>
+  );
+}
+
+/** 報表的一列；onDrill 有給時科目列整列可點。 */
+function StatementTableRow({
+  row,
+  label,
+  hasCompare,
+  locale,
+  onDrill,
+}: Readonly<{
+  row: StatementRow;
+  label: string;
+  hasCompare: boolean;
+  locale: string;
+  onDrill?: (target: DrillTarget) => void;
+}>) {
+  const clickable = !!onDrill && row.kind === "account" && row.glAccountId !== null;
+  const isHeader = row.kind === "header";
+  return (
+    <TableRow
+      className={cn(rowClass(row.kind), clickable && "cursor-pointer", !clickable && row.kind === "account" && "hover:bg-transparent")}
+      onClick={
+        clickable && onDrill
+          ? () => onDrill({ glAccountId: row.glAccountId as number, code: row.code, name: row.label })
+          : undefined
+      }
+    >
+      <TableCell className="tabular-nums text-muted-foreground">{row.code ?? ""}</TableCell>
+      <TableCell style={{ paddingLeft: `${16 + Math.max(0, row.level) * 16}px` }}>{label}</TableCell>
+      <TableCell className="text-right">{isHeader ? null : <Amount value={row.amount} kind="neutral" />}</TableCell>
+      {hasCompare ? (
+        <TableCell className="text-right text-muted-foreground">
+          {isHeader || row.compareAmount === null ? null : <Amount value={row.compareAmount} kind="neutral" />}
+        </TableCell>
+      ) : null}
+      {hasCompare ? (
+        <TableCell className="text-right tabular-nums text-muted-foreground">
+          {isHeader ? null : formatPercent(changeRatio(row.amount, row.compareAmount), locale)}
+        </TableCell>
+      ) : null}
+    </TableRow>
   );
 }
 

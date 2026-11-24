@@ -70,8 +70,8 @@ export default async function JournalPage() {
                     <TableCell className="max-w-64 whitespace-normal">{e.memo ?? t("common.none")}</TableCell>
                     <TableCell>
                       <ul className="flex flex-col gap-0.5 text-xs">
-                        {e.lines.map((l, i) => (
-                          <li key={i} className={l.credit > 0 ? "flex gap-2 pl-4" : "flex gap-2"}>
+                        {e.lines.map((l) => (
+                          <li key={l.id} className={l.credit > 0 ? "flex gap-2 pl-4" : "flex gap-2"}>
                             <span className="text-muted-foreground">{l.debit > 0 ? t("journal.dr") : t("journal.cr")}</span>
                             <span className="min-w-0 flex-1 truncate">
                               <span className="font-mono tabular-nums">{l.code}</span> {l.name}

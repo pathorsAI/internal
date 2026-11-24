@@ -3,6 +3,7 @@
  * build 到 to，並在 from 前一天加外幣評價邊界，未實現兌換損益 = R(to) − R(from−1)。
  */
 import { buildInternal } from "../build";
+import type { SubtotalDef } from "../module";
 import { addDays } from "../periods";
 import { createCtx, type Ctx } from "../resolve";
 import { round2 } from "../round";
@@ -25,6 +26,30 @@ export function netIncome(pl: Map<number, number>): number {
   return round2(s);
 }
 
+/** 小計的各項（"-key" 表示減）加總，回傳 [本期, 比較期]。 */
+function sumTerms(terms: string[], totals: Map<string, [number, number]>): [number, number] {
+  let a = 0;
+  let c = 0;
+  for (const term of terms) {
+    const neg = term.startsWith("-");
+    const t = totals.get(neg ? term.slice(1) : term) ?? [0, 0];
+    a += neg ? -t[0] : t[0];
+    c += neg ? -t[1] : t[1];
+  }
+  return [a, c];
+}
+
+function coversAll(terms: string[], keys: string[]): boolean {
+  return keys.every((k) => terms.some((t) => t.replace(/^-/, "") === k));
+}
+
+function subtotalRow(sub: SubtotalDef, totals: Map<string, [number, number]>, allKeys: string[], hasCompare: boolean): StatementRow {
+  const [a, c] = sumTerms(sub.sum, totals);
+  // 涵蓋全部損益區塊的小計就是本期淨利 → 當總計
+  const kind = coversAll(sub.sum, allKeys) ? "total" : "subtotal";
+  return row(`subtotal:${sub.key}`, kind, `subtotals.${sub.key}`, a, hasCompare ? c : null);
+}
+
 export function incomeStatement(inputs: LedgerInputs, ledger: LedgerKind, period: Period, compare: Period | null): Statement {
   const ctx = createCtx(inputs);
   const main = periodPL(inputs, ledger, period, ctx);
@@ -40,18 +65,9 @@ export function incomeStatement(inputs: LedgerInputs, ledger: LedgerKind, period
     rows.push(...block.rows);
     totals.set(s.key, [block.total, block.compareTotal ?? 0]);
     for (const sub of ctx.module.incomeSubtotals.filter((x) => x.after === s.key)) {
-      let a = 0;
-      let c = 0;
-      for (const term of sub.sum) {
-        const neg = term.startsWith("-");
-        const t = totals.get(neg ? term.slice(1) : term) ?? [0, 0];
-        a += neg ? -t[0] : t[0];
-        c += neg ? -t[1] : t[1];
-      }
-      // 涵蓋全部損益區塊的小計就是本期淨利 → 當總計
-      const covers = allKeys.every((k) => sub.sum.some((t) => t.replace(/^-/, "") === k));
-      if (covers) coveredAll = true;
-      rows.push(row(`subtotal:${sub.key}`, covers ? "total" : "subtotal", `subtotals.${sub.key}`, a, cmp ? c : null));
+      const r = subtotalRow(sub, totals, allKeys, cmp != null);
+      if (r.kind === "total") coveredAll = true;
+      rows.push(r);
     }
   }
   if (!coveredAll) rows.push(row("totals.net_income", "total", "totals.net_income", netIncome(main), cmp ? netIncome(cmp) : null));

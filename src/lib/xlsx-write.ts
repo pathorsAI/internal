@@ -191,20 +191,29 @@ const STYLES_XML =
   '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
   "</styleSheet>";
 
-function cellXml(cell: XlsxCell, ref: string): string {
+/** 儲存格統一成 { v, bold, plain }。 */
+function normalizeCell(cell: XlsxCell): { v: string | number | null | undefined; bold: boolean; plain: boolean } {
   const obj = cell !== null && typeof cell === "object" ? cell : { v: cell };
-  const { v } = obj;
-  const bold = "bold" in obj && obj.bold === true;
-  const plain = "plain" in obj && obj.plain === true;
+  return {
+    v: obj.v,
+    bold: "bold" in obj && obj.bold === true,
+    plain: "plain" in obj && obj.plain === true,
+  };
+}
+
+/** 數字的樣式：plain 不套千分位格式。 */
+function numberStyle(bold: boolean, plain: boolean): number {
+  if (plain) return bold ? STYLE_BOLD : STYLE_DEFAULT;
+  return bold ? STYLE_BOLD_NUMBER : STYLE_NUMBER;
+}
+
+function cellXml(cell: XlsxCell, ref: string): string {
+  const { v, bold, plain } = normalizeCell(cell);
   if (v === null || v === undefined || v === "") {
     return bold ? `<c r="${ref}" s="${STYLE_BOLD}"/>` : "";
   }
   if (typeof v === "number") {
-    if (!Number.isFinite(v)) return "";
-    let style: number;
-    if (plain) style = bold ? STYLE_BOLD : STYLE_DEFAULT;
-    else style = bold ? STYLE_BOLD_NUMBER : STYLE_NUMBER;
-    return `<c r="${ref}" s="${style}"><v>${v}</v></c>`;
+    return Number.isFinite(v) ? `<c r="${ref}" s="${numberStyle(bold, plain)}"><v>${v}</v></c>` : "";
   }
   const style = bold ? ` s="${STYLE_BOLD}"` : "";
   return `<c r="${ref}" t="inlineStr"${style}><is><t xml:space="preserve">${escapeXml(v)}</t></is></c>`;

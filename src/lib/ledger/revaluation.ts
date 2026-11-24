@@ -9,7 +9,7 @@
  * 而 asOf 的資產負債表只剩 R(asOf)。累積盈虧（會計年度開始前）帶著 R(年度開始前一天)，
  * 本期損益只認列年度內的變動 → 損益表淨利 ＝ 資產負債表「本期損益」。
  */
-import { addDays, monthEnd, monthStart, addMonths } from "./periods";
+import { addDays, compareStrings, monthEnd, monthStart, addMonths } from "./periods";
 import { review } from "./post";
 import { line, type Ctx } from "./resolve";
 import { round2 } from "./round";
@@ -30,12 +30,12 @@ export function postRevaluations(
   for (const p of base)
     for (const l of p.lines) if (l.currency && !ctx.fx.isFunctional(l.currency)) foreignLines.push({ date: p.date, l });
   if (foreignLines.length === 0) return { postings, review: reviews };
-  foreignLines.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  foreignLines.sort((a, b) => compareStrings(a.date, b.date));
 
   const dates = new Set<string>();
   for (let m = monthStart(foreignLines[0].date); monthEnd(m) < asOf; m = addMonths(m, 1)) dates.add(monthEnd(m));
   for (const b of boundaries) if (b < asOf && b >= foreignLines[0].date) dates.add(b);
-  const points = [...dates].sort();
+  const points = [...dates].sort(compareStrings);
 
   const fxGain = ctx.sys("fx_gain_loss");
   const groups = new Map<string, Group>();
@@ -58,7 +58,7 @@ export function postRevaluations(
     for (const g of groups.values()) {
       const hit = ctx.fx.rateAt(g.currency, d);
       if (!hit) {
-        if (final) reviews.push(review("missing_fx", "error", ledger, "fx_revaluation", null, d, round2(g.native), { currency: g.currency }));
+        if (final) reviews.push(review("missing_fx", "error", ledger, { sourceType: "fx_revaluation", sourceId: null, date: d, amount: round2(g.native) }, { currency: g.currency }));
         continue;
       }
       const adj = round2(round2(g.native * hit.rate) - g.functional);

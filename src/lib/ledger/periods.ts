@@ -76,3 +76,10 @@ export function periodPresets(today: string, startMonth: number): { key: PresetK
     { key: "last_year", period: span(lastFy, 12) },
   ];
 }
+
+/** 字串依 code unit 排序（ISO 日期、key 用）；不用 localeCompare，免得語系改變排序。 */
+export function compareStrings(a: string, b: string): number {
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+}

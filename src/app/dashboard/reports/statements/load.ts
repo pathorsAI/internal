@@ -35,6 +35,7 @@ export async function loadStatementsContext(
   const years: number[] = [];
   for (let y = thisYear; y >= Math.max(firstYear, thisYear - 15); y -= 1) years.push(y);
   if (!years.includes(params.year)) years.push(params.year);
+  years.sort((a, b) => b - a);
 
   return {
     inputs,
@@ -42,6 +43,6 @@ export async function loadStatementsContext(
     presets,
     params,
     hasData: inputs.transactions.length > 0 || inputs.entries.length > 0,
-    years: years.sort((a, b) => b - a),
+    years,
   };
 }

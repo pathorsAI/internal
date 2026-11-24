@@ -4,7 +4,7 @@
  * 跟四大報表同一個來源。純函式。
  */
 import { getJurisdiction } from "@/lib/ledger/jurisdictions";
-import type { BuildResult, LedgerInputs, LedgerKind, SystemKey } from "@/lib/ledger/types";
+import type { BuildResult, LedgerInputs, LedgerKind, Posting, PostingLine, SystemKey } from "@/lib/ledger/types";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -39,51 +39,101 @@ export type NotesData = {
   fixedAssetTotals: { cost: number; accumulated: number; net: number };
 };
 
-export function buildNotes(inputs: LedgerInputs, built: BuildResult, ledger: LedgerKind, asOf: string): NotesData {
-  const idOf = (key: SystemKey) => inputs.accounts.find((a) => a.systemKey === key)?.id ?? null;
-  const arId = idOf("ar");
-  const employeeId = idOf("employee_payable");
-  const shareholderId = idOf("shareholder");
-  const accumulatedId = idOf("accumulated_depreciation");
+/** 附註要追的幾個系統科目（找不到就是 null）。 */
+type NoteAccountIds = {
+  cash: Set<number>;
+  ar: number | null;
+  employee: number | null;
+  shareholder: number | null;
+  accumulated: number | null;
+};
 
-  const cashAccountIds = new Set(inputs.accounts.filter((a) => a.cashFlow === "cash").map((a) => a.id));
-  const bank = new Map<number, { balance: number; fx: number; hasFx: boolean }>();
-  const ar = new Map<number | null, number>();
-  const emp = new Map<number | null, number>();
-  let shareholder = 0;
-  let shareholderEntries = 0;
-  const accumulatedByAsset = new Map<number, number>();
-  const assetPostings = new Set<string>();
+/** 掃過分錄累積出來的各附註餘額。 */
+type NoteTotals = {
+  bank: Map<number, { balance: number; fx: number; hasFx: boolean }>;
+  ar: Map<number | null, number>;
+  emp: Map<number | null, number>;
+  shareholder: number;
+  shareholderEntries: number;
+  accumulatedByAsset: Map<number, number>;
+  assetPostings: Set<string>;
+};
 
-  for (const p of built.postings) {
+function addBankLine(bank: NoteTotals["bank"], bankAccountId: number, l: PostingLine, net: number) {
+  const cur = bank.get(bankAccountId) ?? { balance: 0, fx: 0, hasFx: false };
+  cur.balance += net;
+  if (l.fxAmount !== null) {
+    cur.fx += l.fxAmount;
+    cur.hasFx = true;
+  }
+  bank.set(bankAccountId, cur);
+}
+
+/** 把一行分錄記進對應的附註餘額；回傳這行是否動到股東往來。 */
+function addLine(totals: NoteTotals, ids: NoteAccountIds, p: Posting, l: PostingLine): boolean {
+  const net = l.debit - l.credit;
+  if (l.bankAccountId !== null && ids.cash.has(l.glAccountId)) addBankLine(totals.bank, l.bankAccountId, l, net);
+  if (l.glAccountId === ids.ar) totals.ar.set(l.partyId, (totals.ar.get(l.partyId) ?? 0) + net);
+  if (l.glAccountId === ids.employee) totals.emp.set(l.employeeId, (totals.emp.get(l.employeeId) ?? 0) - net);
+  if (l.glAccountId === ids.accumulated && p.sourceType === "depreciation" && p.sourceId !== null) {
+    totals.accumulatedByAsset.set(p.sourceId, (totals.accumulatedByAsset.get(p.sourceId) ?? 0) - net);
+  }
+  if (l.glAccountId !== ids.shareholder) return false;
+  totals.shareholder -= net;
+  return true;
+}
+
+function accumulate(postings: Posting[], ledger: LedgerKind, asOf: string, ids: NoteAccountIds): NoteTotals {
+  const totals: NoteTotals = {
+    bank: new Map(),
+    ar: new Map(),
+    emp: new Map(),
+    shareholder: 0,
+    shareholderEntries: 0,
+    accumulatedByAsset: new Map(),
+    assetPostings: new Set(),
+  };
+  for (const p of postings) {
     if (p.ledger !== ledger || p.date > asOf) continue;
     let touchesShareholder = false;
     for (const l of p.lines) {
-      const net = l.debit - l.credit;
-      if (l.bankAccountId !== null && cashAccountIds.has(l.glAccountId)) {
-        const cur = bank.get(l.bankAccountId) ?? { balance: 0, fx: 0, hasFx: false };
-        cur.balance += net;
-        if (l.fxAmount !== null) {
-          cur.fx += l.fxAmount;
-          cur.hasFx = true;
-        }
-        bank.set(l.bankAccountId, cur);
-      }
-      if (l.glAccountId === arId) ar.set(l.partyId, (ar.get(l.partyId) ?? 0) + net);
-      if (l.glAccountId === employeeId) emp.set(l.employeeId, (emp.get(l.employeeId) ?? 0) - net);
-      if (l.glAccountId === shareholderId) {
-        shareholder -= net;
-        touchesShareholder = true;
-      }
-      if (l.glAccountId === accumulatedId && p.sourceType === "depreciation" && p.sourceId !== null) {
-        accumulatedByAsset.set(p.sourceId, (accumulatedByAsset.get(p.sourceId) ?? 0) - net);
-      }
+      if (addLine(totals, ids, p, l)) touchesShareholder = true;
     }
-    if (touchesShareholder && p.sourceType !== "manual") shareholderEntries += 1;
+    if (touchesShareholder && p.sourceType !== "manual") totals.shareholderEntries += 1;
     if (p.sourceId !== null && (p.sourceType === "depreciation" || p.sourceType === "transaction")) {
-      assetPostings.add(`${p.sourceType}:${p.sourceId}`);
+      totals.assetPostings.add(`${p.sourceType}:${p.sourceId}`);
     }
   }
+  return totals;
+}
+
+/** 政府帳只列有入帳依據的資產（有折舊分錄、來源交易有入帳，或手動建立）；管理帳全列。 */
+function assetInLedger(
+  a: LedgerInputs["fixedAssets"][number],
+  ledger: LedgerKind,
+  asOf: string,
+  assetPostings: Set<string>,
+): boolean {
+  if (a.acquiredOn > asOf) return false;
+  if (ledger === "management" || a.sourceTransactionId === null) return true;
+  return assetPostings.has(`depreciation:${a.id}`) || assetPostings.has(`transaction:${a.sourceTransactionId}`);
+}
+
+export function buildNotes(inputs: LedgerInputs, built: BuildResult, ledger: LedgerKind, asOf: string): NotesData {
+  const idOf = (key: SystemKey) => inputs.accounts.find((a) => a.systemKey === key)?.id ?? null;
+  const ids: NoteAccountIds = {
+    cash: new Set(inputs.accounts.filter((a) => a.cashFlow === "cash").map((a) => a.id)),
+    ar: idOf("ar"),
+    employee: idOf("employee_payable"),
+    shareholder: idOf("shareholder"),
+    accumulated: idOf("accumulated_depreciation"),
+  };
+  const { bank, ar, emp, shareholder, shareholderEntries, accumulatedByAsset, assetPostings } = accumulate(
+    built.postings,
+    ledger,
+    asOf,
+    ids,
+  );
 
   const inLedger = (scope: LedgerKind) => ledger === "management" || scope === "government";
   const cash = inputs.bankAccounts
@@ -117,14 +167,7 @@ export function buildNotes(inputs: LedgerInputs, built: BuildResult, ledger: Led
     .sort((a, b) => b.balance - a.balance);
 
   const fixedAssets = inputs.fixedAssets
-    .filter(
-      (a) =>
-        a.acquiredOn <= asOf &&
-        (ledger === "management" ||
-          assetPostings.has(`depreciation:${a.id}`) ||
-          (a.sourceTransactionId !== null && assetPostings.has(`transaction:${a.sourceTransactionId}`)) ||
-          a.sourceTransactionId === null),
-    )
+    .filter((a) => assetInLedger(a, ledger, asOf, assetPostings))
     .map((a) => {
       const accumulated = round2(accumulatedByAsset.get(a.id) ?? 0);
       return {
