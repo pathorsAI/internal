@@ -7,12 +7,18 @@
   <img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg">
 </p>
 
+<p align="center">
+  <b>English</b> · <a href="README.zh-TW.md">繁體中文</a>
+</p>
+
 <h1 align="center">Internal</h1>
 
 <p align="center">
   <b>Self-hosted bookkeeping &amp; client-finance management for small companies.</b><br/>
   One deployment serves many organizations, with every row scoped by <code>organization_id</code>.
 </p>
+
+<!-- intro-video -->
 
 ---
 
