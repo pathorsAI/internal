@@ -33,8 +33,7 @@ import {
   billingItems,
   activityLog,
   employeeBankAccounts,
-  recurringExpenses,
-  paymentMethods,
+  vendorInvoices,
 } from "./schema";
 import {
   oauthApplication,
@@ -2572,73 +2571,34 @@ export async function getAuditMeta(
   return map;
 }
 
-// ---- 固定支出（recurring_expenses，migrations/0032）----
+// ---- 固定支出的交易（固定支出 = 有排程的廠商計費帳戶，src/lib/recurring-expenses.ts）----
+
+/** 這筆交易被哪些帳戶的雲端帳單綁住（match_status = matched / manual / created）。 */
+const invoiceAccountIdsOfTxn = sql<number[] | null>`(
+  select json_agg(distinct ${vendorInvoices.billingAccountId})
+  from ${vendorInvoices}
+  where ${vendorInvoices.matchedTransactionId} = ${transactions.id}
+    and ${vendorInvoices.organizationId} = ${transactions.organizationId}
+    and ${vendorInvoices.matchStatus} in ('matched', 'manual', 'created')
+)`;
 
 /**
- * 固定支出列表（含廠商、付款方式，以及付款方式最後從哪個帳本帳戶扣）；web 頁、MCP 與
- * Discord 通知共用。付款方式被軟刪除時 label 等欄位為 null。
+ * [start, endExclusive)（台北日曆）的支出與代墊，給固定支出回顧與「這期付了沒」用：實際付款帳戶、
+ * 對象、代墊的員工，以及判斷屬於哪個廠商計費帳戶要的欄位（vendor_billing_account_id、
+ * 綁到這筆交易的雲端帳單帳戶）。金額在這裡轉成 number（領域模組只吃 number）。
+ *
+ * relatedTo：只要跟這些帳戶有關的交易（vendor_billing_account_id 在 accountIds 內、對象在
+ * partyIds 內、或被這些帳戶的雲端帳單綁住）—— 範圍長（年繳）時不必把整個組織的支出都撈出來。
  */
-export async function listRecurringExpenses(orgId: string, opts: { activeOnly?: boolean } = {}) {
-  const db = getDb();
-  return db
-    .select({
-      id: recurringExpenses.id,
-      name: recurringExpenses.name,
-      partyId: recurringExpenses.partyId,
-      partyName: parties.name,
-      matchPattern: recurringExpenses.matchPattern,
-      paymentMethodId: recurringExpenses.paymentMethodId,
-      paymentMethodLabel: paymentMethods.label,
-      paymentMethodLast4: paymentMethods.last4,
-      expectedAccountId: paymentMethods.settlesFromAccountId,
-      expectedAccountName: bankAccounts.name,
-      schedule: recurringExpenses.schedule,
-      anchorDate: recurringExpenses.anchorDate,
-      intervalMonths: recurringExpenses.intervalMonths,
-      expectedAmount: recurringExpenses.expectedAmount,
-      currency: recurringExpenses.currency,
-      billingUrl: recurringExpenses.billingUrl,
-      note: recurringExpenses.note,
-      isActive: recurringExpenses.isActive,
-      createdAt: recurringExpenses.createdAt,
-      updatedAt: recurringExpenses.updatedAt,
-    })
-    .from(recurringExpenses)
-    .leftJoin(parties, eq(parties.id, recurringExpenses.partyId))
-    .leftJoin(
-      paymentMethods,
-      and(
-        eq(paymentMethods.id, recurringExpenses.paymentMethodId),
-        eq(paymentMethods.organizationId, orgId),
-        isNull(paymentMethods.deletedAt),
-      ),
-    )
-    .leftJoin(
-      bankAccounts,
-      and(eq(bankAccounts.id, paymentMethods.settlesFromAccountId), eq(bankAccounts.organizationId, orgId)),
-    )
-    .where(
-      and(
-        eq(recurringExpenses.organizationId, orgId),
-        isNull(recurringExpenses.deletedAt),
-        opts.activeOnly ? eq(recurringExpenses.isActive, true) : undefined,
-      ),
-    )
-    .orderBy(desc(recurringExpenses.isActive), recurringExpenses.name, recurringExpenses.id);
-}
-
-export type RecurringExpenseRow = Awaited<ReturnType<typeof listRecurringExpenses>>[number];
-
-/**
- * 某個月（台北日曆，'YYYY-MM'）的支出與代墊，給固定支出回顧比對用：實際付款帳戶、
- * 對象名稱、代墊的員工。金額在這裡轉成 number（領域模組只吃 number）。
- */
-export async function listLedgerTransactionsForPeriod(
+export async function listLedgerTransactionsInRange(
   orgId: string,
-  period: string,
+  start: string,
+  endExclusive: string,
+  relatedTo?: { accountIds: number[]; partyIds: number[] },
 ): Promise<LedgerTransaction[]> {
   const db = getDb();
-  const { start, endExclusive } = periodRange(period);
+  const accountIds = relatedTo?.accountIds.length ? relatedTo.accountIds : [0];
+  const partyIds = relatedTo?.partyIds.length ? relatedTo.partyIds : [0];
   const rows = await db
     .select({
       id: transactions.id,
@@ -2649,9 +2609,12 @@ export async function listLedgerTransactionsForPeriod(
       fromAccountId: transactions.fromAccountId,
       fromAccountName: bankAccounts.name,
       cardLast4: sql<string | null>`${transactions.externalMeta}->>'cardLastFour'`,
+      partyId: transactions.partyId,
       partyName: parties.name,
       description: transactions.description,
       settleEmployeeName: employees.name,
+      vendorBillingAccountId: transactions.vendorBillingAccountId,
+      invoiceAccountIds: invoiceAccountIdsOfTxn,
     })
     .from(transactions)
     .leftJoin(bankAccounts, eq(bankAccounts.id, transactions.fromAccountId))
@@ -2664,12 +2627,35 @@ export async function listLedgerTransactionsForPeriod(
         gte(transactions.txnDate, start),
         lt(transactions.txnDate, endExclusive),
         isNull(transactions.deletedAt),
+        relatedTo
+          ? or(
+              inArray(transactions.vendorBillingAccountId, accountIds),
+              inArray(transactions.partyId, partyIds),
+              sql`exists (
+                select 1 from ${vendorInvoices}
+                where ${vendorInvoices.matchedTransactionId} = ${transactions.id}
+                  and ${vendorInvoices.organizationId} = ${transactions.organizationId}
+                  and ${inArray(vendorInvoices.billingAccountId, accountIds)}
+              )`,
+            )
+          : undefined,
       ),
     )
     .orderBy(transactions.txnDate, transactions.id);
   return rows.map((r) => ({
     ...r,
+    currency: r.currency.trim(),
     type: r.type === "advance" ? "advance" : "expense",
     amount: Number(r.amount),
+    invoiceAccountIds: (r.invoiceAccountIds ?? []).map(Number),
   }));
+}
+
+/** 某個月（台北日曆，'YYYY-MM'）的支出與代墊（整個組織），給固定支出回顧比對用。 */
+export async function listLedgerTransactionsForPeriod(
+  orgId: string,
+  period: string,
+): Promise<LedgerTransaction[]> {
+  const { start, endExclusive } = periodRange(period);
+  return listLedgerTransactionsInRange(orgId, start, endExclusive);
 }

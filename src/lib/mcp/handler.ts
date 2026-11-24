@@ -309,7 +309,7 @@ const OPENWORLD_OVERRIDES: Record<string, Partial<ToolAnnotations>> = {
   // (GET-only for this path), Wise transaction sync (GET-only) and Azure / GCP billing
   // sync (read-only allowlists); writes only our books.
   run_integration_sync: { openWorldHint: true },
-  // Dry run by default; send=true posts the recurring-expense recap to the org's
+  // Dry run by default; send=true posts the recurring-expense (scheduled vendor billing account) recap to the org's
   // Discord channel via its webhook (src/lib/billing-notify.ts).
   preview_billing_notifications: { openWorldHint: true },
 };

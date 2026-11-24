@@ -13,6 +13,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/page-header";
 import { cn } from "@/lib/utils";
 import type { AttentionItem } from "@/lib/vendor-billing/attention";
+import type { PeriodStatus } from "@/lib/recurring-expenses";
 import type { MatchStatus } from "@/lib/vendor-billing/match";
 import type { BillingAccountRow, InvoiceRow, PaymentMethodRow } from "@/lib/vendor-billing/service";
 import { reconcileNowAction, syncNowAction } from "./actions";
@@ -140,6 +141,7 @@ function InvoiceToolbar({
 function ViewTable({
   view,
   today,
+  statuses,
   accounts,
   methods,
   invoices,
@@ -148,6 +150,7 @@ function ViewTable({
 }: Readonly<{
   view: View;
   today: string;
+  statuses: Readonly<Record<number, PeriodStatus>>;
   accounts: BillingAccountRow[];
   methods: PaymentMethodRow[];
   invoices: InvoiceRow[];
@@ -158,7 +161,7 @@ function ViewTable({
   if (view === "invoices") {
     return <InvoicesTable rows={invoices} today={today} onOpen={(id) => onOpenAccount(id, true)} />;
   }
-  return <AccountsTable rows={accounts} today={today} onOpen={(id) => onOpenAccount(id)} />;
+  return <AccountsTable rows={accounts} today={today} statuses={statuses} onOpen={(id) => onOpenAccount(id)} />;
 }
 
 export function VendorBillingClient({
@@ -166,6 +169,7 @@ export function VendorBillingClient({
   canManage,
   today,
   accounts,
+  statuses,
   methods,
   invoices,
   attention,
@@ -178,6 +182,8 @@ export function VendorBillingClient({
   /** 台北日期 YYYY-MM-DD（server 算，卡片到期判斷用，避免 server / client 結果不同） */
   today: string;
   accounts: BillingAccountRow[];
+  /** 固定支出（有排程的帳號）這期付了沒；server 算好（src/lib/recurring-expenses.ts periodStatuses）。 */
+  statuses: Readonly<Record<number, PeriodStatus>>;
   methods: PaymentMethodRow[];
   invoices: InvoiceRow[];
   attention: AttentionItem[];
@@ -309,6 +315,7 @@ export function VendorBillingClient({
       <ViewTable
         view={view}
         today={today}
+        statuses={statuses}
         accounts={accounts}
         methods={methods}
         invoices={shownInvoices}
@@ -321,6 +328,7 @@ export function VendorBillingClient({
           key={accountTarget.nonce}
           target={accountTarget}
           row={findRow(accounts, accountTarget)}
+          status={accountTarget.mode === "edit" ? statuses[accountTarget.id] : undefined}
           open={accountOpen}
           onOpenChange={setAccountOpen}
           canManage={canManage}

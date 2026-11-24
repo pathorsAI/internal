@@ -28,7 +28,8 @@ import {
   type VendorProvider,
 } from "@/lib/vendor-billing/inputs";
 import { MATCH_STATUSES, type MatchStatus } from "@/lib/vendor-billing/match";
-import type { TxnBrief } from "@/lib/vendor-billing/service";
+import type { PeriodStatus } from "@/lib/recurring-expenses";
+import type { BillingAccountRow, TxnBrief } from "@/lib/vendor-billing/service";
 
 // 廠商計費頁各元件共用的小零件：型別守衛、chip、日期字串、可點的表格列。
 
@@ -134,6 +135,42 @@ export function ExpiryChip({
     return <StatusTag tone="risk">{t("cell.expired")}</StatusTag>;
   }
   return <StatusTag tone="warning">{t("cell.daysLeft", { days: exp.daysLeft })}</StatusTag>;
+}
+
+/** 固定支出的週期文字：每月 / 每 N 個月 / 用量計費；沒排程回 null。 */
+export function scheduleText(a: Pick<BillingAccountRow, "schedule" | "intervalMonths">, t: VbT): string | null {
+  if (a.schedule === "usage") return t("schedule.usageShort");
+  if (a.schedule !== "fixed") return null;
+  return a.intervalMonths === 1 ? t("schedule.monthly") : t("schedule.everyNMonths", { months: a.intervalMonths });
+}
+
+/**
+ * 這期付了沒：已付綠色、fixed 扣款日已過還沒看到琥珀色（usage 的月份還沒過完，未見扣款是正常的，灰色）、
+ * 還沒開始扣灰色。
+ */
+export function PeriodStatusChip({
+  status,
+  schedule,
+}: Readonly<{ status: PeriodStatus | undefined; schedule: string | null }>) {
+  const t = useTranslations("vendorBilling");
+  if (!status) return null;
+  const title =
+    status.windowStart && status.windowEnd
+      ? t("schedule.window", { start: day(status.windowStart), end: day(status.windowEnd) })
+      : undefined;
+  if (status.state === "paid") {
+    return (
+      <span title={title}>
+        <StatusTag tone="income">{t(status.via === "invoice" ? "schedule.status.paidInvoice" : "schedule.status.paid")}</StatusTag>
+      </span>
+    );
+  }
+  if (status.state === "upcoming") return <StatusTag tone="neutral">{t("schedule.status.upcoming")}</StatusTag>;
+  return (
+    <span title={title}>
+      <StatusTag tone={schedule === "fixed" ? "warning" : "neutral"}>{t("schedule.status.unpaid")}</StatusTag>
+    </span>
+  );
 }
 
 export function expiryText(month: number | null, year: number | null): string {

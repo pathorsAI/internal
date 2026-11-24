@@ -4,9 +4,14 @@
 // - 寫入前 service 層一律驗證所有參照都屬於同一個組織（src/lib/vendor-billing/guards.ts）。
 // - 這些工具只讀寫本組織自己的資料表，不打 Azure / GCP；同步走既有的 run_integration_sync。
 // - 只存卡別、末四碼、到期、持卡人 —— 不收也不回傳完整卡號；不回傳任何整合憑證。
+// - 固定支出（migrations/0039）併進來了：一個廠商計費帳戶就是一筆固定支出，排程欄位
+//   （schedule / anchorDate / intervalMonths / expectedAmount / currency / billingUrl）在帳戶上，
+//   periodStatus 是「這期付了沒」。舊的 *_recurring_expense 工具只剩相容層（tools-recurring-expenses.ts）。
 import { canManageOrg, getOrgRole } from "@/lib/session";
 import { cardExpiry, type AttentionItem } from "@/lib/vendor-billing/attention";
+import type { PeriodStatus } from "@/lib/recurring-expenses";
 import {
+  ACCOUNT_SCHEDULES,
   ACCOUNT_STATUSES,
   INVOICE_ACTIONS,
   LEDGER_MODES,
@@ -23,6 +28,7 @@ import {
   listBillingAccounts,
   listPaymentMethods,
   listVendorInvoices,
+  recurringStatuses,
   resolveVendorInvoice,
   upsertBillingAccount,
   upsertPaymentMethod,
@@ -87,6 +93,45 @@ const TXN_BRIEF = {
   ],
 };
 
+export const PERIOD_STATUS = {
+  anyOf: [
+    rowSchema({
+      state: {
+        type: "string",
+        enum: ["paid", "unpaid", "upcoming"],
+        description:
+          "paid = a ledger expense/advance linked to this account (vendor_billing_account_id, or a matched cloud invoice, or — transitional — the account's own party when no other open recurring account has it) is dated inside the current period window, OR one of the account's cloud invoices dated in the window is matched to a transaction; unpaid = neither yet; upcoming = the first fixed charge date is still in the future.",
+      },
+      via: { type: ["string", "null"], enum: ["transaction", "invoice", null] },
+      windowStart: { type: ["string", "null"], description: "YYYY-MM-DD. fixed: last charge date − 7 days; usage: 1st of this month." },
+      windowEnd: { type: ["string", "null"], description: "YYYY-MM-DD, exclusive. fixed: next charge date − 7 days; usage: 1st of next month." },
+      chargeDate: { type: ["string", "null"], description: "The charge date of the current period (fixed only)." },
+      nextChargeDate: { type: ["string", "null"], description: "Next charge on or after today (fixed only), Asia/Taipei." },
+      transactionIds: { type: "array", items: { type: "number" }, description: "Ledger transactions proving it was paid (see get_transaction)." },
+    }),
+    { type: "null" },
+  ],
+  description: "This period's paid status; null when the account has no schedule or is closed.",
+};
+
+/** 排程欄位（輸入）；upsert_vendor_billing_account 與固定支出相容工具共用。 */
+export const SCHEDULE_INPUT_PROPS = {
+  schedule: {
+    type: ["string", "null"],
+    enum: [...ACCOUNT_SCHEDULES, null],
+    description:
+      "Recurring-expense schedule (固定支出). fixed = charged on a calendar date (needs anchorDate); usage = usage billing / prepaid top-ups, no fixed date (no reminder, never flagged as missing, still in the monthly recap); null = not a recurring expense (no Discord reminder or recap).",
+  },
+  anchorDate: {
+    type: ["string", "null"],
+    description: "YYYY-MM-DD, the first (or any known) charge date. Repeats every intervalMonths, day clamped to month end. Required for fixed.",
+  },
+  intervalMonths: { type: "number", description: "1–36; default 1." },
+  expectedAmount: { type: ["number", "null"], description: "Expected amount per charge; shown in reminders when last month has nothing." },
+  currency: { type: ["string", "null"], description: "3-letter code for expectedAmount (default TWD)." },
+  billingUrl: { type: ["string", "null"], description: "Vendor billing console link (http/https)." },
+};
+
 const ACCOUNT_ROW = rowSchema({
   id: { type: "number" },
   provider: { type: "string", enum: [...VENDOR_PROVIDERS] },
@@ -123,6 +168,13 @@ const ACCOUNT_ROW = rowSchema({
     ],
   },
   note: NULLABLE_STRING,
+  schedule: { type: ["string", "null"], enum: [...ACCOUNT_SCHEDULES, null], description: "Recurring-expense schedule; null = not a recurring expense." },
+  anchorDate: NULLABLE_STRING,
+  intervalMonths: { type: "number" },
+  expectedAmount: { type: ["number", "null"] },
+  currency: NULLABLE_STRING,
+  billingUrl: NULLABLE_STRING,
+  periodStatus: PERIOD_STATUS,
   attention: { type: "array", items: { type: "string" }, description: "Why this account needs attention (empty = fine)." },
 });
 
@@ -214,7 +266,12 @@ function attentionAccountId(a: AttentionItem): number | null {
   return "billingAccountId" in a ? a.billingAccountId : null;
 }
 
-function accountOut(a: BillingAccountRow, attention: AttentionItem[], today: string) {
+function accountOut(
+  a: BillingAccountRow,
+  attention: AttentionItem[],
+  today: string,
+  statuses: ReadonlyMap<number, PeriodStatus>,
+) {
   const pm = a.paymentMethod;
   return {
     id: a.id,
@@ -249,6 +306,13 @@ function accountOut(a: BillingAccountRow, attention: AttentionItem[], today: str
     openInvoiceCount: a.openInvoiceCount,
     latestInvoice: a.latestInvoice,
     note: a.note,
+    schedule: a.schedule,
+    anchorDate: a.anchorDate,
+    intervalMonths: a.intervalMonths,
+    expectedAmount: a.expectedAmount,
+    currency: a.currency,
+    billingUrl: a.billingUrl,
+    periodStatus: statuses.get(a.id) ?? null,
     attention: attention
       .filter((x) => attentionAccountId(x) === a.id || (pm && "paymentMethodId" in x && x.paymentMethodId === pm.id))
       .map(attentionText),
@@ -286,6 +350,36 @@ function paymentMethodOut(p: PaymentMethodRow, today: string) {
   };
 }
 
+const ACCOUNT_INPUT_KEYS = [
+  "id",
+  "provider",
+  "externalId",
+  "displayName",
+  "partyId",
+  "matchPartyIds",
+  "paymentMethodId",
+  "ownerUserId",
+  "ledgerMode",
+  "bookPromotionCredits",
+  "status",
+  "note",
+  ...Object.keys(SCHEDULE_INPUT_PROPS),
+] as const;
+
+/** 一個帳戶的完整輸出（含 attention 與這期狀態）；寫入之後回傳用。 */
+export async function accountView(orgId: string, id: number) {
+  const today = taipeiToday();
+  const [[row], attention, statuses] = await Promise.all([
+    listBillingAccounts(orgId, { ids: [id] }),
+    getAttention(orgId, today),
+    recurringStatuses(orgId, today),
+  ]);
+  if (!row) throw new Error(`Billing account ${id} not found in your organization.`);
+  return accountOut(row, attention, today, statuses);
+}
+
+export { ACCOUNT_ROW };
+
 /** 把 MCP args 裡「有給的」欄位挑出來（PATCH 語意：沒給 = 不動）。 */
 function present(args: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -298,7 +392,7 @@ function present(args: Record<string, unknown>, keys: readonly string[]): Record
 export const vendorBillingTools: Record<string, ToolDef> = {
   list_vendor_billing_accounts: {
     description:
-      "List this organization's vendor billing accounts — which platform account (Azure billing profile, GCP billing account, Cloudflare, AWS, …) is paid by which payment method (card, reseller invoice, bank transfer, Wise card), with its ledger party, owner, resources count, latest invoice and anything that needs attention (expiring card, no payment method, stale manual data, unmatched/overdue invoices, things gone missing at the provider). Azure/GCP accounts are synced read-only by the integrations (run_integration_sync); others are entered by hand.",
+      "List this organization's vendor billing accounts — which platform account (Azure billing profile, GCP billing account, Cloudflare, AWS, any other vendor such as Neon / LiveKit / Anthropic, …) is paid by which payment method (card, reseller invoice, bank transfer, Wise card), with its ledger party, owner, resources count, latest invoice and anything that needs attention (expiring card, no payment method, stale manual data, unmatched/overdue invoices, things gone missing at the provider). Recurring expenses (固定支出) ARE these accounts: an account with a schedule gets Discord charge reminders and the monthly recap, and periodStatus says whether this period is paid. Azure/GCP accounts are synced read-only by the integrations (run_integration_sync); others are entered by hand (provider other, source manual).",
     inputSchema: {
       type: "object",
       properties: {
@@ -306,6 +400,7 @@ export const vendorBillingTools: Record<string, ToolDef> = {
         provider: { type: "string", enum: [...VENDOR_PROVIDERS] },
         status: { type: "string", enum: [...ACCOUNT_STATUSES] },
         needsAttention: { type: "boolean", description: "Only accounts with at least one attention item." },
+        recurringOnly: { type: "boolean", description: "Only accounts with a schedule (recurring expenses / 固定支出)." },
       },
       additionalProperties: false,
     },
@@ -313,18 +408,21 @@ export const vendorBillingTools: Record<string, ToolDef> = {
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       const today = taipeiToday();
-      const [rows, attention] = await Promise.all([
+      const [rows, attention, statuses] = await Promise.all([
         listBillingAccounts(orgId, { provider: optString(args, "provider"), status: optString(args, "status") }),
         getAttention(orgId, today),
+        recurringStatuses(orgId, today),
       ]);
-      const out = rows.map((r) => accountOut(r, attention, today));
-      return listResult(optBoolean(args, "needsAttention") ? out.filter((a) => a.attention.length > 0) : out);
+      let out = rows.map((r) => accountOut(r, attention, today, statuses));
+      if (optBoolean(args, "needsAttention")) out = out.filter((a) => a.attention.length > 0);
+      if (optBoolean(args, "recurringOnly")) out = out.filter((a) => a.schedule !== null);
+      return listResult(out);
     },
   },
 
   get_vendor_billing_account: {
     description:
-      "One vendor billing account with its payment method, resources (Azure subscriptions / GCP projects), recent invoices with their reconciliation status and linked/suggested ledger transactions, and monthly cost totals per currency: usage (grossAmount), GCP promotion credits (promotionCredit) and actually paid (amount). Costs are analytics only, except that when bookPromotionCredits is on the credit-covered part of each closed GCP month is booked to the management books (book = internal).",
+      "One vendor billing account with its payment method, recurring-expense schedule and this period's paid status, resources (Azure subscriptions / GCP projects), recent invoices with their reconciliation status and linked/suggested ledger transactions, and monthly cost totals per currency: usage (grossAmount), GCP promotion credits (promotionCredit) and actually paid (amount). Costs are analytics only, except that when bookPromotionCredits is on the credit-covered part of each closed GCP month is booked to the management books (book = internal).",
     inputSchema: {
       type: "object",
       properties: { ...ORG_ARG, id: { type: "number", description: "From list_vendor_billing_accounts." } },
@@ -355,10 +453,14 @@ export const vendorBillingTools: Record<string, ToolDef> = {
       const orgId = await resolveOrg(args, ctx);
       const id = requireNumber(args, "id");
       const today = taipeiToday();
-      const [detail, attention] = await Promise.all([getBillingAccount(orgId, id), getAttention(orgId, today)]);
+      const [detail, attention, statuses] = await Promise.all([
+        getBillingAccount(orgId, id),
+        getAttention(orgId, today),
+        recurringStatuses(orgId, today),
+      ]);
       if (!detail) throw new Error(`Billing account ${id} not found in your organization.`);
       return {
-        account: accountOut(detail.account, attention, today),
+        account: accountOut(detail.account, attention, today, statuses),
         resources: detail.resources.map(resourceOut),
         invoices: detail.invoices.map(invoiceOut),
         costs: detail.costs,
@@ -368,7 +470,7 @@ export const vendorBillingTools: Record<string, ToolDef> = {
 
   upsert_vendor_billing_account: {
     description:
-      "Create (omit id) or update a vendor billing account (owner/admin only). Creating is for platforms without an integration (e.g. Cloudflare, AWS): provider + displayName required. For accounts synced from Azure/GCP only partyId, matchPartyIds, paymentMethodId, ownerUserId, ledgerMode, bookPromotionCredits (GCP) and note can be changed. Look ids up first: partyId/matchPartyIds via list_parties, paymentMethodId via list_payment_methods, ownerUserId via list_org_members. Omitted fields are left unchanged; pass null to clear. Keep ledgerMode = match_only unless the user explicitly wants missing invoices booked automatically.",
+      "Create (omit id) or update a vendor billing account (owner/admin only). This is also how recurring expenses (固定支出) are registered: one account = one recurring expense — set schedule (fixed + anchorDate + intervalMonths, or usage), expectedAmount/currency and billingUrl. Creating is for vendors without an integration (Cloudflare, AWS, Neon, LiveKit, Anthropic, …; use provider other for anything not listed): provider + displayName required. For accounts synced from Azure/GCP only partyId, matchPartyIds, paymentMethodId, ownerUserId, ledgerMode, bookPromotionCredits (GCP), note and the schedule fields can be changed. Ledger expenses are linked to the account automatically when their party has exactly one open account, so set partyId to the vendor's ledger party. Bookkeeping metadata only: nothing here pays, charges or moves money. Look ids up first: partyId/matchPartyIds via list_parties, paymentMethodId via list_payment_methods, ownerUserId via list_org_members. Omitted fields are left unchanged; pass null to clear. Keep ledgerMode = match_only unless the user explicitly wants missing invoices booked automatically.",
     inputSchema: {
       type: "object",
       properties: {
@@ -383,8 +485,9 @@ export const vendorBillingTools: Record<string, ToolDef> = {
         ownerUserId: { type: ["string", "null"], description: "Member responsible for this account." },
         ledgerMode: { type: "string", enum: [...LEDGER_MODES] },
         bookPromotionCredits: { type: "boolean", description: "GCP: book promotion-credit-covered cost into the management books (default true). false stops creating new ones; existing ones stay." },
-        status: { type: "string", enum: ["active", "closed"], description: "Manual accounts only." },
+        status: { type: "string", enum: ["active", "closed"], description: "Manual accounts only. closed = no reminders, left out of the recap." },
         note: { type: ["string", "null"] },
+        ...SCHEDULE_INPUT_PROPS,
       },
       additionalProperties: false,
     },
@@ -394,12 +497,10 @@ export const vendorBillingTools: Record<string, ToolDef> = {
       const orgId = await resolveOrg(args, ctx);
       await assertCanManage(orgId, ctx.userId);
       const patch = normalizeBillingAccountInput(
-        present(args, ["id", "provider", "externalId", "displayName", "partyId", "matchPartyIds", "paymentMethodId", "ownerUserId", "ledgerMode", "bookPromotionCredits", "status", "note"]),
+        present(args, [...ACCOUNT_INPUT_KEYS]),
       );
       const r = await upsertBillingAccount(orgId, patch);
-      const today = taipeiToday();
-      const [[row], attention] = await Promise.all([listBillingAccounts(orgId, { ids: [r.id] }), getAttention(orgId, today)]);
-      return { id: r.id, created: r.created, account: accountOut(row, attention, today) };
+      return { id: r.id, created: r.created, account: await accountView(orgId, r.id) };
     },
   },
 

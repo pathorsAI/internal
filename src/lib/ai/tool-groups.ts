@@ -189,7 +189,7 @@ export const TOOL_GROUPS: Record<ToolGroupId, GroupDef> = {
   },
   integrations: {
     summary:
-      "Integrations & recurring costs: integration status and sync, Wise balances and statements, cloud vendor billing accounts / payment methods / cloud invoices, recurring expenses and their Discord notifications.",
+      "Integrations & recurring costs: integration status and sync, Wise balances and statements, vendor billing accounts (cloud and any other vendor; an account with a schedule IS a recurring expense / 固定支出, with next charge date and this period's paid status) / payment methods / cloud invoices, and the Discord charge reminders + monthly recap. Register or edit recurring expenses with upsert_vendor_billing_account; the *_recurring_expense tools are compatibility shims over the same accounts.",
     tools: [
       "list_integrations",
       "run_integration_sync",

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  applyScheduleRules,
   forbiddenSyncedFields,
   normalizeBillingAccountInput,
   normalizePaymentMethodInput,
@@ -34,6 +35,50 @@ describe("billing account input", () => {
   test("synced accounts: platform-owned fields are flagged", () => {
     const patch = normalizeBillingAccountInput({ id: 1, displayName: "renamed", partyId: 2 });
     expect(forbiddenSyncedFields(patch, SYNCED_ACCOUNT_EDITABLE)).toEqual(["displayName"]);
+  });
+});
+
+describe("schedule (固定支出) fields", () => {
+  test("parsed and validated", () => {
+    expect(
+      normalizeBillingAccountInput({
+        id: 1,
+        schedule: "fixed",
+        anchorDate: "2026-01-31",
+        intervalMonths: "12",
+        expectedAmount: "1,234.5",
+        currency: "usd",
+        billingUrl: "https://console.cloud.google.com/billing",
+      }),
+    ).toEqual({
+      id: 1,
+      schedule: "fixed",
+      anchorDate: "2026-01-31",
+      intervalMonths: 12,
+      expectedAmount: "1234.5",
+      currency: "USD",
+      billingUrl: "https://console.cloud.google.com/billing",
+    });
+    expect(normalizeBillingAccountInput({ id: 1, schedule: "none" }).schedule).toBeNull();
+    expect(() => normalizeBillingAccountInput({ id: 1, schedule: "weekly" })).toThrow(VendorBillingInputError);
+    expect(() => normalizeBillingAccountInput({ id: 1, intervalMonths: 0 })).toThrow(/1～36/);
+    expect(() => normalizeBillingAccountInput({ id: 1, anchorDate: "2026/01/31" })).toThrow(/YYYY-MM-DD/);
+    expect(() => normalizeBillingAccountInput({ id: 1, billingUrl: "javascript:alert(1)" })).toThrow(/http/);
+  });
+
+  test("synced accounts may set a schedule", () => {
+    const patch = normalizeBillingAccountInput({ id: 1, schedule: "usage", expectedAmount: 30 });
+    expect(forbiddenSyncedFields(patch, SYNCED_ACCOUNT_EDITABLE)).toEqual([]);
+  });
+
+  test("cross-field rules", () => {
+    const none = { schedule: null, anchorDate: null, expectedAmount: null, currency: null };
+    expect(() => applyScheduleRules({ id: null, schedule: "fixed" }, null)).toThrow(/扣款日/);
+    expect(applyScheduleRules({ id: 1, expectedAmount: "10" }, none).currency).toBe("TWD");
+    const fixed = { schedule: "fixed", anchorDate: "2026-01-05", expectedAmount: "10", currency: "USD" };
+    expect(applyScheduleRules({ id: 1, schedule: "usage" }, fixed)).toEqual({ id: 1, schedule: "usage", anchorDate: null });
+    expect(applyScheduleRules({ id: 1, expectedAmount: null }, fixed)).toEqual({ id: 1, expectedAmount: null, currency: null });
+    expect(applyScheduleRules({ id: 1, note: "x" }, fixed)).toEqual({ id: 1, note: "x" });
   });
 });
 

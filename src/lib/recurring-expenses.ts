@@ -1,8 +1,13 @@
 import { CURRENCIES } from "./currency";
 
 /**
- * 固定支出（recurring_expenses）的純領域邏輯：扣款日推算、交易比對、每月回顧的模型與
- * Discord 訊息。不碰 DB、不打外部服務 —— 讀資料與送訊息在 src/lib/billing-notify.ts。
+ * 固定支出的純領域邏輯：扣款日推算、交易歸屬、「這期付了沒」、每月回顧的模型與 Discord 訊息。
+ * 不碰 DB、不打外部服務 —— 讀資料在 src/lib/vendor-billing/service.ts（listRecurringAccounts 等），
+ * 送訊息在 src/lib/billing-notify.ts。
+ *
+ * 固定支出 = 有排程（schedule 不是 NULL）的廠商計費帳戶（vendor_billing_accounts，migrations/0039）：
+ * 一個廠商計費帳戶就是一筆固定支出，id 就是帳戶 id。舊的 recurring_expenses 表與 match_pattern
+ * 字串比對已經停用 —— 交易屬於哪筆固定支出，看外鍵（見 assignTransactions）。
  *
  * 日期一律是台北日曆的 'YYYY-MM-DD' 字串，月份是 'YYYY-MM'。這裡只做字串與整數運算，
  * 不經過 Date 的時區換算，所以在 Workers（UTC）上跑出來的日期跟台北日曆一致。
@@ -15,18 +20,20 @@ import { CURRENCIES } from "./currency";
 // ---------------------------------------------------------------------------
 
 /**
- * 扣款節奏。fixed 一定有 anchorDate（DB 的 chk_recurring_expense_anchor 保證），
- * usage（用量計費 / 自動儲值）沒有固定扣款日 —— 不提醒、不檢查漏扣。
+ * 扣款節奏。fixed 一定有 anchorDate（DB 的 chk_vendor_billing_account_anchor 保證），
+ * usage（用量計費 / 自動儲值）沒有固定扣款日 —— 不提醒、不檢查漏扣，但列進回顧。
+ * 帳戶的 schedule 是 NULL（不提醒）時根本不算固定支出，toRecurringExpense 回 null。
  */
 export type ChargeSchedule =
   | { schedule: "fixed"; anchorDate: string; intervalMonths: number }
   | { schedule: "usage" };
 
 export type RecurringExpense = ChargeSchedule & {
+  /** 廠商計費帳戶 id。 */
   id: number;
   name: string;
-  /** | 分隔、不分大小寫的子字串；null = 用 name 比對。 */
-  matchPattern: string | null;
+  /** 這個帳戶的廠商 = party_id ∪ meta.matchPartyIds（matchPartiesOf）；過渡期的對象比對用。 */
+  partyIds: number[];
   /** 預期的付款方式（payment_methods）。 */
   paymentMethodId: number | null;
   /** 付款方式給人看的名稱，例如「MasterCard •1234」。 */
@@ -44,48 +51,71 @@ export type RecurringExpense = ChargeSchedule & {
 export type RecurringExpenseRecord = {
   id: number;
   name: string;
-  matchPattern: string | null;
+  partyIds: number[];
   paymentMethodId: number | null;
   paymentMethodLabel: string | null;
   paymentMethodLast4: string | null;
   expectedAccountId: number | null;
   expectedAccountName: string | null;
-  schedule: string;
+  schedule: string | null;
   anchorDate: string | null;
   intervalMonths: number;
-  expectedAmount: string | null;
+  expectedAmount: string | number | null;
   currency: string | null;
   billingUrl: string | null;
 };
 
-/** schedule = fixed 但沒有 anchorDate 的列 DB CHECK 擋得掉；萬一出現就當成 usage（不提醒、不檢查漏扣）。 */
-export function toRecurringExpense(r: RecurringExpenseRecord): RecurringExpense {
-  const schedule: ChargeSchedule =
-    r.schedule === "fixed" && r.anchorDate
-      ? { schedule: "fixed", anchorDate: r.anchorDate, intervalMonths: r.intervalMonths }
-      : { schedule: "usage" };
+/** 帳戶的排程（schedule 是 NULL = 不提醒 → null）。fixed 卻沒有 anchorDate 的列 DB CHECK 擋得掉；萬一出現就當成 usage。 */
+export function chargeScheduleOf(r: {
+  schedule: string | null;
+  anchorDate: string | null;
+  intervalMonths: number;
+}): ChargeSchedule | null {
+  if (r.schedule === "fixed" && r.anchorDate) {
+    return { schedule: "fixed", anchorDate: r.anchorDate, intervalMonths: r.intervalMonths };
+  }
+  if (r.schedule === "fixed" || r.schedule === "usage") return { schedule: "usage" };
+  return null;
+}
+
+/** 沒有排程的帳戶不是固定支出：回 null。 */
+export function toRecurringExpense(r: RecurringExpenseRecord): RecurringExpense | null {
+  const schedule = chargeScheduleOf(r);
+  if (!schedule) return null;
   return {
     ...schedule,
     id: r.id,
     name: r.name,
-    matchPattern: r.matchPattern,
+    partyIds: r.partyIds,
     paymentMethodId: r.paymentMethodId,
     paymentMethodLabel: r.paymentMethodLabel,
     paymentMethodLast4: r.paymentMethodLast4,
     expectedAccountId: r.expectedAccountId,
     expectedAccountName: r.expectedAccountName,
     expectedAmount: r.expectedAmount === null ? null : Number(r.expectedAmount),
-    currency: r.currency,
+    currency: r.currency?.trim() || null,
     billingUrl: r.billingUrl,
   };
 }
 
 export type Money = { currency: string; amount: number };
 
-/** 回顧用的帳本交易：上個月的 expense 與 advance。金額已轉成 number。 */
-export type LedgerTransaction = {
+/**
+ * 判斷「這筆交易屬於哪個廠商計費帳戶」需要的欄位（見 assignTransactions）。
+ *   vendorBillingAccountId  transactions.vendor_billing_account_id（連結層自動帶或人指定）
+ *   invoiceAccountIds       哪些帳戶的雲端帳單（vendor_invoices）已經綁到這筆交易
+ *                           （match_status = matched / manual / created）
+ */
+export type LinkedTransaction = {
   id: number;
   txnDate: string;
+  partyId: number | null;
+  vendorBillingAccountId: number | null;
+  invoiceAccountIds: readonly number[];
+};
+
+/** 回顧用的帳本交易：上個月的 expense 與 advance。金額已轉成 number。 */
+export type LedgerTransaction = LinkedTransaction & {
   type: "expense" | "advance";
   amount: number;
   currency: string;
@@ -109,6 +139,7 @@ export type Payer =
   | { kind: "unassigned" };
 
 export type RecapLine = {
+  /** 廠商計費帳戶 id（固定支出 = 有排程的廠商計費帳戶）。 */
   expenseId: number;
   name: string;
   /** 這一行涵蓋的交易，依 id 由小到大；訊息裡連到交易頁只看這幾筆。 */
@@ -140,7 +171,7 @@ export type RecapModel = {
   /** 所有組（含員工代墊）的總額。 */
   grandTotals: Money[];
   groups: RecapGroup[];
-  /** fixed、這個月有扣款日、卻一筆交易都沒對到。 */
+  /** fixed、這個月有扣款日、卻一筆交易都沒歸到它，也沒有這個月已綁定交易的雲端帳單。 */
   missing: { expenseId: number; name: string; chargeDates: string[] }[];
   /** 對到的交易不是從設定的扣款帳戶付的（含員工代墊）。 */
   accountMismatch: {
@@ -158,10 +189,12 @@ export type RecapModel = {
 
 export type RecapInput = {
   period: string;
-  /** 已啟用的固定支出。 */
+  /** 使用中、有排程的廠商計費帳戶。 */
   expenses: readonly RecurringExpense[];
   /** period 那個月的 expense / advance 交易（呼叫端依日期篩好）。 */
   transactions: readonly LedgerTransaction[];
+  /** 這些帳戶已綁定交易的雲端帳單；發票日在 period 內的算「有付」，不會被列成漏扣。 */
+  matchedInvoices?: readonly MatchedInvoice[];
   outstandingAdvances: readonly OutstandingAdvance[];
   needsReviewCount: number;
 };
@@ -272,68 +305,154 @@ export function chargeDatesInMonth(expense: ChargeSchedule, period: string): str
 }
 
 // ---------------------------------------------------------------------------
-// 交易比對
+// 交易歸屬（不再用字串比對）
 // ---------------------------------------------------------------------------
 
-function splitPattern(pattern: string): string[] {
-  return pattern
-    .split("|")
-    .map((p) => p.trim().toLowerCase())
-    .filter((p) => p !== "");
-}
-
-/** match_pattern 沒填、或只有空白和 | 時，退回用 name 比對。 */
-function patternParts(expense: Pick<RecurringExpense, "name" | "matchPattern">): string[] {
-  const parts = expense.matchPattern ? splitPattern(expense.matchPattern) : [];
-  return parts.length > 0 ? parts : splitPattern(expense.name);
-}
-
 /**
- * 交易的對象名稱或說明，含有任一段 pattern（不分大小寫的子字串，`*` 照字面比）就算對到。
- * 例：`google*cloud` 對到對象「Google*Cloud Abc123」；`openai` 對到說明「OPENAI 國外交易服務費」。
+ * 每筆交易歸給哪一筆固定支出（＝哪個廠商計費帳戶），依序：
+ *   1. transactions.vendor_billing_account_id 有值 → 就是那個帳戶。指到不在 expenses 裡的帳戶
+ *      （沒排程、已關閉…）就不歸給任何一筆 —— 它已經明確屬於別的帳戶，不再往下猜。
+ *   2. 有帳戶的雲端帳單已經綁到這筆交易（invoiceAccountIds）→ 那個帳戶（多個時取 id 最小的）。
+ *   3. 過渡期的對象比對：交易沒有 vendor_billing_account_id、它的對象（party_id）剛好只屬於
+ *      expenses 裡的一個帳戶（matchPartiesOf）→ 那個帳戶。這是外鍵比對，不是字串比對；
+ *      同一個對象有好幾個帳戶時不猜（跟連結層 src/lib/linking/resolve.ts「剛好一個才自動帶」一致）。
+ *      等舊交易都補上 vendor_billing_account_id 之後，這一步就不會再命中。
+ * 對不到的交易不出現在結果裡 —— 回顧只涵蓋有登記的廠商。
  */
-export function matchesExpense(
-  expense: Pick<RecurringExpense, "name" | "matchPattern">,
-  txn: { partyName: string | null; description: string | null },
-): boolean {
-  const haystacks = [txn.partyName, txn.description]
-    .filter((s): s is string => !!s)
-    .map((s) => s.toLowerCase());
-  return patternParts(expense).some((part) => haystacks.some((h) => h.includes(part)));
+export function assignTransactions<T extends LinkedTransaction>(
+  expenses: readonly Pick<RecurringExpense, "id" | "partyIds">[],
+  transactions: readonly T[],
+): Map<number, T[]> {
+  const known = new Set(expenses.map((e) => e.id));
+  const owners = new Map<number, number[]>();
+  for (const e of expenses) {
+    for (const p of e.partyIds) owners.set(p, [...(owners.get(p) ?? []), e.id]);
+  }
+  const out = new Map<number, T[]>();
+  for (const txn of transactions) {
+    const hit = ownerOf(txn, known, owners);
+    if (hit === undefined) continue;
+    const list = out.get(hit) ?? [];
+    list.push(txn);
+    out.set(hit, list);
+  }
+  return out;
+}
+
+function ownerOf(txn: LinkedTransaction, known: Set<number>, owners: Map<number, number[]>): number | undefined {
+  if (txn.vendorBillingAccountId !== null) {
+    return known.has(txn.vendorBillingAccountId) ? txn.vendorBillingAccountId : undefined;
+  }
+  const viaInvoice = [...txn.invoiceAccountIds].sort((a, b) => a - b).find((id) => known.has(id));
+  if (viaInvoice !== undefined) return viaInvoice;
+  const byParty = txn.partyId === null ? undefined : owners.get(txn.partyId);
+  return byParty?.length === 1 ? byParty[0] : undefined;
 }
 
 const FEE_KEYWORDS = /手續費|服務費/;
 
 /**
- * 銀行另外收的手續費列：對象是銀行（對不到 pattern），只靠說明對到，說明裡寫明是手續費。
- * 例：對象「A 銀行」、說明「OPENAI 國外交易服務費」。
+ * 銀行另外收的手續費列：歸到這筆固定支出（通常是人把它連到這個帳戶），但對象不是這個廠商，
+ * 說明裡寫明是手續費。例：對象「A 銀行」、說明「OPENAI 國外交易服務費」。
  */
 export function isBankFee(
-  expense: Pick<RecurringExpense, "name" | "matchPattern">,
-  txn: { partyName: string | null; description: string | null },
+  expense: Pick<RecurringExpense, "partyIds">,
+  txn: { partyId: number | null; description: string | null },
 ): boolean {
-  return (
-    !matchesExpense(expense, { partyName: txn.partyName, description: null }) &&
-    FEE_KEYWORDS.test(txn.description ?? "")
-  );
+  const vendorRow = txn.partyId !== null && expense.partyIds.includes(txn.partyId);
+  return !vendorRow && FEE_KEYWORDS.test(txn.description ?? "");
+}
+
+/** 已綁定交易的雲端帳單（vendor_invoices 的 match_status = matched / manual / created）。 */
+export type MatchedInvoice = { billingAccountId: number; invoiceDate: string; transactionId: number };
+
+// ---------------------------------------------------------------------------
+// 這期付了沒
+// ---------------------------------------------------------------------------
+
+/** 扣款日前後的寬限：卡片交易常在扣款日前幾天就入帳。 */
+export const PAID_GRACE_DAYS = 7;
+
+/**
+ * 「這期」的範圍（半開區間 [start, endExclusive)）：
+ *   fixed：最近一次（≤ today）扣款日往前 PAID_GRACE_DAYS 天，到下一次扣款日往前 PAID_GRACE_DAYS 天。
+ *          第一次扣款日還沒到 → null（還沒開始扣）。
+ *   usage：today 所在的月份。
+ */
+export function currentPeriodWindow(
+  expense: ChargeSchedule,
+  today: string,
+): { start: string; endExclusive: string; chargeDate: string | null; nextChargeDate: string | null } | null {
+  if (expense.schedule === "usage") {
+    const { start, endExclusive } = periodRange(today.slice(0, 7));
+    return { start, endExclusive, chargeDate: null, nextChargeDate: null };
+  }
+  const { anchorDate, intervalMonths } = expense;
+  if (anchorDate > today) return null;
+  let k = Math.max(0, Math.floor((monthIndex(parseDate(today)) - monthIndex(parseDate(anchorDate))) / intervalMonths));
+  while (k > 0 && nthChargeDate(anchorDate, intervalMonths, k) > today) k -= 1;
+  while (nthChargeDate(anchorDate, intervalMonths, k + 1) <= today) k += 1;
+  const chargeDate = nthChargeDate(anchorDate, intervalMonths, k);
+  const next = nthChargeDate(anchorDate, intervalMonths, k + 1);
+  return {
+    start: addDaysYmd(chargeDate, -PAID_GRACE_DAYS),
+    endExclusive: addDaysYmd(next, -PAID_GRACE_DAYS),
+    chargeDate,
+    nextChargeDate: next,
+  };
 }
 
 /**
- * 每筆交易歸給第一個對到的固定支出（依 id 由小到大，結果固定）。對不到任何固定支出的
- * 交易不出現在結果裡 —— 回顧只涵蓋有登記的廠商。
+ * 一筆固定支出這期的狀態。
+ *   paid      這期範圍內有歸到這個帳戶的交易（via = transaction），或這個帳戶有發票日在範圍內、
+ *             已綁定交易的雲端帳單（via = invoice）。
+ *   unpaid    範圍內兩者都沒有（fixed：扣款日已過還沒看到；usage：這個月還沒看到）。
+ *   upcoming  fixed 的第一次扣款日還沒到。
  */
-export function assignTransactions(
+export type PeriodStatus = {
+  state: "paid" | "unpaid" | "upcoming";
+  via: "transaction" | "invoice" | null;
+  windowStart: string | null;
+  /** 不含這一天。 */
+  windowEnd: string | null;
+  /** 這期的扣款日（fixed）；usage 是 null。 */
+  chargeDate: string | null;
+  /** today 當天或之後的下一次扣款日（fixed）；usage 是 null。 */
+  nextChargeDate: string | null;
+  /** 證明付了的交易（via = transaction 是歸到帳戶的交易；via = invoice 是帳單綁的交易）。 */
+  transactionIds: number[];
+};
+
+/** expenses 每一筆這期的狀態。transactions 至少要涵蓋每筆的範圍；invoices 是這些帳戶已綁定的帳單。 */
+export function periodStatuses(
   expenses: readonly RecurringExpense[],
-  transactions: readonly LedgerTransaction[],
-): Map<number, LedgerTransaction[]> {
-  const ordered = [...expenses].sort((a, b) => a.id - b.id);
-  const out = new Map<number, LedgerTransaction[]>();
-  for (const txn of transactions) {
-    const hit = ordered.find((e) => matchesExpense(e, txn));
-    if (!hit) continue;
-    const list = out.get(hit.id) ?? [];
-    list.push(txn);
-    out.set(hit.id, list);
+  today: string,
+  transactions: readonly LinkedTransaction[],
+  invoices: readonly MatchedInvoice[],
+): Map<number, PeriodStatus> {
+  const assigned = assignTransactions(expenses, transactions);
+  const out = new Map<number, PeriodStatus>();
+  for (const e of expenses) {
+    const next = nextChargeDate(e, today);
+    const w = currentPeriodWindow(e, today);
+    if (!w) {
+      out.set(e.id, { state: "upcoming", via: null, windowStart: null, windowEnd: null, chargeDate: null, nextChargeDate: next, transactionIds: [] });
+      continue;
+    }
+    const inWindow = (d: string) => d >= w.start && d < w.endExclusive;
+    const base = { windowStart: w.start, windowEnd: w.endExclusive, chargeDate: w.chargeDate, nextChargeDate: next };
+    const txnIds = (assigned.get(e.id) ?? []).filter((t) => inWindow(t.txnDate)).map((t) => t.id);
+    if (txnIds.length > 0) {
+      out.set(e.id, { ...base, state: "paid", via: "transaction", transactionIds: txnIds.sort((a, b) => a - b) });
+      continue;
+    }
+    const inv = invoices.filter((i) => i.billingAccountId === e.id && inWindow(i.invoiceDate));
+    out.set(
+      e.id,
+      inv.length > 0
+        ? { ...base, state: "paid", via: "invoice", transactionIds: [...new Set(inv.map((i) => i.transactionId))].sort((a, b) => a - b) }
+        : { ...base, state: "unpaid", via: null, transactionIds: [] },
+    );
   }
   return out;
 }
@@ -498,11 +617,20 @@ export function buildRecap(input: RecapInput): RecapModel {
   const mismatch: RecapModel["accountMismatch"] = [];
   const missing: RecapModel["missing"] = [];
 
+  const { start, endExclusive } = periodRange(input.period);
+  const invoicePaid = new Set(
+    (input.matchedInvoices ?? [])
+      .filter((i) => i.invoiceDate >= start && i.invoiceDate < endExclusive)
+      .map((i) => i.billingAccountId),
+  );
+
   for (const expense of [...input.expenses].sort((a, b) => a.id - b.id)) {
     const txns = assigned.get(expense.id) ?? [];
     if (txns.length === 0) {
       const chargeDates = chargeDatesInMonth(expense, input.period);
-      if (chargeDates.length > 0) missing.push({ expenseId: expense.id, name: expense.name, chargeDates });
+      if (chargeDates.length > 0 && !invoicePaid.has(expense.id)) {
+        missing.push({ expenseId: expense.id, name: expense.name, chargeDates });
+      }
       continue;
     }
     const wrongPayers = new Set<string>();

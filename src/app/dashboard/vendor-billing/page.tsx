@@ -5,6 +5,7 @@ import {
   listBillingAccounts,
   listPaymentMethods,
   listVendorInvoices,
+  recurringStatuses,
 } from "@/lib/vendor-billing/service";
 import { taipeiToday } from "@/lib/vendor-billing/sync-plan";
 import { VendorBillingClient, type View } from "./vendor-billing-client";
@@ -23,8 +24,9 @@ export default async function VendorBillingPage({
   const { orgId, role } = await requireOrgWithRole();
   const { view } = await searchParams;
   const today = taipeiToday();
-  const [accounts, methods, invoices, attention, parties, bankAccounts, members] = await Promise.all([
+  const [accounts, statuses, methods, invoices, attention, parties, bankAccounts, members] = await Promise.all([
     listBillingAccounts(orgId),
+    recurringStatuses(orgId, today),
     listPaymentMethods(orgId),
     listVendorInvoices(orgId, { limit: 300 }),
     getAttention(orgId, today),
@@ -43,6 +45,7 @@ export default async function VendorBillingPage({
       canManage={canManageOrg(role)}
       today={today}
       accounts={accounts}
+      statuses={Object.fromEntries(statuses)}
       methods={methods}
       invoices={invoices}
       attention={attention}

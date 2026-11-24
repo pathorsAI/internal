@@ -1,11 +1,11 @@
-import { and, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
 import { getDb } from "@/db";
+import { listLedgerTransactionsInRange } from "@/db/queries";
 import { user } from "@/db/auth-schema";
 import {
   bankAccounts,
   parties,
   paymentMethods,
-  recurringExpenses,
   transactions,
   vendorBillingAccounts,
   vendorBillingResources,
@@ -17,6 +17,7 @@ import { booksPromotionCredits, matchPartiesOf, parseMatchPartyIds, parseRejecte
 import { computeAttention, type AttentionItem } from "./attention";
 import { assertOrgRefs, billingAccountRefs, invoiceResolutionRefs, paymentMethodRefs } from "./guards";
 import {
+  applyScheduleRules,
   forbiddenSyncedFields,
   SYNCED_ACCOUNT_EDITABLE,
   SYNCED_PAYMENT_METHOD_EDITABLE,
@@ -28,6 +29,14 @@ import {
 import { addDays, GROUP_WINDOW_DAYS, type MatchStatus } from "./match";
 import { createLedgerTransactionForInvoice } from "./reconcile";
 import { taipeiToday } from "./sync-plan";
+import {
+  currentPeriodWindow,
+  periodStatuses,
+  toRecurringExpense,
+  type MatchedInvoice,
+  type PeriodStatus,
+  type RecurringExpense,
+} from "@/lib/recurring-expenses";
 
 /**
  * 廠商計費的讀寫（server only）。web server action 與 MCP 工具共用這一層：
@@ -79,6 +88,13 @@ export type BillingAccountRow = {
   lastSeenAt: string | null;
   meta: Record<string, unknown>;
   note: string | null;
+  /** 固定支出的扣款週期：fixed / usage；null = 不提醒（不算固定支出）。 */
+  schedule: "fixed" | "usage" | null;
+  anchorDate: string | null;
+  intervalMonths: number;
+  expectedAmount: number | null;
+  currency: string | null;
+  billingUrl: string | null;
   resourceCount: number;
   missingResourceCount: number;
   openInvoiceCount: number;
@@ -244,6 +260,12 @@ export async function listBillingAccounts(
       lastSeenAt: a.lastSeenAt,
       meta: a.meta ?? {},
       note: a.note,
+      schedule: a.schedule === "fixed" || a.schedule === "usage" ? a.schedule : null,
+      anchorDate: a.anchorDate,
+      intervalMonths: a.intervalMonths,
+      expectedAmount: num(a.expectedAmount),
+      currency: a.currency?.trim() || null,
+      billingUrl: a.billingUrl,
       resourceCount: resMap.get(a.id)?.total ?? 0,
       missingResourceCount: resMap.get(a.id)?.missing ?? 0,
       openInvoiceCount: invMap.get(a.id)?.open ?? 0,
@@ -580,6 +602,12 @@ async function insertBillingAccount(db: Db, orgId: string, patch: BillingAccount
       lastVerifiedAt: sql`now()`,
       meta: metaPatchOf(patch),
       note: patch.note ?? null,
+      schedule: patch.schedule ?? null,
+      anchorDate: patch.anchorDate ?? null,
+      intervalMonths: patch.intervalMonths ?? 1,
+      expectedAmount: patch.expectedAmount ?? null,
+      currency: patch.currency ?? null,
+      billingUrl: patch.billingUrl ?? null,
     })
     .onConflictDoNothing()
     .returning({ id: vendorBillingAccounts.id });
@@ -597,6 +625,12 @@ const ACCOUNT_COLUMNS = [
   "ledgerMode",
   "status",
   "note",
+  "schedule",
+  "anchorDate",
+  "intervalMonths",
+  "expectedAmount",
+  "currency",
+  "billingUrl",
 ] as const;
 
 /** 存在 meta 裡的設定（matchPartyIds、bookPromotionCredits）；只放有傳的。 */
@@ -619,15 +653,18 @@ function accountUpdateSet(patch: BillingAccountPatch): Record<string, unknown> {
 }
 
 /** 新增或修改計費帳號，回傳 id。同步來的帳號只能改 party / 比對廠商 / 付款方式 / 負責人 / 入帳模式 / 備註。 */
-export async function upsertBillingAccount(orgId: string, patch: BillingAccountPatch): Promise<{ id: number; created: boolean }> {
+export async function upsertBillingAccount(orgId: string, input: BillingAccountPatch): Promise<{ id: number; created: boolean }> {
   const db = getDb();
   await assertOrgRefs(orgId, {
-    ...billingAccountRefs(patch),
-    party: [patch.partyId, ...(patch.matchPartyIds ?? [])],
+    ...billingAccountRefs(input),
+    party: [input.partyId, ...(input.matchPartyIds ?? [])],
   });
-  if (patch.id === null) return { id: await insertBillingAccount(db, orgId, patch), created: true };
+  if (input.id === null) {
+    return { id: await insertBillingAccount(db, orgId, applyScheduleRules(input, null)), created: true };
+  }
 
-  const current = await loadAccount(db, orgId, patch.id);
+  const current = await loadAccount(db, orgId, input.id);
+  const patch = { ...applyScheduleRules(input, current), id: input.id };
   if (current.source === "synced") {
     const bad = forbiddenSyncedFields(patch, SYNCED_ACCOUNT_EDITABLE);
     if (bad.length) throw new VendorBillingInputError(`同步來的帳號不能修改：${bad.join(", ")}（由平台同步決定）`);
@@ -704,7 +741,7 @@ export async function upsertPaymentMethod(orgId: string, patch: PaymentMethodPat
   return { id, created: false };
 }
 
-/** 刪除（軟刪）手動付款方式；指向它的計費帳號改成「未設定」。 */
+/** 刪除（軟刪）手動付款方式；指向它的計費帳號（含固定支出）改成「未設定」。 */
 export async function deletePaymentMethod(orgId: string, id: number): Promise<void> {
   const db = getDb();
   const [current] = await db
@@ -722,10 +759,6 @@ export async function deletePaymentMethod(orgId: string, id: number): Promise<vo
     .update(vendorBillingAccounts)
     .set({ paymentMethodId: null, updatedAt: sql`now()` })
     .where(and(eq(vendorBillingAccounts.organizationId, orgId), eq(vendorBillingAccounts.paymentMethodId, id)));
-  await db
-    .update(recurringExpenses)
-    .set({ paymentMethodId: null, updatedAt: sql`now()` })
-    .where(and(eq(recurringExpenses.organizationId, orgId), eq(recurringExpenses.paymentMethodId, id)));
 }
 
 /**
@@ -847,4 +880,175 @@ export async function resolveVendorInvoice(
   return (await listVendorInvoices(orgId, { billingAccountId: inv.billingAccountId, limit: 500 })).find(
     (i) => i.id === invoiceId,
   );
+}
+
+// ---------------------------------------------------------------------------
+// 固定支出 = 有排程（schedule 不是 NULL）的廠商計費帳戶（migrations/0039）
+// ---------------------------------------------------------------------------
+
+export type RecurringAccountRow = RecurringExpense & {
+  provider: string;
+  source: string;
+  status: string;
+  partyId: number | null;
+  partyName: string | null;
+  note: string | null;
+  /** 0039 從 recurring_expenses 搬過來時留下的比對字串（meta.matchPattern）；只供參考，不再拿來比對。 */
+  legacyMatchPattern: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/**
+ * 有排程的廠商計費帳戶（含廠商、付款方式，以及付款方式最後從哪個帳本帳戶扣）。
+ * Discord 通知、MCP 的固定支出相容工具、廠商計費頁的「這期付了沒」共用。付款方式被軟刪除時 label 等欄位為 null。
+ */
+export async function listRecurringAccounts(
+  orgId: string,
+  filter: { statuses?: string[]; ids?: number[] } = {},
+): Promise<RecurringAccountRow[]> {
+  const rows = await getDb()
+    .select({
+      a: vendorBillingAccounts,
+      partyName: parties.name,
+      paymentMethodLabel: paymentMethods.label,
+      paymentMethodLast4: paymentMethods.last4,
+      expectedAccountId: paymentMethods.settlesFromAccountId,
+      expectedAccountName: bankAccounts.name,
+    })
+    .from(vendorBillingAccounts)
+    .leftJoin(parties, and(eq(parties.id, vendorBillingAccounts.partyId), eq(parties.organizationId, orgId)))
+    .leftJoin(
+      paymentMethods,
+      and(
+        eq(paymentMethods.id, vendorBillingAccounts.paymentMethodId),
+        eq(paymentMethods.organizationId, orgId),
+        isNull(paymentMethods.deletedAt),
+      ),
+    )
+    .leftJoin(bankAccounts, and(eq(bankAccounts.id, paymentMethods.settlesFromAccountId), eq(bankAccounts.organizationId, orgId)))
+    .where(
+      and(
+        eq(vendorBillingAccounts.organizationId, orgId),
+        isNull(vendorBillingAccounts.deletedAt),
+        isNotNull(vendorBillingAccounts.schedule),
+        filter.statuses ? inArray(vendorBillingAccounts.status, filter.statuses) : undefined,
+        filter.ids ? inArray(vendorBillingAccounts.id, nonEmptyIds(filter.ids)) : undefined,
+      ),
+    )
+    .orderBy(sql`${vendorBillingAccounts.status} = 'active' desc`, vendorBillingAccounts.displayName, vendorBillingAccounts.id);
+  const out: RecurringAccountRow[] = [];
+  for (const r of rows) {
+    const { a } = r;
+    const expense = toRecurringExpense({
+      id: a.id,
+      name: a.displayName,
+      partyIds: matchPartiesOf(a),
+      paymentMethodId: a.paymentMethodId,
+      paymentMethodLabel: r.paymentMethodLabel,
+      paymentMethodLast4: r.paymentMethodLast4,
+      expectedAccountId: r.expectedAccountId,
+      expectedAccountName: r.expectedAccountName,
+      schedule: a.schedule,
+      anchorDate: a.anchorDate,
+      intervalMonths: a.intervalMonths,
+      expectedAmount: a.expectedAmount,
+      currency: a.currency,
+      billingUrl: a.billingUrl,
+    });
+    if (!expense) continue;
+    out.push({
+      ...expense,
+      provider: a.provider,
+      source: a.source,
+      status: a.status,
+      partyId: a.partyId,
+      partyName: r.partyName ?? null,
+      note: a.note,
+      legacyMatchPattern: typeof a.meta?.matchPattern === "string" ? a.meta.matchPattern : null,
+      createdAt: a.createdAt,
+      updatedAt: a.updatedAt,
+    });
+  }
+  return out;
+}
+
+const PAID_MATCH_STATUSES = ["matched", "manual", "created"];
+
+/** 這些帳戶發票日在 [start, endExclusive) 內、已綁定（未刪除的）交易的雲端帳單。 */
+export async function listMatchedInvoices(
+  orgId: string,
+  accountIds: number[],
+  start: string,
+  endExclusive: string,
+): Promise<MatchedInvoice[]> {
+  if (accountIds.length === 0) return [];
+  const rows = await getDb()
+    .select({
+      billingAccountId: vendorInvoices.billingAccountId,
+      invoiceDate: vendorInvoices.invoiceDate,
+      transactionId: vendorInvoices.matchedTransactionId,
+    })
+    .from(vendorInvoices)
+    .innerJoin(
+      transactions,
+      and(
+        eq(transactions.id, vendorInvoices.matchedTransactionId),
+        eq(transactions.organizationId, orgId),
+        isNull(transactions.deletedAt),
+      ),
+    )
+    .where(
+      and(
+        eq(vendorInvoices.organizationId, orgId),
+        inArray(vendorInvoices.billingAccountId, accountIds),
+        inArray(vendorInvoices.matchStatus, PAID_MATCH_STATUSES),
+        gte(vendorInvoices.invoiceDate, start),
+        lt(vendorInvoices.invoiceDate, endExclusive),
+      ),
+    );
+  return rows.flatMap((r) => (r.transactionId === null ? [] : [{ ...r, transactionId: r.transactionId }]));
+}
+
+/**
+ * 每個固定支出這期付了沒（src/lib/recurring-expenses.ts 的 periodStatuses）。
+ * 預設看所有沒關閉的（使用中、平台上找不到）；accounts 可以直接給已經讀好的列。
+ */
+export async function recurringStatuses(
+  orgId: string,
+  today: string = taipeiToday(),
+  accounts?: readonly RecurringExpense[],
+): Promise<Map<number, PeriodStatus>> {
+  const expenses = accounts ?? (await listRecurringAccounts(orgId, { statuses: ["active", "missing"] }));
+  if (expenses.length === 0) return new Map();
+  const windows = expenses
+    .map((e) => currentPeriodWindow(e, today))
+    .filter((w): w is NonNullable<typeof w> => w !== null);
+  if (windows.length === 0) return periodStatuses(expenses, today, [], []);
+  const start = windows.reduce((m, w) => (w.start < m ? w.start : m), windows[0].start);
+  const end = windows.reduce((m, w) => (w.endExclusive > m ? w.endExclusive : m), windows[0].endExclusive);
+  const accountIds = expenses.map((e) => e.id);
+  const [txns, invoices] = await Promise.all([
+    listLedgerTransactionsInRange(orgId, start, end, {
+      accountIds,
+      partyIds: [...new Set(expenses.flatMap((e) => e.partyIds))],
+    }),
+    listMatchedInvoices(orgId, accountIds, start, end),
+  ]);
+  return periodStatuses(expenses, today, txns, invoices);
+}
+
+/** 不再當固定支出：手動帳戶軟刪除（同舊的刪除固定支出）；同步來的帳戶刪不掉，改成不提醒（schedule = NULL）。 */
+export async function removeRecurringSchedule(orgId: string, id: number): Promise<"deleted" | "unscheduled"> {
+  const db = getDb();
+  const current = await loadAccount(db, orgId, id);
+  if (current.source === "manual") {
+    await deleteBillingAccount(orgId, id);
+    return "deleted";
+  }
+  await db
+    .update(vendorBillingAccounts)
+    .set({ schedule: null, anchorDate: null, updatedAt: sql`now()` })
+    .where(and(eq(vendorBillingAccounts.id, id), eq(vendorBillingAccounts.organizationId, orgId)));
+  return "unscheduled";
 }

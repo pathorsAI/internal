@@ -80,7 +80,7 @@ export const vendorBillingAdminTools: Record<string, ToolDef> = {
 
   delete_payment_method: {
     description:
-      "Delete (soft-delete) a MANUALLY recorded payment method (owner/admin). Billing accounts and recurring expenses that pointed at it become 'not set'. Cards synced from Azure cannot be deleted — deactivate them with upsert_payment_method isActive=false. Requires confirm: true.",
+      "Delete (soft-delete) a MANUALLY recorded payment method (owner/admin). Billing accounts (including recurring expenses, which are billing accounts with a schedule) that pointed at it become 'not set'. Cards synced from Azure cannot be deleted — deactivate them with upsert_payment_method isActive=false. Requires confirm: true.",
     inputSchema: {
       type: "object",
       properties: { id: { type: "number", description: "From list_payment_methods." }, ...CONFIRM_ARG, ...ORG_ARG },

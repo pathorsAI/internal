@@ -9,7 +9,6 @@ import links from "./links";
 import billing from "./billing";
 import contracts from "./contracts";
 import subscriptions from "./subscriptions";
-import recurringExpenses from "./recurringExpenses";
 import projects from "./projects";
 import parties from "./parties";
 import categories from "./categories";
@@ -44,7 +43,6 @@ const catalogue = {
   billing,
   contracts,
   subscriptions,
-  recurringExpenses,
   projects,
   parties,
   categories,
