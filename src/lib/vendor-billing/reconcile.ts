@@ -1,6 +1,7 @@
 import { and, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { paymentMethods, transactions, vendorBillingAccounts, vendorInvoices } from "@/db/schema";
+import { insertTransactions } from "@/lib/linking/write";
 import { matchPartiesOf, parseRejectedTransactionIds } from "./account-meta";
 import {
   addDays,
@@ -97,37 +98,40 @@ export async function createLedgerTransactionForInvoice(
   }
   const amount = invoice.amount.toFixed(2);
   const period = invoice.periodStart && invoice.periodEnd ? `（${invoice.periodStart}～${invoice.periodEnd}）` : "";
-  const inserted = await db
-    .insert(transactions)
-    .values({
-      organizationId: orgId,
-      type: "expense",
-      txnDate: invoice.invoiceDate,
-      description: `${PROVIDER_NAME[account.provider] ?? account.provider} ${account.displayName} 帳單 ${invoice.externalRef}${period}`,
-      categoryId: null,
-      partyId,
-      amount,
-      currency: invoice.currency,
-      amountTwd: invoice.currency === "TWD" ? amount : null,
-      fromAccountId,
-      book: "internal",
-      billedToCompanyTaxId: false,
-      externalSource,
-      externalRef: invoice.externalRef,
-      externalMeta: {
-        vendorInvoiceId: invoice.id,
-        billingAccountId: invoice.billingAccountId,
-        billingAccount: account.displayName,
-        periodStart: invoice.periodStart,
-        periodEnd: invoice.periodEnd,
-        source: invoice.source,
+  const inserted = await insertTransactions(
+    { db, orgId, source: "vendor_billing" },
+    [
+      {
+        organizationId: orgId,
+        type: "expense",
+        txnDate: invoice.invoiceDate,
+        description: `${PROVIDER_NAME[account.provider] ?? account.provider} ${account.displayName} 帳單 ${invoice.externalRef}${period}`,
+        categoryId: null,
+        partyId,
+        vendorBillingAccountId: invoice.billingAccountId,
+        amount,
+        currency: invoice.currency,
+        amountTwd: invoice.currency === "TWD" ? amount : null,
+        fromAccountId,
+        book: "internal",
+        billedToCompanyTaxId: false,
+        externalSource,
+        externalRef: invoice.externalRef,
+        externalMeta: {
+          vendorInvoiceId: invoice.id,
+          billingAccountId: invoice.billingAccountId,
+          billingAccount: account.displayName,
+          periodStart: invoice.periodStart,
+          periodEnd: invoice.periodEnd,
+          source: invoice.source,
+        },
+        needsReview: true,
       },
-      needsReview: true,
-    })
-    .onConflictDoNothing()
-    .returning({ id: transactions.id });
+    ],
+    { onConflictDoNothing: true },
+  );
 
-  let txnId = inserted[0]?.id ?? null;
+  let txnId = inserted[0]?.row.id ?? null;
   let status: "created" | "linked" | "deleted" = "created";
   if (txnId === null) {
     const [existing] = await db

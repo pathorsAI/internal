@@ -1,5 +1,6 @@
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { getDb } from "@/db";
+import { insertTransaction } from "@/lib/linking/write";
 import {
   accountReconciliations,
   bankAccounts,
@@ -9,7 +10,6 @@ import {
   payrollRuns,
   payslipItems,
   payslips,
-  transactions,
 } from "@/db/schema";
 import { member } from "@/db/auth-schema";
 import {
@@ -917,9 +917,9 @@ export const hrTools: Record<string, ToolDef> = {
 
       // 薪資固定以 TWD 記帳，所以發薪帳戶也必須是 TWD 帳戶。
       await assertAccountCurrency(db, orgId, "TWD", [fromAccountId]);
-      const [txn] = await db
-        .insert(transactions)
-        .values({
+      const { row: txn } = await insertTransaction(
+        { db, orgId, source: "payroll" },
+        {
           organizationId: orgId,
           type: "expense",
           txnDate: payDate,
@@ -933,8 +933,8 @@ export const hrTools: Record<string, ToolDef> = {
           fromAccountId,
           book,
           billedToCompanyTaxId: false,
-        })
-        .returning({ id: transactions.id });
+        },
+      );
 
       const slipValues = {
         taxableTotal: String(taxable),
