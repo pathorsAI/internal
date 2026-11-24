@@ -31,8 +31,11 @@ export function TaxFields({
 }>) {
   const t = useTranslations("common.tax");
   const inherit = orgDefault != null;
-  const treatmentValue = isTaxTreatment(treatment) ? treatment : inherit ? TAX_INHERIT : "taxable";
-  const basisValue = isAmountBasis(basis) ? basis : inherit ? TAX_INHERIT : "net";
+  // 沒存值時：可沿用就選「沿用」，不能沿用（組織預設本身）就給系統預設
+  let treatmentValue: string = inherit ? TAX_INHERIT : "taxable";
+  if (isTaxTreatment(treatment)) treatmentValue = treatment;
+  let basisValue: string = inherit ? TAX_INHERIT : "net";
+  if (isAmountBasis(basis)) basisValue = basis;
 
   return (
     <>
