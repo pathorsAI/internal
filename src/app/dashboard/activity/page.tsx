@@ -48,6 +48,9 @@ export default async function ActivityPage() {
     payroll_run: t("entity.payroll_run"),
     payslip: t("entity.payslip"),
     integration: t("entity.integration"),
+    api_key: t("entity.api_key"),
+    tool: t("entity.tool"),
+    organization: t("entity.organization"),
   };
   const { orgId } = await requireOrg();
   const rows = await listActivity(orgId, { limit: 300 });
@@ -83,7 +86,7 @@ export default async function ActivityPage() {
                     {r.actorName ?? r.actorEmail ?? (r.channel === "system" ? t("systemActor") : "—")}
                   </TableCell>
                   <TableCell>
-                    {r.channel === "mcp" || r.channel === "ai" || r.channel === "system" ? (
+                    {r.channel === "mcp" || r.channel === "ai" || r.channel === "system" || r.channel === "api" ? (
                       <StatusTag tone={r.channel === "system" ? "neutral" : "primary"}>
                         {t(`source.${r.channel}`)}
                       </StatusTag>

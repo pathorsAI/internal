@@ -17,6 +17,7 @@ const activity = {
     ai: { "zh-TW": "AI 助理", en: "AI assistant" },
     web: { "zh-TW": "網頁", en: "Web" },
     system: { "zh-TW": "系統排程", en: "Scheduled" },
+    api: { "zh-TW": "API key", en: "API key" },
   },
   systemActor: { "zh-TW": "系統", en: "System" },
   action: {
@@ -41,6 +42,9 @@ const activity = {
     payroll_run: { "zh-TW": "薪資批次", en: "Payroll run" },
     payslip: { "zh-TW": "薪資單", en: "Payslip" },
     integration: { "zh-TW": "整合", en: "Integration" },
+    api_key: { "zh-TW": "API key", en: "API key" },
+    tool: { "zh-TW": "工具呼叫", en: "Tool call" },
+    organization: { "zh-TW": "組織", en: "Organization" },
   },
 } satisfies Dictionary;
 

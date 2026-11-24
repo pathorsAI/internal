@@ -1,6 +1,6 @@
 import { type ToolContext, tools } from "./tools";
 import { type ToolAnnotations, type ToolDef, resolveOrg } from "./shared";
-import { logAi, logMcp, type ActivityAction } from "@/db/activity";
+import { logAi, logApi, logMcp, type ActivityAction } from "@/db/activity";
 import { publicBaseUrl, trustedOrigins } from "@/lib/base-url";
 import { MCP_SERVER_ICONS } from "./mcp-icons";
 
@@ -73,8 +73,9 @@ export function deriveMcpAudit(name: string, out: unknown): McpAudit | null {
 
 // Minimal MCP server over JSON-RPC 2.0 (Streamable HTTP, stateless). No SDK
 // dependency — Workers-friendly. Handles initialize / tools.list / tools.call /
-// ping and ignores notifications. Auth (bearer token -> userId) is done by
-// withMcpAuth in the route; this module trusts ctx.userId.
+// ping and ignores notifications. Auth (OAuth bearer token -> userId, or an
+// organization API key -> its creator + ctx.apiKey) is done in the route; this
+// module trusts ctx.userId.
 
 // ---------------------------------------------------------------------------
 // Server identity
@@ -82,7 +83,7 @@ export function deriveMcpAudit(name: string, out: unknown): McpAudit | null {
 
 /** Bump on every published change to tools, schemas or instructions. Clients
  *  (and OpenAI's plugin "Scan Tools") key their cached snapshot off this. */
-export const SERVER_VERSION = "1.13.1";
+export const SERVER_VERSION = "1.14.0";
 
 /** Public base URL of this deployment; doubles as the OAuth issuer.
  *  Keep in sync with the `resource` passed to `mcp()` in src/lib/auth.ts. */
@@ -417,7 +418,7 @@ function clamp64(s: string): string {
 // ChatGPT only shows its account-linking UI when a tool declares this.
 const SECURITY_SCHEMES = [{ type: "oauth2", scopes: MCP_SCOPES }];
 
-function describeTool(name: string, t: ToolDef) {
+export function describeTool(name: string, t: ToolDef) {
   const annotations = toolAnnotations(name, t.annotations);
   const title = annotations.title ?? humanTitle(name);
   return {
@@ -444,12 +445,76 @@ function describeTool(name: string, t: ToolDef) {
 
 export type ToolRunResult =
   | { ok: true; out: unknown }
-  | { ok: false; error: string };
+  | { ok: false; error: string; code?: ToolRunErrorCode };
+
+/** Why a call never reached `execute` (REST maps these to HTTP status codes). */
+export type ToolRunErrorCode = "unknown_tool" | "forbidden";
+
+/**
+ * Tools an API key may not call at all: they act on the *user's* account
+ * (joining another organization), not on the key's organization.
+ */
+export const API_KEY_EXCLUDED_TOOLS: ReadonlySet<string> = new Set([
+  "list_my_invitations",
+  "accept_invitation",
+]);
+
+/** `[read]` tools (readOnlyHint) — the only ones a read-only API key may call. */
+export function isReadOnlyTool(name: string): boolean {
+  const tool = tools[name];
+  return Boolean(tool && toolAnnotations(name, tool.annotations).readOnlyHint);
+}
+
+/**
+ * Whether this caller may run the tool at all. OAuth MCP and the in-app AI see
+ * every tool; an API key loses the account-level tools, and a read-only key is
+ * limited to `[read]` tools.
+ */
+export function toolAllowedFor(name: string, ctx: ToolContext): boolean {
+  if (!tools[name]) return false;
+  if (!ctx.apiKey) return true;
+  if (API_KEY_EXCLUDED_TOOLS.has(name)) return false;
+  return ctx.apiKey.scope === "write" || isReadOnlyTool(name);
+}
+
+/** The tool names this caller may see / call, in registry order. */
+export function toolNamesFor(ctx: ToolContext): string[] {
+  return Object.keys(tools).filter((name) => toolAllowedFor(name, ctx));
+}
+
+/** API key calls: every call is logged (reads too), channel 'api', key name in the summary. */
+async function auditApiKeyCall(
+  name: string,
+  args: Record<string, unknown>,
+  ctx: ToolContext & { apiKey: NonNullable<ToolContext["apiKey"]> },
+  out: unknown,
+  error: string | null,
+): Promise<void> {
+  try {
+    const audit = error === null ? deriveMcpAudit(name, out) : null;
+    const orgId = await resolveOrg(args, ctx).catch(() => ctx.apiKey.organizationId);
+    const action: ActivityAction = audit?.action ?? (isReadOnlyTool(name) ? "read" : "update");
+    const summary = error === null ? name : `${name}（失敗：${error.slice(0, 200)}）`;
+    await logApi(
+      orgId,
+      ctx.userId,
+      ctx.apiKey.name,
+      action,
+      audit?.entityType ?? "tool",
+      audit?.entityId ?? null,
+      summary,
+    );
+  } catch {
+    // ignore audit failures
+  }
+}
 
 /**
  * Run one tool and write its best-effort audit entry. Shared by the MCP
- * endpoint (channel "mcp") and the in-app AI assistant (channel "ai",
- * src/lib/ai/run-tool.ts), so both resolve the org and log writes the same way.
+ * endpoint (channel "mcp"), the in-app AI assistant (channel "ai",
+ * src/lib/ai/engine.ts) and the REST API (src/app/api/v1), so every transport
+ * resolves the org, enforces API-key scope and logs writes the same way.
+ * A call carrying `ctx.apiKey` is always logged under channel "api".
  * `summary` overrides the activity-log summary (default: the tool name).
  */
 export async function runToolWithAudit(
@@ -460,28 +525,57 @@ export async function runToolWithAudit(
   summary?: string,
 ): Promise<ToolRunResult> {
   const tool = tools[name];
-  if (!tool) return { ok: false, error: `Unknown tool: ${name}` };
+  if (!tool) return { ok: false, error: `Unknown tool: ${name}`, code: "unknown_tool" };
+  const apiKey = ctx.apiKey;
+  // An API-key call is logged exactly once per call (reads, refusals and failures included).
+  const auditKey = (out: unknown, error: string | null) =>
+    apiKey ? auditApiKeyCall(name, args, { ...ctx, apiKey }, out, error) : Promise.resolve();
+
+  if (!toolAllowedFor(name, ctx)) {
+    const reason = refusalReason(name);
+    await auditKey(undefined, `refused: ${reason}`);
+    return { ok: false, error: reason, code: "forbidden" };
+  }
   let out: unknown;
   try {
     out = await tool.execute(args, ctx);
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    const message = err instanceof Error ? err.message : String(err);
+    await auditKey(undefined, message);
+    return { ok: false, error: message };
   }
-  // Best-effort audit log for writes (never affects the response).
-  const audit = deriveMcpAudit(name, out);
-  if (audit) {
-    try {
-      const orgId = await resolveOrg(
-        audit.organizationId ? { organizationId: audit.organizationId } : args,
-        ctx,
-      );
-      const log = channel === "ai" ? logAi : logMcp;
-      await log(orgId, ctx.userId, audit.action, audit.entityType, audit.entityId, summary ?? name);
-    } catch {
-      // ignore audit failures
-    }
-  }
+  if (apiKey) await auditKey(out, null);
+  else await auditToolWrite(name, args, ctx, channel, out, summary);
   return { ok: true, out };
+}
+
+function refusalReason(name: string): string {
+  return API_KEY_EXCLUDED_TOOLS.has(name)
+    ? `${name} acts on a user account and is not available to API keys.`
+    : `${name} is not a [read] tool; this API key is read-only. Create a read-write key to call it.`;
+}
+
+/** Best-effort audit log for writes over OAuth MCP / the in-app AI (never affects the response). */
+async function auditToolWrite(
+  name: string,
+  args: Record<string, unknown>,
+  ctx: ToolContext,
+  channel: "mcp" | "ai",
+  out: unknown,
+  summary?: string,
+): Promise<void> {
+  const audit = deriveMcpAudit(name, out);
+  if (!audit) return;
+  try {
+    const orgId = await resolveOrg(
+      audit.organizationId ? { organizationId: audit.organizationId } : args,
+      ctx,
+    );
+    const log = channel === "ai" ? logAi : logMcp;
+    await log(orgId, ctx.userId, audit.action, audit.entityType, audit.entityId, summary ?? name);
+  } catch {
+    // ignore audit failures
+  }
 }
 
 async function handleToolCall(
@@ -554,7 +648,7 @@ async function handleMessage(
 
     case "tools/list":
       return ok(id, {
-        tools: Object.entries(tools).map(([name, t]) => describeTool(name, t)),
+        tools: toolNamesFor(ctx).map((name) => describeTool(name, tools[name])),
       });
 
     case "tools/call":
@@ -572,7 +666,7 @@ async function handleMessage(
 
 export async function handleMcpRequest(
   req: Request,
-  session: { userId: string },
+  session: { userId: string; apiKey?: ToolContext["apiKey"] },
 ): Promise<Response> {
   const cors = corsHeaders(req);
 
@@ -623,7 +717,10 @@ export async function handleMcpRequest(
   // Optional per-connection org pin: /mcp?org=<id-or-slug>. Lets a
   // multi-org user run one connection per org. Validated in resolveOrgId.
   const orgHint = new URL(req.url).searchParams.get("org") ?? undefined;
-  const ctx: ToolContext = { userId: session.userId, orgHint };
+  // An API key is pinned to its own organization; ?org can't move it elsewhere.
+  const ctx: ToolContext = session.apiKey
+    ? { userId: session.userId, apiKey: session.apiKey }
+    : { userId: session.userId, orgHint };
 
   if (Array.isArray(body)) {
     const responses = (

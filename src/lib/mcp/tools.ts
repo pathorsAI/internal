@@ -37,6 +37,8 @@ import { wiseTools } from "./tools-wise";
 import { simpanyTools } from "./tools-simpany";
 import { vendorBillingTools } from "./tools-vendor-billing";
 import { recurringExpenseTools } from "./tools-recurring-expenses";
+import { settingsTools } from "./tools-settings";
+import { vendorBillingAdminTools } from "./tools-vendor-billing-admin";
 
 export type { ToolContext, ToolDef } from "./shared";
 
@@ -99,8 +101,8 @@ const ACTIVITY_ROW: JsonSchemaObject = rowSchema({
   actorEmail: { type: ["string", "null"] },
   channel: {
     type: "string",
-    enum: ["web", "mcp", "ai", "system"],
-    description: "ai = the in-app AI assistant acting for the signed-in member; system = scheduled work with no human actor (e.g. the daily integration auto-sync); actor fields are null.",
+    enum: ["web", "mcp", "ai", "system", "api"],
+    description: "ai = the in-app AI assistant acting for the signed-in member; api = a call made with an organization API key (REST /api/v1 or MCP), actor = the member who created the key, summary starts with the key name; system = scheduled work with no human actor (e.g. the daily integration auto-sync); actor fields are null.",
   },
   action: { type: "string", enum: ["create", "update", "delete", "read"] },
   entityType: { type: "string" },
@@ -150,7 +152,9 @@ const billingTools: Record<string, ToolDef> = {
       additionalProperties: false,
     },
     execute: async (_args, ctx) => {
-      const orgs = await listMyOrgs(ctx.userId);
+      const all = await listMyOrgs(ctx.userId);
+      // An API key only ever sees the one organization it was created in.
+      const orgs = ctx.apiKey ? all.filter((o) => o.id === ctx.apiKey?.organizationId) : all;
       return {
         organizations: orgs.map((o) => ({
           name: o.name,
@@ -731,4 +735,6 @@ export const tools: Record<string, ToolDef> = {
   ...simpanyTools,
   ...vendorBillingTools,
   ...recurringExpenseTools,
+  ...settingsTools,
+  ...vendorBillingAdminTools,
 };

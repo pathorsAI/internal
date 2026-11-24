@@ -76,6 +76,7 @@ export type NavItemKey =
   | "members"
   | "activity"
   | "mcp"
+  | "api"
   | "integrations"
   | "settings";
 

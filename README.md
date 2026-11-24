@@ -108,7 +108,8 @@ same ideas — it is [`docs/index.html`](docs/index.html), published with GitHub
 - **Reports** — receivables ageing, VAT periods, contract coverage, cost and project P&L.
 - **Documents** — file uploads to object storage (e.g. receipts attached to transactions).
 - **MCP** — the ledger is also exposed as an MCP server, so an AI agent can query and record
-  against it. See [`docs/mcp.md`](docs/mcp.md).
+  against it. See [`docs/mcp.md`](docs/mcp.md). The same tools are a REST API (`/api/v1`,
+  organization API keys, OpenAPI). See [`docs/api.md`](docs/api.md).
 - **Bilingual UI** — English and Traditional Chinese, switched per user without
   reloading or changing URLs. See [Internationalization](#internationalization).
 - **Auth** — Google OAuth, enterprise SSO (any OIDC provider, routed by email domain) and

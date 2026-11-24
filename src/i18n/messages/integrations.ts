@@ -12,6 +12,10 @@ const integrations = {
     "zh-TW": "把這個組織接上外部服務。每個整合預設關閉：先連接（輸入憑證並實測），再手動開啟。",
     en: "Connect this organization to external services. Every integration starts off: connect it first (credentials are tested), then switch it on.",
   },
+  connectLinkOtherOrg: {
+    "zh-TW": "這個連接網址是給組織「{org}」的。請先從左上角切換到那個組織，再重新打開網址。",
+    en: "This connect link is for the organization \"{org}\". Switch to it from the top-left menu, then open the link again.",
+  },
   readOnlyNote: {
     "zh-TW": "只有組織的擁有者或管理員可以連接、開關或中斷整合。",
     en: "Only organization owners or admins can connect, toggle or disconnect integrations.",
@@ -198,6 +202,10 @@ const integrations = {
     cannotEnable: {
       "zh-TW": "{name} 需要先重新連接才能開啟",
       en: "{name} must be reconnected before it can be switched on",
+    },
+    secretRequired: {
+      "zh-TW": "{name} 的這種連接方式需要輸入憑證（密碼、token、金鑰），憑證不經過 MCP／API，請 owner 或 admin 到 設定 › 整合 的連接視窗輸入",
+      en: "Connecting {name} this way needs a secret (password, token or key). Secrets never go through MCP or the API — an owner or admin must enter them in the connect sheet under Settings › Integrations.",
     },
     encryptionKeyMissing: {
       "zh-TW": "伺服器尚未設定 FIELD_ENCRYPTION_KEYS，無法安全儲存憑證，請聯絡系統管理員",

@@ -4,31 +4,27 @@ import { revalidatePath } from "next/cache";
 import { getTranslations } from "next-intl/server";
 import { logWeb } from "@/db/activity";
 import { canManageOrg, requireOrgWithRole } from "@/lib/session";
-import { azureBillingAccountId, discoverAzureProfiles, withAzureClient } from "@/lib/integrations/azure";
-import { withGcpClient } from "@/lib/integrations/gcp";
-import { getIntegration, updateConfig } from "@/lib/integrations/store";
 import {
-  isValidBigQueryExport,
-  parseAzureScope,
-  parseGcpScope,
-  sanitizeAllowlist,
-} from "@/lib/vendor-billing/scope";
+  refreshCloudDiscoveryForOrg,
+  saveCloudBillingScopeForOrg,
+} from "@/lib/integrations/settings-service";
 
 /**
  * 設定 › 整合 › Azure / GCP 的「計費範圍」（限 owner / admin）。
  * 同一個外部計費範圍裡可能混著別的組織或個人的東西，所以每個組織要自己勾選哪些是它的；
  * 只改 org_integrations.config 的非機密設定。「重新探索」會對平台發唯讀請求。
+ * 邏輯在 src/lib/integrations/settings-service.ts（MCP／REST 工具共用）。
  */
 
 export type CloudScopeActionState = { ok: boolean; error?: string };
 
 const PAGE = "/dashboard/settings/integrations";
 
-async function requireManager(): Promise<{ orgId: string } | { error: string }> {
+async function requireManager(): Promise<{ orgId: string; userId: string } | { error: string }> {
   const t = await getTranslations("integrations");
-  const { orgId, role } = await requireOrgWithRole();
+  const { orgId, userId, role } = await requireOrgWithRole();
   if (!canManageOrg(role)) return { error: t("errors.notAllowed") };
-  return { orgId };
+  return { orgId, userId };
 }
 
 export async function saveCloudBillingScopeAction(
@@ -40,27 +36,15 @@ export async function saveCloudBillingScopeAction(
   const me = await requireManager();
   if ("error" in me) return { ok: false, error: me.error };
   try {
-    if (provider !== "azure" && provider !== "gcp") return { ok: false, error: t("toast.failed") };
-    const row = await getIntegration(me.orgId, provider);
-    if (!row) return { ok: false, error: t("errors.notConnected", { name: t(`providers.${provider}.name`) }) };
-    if (provider === "azure") {
-      const scope = parseAzureScope(row.config);
-      const ids = sanitizeAllowlist(input?.ids, scope.discovered);
-      await updateConfig(me.orgId, "azure", { billingProfileIds: ids });
-      await logWeb(me.orgId, "update", "integration", null, t("scope.activity.saved", { name: t("providers.azure.name"), count: ids.length }));
-    } else {
-      const scope = parseGcpScope(row.config);
-      const ids = sanitizeAllowlist(input?.ids, scope.discovered);
-      let bigQueryExport: { projectId: string; dataset: string } | null = null;
-      const bq = input?.bigQuery;
-      if (bq && (bq.projectId?.trim() || bq.dataset?.trim())) {
-        const v = { projectId: bq.projectId.trim(), dataset: bq.dataset.trim() };
-        if (!isValidBigQueryExport(v)) return { ok: false, error: t("scope.errors.bigQuery") };
-        bigQueryExport = v;
-      }
-      await updateConfig(me.orgId, "gcp", { billingAccountIds: ids, bigQueryExport });
-      await logWeb(me.orgId, "update", "integration", null, t("scope.activity.saved", { name: t("providers.gcp.name"), count: ids.length }));
-    }
+    await saveCloudBillingScopeForOrg(
+      {
+        ...me,
+        log: (action, entityType, entityId, summary) => logWeb(me.orgId, action, entityType, entityId, summary),
+      },
+      provider,
+      // 網頁表單一律送 bigQuery（沒填 = null = 清掉），與舊行為一致。
+      { ids: input?.ids, bigQuery: provider === "gcp" ? (input?.bigQuery ?? null) : undefined },
+    );
     revalidatePath(PAGE);
     revalidatePath("/dashboard/vendor-billing");
     return { ok: true };
@@ -75,21 +59,7 @@ export async function refreshCloudDiscoveryAction(provider: "azure" | "gcp"): Pr
   const me = await requireManager();
   if ("error" in me) return { ok: false, error: me.error };
   try {
-    if (provider === "azure") {
-      await withAzureClient(me.orgId, async (client, row) => {
-        const ba = azureBillingAccountId(row.config);
-        if (!ba) throw new Error(t("scope.errors.noBillingAccount"));
-        const profiles = await discoverAzureProfiles(client, ba);
-        await updateConfig(me.orgId, "azure", { discovered: profiles, discoveredAt: new Date().toISOString() });
-      });
-    } else if (provider === "gcp") {
-      await withGcpClient(me.orgId, async (client) => {
-        const discovered = await client.listBillingAccounts();
-        await updateConfig(me.orgId, "gcp", { discovered, discoveredAt: new Date().toISOString() });
-      });
-    } else {
-      return { ok: false, error: t("toast.failed") };
-    }
+    await refreshCloudDiscoveryForOrg(me.orgId, provider);
     revalidatePath(PAGE);
     return { ok: true };
   } catch (e) {
