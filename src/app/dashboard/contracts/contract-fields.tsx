@@ -9,6 +9,8 @@ import { CurrencySelect } from "@/components/currency-select";
 import { PartyField } from "@/components/party-combobox";
 import { DEFAULT_CURRENCY } from "@/lib/currency";
 import { SelectItem } from "@/components/ui/select";
+import { TaxFields } from "@/components/tax-fields";
+import type { TaxSetting } from "@/lib/tax-treatment";
 import {
   ContractBillingPlanFields,
   type BillingPlanDefaults,
@@ -31,6 +33,9 @@ export type ContractFormValues = {
   status: string;
   note: string | null;
   fileUrl: string | null;
+  /** 合約自己存的稅別（NULL＝沿用組織預設） */
+  taxTreatment: string | null;
+  amountBasis: string | null;
 } & BillingPlanDefaults;
 
 /**
@@ -48,10 +53,13 @@ export function ContractFields({
   scheduleCount = 0,
   lockedScheduleCount = 0,
   extra,
+  orgTax,
 }: Readonly<{
   parties: Option[];
   projects: Option[];
   values?: ContractFormValues;
+  /** 組織的稅別預設：新增時預選它，並提供「沿用組織預設」選項 */
+  orgTax: TaxSetting;
   summary?: { received: number; cost: number; remaining: number | null };
   /** 這張合約已有幾筆請款項目，以及其中已動過（不可重排）的筆數 */
   scheduleCount?: number;
@@ -132,6 +140,13 @@ export function ContractFields({
       <Field label={t("newDialog.currency")}>
         <CurrencySelect defaultValue={values?.currency} onValueChange={setCurrency} />
       </Field>
+      {/* 新增時預選「沿用組織預設（…）」：畫面看得到組織的值，存成 NULL，之後改組織預設會跟著變。
+          編輯時回填合約自己存的值（NULL＝沿用）。綁在合約上的訂閱與請款項目都跟著它。 */}
+      <TaxFields
+        treatment={values ? values.taxTreatment : null}
+        basis={values ? values.amountBasis : null}
+        orgDefault={orgTax}
+      />
       <SelectField
         name="status"
         label={t("newDialog.status")}

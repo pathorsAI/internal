@@ -194,6 +194,21 @@ board automatically. `sync_billing_calendar` pushes the board to Google Calendar
 > charge (`billingItemId`) or to a subscription period — never from `paidOn`, which
 > is only a human annotation.
 
+**營業稅別 (VAT treatment, migrations/0040)** — contracts, subscriptions and billing
+items carry optional `taxTreatment` (`taxable` 應稅 5% | `zero_rated` 零稅率 |
+`exempt` 免稅 | `none` 不加收營業稅) and `amountBasis` (`net` 未稅 | `gross` 含稅).
+`amount` is net unless `amountBasis=gross`. `null` inherits: a subscription or
+billing item bound to a contract always follows the contract; otherwise its own
+field, then the organization default (組織設定). The create/update tools accept
+both fields (`null` = inherit). Every list tool (`list_contracts`,
+`list_subscriptions`, `list_billing_status`, `list_upcoming_billing`,
+`get_subscription_schedule`, and `contractProgress`) returns the **effective**
+`taxTreatment` / `amountBasis` plus `net` / `tax` / `gross`. Collection status
+(已收／未收／收齊／逾期, `remaining`, `fullyCollected`, a board row's `expected`,
+a period's `expected`) always compares received income against **gross**;
+revenue estimates should use **net**. `set_subscription_period`'s
+`expectedAmount` is in the subscription's basis.
+
 **Ledger (management & tax books)** — `list_transactions`, `get_transaction`,
 `list_outstanding_advances`, `create_transaction` (expense/income/advance/transfer),
 `update_transaction` (date/amount/category/project/…), `delete_transaction`,
@@ -246,8 +261,8 @@ so a recurring fee quoted in a contract stays traceable — `list_subscriptions`
 returns it as `contractId` / `contractTitle`. Contract status is stored, not derived: linking
 an income transaction that fills the contract does **not** move it to
 `completed` on its own. So `create_transaction` / `bulk_create_transactions` /
-`update_transaction` return `contractProgress` (amount / received / remaining /
-`fullyCollected`) for every contract they touched — when a contract comes back
+`update_transaction` return `contractProgress` (amount / net / tax / gross /
+received / remaining = gross − received / `fullyCollected`) for every contract they touched — when a contract comes back
 fully collected while still draft/active, the client is told to surface it and
 ask the user before calling `update_contract` with `status='completed'`. Status
 is never flipped automatically.

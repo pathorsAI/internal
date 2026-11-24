@@ -48,6 +48,9 @@ export function OrgSettingsClient({
   // logo 欄位：mode 給「儲存」按鈕判斷有沒有變更；存檔成功換 fieldKey 讓欄位重掛回 keep。
   const [logoMode, setLogoMode] = useState<AvatarMode>("keep");
   const [fieldKey, setFieldKey] = useState(0);
+  // 目前的 logo：存檔後直接換成回傳的新網址。不能只靠 router.refresh() 帶回新的 orgLogo prop ——
+  // 欄位在那之前就重掛了，會先畫回舊值（原本沒有 logo 就是字母頭像）。
+  const [logo, setLogo] = useState(orgLogo);
 
   // `draft` 在使用者真的打字前都是 null，欄位只是「顯示」server 傳來的名稱。
   // 存檔後清掉 draft，就會自動同步成伺服器回來的值。
@@ -78,6 +81,7 @@ export function OrgSettingsClient({
       }
       if (logoMode !== "keep") {
         const res = await saveOrgLogo(new FormData(e.currentTarget));
+        if (res.ok && res.url !== undefined) setLogo(res.url);
         if (!res.ok) {
           toast.error(res.error ?? t("org.toast.updateFailed"));
           return;
@@ -112,12 +116,12 @@ export function OrgSettingsClient({
           <Field label={t("org.logoLabel")}>
             <AvatarUploadField
               key={fieldKey}
-              hasCurrent={Boolean(orgLogo)}
+              hasCurrent={Boolean(logo)}
               disabled={!canEdit || saving}
               onModeChange={setLogoMode}
               labels={avatarFieldLabels((k) => tLogo(k as never))}
               renderAvatar={({ mode, src }) => (
-                <PartyAvatar name={orgName} size="lg" src={src ?? (mode === "keep" ? orgLogo : null)} />
+                <PartyAvatar name={orgName} size="lg" src={src ?? (mode === "keep" ? logo : null)} />
               )}
             />
           </Field>

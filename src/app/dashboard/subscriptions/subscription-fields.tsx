@@ -1,11 +1,20 @@
 "use client";
 
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Field, SelectField, TextField } from "@/components/form-field";
 import { DatePicker } from "@/components/date-picker";
 import { CurrencySelect } from "@/components/currency-select";
 import { PartyField } from "@/components/party-combobox";
-import { SelectItem } from "@/components/ui/select";
+import { TaxFields, TaxFollowsContract } from "@/components/tax-fields";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { TaxSetting } from "@/lib/tax-treatment";
 
 export type Option = { id: number; name: string };
 
@@ -23,6 +32,9 @@ export type SubscriptionFormValues = {
   endDate: string | null;
   status: string;
   note: string | null;
+  /** 訂閱自己存的稅別（NULL＝沿用）。綁了合約時不顯示、跟著合約。 */
+  taxTreatment: string | null;
+  amountBasis: string | null;
 };
 
 /**
@@ -36,13 +48,20 @@ export function SubscriptionFields({
   projects,
   contracts,
   values,
+  orgTax,
 }: Readonly<{
   parties: Option[];
   projects: Option[];
   contracts: Option[];
   values?: SubscriptionFormValues;
+  /** 組織的稅別預設，「沿用」選項顯示用 */
+  orgTax: TaxSetting;
 }>) {
   const t = useTranslations("subscriptions");
+  // 綁不綁合約決定稅別欄位要不要出現，所以合約下拉要受控。
+  const [contractId, setContractId] = useState(
+    values?.contractId == null ? "none" : String(values.contractId),
+  );
 
   return (
     <>
@@ -64,20 +83,22 @@ export function SubscriptionFields({
           </SelectItem>
         ))}
       </SelectField>
-      <SelectField
-        name="contractId"
-        label={t("newDialog.contract.label")}
-        placeholder={t("newDialog.contract.placeholder")}
-        defaultValue={values?.contractId == null ? "none" : String(values.contractId)}
-      >
-        {/* 選填：Radix Select 不接受空字串，「不綁定」用 "none"（mutations 那側轉回 null）。 */}
-        <SelectItem value="none">{t("newDialog.contract.placeholder")}</SelectItem>
-        {contracts.map((c) => (
-          <SelectItem key={c.id} value={String(c.id)}>
-            {c.name}
-          </SelectItem>
-        ))}
-      </SelectField>
+      <Field label={t("newDialog.contract.label")}>
+        <Select name="contractId" value={contractId} onValueChange={setContractId}>
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder={t("newDialog.contract.placeholder")} />
+          </SelectTrigger>
+          <SelectContent>
+            {/* 選填：Radix Select 不接受空字串，「不綁定」用 "none"（mutations 那側轉回 null）。 */}
+            <SelectItem value="none">{t("newDialog.contract.placeholder")}</SelectItem>
+            {contracts.map((c) => (
+              <SelectItem key={c.id} value={String(c.id)}>
+                {c.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
       <TextField
         name="name"
         label={t("newDialog.name.label")}
@@ -97,6 +118,16 @@ export function SubscriptionFields({
       <Field label={t("newDialog.currency")}>
         <CurrencySelect defaultValue={values?.currency} />
       </Field>
+      {/* 綁了合約就跟著合約，不送這兩個欄位（mutations 那側就不會動到訂閱自己的值）。 */}
+      {contractId === "none" ? (
+        <TaxFields
+          treatment={values?.taxTreatment}
+          basis={values?.amountBasis}
+          orgDefault={orgTax}
+        />
+      ) : (
+        <TaxFollowsContract />
+      )}
       <TextField
         name="intervalMonths"
         label={t("newDialog.intervalMonths")}

@@ -18,6 +18,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { BillingItemFields, type Option } from "./billing-item-fields";
+import type { TaxSetting } from "@/lib/tax-treatment";
 
 const initial: ActionState = { ok: false };
 
@@ -28,7 +29,9 @@ export function NewBillingItemDialog({
   contractId,
   triggerLabel,
   triggerVariant = "default",
+  orgTax,
 }: Readonly<{
+  orgTax: TaxSetting;
   parties: Option[];
   contracts: Option[];
   projects: Option[];
@@ -84,6 +87,7 @@ export function NewBillingItemDialog({
               contracts={contracts}
               projects={projects}
               hideContract={contractId != null}
+              orgTax={orgTax}
             />
           </div>
 

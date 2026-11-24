@@ -27,7 +27,8 @@ import {
   payrollItemTypes,
   recurringExpenses,
 } from "./schema";
-import { oauthAccessToken, oauthConsent, member } from "./auth-schema";
+import { oauthAccessToken, oauthConsent, member, organization } from "./auth-schema";
+import { isAmountBasis, isTaxTreatment } from "@/lib/tax-treatment";
 import { uploadDocument } from "@/lib/storage";
 import { validateAvatarBytes } from "@/lib/party-avatar";
 import { removePartyAvatar, replacePartyAvatar } from "@/lib/party-avatar-store";
@@ -67,6 +68,70 @@ function num(v: FormDataEntryValue | null) {
 function optRefNum(v: FormDataEntryValue | null) {
   const s = str(v);
   return s === null || s === "none" ? null : Number(s);
+}
+
+// ---- 營業稅別（migrations/0040）----
+
+/** 表單上「沿用」那一項的值（Radix Select 不收空字串）。 */
+const TAX_INHERIT = "inherit";
+
+type TaxFormColumns = { taxTreatment?: string | null; amountBasis?: string | null };
+
+/**
+ * 合約／訂閱／請款項目表單的兩個稅別欄位。
+ * - 表單根本沒有這個欄位（例如綁了合約、只顯示「跟隨合約」）→ 不放進回傳，update 時不動它；
+ * - 空字串或 "inherit" → NULL（沿用合約或組織預設）；
+ * - 其他值必須合法，否則回 null 讓呼叫端擋下。
+ */
+function taxFormColumns(formData: FormData): TaxFormColumns | null {
+  const out: TaxFormColumns = {};
+  for (const [key, valid] of [
+    ["taxTreatment", isTaxTreatment],
+    ["amountBasis", isAmountBasis],
+  ] as const) {
+    if (!formData.has(key)) continue;
+    const v = str(formData.get(key));
+    if (v === null || v === TAX_INHERIT) out[key] = null;
+    else if (valid(v)) out[key] = v;
+    else return null;
+  }
+  return out;
+}
+
+/**
+ * 組織的營業稅別預設。只有擁有者／管理員能改；組織一律取 session 的，不吃表單傳來的 id。
+ */
+export async function updateOrgTaxSettings(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const t = await getTranslations("errors");
+  const treatment = str(formData.get("taxTreatment"));
+  const basis = str(formData.get("amountBasis"));
+  if (!isTaxTreatment(treatment) || !isAmountBasis(basis)) {
+    return { ok: false, error: t("validation.taxSettingInvalid") };
+  }
+  try {
+    const { orgId, role } = await requireOrgWithRole();
+    if (!canManageOrg(role)) return { ok: false, error: t("forbidden.manageOrgSettings") };
+    await getDb()
+      .update(organization)
+      .set({ taxTreatment: treatment, amountBasis: basis })
+      .where(eq(organization.id, orgId));
+    await logWeb(orgId, "update", "organization", null, `tax_treatment=${treatment} amount_basis=${basis}`);
+    for (const path of [
+      "/dashboard/settings",
+      "/dashboard/contracts",
+      "/dashboard/subscriptions",
+      "/dashboard/billing",
+      "/dashboard/reports",
+    ]) {
+      revalidatePath(path);
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
+  }
 }
 
 // ---- 外鍵歸屬驗證 ----
@@ -1346,6 +1411,12 @@ function resolveExternalStatus(
   return externalRef ? "issued" : "pending";
 }
 
+const INVOICE_TAX_TREATMENTS = new Set(["taxable", "zero_rated", "exempt"]);
+
+function invoiceTaxTreatmentField(v: string | null): { taxTreatment?: string } {
+  return v && INVOICE_TAX_TREATMENTS.has(v) ? { taxTreatment: v } : {};
+}
+
 function invoiceValues(formData: FormData) {
   const direction = str(formData.get("direction")) ?? "received";
   // Simpany 的單號就是發票號碼，兩個欄位共用一個輸入框（任一有值即補齊另一個）。
@@ -1365,6 +1436,8 @@ function invoiceValues(formData: FormData) {
     amountNet: str(formData.get("amountNet")),
     tax: str(formData.get("tax")),
     amountGross: str(formData.get("amountGross")),
+    // 只有帶了這個欄位的表單（看板的開發票對話框）才寫；其他發票表單維持資料庫預設（應稅）。
+    ...invoiceTaxTreatmentField(str(formData.get("taxTreatment"))),
     currency: str(formData.get("currency")) ?? "TWD",
     status: str(formData.get("status")) ?? "valid",
     note: str(formData.get("note")),
@@ -1976,6 +2049,7 @@ function subscriptionValues(formData: FormData) {
     endDate: str(formData.get("endDate")),
     status: str(formData.get("status")) ?? "active",
     note: str(formData.get("note")),
+    tax: taxFormColumns(formData),
   };
 }
 
@@ -1993,6 +2067,7 @@ async function requiredSubscriptionFields(
   if (v.amount === null) return { error: t("required.amount") };
   if (!v.startDate) return { error: t("required.startDate") };
   if (!SUBSCRIPTION_STATUS.has(v.status)) return { error: t("validation.statusInvalid") };
+  if (v.tax === null) return { error: t("validation.taxSettingInvalid") };
   return { name: v.name, amount: v.amount, startDate: v.startDate };
 }
 
@@ -2012,6 +2087,7 @@ function subscriptionColumns(
     endDate: v.endDate,
     status: v.status,
     note: v.note,
+    ...v.tax,
   };
 }
 
@@ -2291,6 +2367,7 @@ function contractValues(formData: FormData) {
     dueRule: dueRule && CONTRACT_DUE_RULE.has(dueRule) ? dueRule : "signed_date",
     dueDay: clampInt(num(formData.get("dueDay")), 1, 31, null),
     regenerateSchedule: formData.get("regenerateSchedule") != null,
+    tax: taxFormColumns(formData),
   };
 }
 
@@ -2415,6 +2492,7 @@ async function requiredContractFields(
   const t = await getTranslations("errors");
   if (!v.title) return { error: t("required.contractTitle") };
   if (!CONTRACT_STATUS.has(v.status)) return { error: t("validation.statusInvalid") };
+  if (v.tax === null) return { error: t("validation.taxSettingInvalid") };
   return { title: v.title };
 }
 
@@ -2439,6 +2517,7 @@ function contractColumns(v: ContractValues, customerPartyId: number, title: stri
     billingIntervalMonths: v.billingIntervalMonths,
     dueRule: v.dueRule,
     dueDay: v.dueDay,
+    ...v.tax,
   };
 }
 
@@ -2543,7 +2622,8 @@ const BILLING_ITEM_STATUS = new Set(["scheduled", "billed", "paid", "cancelled"]
 function billingItemValues(formData: FormData) {
   return {
     customerPartyName: str(formData.get("customerPartyName")),
-    contractId: num(formData.get("contractId")),
+    // 「不綁定」選項送 "none"（Radix Select 不收空字串）
+    contractId: optRefNum(formData.get("contractId")),
     projectId: num(formData.get("projectId")),
     title: str(formData.get("title")),
     amount: str(formData.get("amount")),
@@ -2555,6 +2635,7 @@ function billingItemValues(formData: FormData) {
     needsInvoice: formData.get("needsInvoice") != null,
     status: str(formData.get("status")) ?? "scheduled",
     note: str(formData.get("note")),
+    tax: taxFormColumns(formData),
   };
 }
 
@@ -2608,6 +2689,7 @@ export async function createBillingItem(
   if (!v.title) return { ok: false, error: t("required.itemTitle") };
   if (!v.amount) return { ok: false, error: t("required.amount") };
   if (!BILLING_ITEM_STATUS.has(v.status)) return { ok: false, error: t("validation.statusInvalid") };
+  if (v.tax === null) return { ok: false, error: t("validation.taxSettingInvalid") };
   try {
     const { orgId } = await requireOrg();
     const refError = await unownedRefError(getDb(), orgId, [
@@ -2634,6 +2716,7 @@ export async function createBillingItem(
         needsInvoice: v.needsInvoice,
         status: v.status,
         note: v.note,
+        ...v.tax,
       })
       .returning({ id: billingItems.id });
     await logWeb(orgId, "create", "billing_item", inserted.id, v.title ?? undefined);
@@ -2657,6 +2740,7 @@ export async function updateBillingItem(
   if (!v.title) return { ok: false, error: t("required.itemTitle") };
   if (!v.amount) return { ok: false, error: t("required.amount") };
   if (!BILLING_ITEM_STATUS.has(v.status)) return { ok: false, error: t("validation.statusInvalid") };
+  if (v.tax === null) return { ok: false, error: t("validation.taxSettingInvalid") };
   try {
     const { orgId } = await requireOrg();
     const refError = await unownedRefError(getDb(), orgId, [
@@ -2682,6 +2766,7 @@ export async function updateBillingItem(
         needsInvoice: v.needsInvoice,
         status: v.status,
         note: v.note,
+        ...v.tax,
       })
       .where(and(eq(billingItems.organizationId, orgId), eq(billingItems.id, id)));
     await logWeb(orgId, "update", "billing_item", id, v.title ?? undefined);

@@ -63,6 +63,9 @@ export const organization = pgTable("organization", {
   logo: text("logo"),
   // 上傳 logo 的物件 key（migrations/0039）；logo 是給畫面的網址
   logoKey: text("logo_key"),
+  // 營業稅別的組織預設（migrations/0040、src/lib/tax-treatment.ts）
+  taxTreatment: text("tax_treatment").default("taxable").notNull(),
+  amountBasis: text("amount_basis").default("net").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   metadata: text("metadata"),
 });

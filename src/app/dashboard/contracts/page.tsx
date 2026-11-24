@@ -25,6 +25,8 @@ import {
   listSubscriptionsByContract,
 } from "@/db/queries";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { getOrgTaxSetting } from "@/db/org-tax";
+import { TaxBreakdown } from "@/components/tax-breakdown";
 import { NewContractDialog } from "./new-contract-dialog";
 import { ContractFileLink } from "./contract-file-link";
 import { requireOrg } from "@/lib/session";
@@ -42,22 +44,28 @@ const statusTone: Record<string, "neutral" | "primary" | "income"> = {
 
 // 收款進度欄：已收 / 合約金額 + 進度條，下方顯示未收與累計成本（成本不從合約金額扣）。
 // 欄寬固定，各列的進度條與數字上下對齊。
+// 應收一律是含稅 gross（客戶實際要付的錢），入帳拿它比；有稅額才在最下面多一行未稅＋稅。
 function CollectionCell({
-  amount,
+  gross,
+  net,
+  tax,
+  remaining,
   currency,
   received,
   cost,
   t,
 }: Readonly<{
-  amount: string | null;
+  gross: number | null;
+  net: number | null;
+  tax: number | null;
+  remaining: number | null;
   currency: string;
   received: number;
   cost: number;
   t: Awaited<ReturnType<typeof getTranslations<"contracts">>>;
 }>) {
-  const total = amount == null ? null : Number(amount);
+  const total = gross;
   const pct = total && total > 0 ? Math.round((received / total) * 100) : null;
-  const remaining = total == null ? null : total - received;
   let remainingLabel: React.ReactNode;
   if (remaining == null) remainingLabel = "—";
   else if (remaining > 0)
@@ -97,6 +105,7 @@ function CollectionCell({
           </span>
         )}
       </div>
+      <TaxBreakdown net={net} tax={tax} />
     </div>
   );
 }
@@ -104,12 +113,13 @@ function CollectionCell({
 export default async function ContractsPage() {
   const { orgId } = await requireOrg();
   const t = await getTranslations("contracts");
-  const [rows, parties, projects, board, subsByContract] = await Promise.all([
+  const [rows, parties, projects, board, subsByContract, orgTax] = await Promise.all([
     listContracts(orgId),
     listParties(orgId),
     listProjects(orgId),
     listBillingBoard(orgId, { includeAllHistory: true }),
     listSubscriptionsByContract(orgId),
+    getOrgTaxSetting(orgId),
   ]);
   const partyOptions = parties.map((p) => ({ id: p.id, name: p.name }));
   const projectOptions = projects.map((p) => ({ id: p.id, name: p.name }));
@@ -132,7 +142,7 @@ export default async function ContractsPage() {
   return (
     <>
       <PageHeader title={t("list.title")} description={t("list.description")}>
-        <NewContractDialog parties={partyOptions} projects={projectOptions} />
+        <NewContractDialog parties={partyOptions} projects={projectOptions} orgTax={orgTax} />
       </PageHeader>
 
       <TableCard>
@@ -169,7 +179,10 @@ export default async function ContractsPage() {
                       <TableCell className="text-muted-foreground">{c.projectName ?? "—"}</TableCell>
                       <TableCell>
                         <CollectionCell
-                          amount={c.amount}
+                          gross={c.gross}
+                          net={c.net}
+                          tax={c.tax}
+                          remaining={c.remaining}
                           currency={c.currency}
                           received={c.received}
                           cost={c.cost}
@@ -217,7 +230,10 @@ export default async function ContractsPage() {
                       billingIntervalMonths: c.billingIntervalMonths,
                       dueRule: c.dueRule,
                       dueDay: c.dueDay,
+                      taxTreatment: c.ownTaxTreatment,
+                      amountBasis: c.ownAmountBasis,
                     }}
+                    orgTax={orgTax}
                     parties={partyOptions}
                     projects={projectOptions}
                     summary={{ received: c.received, cost: c.cost, remaining: c.remaining }}
@@ -232,6 +248,7 @@ export default async function ContractsPage() {
                           rows={billingByContract.get(c.id) ?? []}
                           parties={partyOptions}
                           projects={projectOptions}
+                          orgTax={orgTax}
                         />
                         <ContractSubscriptions rows={subsByContract.get(c.id) ?? []} />
                       </>

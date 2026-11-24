@@ -22,6 +22,11 @@ import {
   requireString,
   resolveOrg,
   rowSchema,
+  EFFECTIVE_TAX_PROPS,
+  optTaxArgs,
+  STORED_TAX_PROPS,
+  TAX_INPUT_PROPS,
+  taxBreakdownProps,
   type ToolDef,
 } from "./shared";
 
@@ -79,6 +84,7 @@ const BILLING_ITEM_PROPS = {
   note: { type: ["string", "null"] },
   createdAt: { type: "string", description: "ISO 8601 timestamp." },
   deletedAt: { type: ["string", "null"], description: "ISO 8601 timestamp." },
+  ...STORED_TAX_PROPS,
 };
 // 整列回傳，欄位一定到齊（值可能是 null）。
 const BILLING_ITEM_REQUIRED = Object.keys(BILLING_ITEM_PROPS);
@@ -112,9 +118,17 @@ const BILLING_BOARD_ROW = rowSchema({
   paidOn: { type: ["string", "null"], description: "YYYY-MM-DD (human annotation only)." },
   invoicedOn: { type: ["string", "null"], description: "YYYY-MM-DD." },
   needsInvoice: { type: "boolean", description: "該開發票卻還沒開." },
-  expected: { type: "number", description: "應收." },
+  amount: { type: "number", description: "The stored amount (billing item amount / subscription period amount), basis per amountBasis." },
+  ...taxBreakdownProps(),
+  expected: {
+    type: "number",
+    description: "應收 = gross (含稅, what the customer actually pays). status/partial/paid compare `paid` against this.",
+  },
   paid: { type: "number", description: "已收, computed from linked ledger transactions." },
   currency: { type: "string", description: "3-letter code." },
+  ...EFFECTIVE_TAX_PROPS,
+  ownTaxTreatment: { ...STORED_TAX_PROPS.taxTreatment, description: "The row's own stored 營業稅別 (subscription periods: the subscription's); null = inherit." },
+  ownAmountBasis: { ...STORED_TAX_PROPS.amountBasis, description: "The row's own stored amount basis; null = inherit." },
   status: { type: "string", enum: [...BOARD_STATUS] },
   note: { type: ["string", "null"] },
   rawStatus: {
@@ -142,13 +156,14 @@ function buildBillingItemPatch(
   if (optBoolean(args, "needsInvoice") !== undefined)
     patch.needsInvoice = optBoolean(args, "needsInvoice");
   if (optString(args, "status") !== undefined) patch.status = optString(args, "status");
+  Object.assign(patch, optTaxArgs(args));
   return patch;
 }
 
 export const billingItemTools: Record<string, ToolDef> = {
   list_billing_status: {
     description:
-      "[read] The billing board: every outstanding charge across one-off contract instalments, project milestones AND recurring subscription periods, merged into one list. This is the tool for 「誰該請款 / 誰已繳款 / 誰還沒繳 / 發票該開給誰」. Status values: due (應請款日已到、還沒請款), billed (已請款待收), partial (部分收款), overdue (超過付款期限仍未收齊), paid (已收齊), upcoming (還沒到應請款日). needsInvoice=true means 該開發票卻還沒開.",
+      "[read] The billing board: every outstanding charge across one-off contract instalments, project milestones AND recurring subscription periods, merged into one list. This is the tool for 「誰該請款 / 誰已繳款 / 誰還沒繳 / 發票該開給誰」. `expected` is the gross receivable (含稅, net + 5% when taxable) — received income is compared against it; `net` is 未稅 for revenue figures. Status values: due (應請款日已到、還沒請款), billed (已請款待收), partial (部分收款), overdue (超過付款期限仍未收齊), paid (已收齊), upcoming (還沒到應請款日). needsInvoice=true means 該開發票卻還沒開.",
     inputSchema: {
       type: "object",
       properties: {
@@ -193,7 +208,7 @@ export const billingItemTools: Record<string, ToolDef> = {
 
   create_billing_item: {
     description:
-      "[write] Add one planned charge to the internal billing board — a contract instalment (簽約金/期中款/尾款), a project milestone, or a one-off. This is a bookkeeping entry: nothing is charged, collected or sent to the customer, and no invoice is issued. Recurring monthly/annual fees do not belong here: use create_subscription, whose periods show up on the board automatically.",
+      "[write] Add one planned charge to the internal billing board — a contract instalment (簽約金/期中款/尾款), a project milestone, or a one-off. This is a bookkeeping entry: nothing is charged, collected or sent to the customer, and no invoice is issued. Recurring monthly/annual fees do not belong here: use create_subscription, whose periods show up on the board automatically. amount is net (未稅) unless amountBasis=gross; taxTreatment/amountBasis left null inherit the contract when contractId is set, otherwise the organization default (a bound contract always wins).",
     inputSchema: {
       type: "object",
       properties: {
@@ -213,6 +228,7 @@ export const billingItemTools: Record<string, ToolDef> = {
         needsInvoice: { type: "boolean", description: "Default true." },
         status: { type: "string", enum: [...ITEM_STATUS], description: "Default scheduled." },
         note: { type: "string" },
+        ...TAX_INPUT_PROPS,
         ...ORG_ARG,
       },
       required: ["title", "amount"],
@@ -256,6 +272,7 @@ export const billingItemTools: Record<string, ToolDef> = {
           needsInvoice: optBoolean(args, "needsInvoice") ?? true,
           status: optString(args, "status") ?? "scheduled",
           note: optString(args, "note") ?? null,
+          ...optTaxArgs(args),
         })
         .returning();
       return row;
@@ -264,7 +281,7 @@ export const billingItemTools: Record<string, ToolDef> = {
 
   update_billing_item: {
     description:
-      "[write] Update a planned charge (only provided fields). Use this to note 「已請款」(billedOn), 「已收款」(paidOn) or 「已開發票」(invoicedOn) after they happened elsewhere — the dates are annotations in the books and do not collect or send anything. Money actually received is computed from ledger transactions bound to this item, not from paidOn.",
+      "[write] Update a planned charge (only provided fields). Use this to note 「已請款」(billedOn), 「已收款」(paidOn) or 「已開發票」(invoicedOn) after they happened elsewhere — the dates are annotations in the books and do not collect or send anything. Money actually received is computed from ledger transactions bound to this item, not from paidOn. amount is net (未稅) unless amountBasis=gross; taxTreatment/amountBasis = null inherit (contract if bound, else org default).",
     inputSchema: {
       type: "object",
       properties: {
@@ -282,6 +299,7 @@ export const billingItemTools: Record<string, ToolDef> = {
         needsInvoice: { type: "boolean" },
         status: { type: "string", enum: [...ITEM_STATUS] },
         note: { type: "string" },
+        ...TAX_INPUT_PROPS,
         ...ORG_ARG,
       },
       required: ["id"],
