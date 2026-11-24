@@ -338,11 +338,11 @@ export const transactions = pgTable("transactions", {
 	externalRef: text("external_ref"),
 	externalMeta: jsonb("external_meta").$type<Record<string, unknown>>(),
 	needsReview: boolean("needs_review").default(false).notNull(),
-	// 待連結（migrations/0040，src/lib/linking）：跟 needsReview（分類待確認）分開。
+	// 待連結（migrations/0041，src/lib/linking）：跟 needsReview（分類待確認）分開。
 	// link_suggested / link_ambiguous / link_amount_mismatch / party_similar / link_skipped；NULL = 不用人看。
 	reviewReason: text("review_reason"),
 	linkCandidates: jsonb("link_candidates").$type<Record<string, unknown>>(),
-	// 這筆支出屬於哪個廠商計費帳戶（固定支出）。FK 在 DB 端（migrations/0040）。
+	// 這筆支出屬於哪個廠商計費帳戶（固定支出）。FK 在 DB 端（migrations/0041）。
 	vendorBillingAccountId: bigint("vendor_billing_account_id", { mode: "number" }),
 }, (table) => [
 	uniqueIndex("uq_txn_external_ref").on(table.organizationId, table.externalSource, table.externalRef).where(sql`external_ref IS NOT NULL`),
@@ -498,6 +498,9 @@ export const subscriptions = pgTable("subscriptions", {
 	endDate: date("end_date"),
 	status: text().default('active').notNull(),
 	note: text(),
+	// 營業稅別（migrations/0040）：NULL = 沿用（綁合約跟合約、否則組織預設），見 src/lib/tax-treatment.ts
+	taxTreatment: text("tax_treatment"),
+	amountBasis: text("amount_basis"),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	foreignKey({
@@ -570,6 +573,9 @@ export const contracts = pgTable("contracts", {
 	/** 各期百分比，逗號分隔（例 '30,40,30'）；NULL = 平均分攤 */
 	installmentSplit: text("installment_split"),
 	billingIntervalMonths: integer("billing_interval_months").default(1).notNull(),
+	// 營業稅別（migrations/0040）：NULL = 沿用（綁合約跟合約、否則組織預設），見 src/lib/tax-treatment.ts
+	taxTreatment: text("tax_treatment"),
+	amountBasis: text("amount_basis"),
 	dueRule: text("due_rule").default('signed_date').notNull(),
 	/** day_of_month 為第幾個日曆日；business_day_of_month 為第幾個工作日 */
 	dueDay: integer("due_day"),
@@ -617,6 +623,9 @@ export const billingItems = pgTable("billing_items", {
 	needsInvoice: boolean("needs_invoice").default(true).notNull(),
 	status: text().default('scheduled').notNull(),
 	note: text(),
+	// 營業稅別（migrations/0040）：NULL = 沿用（綁合約跟合約、否則組織預設），見 src/lib/tax-treatment.ts
+	taxTreatment: text("tax_treatment"),
+	amountBasis: text("amount_basis"),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
 }, (table) => [
@@ -891,7 +900,7 @@ export const vendorBillingAccounts = pgTable("vendor_billing_accounts", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
-	// 固定支出（migrations/0040，原本的 recurring_expenses）：一個廠商計費帳戶就是一筆固定支出。
+	// 固定支出（migrations/0041，原本的 recurring_expenses）：一個廠商計費帳戶就是一筆固定支出。
 	// schedule NULL = 不提醒；fixed = 依 anchorDate 每 intervalMonths 個月；usage = 用量計費每月扣。
 	schedule: text(),
 	anchorDate: date("anchor_date"),

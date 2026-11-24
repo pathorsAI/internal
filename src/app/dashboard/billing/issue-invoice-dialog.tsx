@@ -30,6 +30,35 @@ import {
 import { formatCurrency } from "@/lib/format";
 import { submitAction } from "@/lib/form-action";
 import { grossFromNet, splitGross } from "@/lib/vat";
+import type { AmountBasis, TaxTreatment } from "@/lib/tax-treatment";
+
+/** gross / net = 應稅（金額含稅／未稅）；notax = 零稅率或免稅，稅額 0。 */
+type InvoiceBasis = "gross" | "net" | "notax";
+
+/**
+ * 預設基準跟著這一筆的有效稅別走：應稅照它的金額基準，零稅率／免稅不算稅額，
+ * 「不加收營業稅」維持原本的預設（含稅）。使用者還是可以改。
+ */
+function defaultBasis(treatment: TaxTreatment, basis: AmountBasis): InvoiceBasis {
+  if (treatment === "taxable") return basis;
+  if (treatment === "zero_rated" || treatment === "exempt") return "notax";
+  return "gross";
+}
+
+/**
+ * 寫進發票紀錄的稅別（invoices.tax_treatment 只收 taxable / zero_rated / exempt）。
+ * 選了「零稅率／免稅」時，有效稅別是免稅就記免稅，其餘一律記零稅率。
+ */
+function invoiceTaxTreatment(basis: InvoiceBasis, treatment: TaxTreatment): "taxable" | "zero_rated" | "exempt" {
+  if (basis !== "notax") return "taxable";
+  return treatment === "exempt" ? "exempt" : "zero_rated";
+}
+
+function splitBy(basis: InvoiceBasis, value: number): { net: number; tax: number; gross: number } {
+  if (basis === "gross") return { ...splitGross(value), gross: value };
+  if (basis === "net") return { net: value, ...grossFromNet(value) };
+  return { net: value, tax: 0, gross: value };
+}
 
 const initial: ActionState = { ok: false };
 
@@ -45,7 +74,8 @@ function todayISO() {
  * Simpany 那邊還是要人去開。所以外部狀態預設 pending，
  * 開好之後把 Simpany 的號碼填進來（或在發票頁補），對帳表才對得起來。
  *
- * 請款金額是未稅還是含稅，各家合約寫法不同，這裡讓人選，選了就即時換算。
+ * 請款金額是未稅還是含稅，預設跟著合約／請款項目的營業稅別（defaultBasis），使用者可改，
+ * 選了就即時換算。
  */
 export function IssueInvoiceDialog({
   billingItemId,
@@ -53,7 +83,9 @@ export function IssueInvoiceDialog({
   customerName,
   customerTaxId,
   title,
-  expected,
+  amount: rawAmount,
+  taxTreatment,
+  amountBasis,
   currency,
 }: Readonly<{
   billingItemId: number;
@@ -61,22 +93,25 @@ export function IssueInvoiceDialog({
   customerName: string | null;
   customerTaxId: string | null;
   title: string;
-  expected: number;
+  /** 請款項目的原樣金額（基準看 amountBasis） */
+  amount: number;
+  /** 有效稅別（綁合約跟合約，否則自己，NULL 沿用組織） */
+  taxTreatment: TaxTreatment;
+  amountBasis: AmountBasis;
   currency: string;
 }>) {
   const t = useTranslations("billing.issueInvoice");
   const tInv = useTranslations("invoices.simpany");
   const tCommon = useTranslations("billing.common");
   const [open, setOpen] = React.useState(false);
-  const [basis, setBasis] = React.useState<"gross" | "net">("gross");
-  const [amount, setAmount] = React.useState(String(expected));
+  const [basis, setBasis] = React.useState<InvoiceBasis>(() =>
+    defaultBasis(taxTreatment, amountBasis),
+  );
+  const [amount, setAmount] = React.useState(String(rawAmount));
   const router = useRouter();
 
   const value = Number(amount) || 0;
-  const { net, tax, gross } =
-    basis === "gross"
-      ? { ...splitGross(value), gross: value }
-      : { net: value, ...grossFromNet(value) };
+  const { net, tax, gross } = splitBy(basis, value);
 
   // 走 submitAction 而不是 <form action>：失敗時 React 不會把剛填的欄位清空
   // （見 @/lib/form-action 的說明）。
@@ -127,6 +162,7 @@ export function IssueInvoiceDialog({
           <input type="hidden" name="amountNet" value={net} />
           <input type="hidden" name="tax" value={tax} />
           <input type="hidden" name="amountGross" value={gross} />
+          <input type="hidden" name="taxTreatment" value={invoiceTaxTreatment(basis, taxTreatment)} />
 
           <div className="grid gap-4 py-4 sm:grid-cols-2">
             <div className="space-y-1.5 sm:col-span-2 rounded-lg border bg-muted/30 p-3 text-sm">
@@ -153,18 +189,19 @@ export function IssueInvoiceDialog({
             </Field>
 
             <Field label={t("fields.basisLabel")}>
-              <Select value={basis} onValueChange={(v) => setBasis(v as "gross" | "net")}>
+              <Select value={basis} onValueChange={(v) => setBasis(v as InvoiceBasis)}>
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="gross">{t("basis.gross")}</SelectItem>
                   <SelectItem value="net">{t("basis.net")}</SelectItem>
+                  <SelectItem value="notax">{t("basis.notax")}</SelectItem>
                 </SelectContent>
               </Select>
             </Field>
             <Field
-              label={basis === "gross" ? t("fields.grossAmount") : t("fields.netAmount")}
+              label={basis === "net" ? t("fields.netAmount") : t("fields.grossAmount")}
               htmlFor="inv-basis-amount"
             >
               <Input

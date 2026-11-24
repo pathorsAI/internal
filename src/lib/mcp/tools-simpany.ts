@@ -439,7 +439,7 @@ export const simpanyTools: Record<string, ToolDef> = {
         taxTreatment: {
           type: "string",
           enum: [...TAX_TREATMENTS],
-          description: "taxable 應稅 (5%), zero_rated 零稅率, exempt 免稅. Default: zero_rated for foreign-currency income from a buyer without a Taiwan tax id, else taxable. Export services are zero_rated, never exempt.",
+          description: "taxable 應稅 (5%), zero_rated 零稅率, exempt 免稅. Default: the 營業稅別 of the source billing item / subscription (its contract's when bound, else its own, else the org default) — taxable/zero_rated/exempt carry over; for 'none' (不加收) or a plain transaction source: zero_rated for foreign-currency income from a buyer without a Taiwan tax id, else taxable. Export services are zero_rated, never exempt.",
         },
         zeroRateReason: { type: "string", description: "Simpany reason code when zero_rated; default 72 外銷勞務. See simpany_list_zero_rate_reasons." },
         customsClearance: { type: "string", enum: ["NOT_VIA_CUSTOMS", "VIA_CUSTOMS"], description: "Zero-rated only; default NOT_VIA_CUSTOMS." },
@@ -457,7 +457,7 @@ export const simpanyTools: Record<string, ToolDef> = {
             additionalProperties: false,
           },
         },
-        isTaxIncluded: { type: "boolean", description: "Whether item prices include 5% tax. Default true." },
+        isTaxIncluded: { type: "boolean", description: "Whether item prices include 5% tax. Default: for a taxable billing item / subscription source, its amountBasis (gross → true, net → false); otherwise true." },
         remark: { type: "string", description: "Printed remark, e.g. a quote number." },
         foreignCurrency: { type: "string", description: "e.g. USD; defaults to the source's currency when not TWD." },
         foreignAmount: { type: "number", description: "Amount in foreignCurrency; defaults to the source amount." },

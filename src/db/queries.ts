@@ -3,6 +3,14 @@ import { sql, eq, desc, and, or, lte, gte, lt, inArray, isNull, isNotNull, alias
 import { getDb } from "./index";
 import { nextChargeDate, todayStr } from "@/lib/mcp/shared";
 import { periodRange, type LedgerTransaction } from "@/lib/recurring-expenses";
+import { getOrgTaxSetting } from "./org-tax";
+import {
+  effectiveTaxSetting,
+  taxedAmount,
+  taxedAmountOrNull,
+  collectionProgress,
+} from "@/lib/tax-amounts";
+import type { AmountBasis, TaxSetting, TaxTreatment } from "@/lib/tax-treatment";
 import { monthWindow, shiftMonth, yearMonthIn } from "@/lib/spend-trend";
 import { projectChildStatuses } from "@/lib/linking/hints";
 import { deriveProjectStatus } from "@/lib/linking/project-status";
@@ -1264,6 +1272,11 @@ function subscriptionRows(db: ReturnType<typeof getDb>) {
       endDate: subscriptions.endDate,
       status: subscriptions.status,
       note: subscriptions.note,
+      /** 訂閱自己存的稅別（NULL＝沿用）；編輯表單回填用。有效稅別另外算。 */
+      ownTaxTreatment: subscriptions.taxTreatment,
+      ownAmountBasis: subscriptions.amountBasis,
+      contractTaxTreatment: contracts.taxTreatment,
+      contractAmountBasis: contracts.amountBasis,
     })
     .from(subscriptions)
     .leftJoin(parties, eq(parties.id, subscriptions.customerPartyId))
@@ -1271,10 +1284,36 @@ function subscriptionRows(db: ReturnType<typeof getDb>) {
     .leftJoin(contracts, eq(contracts.id, subscriptions.contractId));
 }
 
+type SubscriptionTaxSource = {
+  contractId: number | null;
+  ownTaxTreatment: string | null;
+  ownAmountBasis: string | null;
+  contractTaxTreatment: string | null;
+  contractAmountBasis: string | null;
+};
+
+/** 訂閱的有效稅別：綁了合約跟合約，沒綁看自己，NULL 沿用組織。 */
+function subscriptionTaxSetting(org: TaxSetting, s: SubscriptionTaxSource): TaxSetting {
+  return effectiveTaxSetting(
+    org,
+    { taxTreatment: s.ownTaxTreatment, amountBasis: s.ownAmountBasis },
+    s.contractId,
+    { taxTreatment: s.contractTaxTreatment, amountBasis: s.contractAmountBasis },
+  );
+}
+
+/** 訂閱清單：每列附上每期金額的 net / tax / gross（gross＝客戶每期實際要付）與有效稅別。 */
 export async function listSubscriptions(orgId: string) {
-  return subscriptionRows(getDb())
-    .where(and(eq(subscriptions.organizationId, orgId), isNull(subscriptions.deletedAt)))
-    .orderBy(desc(subscriptions.createdAt));
+  const [rows, org] = await Promise.all([
+    subscriptionRows(getDb())
+      .where(and(eq(subscriptions.organizationId, orgId), isNull(subscriptions.deletedAt)))
+      .orderBy(desc(subscriptions.createdAt)),
+    getOrgTaxSetting(orgId),
+  ]);
+  return rows.map((r) => ({
+    ...r,
+    ...taxedAmount(Number(r.amount), subscriptionTaxSetting(org, r), r.currency),
+  }));
 }
 
 export type ContractSubscription = {
@@ -1284,6 +1323,11 @@ export type ContractSubscription = {
   currency: string;
   intervalMonths: number;
   status: string;
+  net: number;
+  tax: number;
+  gross: number;
+  taxTreatment: TaxTreatment;
+  amountBasis: AmountBasis;
 };
 
 /**
@@ -1294,30 +1338,41 @@ export async function listSubscriptionsByContract(
   orgId: string,
 ): Promise<Map<number, ContractSubscription[]>> {
   const db = getDb();
-  const rows = await db
-    .select({
-      contractId: subscriptions.contractId,
-      id: subscriptions.id,
-      name: subscriptions.name,
-      amount: subscriptions.amount,
-      currency: subscriptions.currency,
-      intervalMonths: subscriptions.intervalMonths,
-      status: subscriptions.status,
-    })
-    .from(subscriptions)
-    .where(
-      and(
-        eq(subscriptions.organizationId, orgId),
-        isNotNull(subscriptions.contractId),
-        isNull(subscriptions.deletedAt),
-      ),
-    )
-    .orderBy(desc(subscriptions.createdAt));
+  const [rows, org] = await Promise.all([
+    db
+      .select({
+        contractId: subscriptions.contractId,
+        id: subscriptions.id,
+        name: subscriptions.name,
+        amount: subscriptions.amount,
+        currency: subscriptions.currency,
+        intervalMonths: subscriptions.intervalMonths,
+        status: subscriptions.status,
+        contractTaxTreatment: contracts.taxTreatment,
+        contractAmountBasis: contracts.amountBasis,
+      })
+      .from(subscriptions)
+      .leftJoin(contracts, eq(contracts.id, subscriptions.contractId))
+      .where(
+        and(
+          eq(subscriptions.organizationId, orgId),
+          isNotNull(subscriptions.contractId),
+          isNull(subscriptions.deletedAt),
+        ),
+      )
+      .orderBy(desc(subscriptions.createdAt)),
+    getOrgTaxSetting(orgId),
+  ]);
   const out = new Map<number, ContractSubscription[]>();
-  for (const { contractId, ...sub } of rows) {
+  for (const { contractId, contractTaxTreatment, contractAmountBasis, ...sub } of rows) {
     if (contractId == null) continue;
+    // 這裡全都綁了合約，稅別一律跟合約。
+    const setting = effectiveTaxSetting(org, null, contractId, {
+      taxTreatment: contractTaxTreatment,
+      amountBasis: contractAmountBasis,
+    });
     const list = out.get(contractId) ?? [];
-    list.push(sub);
+    list.push({ ...sub, ...taxedAmount(Number(sub.amount), setting, sub.currency) });
     out.set(contractId, list);
   }
   return out;
@@ -1361,6 +1416,12 @@ export type SubscriptionForSchedule = {
   intervalMonths: number;
   startDate: string;
   endDate: string | null;
+  /**
+   * 有效稅別（src/lib/tax-amounts.ts 的 effectiveTaxSetting）。每期的 amount（含覆寫）跟訂閱本身同一個基準，
+   * 應收（expected）一律換成含稅 gross 再跟入帳比。沒給就當成不加稅（expected = amount）。
+   */
+  taxSetting?: TaxSetting;
+  currency?: string;
 };
 
 export type SubscriptionPeriodStatus = "paid" | "partial" | "overdue" | "upcoming";
@@ -1368,6 +1429,13 @@ export type SubscriptionPeriodStatus = "paid" | "partial" | "overdue" | "upcomin
 export type SubscriptionPeriod = {
   periodStart: string;
   periodLabel: string;
+  /** 該期金額原樣（訂閱預設或 set_subscription_period 覆寫），基準跟訂閱的 amountBasis 一樣。 */
+  amount: number;
+  /** 未稅 */
+  net: number;
+  /** 稅額 */
+  tax: number;
+  /** 應收＝含稅 gross（客戶實際要付）；收款狀態拿這個跟已收比。 */
   expected: number;
   paid: number;
   status: SubscriptionPeriodStatus;
@@ -1436,7 +1504,9 @@ export function computeSubscriptionSchedule(
   explicitPeriods: SubscriptionPeriodOverride[],
   today: string,
 ): { periods: SubscriptionPeriod[]; totalOutstanding: number } {
-  const defaultExpected = Number(sub.amount);
+  const defaultAmount = Number(sub.amount);
+  const setting: TaxSetting = sub.taxSetting ?? { treatment: "none", basis: "net" };
+  const currency = sub.currency ?? "TWD";
   const paidMap = new Map(paidByPeriod.map((p) => [p.periodStart, p.paid]));
   const overrideByStart = new Map(explicitPeriods.map((p) => [p.periodStart, p]));
 
@@ -1466,7 +1536,8 @@ export function computeSubscriptionSchedule(
   const periods: SubscriptionPeriod[] = sorted.map((periodStart) => {
     const override = overrideByStart.get(periodStart);
     // expectedAmount 可為 NULL（只記請款/開發票日、不覆寫金額）→ 退回 sub.amount。
-    const expected = override?.expectedAmount ?? defaultExpected;
+    const amount = override?.expectedAmount ?? defaultAmount;
+    const { net, tax, gross: expected } = taxedAmount(amount, setting, currency);
     const paid = paidMap.get(periodStart) ?? 0;
     const upcoming = periodStart > today;
     let status: SubscriptionPeriodStatus;
@@ -1478,6 +1549,9 @@ export function computeSubscriptionSchedule(
     return {
       periodStart,
       periodLabel: periodStart,
+      amount,
+      net,
+      tax,
       expected,
       paid,
       status,
@@ -1488,7 +1562,7 @@ export function computeSubscriptionSchedule(
       isOverride: override?.expectedAmount != null,
     };
   });
-  return { periods, totalOutstanding };
+  return { periods, totalOutstanding: Math.round(totalOutstanding * 100) / 100 };
 }
 
 export type SubscriptionSchedule = {
@@ -1502,7 +1576,15 @@ export type SubscriptionSchedule = {
   endDate: string | null;
   status: string;
   nextChargeDate: string | null;
+  /** 預設每期金額（amount）拆出來的未稅／稅額／含稅 */
+  net: number;
+  tax: number;
+  gross: number;
+  /** 有效稅別（綁合約跟合約，否則自己，NULL 沿用組織） */
+  taxTreatment: TaxTreatment;
+  amountBasis: AmountBasis;
   periods: SubscriptionPeriod[];
+  /** 已到期各期的未收合計（含稅） */
   totalOutstanding: number;
 };
 
@@ -1514,12 +1596,14 @@ export async function getSubscriptionSchedule(
   const sub = await getSubscription(orgId, id);
   if (!sub) return null;
   const today = todayStr();
-  const [paidByPeriod, explicitPeriods] = await Promise.all([
+  const [paidByPeriod, explicitPeriods, org] = await Promise.all([
     subscriptionPaidByPeriod(orgId, id),
     listSubscriptionPeriods(orgId, id),
+    getOrgTaxSetting(orgId),
   ]);
+  const taxSetting = subscriptionTaxSetting(org, sub);
   const { periods, totalOutstanding } = computeSubscriptionSchedule(
-    sub,
+    { ...sub, taxSetting },
     paidByPeriod,
     explicitPeriods,
     today,
@@ -1538,6 +1622,7 @@ export async function getSubscriptionSchedule(
       sub.status === "active"
         ? nextChargeDate(sub.startDate, sub.intervalMonths, today, sub.endDate)
         : null,
+    ...taxedAmount(Number(sub.amount), taxSetting, sub.currency),
     periods,
     totalOutstanding,
   };
@@ -1647,51 +1732,63 @@ export async function listContracts(orgId: string) {
   // received = income（已收）；cost = expense/advance（成本，僅供參考，不從合約金額扣）。
   const receivedSum = sql<string>`coalesce(sum(${transactions.amount}) filter (where ${transactions.type} = 'income'), 0)`;
   const costSum = sql<string>`coalesce(sum(${transactions.amount}) filter (where ${transactions.type} in ('expense','advance')), 0)`;
-  const rows = await db
-    .select({
-      id: contracts.id,
-      customerPartyId: contracts.customerPartyId,
-      customerName: parties.name,
-      projectId: contracts.projectId,
-      projectName: projects.name,
-      title: contracts.title,
-      amount: contracts.amount,
-      currency: contracts.currency,
-      startDate: contracts.startDate,
-      endDate: contracts.endDate,
-      signedDate: contracts.signedDate,
-      paymentTermsDays: contracts.paymentTermsDays,
-      status: contracts.status,
-      note: contracts.note,
-      fileUrl: contracts.fileUrl,
-      billingPlan: contracts.billingPlan,
-      installmentCount: contracts.installmentCount,
-      installmentSplit: contracts.installmentSplit,
-      billingIntervalMonths: contracts.billingIntervalMonths,
-      dueRule: contracts.dueRule,
-      dueDay: contracts.dueDay,
-      received: receivedSum,
-      cost: costSum,
-    })
-    .from(contracts)
-    .leftJoin(parties, eq(parties.id, contracts.customerPartyId))
-    .leftJoin(projects, eq(projects.id, contracts.projectId))
-    .leftJoin(
-      transactions,
-      and(
-        eq(transactions.contractId, contracts.id),
-        eq(transactions.currency, contracts.currency),
-        isNull(transactions.deletedAt),
-      ),
-    )
-    .where(and(eq(contracts.organizationId, orgId), isNull(contracts.deletedAt)))
-    .groupBy(contracts.id, parties.name, projects.name)
-    .orderBy(desc(contracts.createdAt));
+  const [rows, org] = await Promise.all([
+    db
+      .select({
+        id: contracts.id,
+        customerPartyId: contracts.customerPartyId,
+        customerName: parties.name,
+        projectId: contracts.projectId,
+        projectName: projects.name,
+        title: contracts.title,
+        amount: contracts.amount,
+        currency: contracts.currency,
+        startDate: contracts.startDate,
+        endDate: contracts.endDate,
+        signedDate: contracts.signedDate,
+        paymentTermsDays: contracts.paymentTermsDays,
+        status: contracts.status,
+        note: contracts.note,
+        fileUrl: contracts.fileUrl,
+        billingPlan: contracts.billingPlan,
+        installmentCount: contracts.installmentCount,
+        installmentSplit: contracts.installmentSplit,
+        billingIntervalMonths: contracts.billingIntervalMonths,
+        dueRule: contracts.dueRule,
+        dueDay: contracts.dueDay,
+        /** 合約自己存的稅別（NULL＝沿用組織預設）；編輯表單回填用。 */
+        ownTaxTreatment: contracts.taxTreatment,
+        ownAmountBasis: contracts.amountBasis,
+        received: receivedSum,
+        cost: costSum,
+      })
+      .from(contracts)
+      .leftJoin(parties, eq(parties.id, contracts.customerPartyId))
+      .leftJoin(projects, eq(projects.id, contracts.projectId))
+      .leftJoin(
+        transactions,
+        and(
+          eq(transactions.contractId, contracts.id),
+          eq(transactions.currency, contracts.currency),
+          isNull(transactions.deletedAt),
+        ),
+      )
+      .where(and(eq(contracts.organizationId, orgId), isNull(contracts.deletedAt)))
+      .groupBy(contracts.id, parties.name, projects.name)
+      .orderBy(desc(contracts.createdAt)),
+    getOrgTaxSetting(orgId),
+  ]);
   return rows.map((r) => {
     const received = Number(r.received);
     const cost = Number(r.cost);
-    const remaining = r.amount == null ? null : Number(r.amount) - received;
-    return { ...r, received, cost, remaining };
+    const setting = effectiveTaxSetting(org, {
+      taxTreatment: r.ownTaxTreatment,
+      amountBasis: r.ownAmountBasis,
+    });
+    // 入帳是客戶實際付的錢（含稅），未收一律拿含稅應收去減。
+    const taxed = taxedAmountOrNull(r.amount, setting, r.currency);
+    const { remaining } = collectionProgress(taxed.gross, received);
+    return { ...r, ...taxed, received, cost, remaining };
   });
 }
 
@@ -1739,9 +1836,24 @@ export type BillingRow = {
   invoicedOn: string | null;
   /** 該開發票卻還沒開 */
   needsInvoice: boolean;
+  /** 金額原樣（請款項目的 amount／訂閱該期金額），基準看 amountBasis */
+  amount: number;
+  /** 未稅 */
+  net: number;
+  /** 稅額 */
+  tax: number;
+  /** 含稅 gross（客戶實際要付）；跟 expected 同一個數字，給只認 net/tax/gross 的呼叫端用 */
+  gross: number;
+  /** 應收＝含稅 gross（客戶實際要付）。收款狀態、未收、帳齡都拿這個比。 */
   expected: number;
   paid: number;
   currency: string;
+  /** 有效稅別：綁合約跟合約，否則自己，NULL 沿用組織 */
+  taxTreatment: TaxTreatment;
+  amountBasis: AmountBasis;
+  /** 這一筆自己存的稅別（NULL＝沿用）；編輯表單回填用 */
+  ownTaxTreatment: string | null;
+  ownAmountBasis: string | null;
   /** 推導出來的顯示狀態 */
   status: BillingItemStatus;
   note: string | null;
@@ -1915,7 +2027,7 @@ export async function listBillingBoard(
   const today = todayStr();
   const cutoff = format(addDays(parseISO(today), -BOARD_PAID_LOOKBACK_DAYS), "yyyy-MM-dd");
 
-  const [itemRows, itemPaid, subRows, subPaidAll, subPeriodsAll] = await Promise.all([
+  const [itemRows, itemPaid, subRows, subPaidAll, subPeriodsAll, org] = await Promise.all([
     db
       .select({
         id: billingItems.id,
@@ -1937,6 +2049,10 @@ export async function listBillingBoard(
         needsInvoice: billingItems.needsInvoice,
         status: billingItems.status,
         note: billingItems.note,
+        ownTaxTreatment: billingItems.taxTreatment,
+        ownAmountBasis: billingItems.amountBasis,
+        contractTaxTreatment: contracts.taxTreatment,
+        contractAmountBasis: contracts.amountBasis,
       })
       .from(billingItems)
       .leftJoin(parties, eq(parties.id, billingItems.customerPartyId))
@@ -1950,13 +2066,25 @@ export async function listBillingBoard(
     ),
     subscriptionPaidByPeriodAll(orgId),
     subscriptionPeriodsAll(orgId),
+    getOrgTaxSetting(orgId),
   ]);
 
   const rows: BillingRow[] = [];
 
   for (const it of itemRows) {
     if (it.status === "cancelled") continue;
-    const expected = Number(it.amount);
+    const taxed = taxedAmount(
+      Number(it.amount),
+      effectiveTaxSetting(
+        org,
+        { taxTreatment: it.ownTaxTreatment, amountBasis: it.ownAmountBasis },
+        it.contractId,
+        { taxTreatment: it.contractTaxTreatment, amountBasis: it.contractAmountBasis },
+      ),
+      it.currency,
+    );
+    // 應收是含稅 gross：入帳是客戶實際付的錢，拿未稅去比會永遠「部分收款」。
+    const expected = taxed.gross;
     const paid = itemPaid.get(it.id) ?? 0;
     const status = deriveBillingStatus(
       {
@@ -1992,9 +2120,17 @@ export async function listBillingBoard(
       paidOn: it.paidOn,
       invoicedOn: it.invoicedOn,
       needsInvoice: it.needsInvoice && !it.invoicedOn && (it.billedOn != null || paid > 0),
+      amount: Number(it.amount),
+      net: taxed.net,
+      tax: taxed.tax,
+      gross: expected,
       expected,
       paid,
       currency: it.currency,
+      taxTreatment: taxed.taxTreatment,
+      amountBasis: taxed.amountBasis,
+      ownTaxTreatment: it.ownTaxTreatment,
+      ownAmountBasis: it.ownAmountBasis,
       status,
       note: it.note,
       rawStatus: it.status,
@@ -2003,8 +2139,9 @@ export async function listBillingBoard(
 
   for (const sub of subRows) {
     if (sub.status === "ended") continue;
+    const taxSetting = subscriptionTaxSetting(org, sub);
     const { periods } = computeSubscriptionSchedule(
-      sub,
+      { ...sub, taxSetting },
       subPaidAll.get(sub.id) ?? [],
       subPeriodsAll.get(sub.id) ?? [],
       today,
@@ -2043,9 +2180,17 @@ export async function listBillingBoard(
         paidOn: null,
         invoicedOn: p.invoicedOn,
         needsInvoice: !p.invoicedOn && (p.billedOn != null || p.paid > 0),
+        amount: p.amount,
+        net: p.net,
+        tax: p.tax,
+        gross: p.expected,
         expected: p.expected,
         paid: p.paid,
         currency: sub.currency,
+        taxTreatment: taxSetting.treatment,
+        amountBasis: taxSetting.basis,
+        ownTaxTreatment: sub.ownTaxTreatment,
+        ownAmountBasis: sub.ownAmountBasis,
         status,
         note: p.note,
         rawStatus: null,
@@ -2267,8 +2412,10 @@ export async function listContractCoverage(
     .filter((c) => c.status !== "cancelled")
     .map((c) => {
       const items = byContract.get(c.id) ?? [];
-      const scheduled = items.reduce((s, r) => s + r.expected, 0);
-      const billed = items.filter((r) => r.billedOn != null).reduce((s, r) => s + r.expected, 0);
+      // 排程對的是合約金額本身：綁合約的請款項目跟合約同一個稅別基準，所以比原樣金額，
+      // 不比含稅（逐期四捨五入的稅額加總會跟合約總額差幾塊，誤報「漏排」）。
+      const scheduled = items.reduce((s, r) => s + r.amount, 0);
+      const billed = items.filter((r) => r.billedOn != null).reduce((s, r) => s + r.amount, 0);
       const amount = c.amount == null ? null : Number(c.amount);
       return {
         id: c.id,

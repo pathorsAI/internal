@@ -22,6 +22,8 @@ export function AccountClient({
   const router = useRouter();
   const [mode, setMode] = useState<AvatarMode>("keep");
   const [fieldKey, setFieldKey] = useState(0);
+  // 存檔後直接換成回傳的新網址，不等 router.refresh() 帶回新的 image prop（見 org-settings-client）
+  const [current, setCurrent] = useState(image);
   const [saving, setSaving] = useState(false);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -34,6 +36,7 @@ export function AccountClient({
         toast.error(res.error);
         return;
       }
+      if (res.url !== undefined) setCurrent(res.url);
       toast.success(mode === "remove" ? t("toast.removed") : t("toast.updated"));
       setMode("keep");
       setFieldKey((k) => k + 1);
@@ -58,12 +61,12 @@ export function AccountClient({
         <form onSubmit={onSubmit} className="space-y-5">
           <AvatarUploadField
             key={fieldKey}
-            hasCurrent={Boolean(image)}
+            hasCurrent={Boolean(current)}
             disabled={saving}
             onModeChange={setMode}
             labels={avatarFieldLabels((k) => tAvatar(k as never))}
             renderAvatar={({ mode: m, src }) => (
-              <PartyAvatar name={name} size="lg" className="rounded-full" src={src ?? (m === "keep" ? image : null)} />
+              <PartyAvatar name={name} size="lg" className="rounded-full" src={src ?? (m === "keep" ? current : null)} />
             )}
           />
           <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-sm">

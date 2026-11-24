@@ -32,7 +32,7 @@ export function projectReadyToClose(input: Parameters<typeof deriveProjectStatus
   return deriveProjectStatus(input) === "completed";
 }
 
-/** 合約已收 ≥ 金額、但還在草稿 / 進行中 → 該提示結案。 */
+/** 合約已收 ≥ 含稅應收（gross）、但還在草稿 / 進行中 → 該提示結案。amount 請傳含稅應收。 */
 export function contractReadyToClose(c: { status: string; amount: number | null; received: number }): boolean {
   return OPEN_CONTRACT.has(c.status) && c.amount !== null && c.amount > 0 && c.received >= c.amount;
 }

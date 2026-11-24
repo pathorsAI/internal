@@ -15,8 +15,14 @@ import {
   requireNumber,
   requireString,
   resolveOrg,
+  optTaxArgs,
+  STORED_TAX_PROPS,
+  TAX_INPUT_PROPS,
   type ToolDef,
 } from "./shared";
+
+const TAX_NOTE =
+  " amount is net (未稅) unless amountBasis=gross. taxTreatment/amountBasis left null inherit the contract's setting when a contract is bound, otherwise the organization default.";
 
 const PROJECT_STATUS = ["active", "archived"] as const;
 const SUB_STATUS = ["active", "paused", "ended"] as const;
@@ -71,6 +77,7 @@ const SUBSCRIPTION_ROW_PROPS = {
   note: { type: ["string", "null"] },
   contractId: { type: ["number", "null"] },
   createdAt: { type: "string" },
+  ...STORED_TAX_PROPS,
 } as const;
 
 const SUBSCRIPTION_ROW: JsonSchemaObject = {
@@ -110,6 +117,7 @@ const CONTRACT_ROW_PROPS = {
   billingIntervalMonths: { type: "number" },
   dueRule: { type: "string", enum: ["signed_date", "day_of_month", "business_day_of_month"] },
   dueDay: { type: ["number", "null"] },
+  ...STORED_TAX_PROPS,
 } as const;
 
 const CONTRACT_ROW: JsonSchemaObject = {
@@ -171,6 +179,7 @@ function subscriptionPatch(args: Record<string, unknown>): Record<string, unknow
   put("endDate", optString(args, "endDate"), () => optString(args, "endDate"));
   put("status", optString(args, "status"), () => optString(args, "status"));
   put("note", optString(args, "note"), () => optString(args, "note"));
+  Object.assign(patch, optTaxArgs(args));
   return patch;
 }
 
@@ -277,7 +286,8 @@ export const clientTools: Record<string, ToolDef> = {
   // ---- subscriptions (recurring billing) ----
   create_subscription: {
     description:
-      "Create a recurring subscription/retainer. intervalMonths controls how often it bills (1=monthly, 3=quarterly, 12=yearly).",
+      "Create a recurring subscription/retainer. intervalMonths controls how often it bills (1=monthly, 3=quarterly, 12=yearly)." +
+      TAX_NOTE,
     inputSchema: {
       type: "object",
       properties: {
@@ -292,6 +302,7 @@ export const clientTools: Record<string, ToolDef> = {
         endDate: { type: "string", description: "YYYY-MM-DD; optional." },
         status: { type: "string", enum: [...SUB_STATUS], description: "Default active." },
         note: { type: "string" },
+        ...TAX_INPUT_PROPS,
         ...ORG_ARG,
       },
       required: ["customerPartyId", "name", "amount", "startDate"],
@@ -321,6 +332,7 @@ export const clientTools: Record<string, ToolDef> = {
           endDate: optString(args, "endDate") ?? null,
           status: optString(args, "status") ?? "active",
           note: optString(args, "note") ?? null,
+          ...optTaxArgs(args),
         })
         .returning();
       return row;
@@ -328,7 +340,10 @@ export const clientTools: Record<string, ToolDef> = {
   },
 
   update_subscription: {
-    description: "Update a subscription (only provided fields). Set status=paused/ended to stop billing.",
+    description:
+      "Update a subscription (only provided fields). Set status=paused/ended to stop billing." +
+      TAX_NOTE +
+      " Pass taxTreatment/amountBasis = null to go back to inheriting.",
     inputSchema: {
       type: "object",
       properties: {
@@ -347,6 +362,7 @@ export const clientTools: Record<string, ToolDef> = {
         endDate: { type: "string", description: "YYYY-MM-DD." },
         status: { type: "string", enum: [...SUB_STATUS] },
         note: { type: "string" },
+        ...TAX_INPUT_PROPS,
         ...ORG_ARG,
       },
       required: ["id"],
@@ -400,7 +416,7 @@ export const clientTools: Record<string, ToolDef> = {
   // ---- contracts ----
   create_contract: {
     description:
-      "Create a client contract. Projects are made of contracts: pass projectId to put it in an existing project (see list_projects), or createProject=true to create a new project named after the contract title with the same customer. Leave both out to create it without a project. Before creating a new project, ASK the user whether they want one (or which existing project it belongs to) — don't create projects on your own.",
+      "Create a client contract. amount is net (未稅) unless amountBasis=gross. taxTreatment/amountBasis left null inherit the organization default; subscriptions and billing items bound to this contract follow the contract's setting. Projects are made of contracts: pass projectId to put it in an existing project (see list_projects), or createProject=true to create a new project named after the contract title with the same customer. Leave both out to create it without a project. Before creating a new project, ASK the user whether they want one (or which existing project it belongs to) — don't create projects on your own.",
     inputSchema: {
       type: "object",
       properties: {
@@ -424,6 +440,7 @@ export const clientTools: Record<string, ToolDef> = {
         },
         note: { type: "string" },
         fileUrl: { type: "string", description: "Link to the signed contract file, e.g. Google Drive." },
+        ...TAX_INPUT_PROPS,
         ...ORG_ARG,
       },
       required: ["customerPartyId", "title"],
@@ -459,6 +476,7 @@ export const clientTools: Record<string, ToolDef> = {
           status: optString(args, "status") ?? "active",
           note: optString(args, "note") ?? null,
           fileUrl: optString(args, "fileUrl") ?? null,
+          ...optTaxArgs(args),
         })
         .returning();
       return row;
@@ -467,7 +485,7 @@ export const clientTools: Record<string, ToolDef> = {
 
   update_contract: {
     description:
-      "Update a contract (only provided fields). Status meanings: draft = 草稿/未生效, active = 進行中, completed = 已完成 (delivered and fully collected, 未收 0), cancelled = 已取消. A contract does NOT move to completed by itself — once its 已收 reaches the contract amount (see list_contracts / the contractProgress returned by the transaction tools), confirm with the user and then set status='completed' here.",
+      "Update a contract (only provided fields). Status meanings: draft = 草稿/未生效, active = 進行中, completed = 已完成 (delivered and fully collected, 未收 0), cancelled = 已取消. A contract does NOT move to completed by itself — once its 已收 reaches the contract amount (see list_contracts / the contractProgress returned by the transaction tools), confirm with the user and then set status='completed' here. amount is net (未稅) unless amountBasis=gross; taxTreatment/amountBasis = null inherit the organization default, and bound subscriptions / billing items follow the contract.",
     inputSchema: {
       type: "object",
       properties: {
@@ -490,6 +508,7 @@ export const clientTools: Record<string, ToolDef> = {
         },
         note: { type: "string" },
         fileUrl: { type: "string" },
+        ...TAX_INPUT_PROPS,
         ...ORG_ARG,
       },
       required: ["id"],
@@ -517,6 +536,7 @@ export const clientTools: Record<string, ToolDef> = {
       if (optString(args, "status") !== undefined) patch.status = optString(args, "status");
       if (optString(args, "note") !== undefined) patch.note = optString(args, "note");
       if (optString(args, "fileUrl") !== undefined) patch.fileUrl = optString(args, "fileUrl");
+      Object.assign(patch, optTaxArgs(args));
       if (Object.keys(patch).length === 0) throw new Error("Nothing to update.");
       const [row] = await db
         .update(contracts)

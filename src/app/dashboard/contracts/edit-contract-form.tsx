@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import type { TaxSetting } from "@/lib/tax-treatment";
 import { updateContract } from "@/db/mutations";
 import { EditForm } from "@/components/edit-form";
 import { ContractFields, type ContractFormValues, type Option, type ProjectOption } from "./contract-fields";
@@ -16,8 +17,10 @@ export function EditContractForm({
   lockedScheduleCount = 0,
   extra,
   footer,
+  orgTax,
 }: Readonly<{
   contract: Contract;
+  orgTax: TaxSetting;
   parties: Option[];
   projects: ProjectOption[];
   summary?: { received: number; cost: number; remaining: number | null };
@@ -48,6 +51,7 @@ export function EditContractForm({
         scheduleCount={scheduleCount}
         lockedScheduleCount={lockedScheduleCount}
         extra={extra}
+        orgTax={orgTax}
       />
     </EditForm>
   );

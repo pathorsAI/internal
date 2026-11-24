@@ -1,6 +1,7 @@
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { Db } from "@/db";
-import { contracts, projects, subscriptions, transactions } from "@/db/schema";
+import { contracts, projects, subscriptions } from "@/db/schema";
+import { getContractProgress } from "@/lib/mcp/shared";
 import { contractReadyToClose, projectReadyToClose } from "./project-status";
 
 /**
@@ -24,63 +25,29 @@ function uniq(list: readonly (number | null | undefined)[]): number[] {
   return [...new Set(list.filter((n): n is number => typeof n === "number" && n > 0))];
 }
 
-/** 合約已收（同幣別收入；含經由請款項 / 訂閱繼承合約的交易）。 */
-export async function contractReceived(db: Db, orgId: string, contractIds: readonly number[]) {
-  const list = uniq(contractIds);
-  if (list.length === 0) return new Map<number, number>();
-  const rows = await db
-    .select({
-      id: contracts.id,
-      received: sql<string>`coalesce(sum(${transactions.amount}) filter (where ${transactions.type} = 'income'), 0)`,
-    })
-    .from(contracts)
-    .leftJoin(
-      transactions,
-      and(
-        eq(transactions.contractId, contracts.id),
-        eq(transactions.currency, contracts.currency),
-        isNull(transactions.deletedAt),
-      ),
-    )
-    .where(and(eq(contracts.organizationId, orgId), inArray(contracts.id, list)))
-    .groupBy(contracts.id);
-  return new Map(rows.map((r) => [r.id, Number(r.received)]));
-}
-
+/**
+ * 合約已收齊但還開著。收齊判斷沿用 getContractProgress（含稅應收 gross vs 同幣別收入，
+ * 含經由請款項 / 訂閱繼承合約的交易），跟合約頁、list_contracts 同一套規則。
+ */
 export async function contractHints(db: Db, orgId: string, contractIds: readonly number[]): Promise<StatusHint[]> {
   const list = uniq(contractIds);
   if (list.length === 0) return [];
-  const [rows, received] = await Promise.all([
-    db
-      .select({
-        id: contracts.id,
-        title: contracts.title,
-        status: contracts.status,
-        amount: contracts.amount,
-        currency: contracts.currency,
-      })
-      .from(contracts)
-      .where(and(eq(contracts.organizationId, orgId), inArray(contracts.id, list), isNull(contracts.deletedAt))),
-    contractReceived(db, orgId, list),
-  ]);
+  const progress = await getContractProgress(db, orgId, list);
   const out: StatusHint[] = [];
-  for (const c of rows) {
-    const amount = c.amount == null ? null : Number(c.amount);
-    const got = received.get(c.id) ?? 0;
-    if (amount !== null && contractReadyToClose({ status: c.status, amount, received: got })) {
-      out.push({
-        kind: "contract_fully_collected",
-        contractId: c.id,
-        title: c.title,
-        status: c.status,
-        currency: c.currency,
-        amount,
-        received: got,
-        message:
-          `合約「${c.title}」已收 ${got} ${c.currency} ≥ 金額 ${amount}，但狀態仍是 ${c.status}。` +
-          "請告訴使用者，並詢問是否改成 completed（已完成）；得到明確同意後才呼叫 update_contract，不要自行更改。",
-      });
-    }
+  for (const c of progress) {
+    if (c.gross === null || !contractReadyToClose({ status: c.status, amount: c.gross, received: c.received })) continue;
+    out.push({
+      kind: "contract_fully_collected",
+      contractId: c.contractId,
+      title: c.title,
+      status: c.status,
+      currency: c.currency,
+      amount: c.gross,
+      received: c.received,
+      message:
+        `合約「${c.title}」已收 ${c.received} ${c.currency} ≥ 含稅應收 ${c.gross}，但狀態仍是 ${c.status}。` +
+        "請告訴使用者，並詢問是否改成 completed（已完成）；得到明確同意後才呼叫 update_contract，不要自行更改。",
+    });
   }
   return out;
 }

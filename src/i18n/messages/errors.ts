@@ -48,6 +48,7 @@ const errors = {
   },
   validation: {
     statusInvalid: { "zh-TW": "狀態不正確", en: "Invalid status" },
+    taxSettingInvalid: { "zh-TW": "稅別或金額基準不正確", en: "Invalid VAT treatment or amount basis" },
     categoryKindInvalid: { "zh-TW": "分類別不正確", en: "Invalid category type" },
     billedDocKind: { "zh-TW": "有報公司統編時，憑證類型必須是電子發票或其他發票", en: "When tax ID is reported, the document type must be an e-invoice or a paper invoice" },
     notOrgMember: { "zh-TW": "該使用者不是此組織成員", en: "That user is not a member of this organization" },
@@ -79,6 +80,7 @@ const errors = {
   },
   forbidden: {
     manageEmployees: { "zh-TW": "只有組織的擁有者或管理員可以修改員工資料", en: "Only organization owners and admins can change employee records" },
+    manageOrgSettings: { "zh-TW": "只有組織的擁有者或管理員可以修改組織設定", en: "Only organization owners and admins can change organization settings" },
   },
   employeeAccount: {
     kindInvalid: { "zh-TW": "帳戶類型不正確", en: "Invalid account type" },

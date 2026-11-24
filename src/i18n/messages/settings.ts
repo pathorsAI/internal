@@ -25,6 +25,23 @@ const settings = {
       updated: { "zh-TW": "已更新組織資料", en: "Organization updated" },
     },
   },
+  tax: {
+    title: { "zh-TW": "營業稅別預設", en: "Default VAT treatment" },
+    descriptionEditable: {
+      "zh-TW": "新合約、沒綁合約的訂閱與請款項目沿用這個設定；合約可以個別改。列表與收款判斷會依此算出含稅應收。",
+      en: "New contracts, and subscriptions or billing items without a contract, use this setting; each contract can override it. Lists and collection status use it to compute the tax-inclusive receivable.",
+    },
+    descriptionReadOnly: {
+      "zh-TW": "新合約、沒綁合約的訂閱與請款項目沿用這個設定。只有擁有者或管理員可以修改。",
+      en: "New contracts, and subscriptions or billing items without a contract, use this setting. Only owners or admins can change it.",
+    },
+    save: { "zh-TW": "儲存稅別", en: "Save VAT settings" },
+    saving: { "zh-TW": "儲存中…", en: "Saving…" },
+    toast: {
+      updated: { "zh-TW": "已更新營業稅別預設", en: "Default VAT treatment updated" },
+      updateFailed: { "zh-TW": "更新失敗", en: "Failed to update" },
+    },
+  },
   calendar: {
     title: { "zh-TW": "Google 日曆", en: "Google Calendar" },
     intro: { "zh-TW": "把請款、收款與開發票的日期推到一本名為「請款提醒 · 組織名」的專屬子日曆，提醒由 Google 自己發送。已收款、已開發票的項目會自動從日曆移除。一個組織同時只會有一個連結。", en: "Pushes billing, payment, and invoicing dates to a dedicated sub-calendar named \"Billing reminders · org name\"; Google sends the reminders itself. Items that are paid or invoiced are automatically removed from the calendar. An organization can only have one connection at a time." },

@@ -546,6 +546,8 @@ type CandidatePools = {
     contractId: number | null;
     title: string;
     amount: string;
+    /** 含稅應收（看板的 expected）；發票總額是含稅的，比這個才對得上未稅基準的請款項目 */
+    gross: number | null;
     currency: string;
     anchor: string | null;
   }[];
@@ -636,6 +638,11 @@ async function loadCandidatePools(orgId: string, from: string, to: string): Prom
       takenBilling.add(`sub:${t.subscriptionId}:${t.subscriptionPeriod}`);
     }
   }
+  const grossByItem = new Map(
+    board
+      .filter((r) => r.source === "billing_item" && r.billingItemId != null)
+      .map((r) => [r.billingItemId as number, r.expected]),
+  );
   return {
     txns,
     items: items.map((it) => ({
@@ -644,6 +651,7 @@ async function loadCandidatePools(orgId: string, from: string, to: string): Prom
       contractId: it.contractId,
       title: it.title,
       amount: it.amount,
+      gross: grossByItem.get(it.id) ?? null,
       currency: it.currency,
       anchor: it.billedOn ?? it.dueDate ?? it.paidOn,
     })),
@@ -691,7 +699,7 @@ function findCandidates(
       if (
         it.customerPartyId === inv.partyId &&
         it.currency === "TWD" &&
-        sameMoney(it.amount, inv.gross) &&
+        (sameMoney(it.gross, inv.gross) || sameMoney(it.amount, inv.gross)) &&
         withinWindow(it.anchor, inv.invoiceDate) &&
         !pools.takenBilling.has(`billing_item:${it.id}`)
       ) {

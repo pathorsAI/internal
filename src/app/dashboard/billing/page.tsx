@@ -41,6 +41,8 @@ import { IssueInvoiceDialog } from "./issue-invoice-dialog";
 import { RecordPaymentDialog } from "./record-payment-dialog";
 import { SyncCalendarButton } from "./sync-calendar-button";
 import { SimpanyIssueSheet, type SimpanyIssueSource } from "../invoices/simpany-issue-sheet";
+import { getOrgTaxSetting } from "@/db/org-tax";
+import { TaxBreakdown } from "@/components/tax-breakdown";
 
 export const dynamic = "force-dynamic";
 
@@ -72,6 +74,7 @@ function outstandingLabel(t: T, expected: number, paid: number, currency: string
 /**
  * 已收 / 應收 + 未收差額，沿用合約頁「收款進度」的資訊密度。
  * 收了一部分才畫進度條 —— 沒收或收齊時一條空的 / 滿的線沒有多的資訊。
+ * 應收（expected）是含稅 gross；有稅額才在最下面多一行未稅＋稅。
  */
 function AmountCell({ row, t }: Readonly<{ row: BillingRow; t: T }>) {
   const partial = row.paid > 0 && row.paid < row.expected;
@@ -89,6 +92,7 @@ function AmountCell({ row, t }: Readonly<{ row: BillingRow; t: T }>) {
       <div className="text-xs text-muted-foreground tabular-nums">
         {outstandingLabel(t, row.expected, row.paid, row.currency)}
       </div>
+      <TaxBreakdown net={row.net} tax={row.tax} />
     </div>
   );
 }
@@ -171,7 +175,9 @@ function InvoiceAction({ row, simpany }: Readonly<{ row: BillingRow; simpany: bo
           customerName={row.customerName}
           customerTaxId={row.customerTaxId}
           title={row.title}
-          expected={row.expected}
+          amount={row.amount}
+          taxTreatment={row.taxTreatment}
+          amountBasis={row.amountBasis}
           currency={row.currency}
         />
       );
@@ -187,7 +193,9 @@ function InvoiceAction({ row, simpany }: Readonly<{ row: BillingRow; simpany: bo
       customerName={row.customerName}
       customerTaxId={row.customerTaxId}
       title={row.title}
-      expected={row.expected}
+      amount={row.amount}
+      taxTreatment={row.taxTreatment}
+      amountBasis={row.amountBasis}
       currency={row.currency}
     />
   );
@@ -227,14 +235,16 @@ export default async function BillingPage({
   const filter =
     rawFilter && FILTERS.has(rawFilter as BoardFilter) ? (rawFilter as BoardFilter) : null;
 
-  const [rows, parties, projects, contracts, calendar, simpanyIntegration] = await Promise.all([
-    listBillingBoard(orgId),
-    listParties(orgId),
-    listProjects(orgId),
-    listContracts(orgId),
-    getCalendarSettings(orgId),
-    getIntegration(orgId, "simpany"),
-  ]);
+  const [rows, parties, projects, contracts, calendar, simpanyIntegration, orgTax] =
+    await Promise.all([
+      listBillingBoard(orgId),
+      listParties(orgId),
+      listProjects(orgId),
+      listContracts(orgId),
+      getCalendarSettings(orgId),
+      getIntegration(orgId, "simpany"),
+      getOrgTaxSetting(orgId),
+    ]);
   // 「在 Simpany 開立」只給 owner / admin，且整合要已開啟；其餘沿用手動流程。
   const simpany =
     canManageOrg(role) &&
@@ -258,6 +268,7 @@ export default async function BillingPage({
           parties={partyOptions}
           contracts={contractOptions}
           projects={projectOptions}
+          orgTax={orgTax}
         />
       </PageHeader>
 
@@ -363,7 +374,8 @@ export default async function BillingPage({
                         contractId: row.contractId,
                         projectId: row.projectId,
                         title: row.title,
-                        amount: String(row.expected),
+                        // 原樣金額（基準看稅別），不是含稅應收 —— 回填 expected 存檔會把稅灌進金額。
+                        amount: String(row.amount),
                         currency: row.currency,
                         dueDate: row.dueDate,
                         billedOn: row.billedOn,
@@ -372,7 +384,10 @@ export default async function BillingPage({
                         needsInvoice: row.needsInvoice || row.invoicedOn != null,
                         status: row.rawStatus ?? "scheduled",
                         note: row.note,
+                        taxTreatment: row.ownTaxTreatment,
+                        amountBasis: row.ownAmountBasis,
                       }}
+                      orgTax={orgTax}
                       parties={partyOptions}
                       contracts={contractOptions}
                       projects={projectOptions}

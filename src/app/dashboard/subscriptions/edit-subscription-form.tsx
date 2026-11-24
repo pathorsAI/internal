@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import type { TaxSetting } from "@/lib/tax-treatment";
 import { updateSubscription } from "@/db/mutations";
 import { EditForm } from "@/components/edit-form";
 import {
@@ -16,12 +17,14 @@ export function EditSubscriptionForm({
   parties,
   projects,
   contracts,
+  orgTax,
   footer,
 }: Readonly<{
   subscription: Subscription;
   parties: Option[];
   projects: Option[];
   contracts: Option[];
+  orgTax: TaxSetting;
   footer?: React.ReactNode;
 }>) {
   const t = useTranslations("subscriptions");
@@ -41,6 +44,7 @@ export function EditSubscriptionForm({
         projects={projects}
         contracts={contracts}
         values={subscription}
+        orgTax={orgTax}
       />
     </EditForm>
   );

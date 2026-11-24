@@ -11,6 +11,9 @@ import {
   transactions,
 } from "@/db/schema";
 import { getSubscriptionSchedule } from "@/db/queries";
+import { getOrgTaxSetting } from "@/db/org-tax";
+import { effectiveTaxSetting } from "@/lib/tax-amounts";
+import type { TaxSetting } from "@/lib/tax-treatment";
 import { isValidEmail } from "@/lib/pii";
 import {
   getSimpanyClient,
@@ -160,7 +163,26 @@ type Source = {
   amount: number | null;
   currency: string;
   itemName: string | null;
+  /**
+   * 來源（請款項目／訂閱）的有效營業稅別：沒指定 taxTreatment / isTaxIncluded 時拿它當預設，
+   * amount 就是它的原樣金額（基準看 basis）。交易來源沒有這個（入帳本來就是含稅的錢）。
+   */
+  taxSetting?: TaxSetting;
 };
+
+/**
+ * 稅別 → 發票課稅別的預設：應稅／零稅率／免稅一對一；「不加收營業稅」沒有對應，回 undefined 走原本的判斷。
+ */
+export function invoiceTreatmentFor(setting: TaxSetting | undefined): TaxTreatment | undefined {
+  if (!setting || setting.treatment === "none") return undefined;
+  return setting.treatment;
+}
+
+/** 金額含不含稅的預設：應稅照來源的金額基準；其他（含沒有來源稅別）維持原本的預設 true。 */
+export function invoiceTaxIncludedFor(setting: TaxSetting | undefined): boolean {
+  if (setting?.treatment === "taxable") return setting.basis === "gross";
+  return true;
+}
 
 function extractEmails(text: string | null | undefined): string[] {
   if (!text) return [];
@@ -242,6 +264,10 @@ async function applyBillingItemSource(
       amount: billingItems.amount,
       currency: billingItems.currency,
       invoicedOn: billingItems.invoicedOn,
+      taxTreatment: billingItems.taxTreatment,
+      amountBasis: billingItems.amountBasis,
+      contractTaxTreatment: contracts.taxTreatment,
+      contractAmountBasis: contracts.amountBasis,
     })
     .from(billingItems)
     .leftJoin(contracts, eq(contracts.id, billingItems.contractId))
@@ -262,6 +288,10 @@ async function applyBillingItemSource(
   src.amount = Number(it.amount);
   src.currency = it.currency;
   src.itemName = it.contractTitle ? `${it.contractTitle} ${it.title}` : it.title;
+  src.taxSetting = effectiveTaxSetting(await getOrgTaxSetting(orgId), it, it.contractId, {
+    taxTreatment: it.contractTaxTreatment,
+    amountBasis: it.contractAmountBasis,
+  });
 }
 
 /** 從訂閱的某一期預填（期別起日要對得上排程）。 */
@@ -302,7 +332,9 @@ async function applySubscriptionSource(
   links.subscriptionPeriod = subscriptionPeriod;
   links.contractId ??= sub.contractId;
   src.partyId ??= sub.customerPartyId;
-  src.amount = period.expected;
+  // 原樣金額＋訂閱的有效稅別（不是含稅應收 expected，否則未稅基準會被再加一次稅）。
+  src.amount = period.amount;
+  src.taxSetting = { treatment: schedule.taxTreatment, basis: schedule.amountBasis };
   src.currency = schedule.currency;
   src.itemName = `${schedule.name}（${period.periodLabel}）`;
 }
@@ -656,7 +688,12 @@ export async function previewSimpanyInvoice(
   const baseTwd = foreign ? foreign.twdAmount : src.amount;
 
   // ---- type / tax treatment ----
-  const { type, taxTreatment } = resolveTypeAndTreatment(input, vat, foreign, warnings);
+  const { type, taxTreatment } = resolveTypeAndTreatment(
+    { ...input, taxTreatment: input.taxTreatment ?? invoiceTreatmentFor(src.taxSetting) },
+    vat,
+    foreign,
+    warnings,
+  );
   const { zeroRateReason, customsClearanceType } = await resolveZeroRate(
     simpany,
     input,
@@ -679,7 +716,7 @@ export async function previewSimpanyInvoice(
   if (foreign && input.items && sum !== foreign.twdAmount) {
     warnings.push(`品項合計 ${sum} 與外幣換算的台幣銷售額 ${foreign.twdAmount} 不一致`);
   }
-  const isTaxIncluded = input.isTaxIncluded ?? true;
+  const isTaxIncluded = input.isTaxIncluded ?? invoiceTaxIncludedFor(src.taxSetting);
   const amounts = computeAmounts(sum, taxTreatment, isTaxIncluded);
   if (!isPositive(amounts.total)) throw new SimpanyPreviewError("發票總額必須大於 0");
 

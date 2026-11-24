@@ -10,6 +10,9 @@ import {
   vendorBillingAccounts,
 } from "@/db/schema";
 import { computeSubscriptionSchedule } from "@/db/queries";
+import { getOrgTaxSetting } from "@/db/org-tax";
+import { effectiveTaxSetting, taxedAmountOrNull, type TaxColumns } from "@/lib/tax-amounts";
+import type { TaxSetting } from "@/lib/tax-treatment";
 import { matchPartiesOf } from "@/lib/vendor-billing/account-meta";
 import {
   decideAutoLink,
@@ -121,7 +124,7 @@ type BillingItemRef = {
   amount: string;
   currency: string;
   status: string;
-};
+} & TaxColumns;
 type SubscriptionRef = {
   id: number;
   name: string;
@@ -134,7 +137,7 @@ type SubscriptionRef = {
   startDate: string;
   endDate: string | null;
   status: string;
-};
+} & TaxColumns;
 type ContractRef = {
   id: number;
   title: string;
@@ -143,7 +146,7 @@ type ContractRef = {
   amount: string | null;
   currency: string;
   status: string;
-};
+} & TaxColumns;
 
 const OPEN_CONTRACT = ["draft", "active"];
 // 只排除取消的請款項。人工標「已收」但沒綁交易的也要當候選：還沒收的金額一律以綁定的交易算，
@@ -166,6 +169,8 @@ async function loadRefs(ctx: LinkContext, drafts: readonly LinkDraft[], matchPar
     amount: billingItems.amount,
     currency: billingItems.currency,
     status: billingItems.status,
+    taxTreatment: billingItems.taxTreatment,
+    amountBasis: billingItems.amountBasis,
   };
   const subCols = {
     id: subscriptions.id,
@@ -179,6 +184,8 @@ async function loadRefs(ctx: LinkContext, drafts: readonly LinkDraft[], matchPar
     startDate: subscriptions.startDate,
     endDate: subscriptions.endDate,
     status: subscriptions.status,
+    taxTreatment: subscriptions.taxTreatment,
+    amountBasis: subscriptions.amountBasis,
   };
   const ctCols = {
     id: contracts.id,
@@ -188,6 +195,8 @@ async function loadRefs(ctx: LinkContext, drafts: readonly LinkDraft[], matchPar
     amount: contracts.amount,
     currency: contracts.currency,
     status: contracts.status,
+    taxTreatment: contracts.taxTreatment,
+    amountBasis: contracts.amountBasis,
   };
 
   const biIds = ids(drafts.map((d) => d.billingItemId));
@@ -264,7 +273,9 @@ async function loadRefs(ctx: LinkContext, drafts: readonly LinkDraft[], matchPar
     : [];
   const ctById = new Map<number, ContractRef>([...openCt, ...moreCt].map((r) => [r.id, r]));
 
-  return { biById, subById, ctById, advById, openBi, openSub, openCt };
+  // 應收一律比含稅金額（入帳是客戶實際付的錢）：稅別照 請款項 / 訂閱自己 → 合約 → 組織 的順序沿用
+  const orgTax: TaxSetting = matchPartyIds.length ? await getOrgTaxSetting(orgId) : { treatment: "none", basis: "net" };
+  return { biById, subById, ctById, advById, openBi, openSub, openCt, orgTax };
 }
 
 type Refs = Awaited<ReturnType<typeof loadRefs>>;
@@ -346,7 +357,14 @@ async function loadPaid(ctx: LinkContext, refs: Refs) {
 
 type Paid = Awaited<ReturnType<typeof loadPaid>>;
 
-/** 某位客戶、某個幣別、某天的候選（還沒算 gap）。 */
+/** 一個金額依有效稅別換成含稅應收（gross）。 */
+function grossOf(refs: Refs, amount: number, own: TaxColumns, contractId: number | null, currency: string): number {
+  const contract = contractId ? refs.ctById.get(contractId) : undefined;
+  const setting = effectiveTaxSetting(refs.orgTax, own, contractId, contract ?? null);
+  return taxedAmountOrNull(amount, setting, currency).gross ?? amount;
+}
+
+/** 某位客戶、某個幣別、某天的候選（還沒算 gap）。expected 一律是含稅應收減已收。 */
 function rawCandidates(
   refs: Refs,
   paid: Paid,
@@ -361,7 +379,7 @@ function rawCandidates(
     if (b.customerPartyId !== partyId) continue;
     if (b.contractId) busyContracts.add(b.contractId);
     if (b.currency !== currency) continue;
-    const remaining = Number(b.amount) - (paid.bi.get(b.id) ?? 0);
+    const remaining = grossOf(refs, Number(b.amount), b, b.contractId, b.currency) - (paid.bi.get(b.id) ?? 0);
     if (remaining <= 0) continue;
     const ct = b.contractId ? refs.ctById.get(b.contractId) : undefined;
     out.push({
@@ -383,14 +401,21 @@ function rawCandidates(
     const paidByPeriod = [...paid.sub.entries()]
       .filter(([k]) => k.startsWith(`${s.id}:`))
       .map(([k, v]) => ({ periodStart: k.slice(String(s.id).length + 1), paid: v }));
+    const gross = (n: number) => grossOf(refs, n, s, s.contractId, s.currency);
     const overrides = (paid.overrideBySub.get(s.id) ?? []).map((o) => ({
       ...o,
+      expectedAmount: o.expectedAmount == null ? null : gross(o.expectedAmount),
       note: null,
       dueDate: null,
       billedOn: null,
       invoicedOn: null,
     }));
-    const { periods } = computeSubscriptionSchedule(s, paidByPeriod, overrides, txnDate);
+    const { periods } = computeSubscriptionSchedule(
+      { ...s, amount: String(gross(Number(s.amount))) },
+      paidByPeriod,
+      overrides,
+      txnDate,
+    );
     const open = periods.find((p) => p.paid < p.expected);
     if (!open) continue;
     const ct = s.contractId ? refs.ctById.get(s.contractId) : undefined;
@@ -409,7 +434,7 @@ function rawCandidates(
   // 合約本身只在它底下沒有開著的請款項 / 訂閱時才當候選（不然會跟子項目重複）
   for (const c of refs.openCt) {
     if (c.customerPartyId !== partyId || c.currency !== currency || busyContracts.has(c.id)) continue;
-    const amount = c.amount == null ? 0 : Number(c.amount);
+    const amount = c.amount == null ? 0 : grossOf(refs, Number(c.amount), c, c.id, c.currency);
     const remaining = amount - (paid.ct.get(c.id) ?? 0);
     if (!(amount > 0) || remaining <= 0) continue;
     out.push({
