@@ -13,6 +13,7 @@ import { claimEmailCooldown } from "@/lib/email-cooldown";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
 import { isSsoDomain } from "@/lib/sso-domain";
 import * as authSchema from "@/db/auth-schema";
+import { resolveCurrentOrgId, setCurrentOrgId } from "@/db/current-org";
 
 /** better-auth 的 provider id，用來取日曆的 access token。 */
 export const GOOGLE_CALENDAR_PROVIDER_ID = "google-calendar";
@@ -254,6 +255,20 @@ export const auth = betterAuth({
       if (ctx.path !== "/sign-in/magic-link" && ctx.path !== "/request-password-reset") return;
       if (await isSsoDomain(ctx.body?.email)) throw ssoRequiredError();
     }),
+    // 切換組織（網頁的組織切換器、requireOrg 的補設）成功之後，記成這個人「目前的組織」，
+    // 站內 AI、聊天 bot、MCP 跟著用同一個（src/db/current-org.ts）。回傳值是切過去的組織；
+    // 失敗（APIError）或取消（null）就不動。寫入失敗只記 log，不影響切換本身。
+    after: createAuthMiddleware(async (ctx) => {
+      if (ctx.path !== "/organization/set-active") return;
+      const userId = ctx.context.session?.user.id;
+      const returned = ctx.context.returned as { id?: unknown } | null | undefined;
+      if (!userId || !returned || typeof returned !== "object" || typeof returned.id !== "string") return;
+      try {
+        await setCurrentOrgId(userId, returned.id);
+      } catch (err) {
+        console.error("[auth] setCurrentOrgId failed", err);
+      }
+    }),
   },
   databaseHooks: {
     user: {
@@ -285,19 +300,13 @@ export const auth = betterAuth({
     },
     session: {
       create: {
-        // Default a new session's active org to the user's first membership,
-        // so server code always has an org to scope by right after login.
+        // 新的 session 從這個人「目前的組織」開始（migrations/0046）；沒設或已不是成員，
+        // 就退回最早加入的組織。登入後 server 端一定有組織可以 scope。
         before: async (session) => {
-          const db = getDb();
-          const rows = await db
-            .select({ organizationId: authSchema.member.organizationId })
-            .from(authSchema.member)
-            .where(eq(authSchema.member.userId, session.userId))
-            .limit(1);
           return {
             data: {
               ...session,
-              activeOrganizationId: rows[0]?.organizationId ?? null,
+              activeOrganizationId: await resolveCurrentOrgId(session.userId),
             },
           };
         },

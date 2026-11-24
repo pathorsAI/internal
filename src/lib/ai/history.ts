@@ -224,6 +224,8 @@ export function uiToolCall(
     ...(level === "read" ? {} : { args: displayArgs(args) }),
     ...(error ? { error } : {}),
     ...(ruleHint ? { ruleHint } : {}),
+    // 模型指定的組織（沒帶 = 目前的組織）：確認卡顯示組織、只讀工具在別的組織時加小標籤。
+    ...(typeof args.organizationId === "string" && args.organizationId ? { organizationId: args.organizationId } : {}),
   };
 }
 

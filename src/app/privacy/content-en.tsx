@@ -265,9 +265,10 @@ export function PrivacyEn() {
             organizations and data you can reach once logged in: accounting transactions,
             counterparties, categories and bank accounts, invoices, projects, contracts,
             subscriptions, billing items, employee data, payroll (read-only), reconciliation
-            records and audit records. The tools are designed to make the client list your
-            organizations and have you name one, rather than guessing which organization to
-            operate on.
+            records and audit records. When no organization is named, tools act on your current
+            organization (the one selected in the web app&rsquo;s organization switcher), and every
+            tool result states which organization it ran in; acting on another organization
+            requires naming it explicitly, and only organizations you belong to are accepted.
           </p>
           <h3>Masking still applies</h3>
           <p>

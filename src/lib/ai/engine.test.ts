@@ -86,10 +86,81 @@ const turn = (content: string, calls: [id: string, name: string, args: object][]
   outputTokens: 5,
 });
 
-describe("runModelLoop", () => {
-  test("read tools run immediately, in-process, scoped to the session org", async () => {
+const ORGS = [
+  { id: "org_1", name: "派斯科技", slug: "pathors", logo: null, role: "owner" },
+  { id: "org_2", name: "東蜂科技", slug: "dongfeng", logo: null, role: "member" },
+];
+
+describe("multi-org", () => {
+  test("an organizationId the user does not belong to is rejected, not silently replaced", async () => {
     const h = harness([
       turn("", [["c1", "list_transactions", { organizationId: "someone-else", limit: 5 }]]),
+      turn("查不到"),
+    ]);
+    await h.ask("最近的交易");
+    expect(h.ran).toEqual([]);
+    const tool = h.rows.find((r) => r.role === "tool");
+    expect(tool?.status).toBe("error");
+    expect(tool?.content).toContain("not a member");
+  });
+
+  test("reads can target another org by slug; it runs with that org's id", async () => {
+    const h = harness([
+      turn("", [["c1", "list_contracts", { organizationId: "dongfeng" }]]),
+      turn("東蜂的合約如下"),
+    ]);
+    h.ctx.orgs = ORGS;
+    await h.ask("威澄的合約");
+    expect(h.ran).toEqual([{ name: "list_contracts", args: { organizationId: "org_2" }, channel: "ai" }]);
+  });
+
+  test("writes are checked against the role in the target org", async () => {
+    const h = harness([
+      turn("", [["w1", "create_transaction", { amount: 1, organizationId: "dongfeng", confirmSummary: "x" }]]),
+      turn("你在東蜂沒有寫入權限"),
+    ]);
+    h.ctx.orgs = ORGS;
+    await h.ask("在東蜂記一筆");
+    // 在東蜂只是 member：不出確認卡，直接回權限錯誤
+    expect(h.rows.find((r) => r.role === "tool")?.status).toBe("error");
+    expect(h.ran).toEqual([]);
+  });
+
+  test("the confirmation card can be re-targeted to another org before confirming", async () => {
+    const orgs = [ORGS[0], { ...ORGS[1], role: "admin" }];
+    const h = harness([
+      turn("", [["w1", "create_transaction", { amount: 1, confirmSummary: "x" }]]),
+      turn("已記在東蜂"),
+    ]);
+    h.ctx.orgs = orgs;
+    const retargeted: string[] = [];
+    h.ctx.deps.retargetToolCall = async (_c, _m, calls) => {
+      retargeted.push(calls[0].arguments);
+    };
+    await h.ask("記一筆");
+    expect(h.rows.find((r) => r.role === "tool")?.status).toBe("pending");
+    await resolveConfirmation(h.ctx, "w1", true, "org_2");
+    expect(h.ran).toEqual([{ name: "create_transaction", args: { amount: 1, organizationId: "org_2" }, channel: "ai" }]);
+    expect(JSON.parse(retargeted[0]).organizationId).toBe("org_2");
+  });
+
+  test("re-targeting to an org the user is not in is refused", async () => {
+    const h = harness([
+      turn("", [["w1", "create_transaction", { amount: 1, confirmSummary: "x" }]]),
+      turn("不能換到那個組織"),
+    ]);
+    h.ctx.orgs = ORGS;
+    await h.ask("記一筆");
+    await resolveConfirmation(h.ctx, "w1", true, "org_x");
+    expect(h.ran).toEqual([]);
+    expect(h.rows.find((r) => r.role === "tool")?.status).toBe("error");
+  });
+});
+
+describe("runModelLoop", () => {
+  test("read tools run immediately, in-process, defaulting to the current org", async () => {
+    const h = harness([
+      turn("", [["c1", "list_transactions", { limit: 5 }]]),
       turn("最近五筆交易如下"),
     ]);
     await h.ask("最近的交易");

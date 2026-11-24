@@ -18,7 +18,9 @@ export const dynamic = "force-dynamic";
  * - 問新的一題：{ conversationId?, message, page? }。沒有 conversationId 就開一段新對話。
  * - 確認卡：{ conversationId, confirm: { toolCallId, approve } }。
  *
- * 組織與使用者一律從登入的 session 取（requireOrg），對話只查得到本人在這個組織的。
+ * 使用者從登入的 session 取；目前的組織是 requireOrg 的組織（使用者的 current_org_id）。
+ * 對話列的是本人在所有組織的對話（仍要是該組織的成員），工具呼叫可以跨到本人的其他組織，
+ * 寫入用目標組織的角色檢查（src/lib/ai/engine.ts）。
  */
 
 function json(status: number, body: ChatEvent) {
@@ -57,7 +59,15 @@ function parseConfirm(v: unknown): ChatRequest["confirm"] | typeof INVALID {
   if (v === undefined) return undefined;
   const c = v as Record<string, unknown> | null;
   if (!c || typeof c.toolCallId !== "string" || typeof c.approve !== "boolean") return INVALID;
-  return { toolCallId: c.toolCallId, approve: c.approve };
+  // 確認卡上「換到 …」：只收短字串，是不是本人的組織、角色夠不夠由引擎檢查。
+  if (c.organizationId !== undefined && (typeof c.organizationId !== "string" || c.organizationId.length > 64)) {
+    return INVALID;
+  }
+  return {
+    toolCallId: c.toolCallId,
+    approve: c.approve,
+    ...(typeof c.organizationId === "string" && c.organizationId ? { organizationId: c.organizationId } : {}),
+  };
 }
 
 function parseBody(raw: unknown): ChatRequest | null {

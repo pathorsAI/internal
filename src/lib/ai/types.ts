@@ -23,6 +23,22 @@ export type UiToolCall = {
    * 給使用者看的一句提示，例如「依規則：Google Workspace → 軟體工具」。網頁與聊天卡片都顯示。
    */
   ruleHint?: string;
+  /**
+   * 這次呼叫要跑在哪個組織：模型帶的 organizationId（id 或 slug）。沒帶 = 目前的組織。
+   * 確認卡與只讀工具的小標籤用它對回組織名稱與 logo。
+   */
+  organizationId?: string;
+  /** 只在畫面上：使用者在確認卡按了「換到 …」，確認時要把 organizationId 一起送出。 */
+  retargeted?: boolean;
+};
+
+/** 站內 AI 看得到的一個組織（本人所屬）。role 只在伺服器端有意義，畫面上可以不帶。 */
+export type AssistantOrg = {
+  id: string;
+  name: string;
+  slug: string | null;
+  logo: string | null;
+  role: string | null;
 };
 
 /** 對話從哪個入口來：網頁 /dashboard/ai、LINE、WhatsApp。 */
@@ -67,7 +83,11 @@ export type ChatRequest = {
   message?: string;
   /** 發問時所在的頁面（例如 /dashboard/transactions），只在新對話的第一題帶。 */
   page?: string;
-  confirm?: { toolCallId: string; approve: boolean };
+  /**
+   * organizationId：確認卡上按了「換到 …」—— 改在這個組織執行（id，伺服器會再查成員與角色，
+   * 並把改過的參數記回對話）。
+   */
+  confirm?: { toolCallId: string; approve: boolean; organizationId?: string };
 };
 
 /** 確認卡上要另外收起來不列的參數。 */

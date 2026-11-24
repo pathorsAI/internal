@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { AlertTriangle, BookMarked, Check, Loader2, Paperclip, PencilLine, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowLeftRight, BookMarked, Check, Loader2, Paperclip, PencilLine, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusTag } from "@/components/ds/status-dot";
 import { Markdown } from "@/components/ai/markdown";
@@ -12,6 +12,18 @@ import { cn } from "@/lib/utils";
 import { splitOptions } from "./split-options";
 
 export type ChatUser = { name: string; image: string | null };
+
+/** 本人所屬的組織（畫確認卡與工具小標籤用）。 */
+export type ChatOrg = { id: string; name: string; slug: string | null; logo: string | null };
+
+/** 對話可以跨組織：本人的組織清單＋目前的組織。只有一個組織時卡片不顯示組織列。 */
+export type ChatOrgs = { orgs: readonly ChatOrg[]; currentOrgId: string };
+
+/** 工具呼叫的 organizationId（id 或 slug，沒帶 = 目前的組織）→ 組織。 */
+export function targetOrg(scope: ChatOrgs, organizationId: string | undefined): ChatOrg | undefined {
+  const key = organizationId ?? scope.currentOrgId;
+  return scope.orgs.find((o) => o.id === key || o.slug === key);
+}
 
 export function UserMessage({
   text,
@@ -47,7 +59,7 @@ export function UserMessage({
 
 
 /** 只讀工具列成一行：list_categories · list_bank_accounts（跟提案示意一樣，用原本的工具名）。 */
-function ToolLine({ tools }: Readonly<{ tools: UiToolCall[] }>) {
+function ToolLine({ tools, orgScope }: Readonly<{ tools: UiToolCall[]; orgScope: ChatOrgs }>) {
   const t = useTranslations("ai.chat");
   if (tools.length === 0) return null;
   const running = tools.some((x) => x.status === "running");
@@ -63,6 +75,7 @@ function ToolLine({ tools }: Readonly<{ tools: UiToolCall[] }>) {
         {tools.map((x, i) => (
           <span key={x.id} className={cn(x.status === "error" && "text-destructive")} title={x.error}>
             {x.name}
+            <OtherOrgLabel call={x} orgScope={orgScope} />
             {x.status === "error" ? ` (${t("toolFailed")})` : ""}
             {i < tools.length - 1 ? " ·" : ""}
           </span>
@@ -70,6 +83,14 @@ function ToolLine({ tools }: Readonly<{ tools: UiToolCall[] }>) {
       </span>
     </div>
   );
+}
+
+/** 只讀工具跑在「不是目前的組織」時，在工具名後面加一個小小的組織名稱。 */
+function OtherOrgLabel({ call, orgScope }: Readonly<{ call: UiToolCall; orgScope: ChatOrgs }>) {
+  if (!call.organizationId) return null;
+  const org = targetOrg(orgScope, call.organizationId);
+  if (!org || org.id === orgScope.currentOrgId) return null;
+  return <span className="ml-1 font-sans text-[11px] text-foreground/70">（{org.name}）</span>;
 }
 
 function formatValue(v: unknown): string {
@@ -84,16 +105,23 @@ function formatValue(v: unknown): string {
 export function ConfirmCard({
   call,
   disabled,
+  orgScope,
   onConfirm,
+  onRetarget,
 }: Readonly<{
   call: UiToolCall;
   disabled: boolean;
+  orgScope: ChatOrgs;
   onConfirm: (call: UiToolCall, approve: boolean) => void;
+  /** 按「換到 …」：把這張待確認的卡改到另一個組織（確認時才真的送出）。 */
+  onRetarget: (call: UiToolCall, orgId: string) => void;
 }>) {
   const t = useTranslations("ai.confirm");
   const danger = call.level === "danger";
   const args = Object.entries(call.args ?? {});
   const resolved = call.status !== "pending";
+  const multiOrg = orgScope.orgs.length > 1;
+  const org = targetOrg(orgScope, call.organizationId);
 
   return (
     <div
@@ -114,6 +142,34 @@ export function ConfirmCard({
         </span>
         {resolved ? <ResolvedTag status={call.status} /> : null}
       </div>
+      {/* 本人在好幾個組織時：寫進哪個組織要一眼看得到，按錯了可以一鍵換過去再確認 */}
+      {multiOrg && org ? (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <span className="inline-flex min-w-0 items-center gap-2">
+            <PartyAvatar name={org.name} src={org.logo} size="md" />
+            <span className="truncate text-sm font-semibold">{org.name}</span>
+            <span className="sr-only">{t("orgLabel")}</span>
+          </span>
+          {call.status === "pending"
+            ? orgScope.orgs
+                .filter((o) => o.id !== org.id)
+                .map((o) => (
+                  <Button
+                    key={o.id}
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                    disabled={disabled}
+                    onClick={() => onRetarget(call, o.id)}
+                  >
+                    <ArrowLeftRight className="size-3.5" aria-hidden />
+                    {t("switchOrg", { name: o.name })}
+                  </Button>
+                ))
+            : null}
+        </div>
+      ) : null}
       <div className="space-y-1">
         <p className="text-sm font-medium">{call.summary ?? call.name}</p>
         {call.summary ? <p className="font-mono text-xs text-muted-foreground">{call.name}</p> : null}
@@ -187,13 +243,17 @@ export function AssistantMessage({
   message,
   streaming,
   disabled,
+  orgScope,
   onConfirm,
+  onRetarget,
   onOption,
 }: Readonly<{
   message: Extract<UiMessage, { kind: "assistant" }>;
   streaming: boolean;
   disabled: boolean;
+  orgScope: ChatOrgs;
   onConfirm: (call: UiToolCall, approve: boolean) => void;
+  onRetarget: (call: UiToolCall, orgId: string) => void;
   /** 只有最後一則回覆給：點快速選項就把那段字當成下一題送出。其他則只拆掉標記不顯示選項。 */
   onOption?: (text: string) => void;
 }>) {
@@ -208,10 +268,17 @@ export function AssistantMessage({
 
   return (
     <div className="space-y-3">
-      <ToolLine tools={reads} />
+      <ToolLine tools={reads} orgScope={orgScope} />
       {/* 確認卡在文字前面：按下確認後模型接著講的結果，會接在卡片下方 */}
       {writes.map((c) => (
-        <ConfirmCard key={c.id} call={c} disabled={disabled} onConfirm={onConfirm} />
+        <ConfirmCard
+          key={c.id}
+          call={c}
+          disabled={disabled}
+          orgScope={orgScope}
+          onConfirm={onConfirm}
+          onRetarget={onRetarget}
+        />
       ))}
       {text ? <Markdown text={text} /> : null}
       {showOptions ? (

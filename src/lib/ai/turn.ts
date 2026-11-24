@@ -2,6 +2,7 @@ import * as aiDb from "@/db/ai";
 import type { AiConversationRow } from "@/db/ai";
 import { listRulesForPrompt, markAiRulesApplied } from "@/db/ai-rules";
 import { findLinkedEmployee } from "@/db/chat";
+import { listUserOrgsWithRoles } from "@/db/current-org";
 import type { Locale } from "@/i18n/config";
 import { readAttachmentParts } from "./attachments";
 import {
@@ -16,7 +17,7 @@ import {
 import { sanitizePage, systemPrompt } from "./prompt";
 import type { RuleLike } from "./rules";
 import type { OrgRole } from "./tool-policy";
-import { isChatChannel, type AttachmentRef, type ChatChannel, type ChatEvent } from "./types";
+import { isChatChannel, type AssistantOrg, type AttachmentRef, type ChatChannel, type ChatEvent } from "./types";
 
 /**
  * 站內 AI 的「一題」：網頁（/api/ai/chat）與聊天 bot（src/lib/channels）都呼叫這裡，
@@ -38,6 +39,11 @@ export type TurnDeps = {
   listRules: (owner: Owner) => Promise<RuleLike[]>;
   /** 這位使用者在這個組織有沒有連到員工資料。 */
   hasEmployee: (owner: Owner) => Promise<boolean>;
+  /**
+   * 本人所屬的全部組織（含角色）：工具可以跨到這些組織、prompt 會列出來。
+   * 沒給（測試）就只有目前的組織。
+   */
+  listOrgs?: (userId: string) => Promise<AssistantOrg[]>;
   now?: () => Date;
 };
 
@@ -53,10 +59,12 @@ export function defaultTurnDeps(apiKey: string): TurnDeps {
     conversations: aiDb,
     listRules: (owner) => listRulesForPrompt(owner.orgId, owner.userId),
     hasEmployee: async (owner) => (await findLinkedEmployee(owner.orgId, owner.userId)) !== null,
+    listOrgs: listUserOrgsWithRoles,
   };
 }
 
 export type RunTurnParams = {
+  /** owner.orgId = 使用者目前的組織（沒指定組織的工具呼叫跑在這裡）。 */
   owner: Owner;
   role: OrgRole;
   channel: ChatChannel;
@@ -71,8 +79,11 @@ export type RunTurnParams = {
   message?: string;
   /** 這題附的檔案（收件匣 document，已確認屬於這個組織）。 */
   attachments?: AttachmentRef[];
-  /** 回覆一張確認卡（與 message 二選一）。 */
-  confirm?: { toolCallId: string; approve: boolean };
+  /**
+   * 回覆一張確認卡（與 message 二選一）。organizationId：卡片上按了「換到 …」，改在這個組織執行
+   * （仍要是本人的組織、角色要夠，引擎會再檢查）。
+   */
+  confirm?: { toolCallId: string; approve: boolean; organizationId?: string };
   /** 網頁：發問時所在的頁面，只在新對話帶進 prompt。 */
   page?: string | null;
   locale: Locale;
@@ -139,13 +150,17 @@ export async function runTurn(p: RunTurnParams): Promise<RunTurnResult> {
   const conversationId = conversation.id;
   const engine = p.deps.engine;
 
-  const [rules, hasEmployee] = await Promise.all([
+  const [rules, hasEmployee, listedOrgs] = await Promise.all([
     p.deps.listRules(p.owner),
     p.deps.hasEmployee(p.owner),
+    p.deps.listOrgs ? p.deps.listOrgs(p.owner.userId) : Promise.resolve(undefined),
   ]);
+  // 只在目前的組織也在清單裡時才用（剛被移出之類的邊界情況就退回「只有目前的組織」）。
+  const orgs = listedOrgs?.some((o) => o.id === p.owner.orgId) ? listedOrgs : undefined;
   const ctx: TurnContext = {
     owner: p.owner,
     role: p.role,
+    ...(orgs ? { orgs } : {}),
     channel: p.channel,
     rules,
     locale: p.locale,
@@ -153,6 +168,7 @@ export async function runTurn(p: RunTurnParams): Promise<RunTurnResult> {
     toolGroups: conversation.toolGroups,
     systemPrompt: systemPrompt({
       orgName: p.orgName,
+      ...(orgs ? { orgs, currentOrgId: p.owner.orgId } : {}),
       locale: p.locale,
       role: p.role,
       page: isNew ? sanitizePage(p.page) : null,
@@ -180,7 +196,7 @@ export async function runTurn(p: RunTurnParams): Promise<RunTurnResult> {
     });
     await runModelLoop(ctx, p.message || null, { hasAttachments: attachments.length > 0 });
   } else if (p.confirm) {
-    await resolveConfirmation(ctx, p.confirm.toolCallId, p.confirm.approve);
+    await resolveConfirmation(ctx, p.confirm.toolCallId, p.confirm.approve, p.confirm.organizationId);
   }
   return { conversationId, title: conversation.title, isNew };
 }

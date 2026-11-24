@@ -17,9 +17,9 @@ import {
   LOAD_TOOL_GROUPS,
   type ToolGroupId,
 } from "./tool-groups";
-import { canRun, refusalReason, toolLevel, type OrgRole } from "./tool-policy";
-import { buildToolSpecs, prepareArgs } from "./tool-specs";
-import type { ChatChannel, ChatEvent, UiToolStatus } from "./types";
+import { bestRole, canRunInOrg, refusalReason, toolLevel, type OrgRole } from "./tool-policy";
+import { buildToolSpecs, prepareArgs, resolveTargetOrg, type OrgScope } from "./tool-specs";
+import type { AssistantOrg, ChatChannel, ChatEvent, UiToolStatus } from "./types";
 
 /**
  * 站內 AI 助理的一題：呼叫模型 → 執行只讀工具 → 再呼叫模型……直到模型直接回答、
@@ -27,7 +27,9 @@ import type { ChatChannel, ChatEvent, UiToolStatus } from "./types";
  * 這一題就停在那裡；使用者按確認後由 resolveConfirmation 執行，再接著跑。
  *
  * 工具一律同程序呼叫 src/lib/mcp/tools 的定義（runToolWithAudit），不繞 HTTP 打自己的 /mcp。
- * 組織固定是目前登入的組織：ctx.orgHint 與每次的 organizationId 都由伺服器塞。
+ * 組織：預設是使用者目前的組織（owner.orgId），但一段對話不鎖在一個組織 —— 模型可以在參數帶
+ * organizationId 查／寫本人的其他組織（prepareArgs 檢查成員資格，canRunInOrg 用「目標組織」的角色
+ * 檢查寫入），確認卡上也能一鍵換到另一個組織再確認（resolveConfirmation 的 organizationId）。
  */
 
 export type Owner = { orgId: string; userId: string };
@@ -56,6 +58,11 @@ export type EngineDeps = {
   readAttachments?: (orgId: string, refs: Parameters<AttachmentReader>[0]) => Promise<ReadonlyMap<number, ContentPart>>;
   /** 規則被套用（確認卡按下確認、而且用的就是規則建議的分類）：apply_count + 1。 */
   markRulesApplied?: (ids: number[]) => Promise<void>;
+  /**
+   * 確認卡「換到 …」之後，把改過組織的工具呼叫寫回那一則 assistant 訊息（之後重畫卡片、
+   * 餵給模型的歷史都是實際執行的組織）。沒給就不記（測試）。
+   */
+  retargetToolCall?: (conversationId: string, messageId: number, toolCalls: AiToolCall[]) => Promise<void>;
 };
 
 export function defaultDeps(apiKey: string): EngineDeps {
@@ -63,12 +70,19 @@ export function defaultDeps(apiKey: string): EngineDeps {
     db: aiDb,
     runTool: runToolWithAudit,
     model: (opts) => streamModelTurn({ apiKey, ...opts }),
+    retargetToolCall: aiDb.updateAiMessageToolCalls,
   };
 }
 
 export type TurnContext = {
+  /** owner.orgId = 目前的組織（沒帶 organizationId 的呼叫跑在這裡）。 */
   owner: Owner;
+  /** 在目前組織的角色。 */
   role: OrgRole;
+  /**
+   * 本人所屬的全部組織（含角色）。沒給 = 只有目前的組織（角色 = role），跟以前一樣。
+   */
+  orgs?: readonly AssistantOrg[];
   /** 從哪個入口來；預設 web。決定工具清單（聊天不開紅色等級）與稽核的 channel。 */
   channel?: ChatChannel;
   /** 組織規則＋本人的個人規則：待確認卡的 ruleHint、確認後的 apply_count 用。 */
@@ -93,12 +107,21 @@ function policyChannel(ctx: TurnContext): ChatChannel {
   return ctx.channel ?? "web";
 }
 
+/** 這一題的組織範圍（沒給 orgs 時只有目前的組織）。 */
+export function orgScope(ctx: Pick<TurnContext, "owner" | "role" | "orgs">): OrgScope {
+  const orgs = ctx.orgs?.length
+    ? ctx.orgs
+    : [{ id: ctx.owner.orgId, name: "", slug: null, logo: null, role: ctx.role }];
+  return { currentOrgId: ctx.owner.orgId, orgs };
+}
+
 /** 會建交易、可以套分類規則的工具。 */
 const RULE_TOOLS = new Set(["create_transaction", "submit_advance"]);
 
-/** 這次呼叫對到的分類規則（只看建交易的工具）。 */
+/** 這次呼叫對到的分類規則（只看建交易的工具）。規則是目前組織的，跑在別的組織就不套。 */
 function matchedRule(ctx: TurnContext, name: string, args: Record<string, unknown>): RuleLike | null {
   if (!RULE_TOOLS.has(name) || !ctx.rules?.length) return null;
+  if (args.organizationId !== undefined && args.organizationId !== ctx.owner.orgId) return null;
   if (name === "create_transaction" && args.type !== "expense" && args.type !== "advance") return null;
   return matchCategoryRule(
     ctx.rules,
@@ -179,7 +202,7 @@ async function handleLoadGroups(
 async function handleOneCall(ctx: TurnContext, call: AiToolCall, save: SaveResult): Promise<boolean> {
   let prepared: Prepared;
   try {
-    prepared = prepareArgs(call.arguments, ctx.owner.orgId);
+    prepared = prepareArgs(call.arguments, orgScope(ctx));
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     await save("error", JSON.stringify({ error: `Invalid arguments: ${error}` }));
@@ -187,7 +210,7 @@ async function handleOneCall(ctx: TurnContext, call: AiToolCall, save: SaveResul
     return false;
   }
 
-  if (!canRun(call.name, prepared.args, ctx.role, policyChannel(ctx))) {
+  if (!canRunInOrg(call.name, prepared.args, orgScope(ctx).orgs, policyChannel(ctx))) {
     const error = refusalReason(call.name, prepared.args, policyChannel(ctx));
     await save("error", JSON.stringify({ error }));
     ctx.emit({ t: "tool", call: uiToolCall(call, "error", error) });
@@ -198,11 +221,13 @@ async function handleOneCall(ctx: TurnContext, call: AiToolCall, save: SaveResul
     // 規則提示存在 pending 列的 content 裡，網頁重新整理、聊天重畫卡片時都讀得到。
     const ruleHint = ruleHintFor(ctx, call.name, prepared.args);
     await save("pending", ruleHint ? JSON.stringify({ ruleHint }) : null);
-    ctx.emit({ t: "tool", call: uiToolCall(call, "pending", undefined, ruleHint) });
+    // 卡片上的組織用解析過的 id（模型可能給 slug），聊天卡片拿它查組織名稱。
+    const card = uiToolCall(call, "pending", undefined, ruleHint);
+    ctx.emit({ t: "tool", call: { ...card, organizationId: prepared.args.organizationId as string } });
     return true;
   }
 
-  ctx.emit({ t: "tool", call: uiToolCall(call, "running") });
+  ctx.emit({ t: "tool", call: { ...uiToolCall(call, "running"), organizationId: prepared.args.organizationId as string } });
   const result = await execute(ctx, call.name, prepared.args, prepared.summary);
   await save(result.status, result.content);
   ctx.emit({ t: "tool_done", id: call.id, status: result.status, error: result.error });
@@ -272,7 +297,9 @@ export async function runModelLoop(
       { role: "system", content: ctx.systemPrompt },
       ...toModelMessages(history, parts),
     ];
-    const tools = buildToolSpecs(groups, ctx.role, policyChannel(ctx));
+    // 工具清單：任何一個組織能寫就提供寫入工具；每次呼叫再用目標組織的角色檢查。
+    const scope = orgScope(ctx);
+    const tools = buildToolSpecs(groups, bestRole(scope.orgs.map((o) => o.role)), policyChannel(ctx), scope);
     ctx.emit({ t: "msg", id: `r${round}-${Date.now()}` });
     const turn = await ctx.deps.model({
       messages,
@@ -337,15 +364,23 @@ async function approveCall(
   ctx: TurnContext,
   toolCallId: string,
   call: AiToolCall,
+  assistant: AiMessageRow,
+  retargetOrgId?: string,
 ): Promise<{ status: UiToolStatus; error?: string } | null> {
   let prepared: Prepared | null = null;
+  let invalid = "Invalid arguments.";
   try {
-    prepared = prepareArgs(call.arguments, ctx.owner.orgId);
-  } catch {
+    prepared = prepareArgs(call.arguments, orgScope(ctx));
+    // 確認卡上換了組織：一樣只收本人所屬的組織，角色在下面用新的目標組織檢查。
+    if (retargetOrgId) {
+      prepared = { ...prepared, args: { ...prepared.args, organizationId: resolveTargetOrg(orgScope(ctx), retargetOrgId) } };
+    }
+  } catch (err) {
+    if (err instanceof Error && retargetOrgId) invalid = err.message;
     prepared = null;
   }
-  if (!prepared || !canRun(call.name, prepared.args, ctx.role, policyChannel(ctx))) {
-    const error = prepared ? refusalReason(call.name, prepared.args, policyChannel(ctx)) : "Invalid arguments.";
+  if (!prepared || !canRunInOrg(call.name, prepared.args, orgScope(ctx).orgs, policyChannel(ctx))) {
+    const error = prepared ? refusalReason(call.name, prepared.args, policyChannel(ctx)) : invalid;
     await ctx.deps.db.resolvePendingToolMessage(
       ctx.conversationId,
       toolCallId,
@@ -356,11 +391,29 @@ async function approveCall(
   }
   const claimed = await ctx.deps.db.claimPendingToolMessage(ctx.conversationId, toolCallId);
   if (!claimed) return null;
+  if (retargetOrgId) await recordRetarget(ctx, assistant, call, prepared.args.organizationId as string);
   ctx.emit({ t: "tool_done", id: toolCallId, status: "running" });
   const result = await execute(ctx, call.name, prepared.args, prepared.summary);
   await ctx.deps.db.setToolMessageResult(ctx.conversationId, toolCallId, result.status, result.content);
   if (result.status === "ok") await recordRuleApplied(ctx, call.name, prepared.args);
   return { status: result.status, error: result.error };
+}
+
+/**
+ * 換過組織的呼叫寫回 assistant 訊息的 tool_calls（organizationId 改成實際執行的組織 id），
+ * 之後重畫卡片、餵給模型的歷史才對得上。記不進去只寫 log，不影響這次寫入。
+ */
+async function recordRetarget(ctx: TurnContext, assistant: AiMessageRow, call: AiToolCall, orgId: string) {
+  if (!ctx.deps.retargetToolCall) return;
+  try {
+    const original = JSON.parse(call.arguments || "{}") as Record<string, unknown>;
+    const updated = (assistant.toolCalls ?? []).map((c) =>
+      c.id === call.id ? { ...c, arguments: JSON.stringify({ ...original, organizationId: orgId }) } : c,
+    );
+    await ctx.deps.retargetToolCall(ctx.conversationId, assistant.id, updated);
+  } catch (err) {
+    console.error("[ai/engine] retargetToolCall failed", err);
+  }
 }
 
 /** 確認後建成的交易用的就是規則建議的分類：記一次套用（失敗不影響寫入）。 */
@@ -383,6 +436,8 @@ export async function resolveConfirmation(
   ctx: TurnContext,
   toolCallId: string,
   approve: boolean,
+  /** 確認卡上按了「換到 …」：改在這個組織執行（id 或 slug，仍要是本人的組織、角色要夠）。 */
+  retargetOrgId?: string,
 ): Promise<void> {
   const history = await ctx.deps.db.listAiMessages(ctx.conversationId);
   const { assistant, call } = findCall(history, toolCallId);
@@ -394,7 +449,7 @@ export async function resolveConfirmation(
 
   let outcome: { status: UiToolStatus; error?: string } | null;
   if (approve) {
-    outcome = await approveCall(ctx, toolCallId, call);
+    outcome = await approveCall(ctx, toolCallId, call, assistant, retargetOrgId);
     if (!outcome) {
       ctx.emit({ t: "error", code: "not_found" });
       return;

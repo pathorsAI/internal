@@ -76,17 +76,26 @@ echo it back as the `resource` parameter on the authorize and token requests.
 All data is scoped to your organization. The token only carries your user id, so
 the server resolves your org from membership (matching the dashboard's behaviour).
 
-If you belong to **multiple orgs**, the server never guesses. Two options:
+If you belong to **multiple orgs**, tools act on your **current organization** —
+the one you last selected in the web app's org switcher (`"user".current_org_id`,
+migration 0046; the in-app AI and the LINE / WhatsApp bot share it). No asking:
 
-- **One connection (recommended):** add a single `<BASE_URL>/mcp`. The server
-  `instructions` tell the model to call `list_organizations` at the start of a
-  session and ask which org to use, then pass it as `organizationId` on every
-  call. If it skips that, org-scoped tools return an "ambiguous organization"
-  error listing the choices, so it must ask and retry — no data ever lands in the
-  wrong org.
+- **One connection (recommended):** add a single `<BASE_URL>/mcp`. With no
+  `organizationId`, a tool resolves: your current org (if you are still a member)
+  → your only org → your earliest-joined org. It never fails with "ambiguous".
+  Pass `organizationId` (id or slug, membership-checked) only to act on another
+  org. The `instructions` tell the model to look in your other orgs
+  (`list_organizations`, then retry with `organizationId`) when a party, contract
+  or project you name isn't in the current one, and to say which org the answer
+  comes from.
 - **Pin per connection:** add `<BASE_URL>/mcp?org=<slug-or-id>` (validated
-  against your memberships) — one connection per org, no asking. The `/dashboard/settings/mcp`
-  page lists ready-to-copy per-org URLs.
+  against your memberships) — one connection per org, regardless of the current
+  org. The `/dashboard/settings/mcp` page lists ready-to-copy per-org URLs.
+
+Every `tools/call` result says which org it ran in: `_meta["pathors/organization"]
+= { id, name, slug }` on the result, plus a last text content item
+`Organization: <name>`. `structuredContent` and each tool's `outputSchema` are
+unchanged.
 
 With a single-org account it just uses that org automatically.
 
@@ -161,7 +170,7 @@ note }`. A new tool whose return shape isn't stable and object-rooted may still
 omit `outputSchema`; it just keeps the JSON-in-a-text-block result shape. Do not
 declare a schema you cannot guarantee.
 
-**Discovery** — `list_organizations` (call first), `get_financial_overview`.
+**Discovery** — `list_organizations` (names the current org in `hint`), `get_financial_overview`.
 Organizations are created in the web app, not over MCP.
 
 **Invitations** — `list_my_invitations` / `accept_invitation`. Invitations are
