@@ -133,6 +133,8 @@ export type DispatcherDeps = {
     getOrgName: (orgId: string) => Promise<string | null>;
     getUserName: (userId: string) => Promise<string | null>;
     listUserOrgs: (userId: string) => Promise<{ id: string; name: string }[]>;
+    /** 確認卡把分類 id 換成名稱（沒給就照原樣顯示 id）。 */
+    getCategoryName?: (orgId: string, id: number) => Promise<string | null>;
   };
   getOrgRole: (orgId: string, userId: string) => Promise<string | null>;
   putObject: (key: string, body: Uint8Array, contentType: string) => Promise<void>;
@@ -519,6 +521,7 @@ async function handleMedia(
     downloaded = await adapter.downloadMedia(event.media, CHAT_MEDIA_MAX_BYTES);
   } catch (err) {
     console.error("[channels] media download failed", err);
+    await recordIn(deps, event, identity, null);
     await replier.text(s.mediaFailed);
     return;
   }
@@ -785,7 +788,7 @@ async function makeCards(
   const cards: ConfirmCard[] = [];
   for (const call of pending) {
     const row = await deps.db.createChatCard({ identityId: identity.id, conversationId, toolCallIds: [call.id] });
-    cards.push(toConfirmCard(call, { ...meta, cardId: row.id }));
+    cards.push(toConfirmCard(await withCategoryName(call, org.orgId, deps), { ...meta, cardId: row.id }));
   }
   if (cards.length >= 3) {
     const row = await deps.db.createChatCard({
@@ -796,6 +799,22 @@ async function makeCards(
     cards.push(batchCard(cards, { ...meta, cardId: row.id }));
   }
   return cards;
+}
+
+/**
+ * 卡片上的「分類」顯示名稱而不是 id（手機上看到「分類 12」沒有意義）。
+ * 只改顯示用的那份參數，送回引擎的 toolCallId 不變；查不到就保留 id。
+ */
+async function withCategoryName(call: UiToolCall, orgId: string, deps: DispatcherDeps): Promise<UiToolCall> {
+  const id = call.args?.categoryId;
+  if (typeof id !== "number" || !deps.directory.getCategoryName) return call;
+  try {
+    const name = await deps.directory.getCategoryName(orgId, id);
+    return name ? { ...call, args: { ...call.args, categoryId: name } } : call;
+  } catch (err) {
+    console.error("[channels] getCategoryName failed", err);
+    return call;
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -220,6 +220,22 @@ export async function createChatLinkCode(input: {
   throw new Error("Could not allocate a link code; try again.");
 }
 
+/**
+ * 兌換綁定碼前的判斷（純函式，方便測）：
+ * - already = 這組碼已經用過，而且就是這個聊天帳號綁給同一個人用掉的（重傳同一句），當成功。
+ * - used／expired／taken = 失敗原因；redeem = 可以兌換。
+ */
+export function checkLinkCode(
+  found: { userId: string; usedAt: string | null; expiresAt: string },
+  existing: Pick<ChatIdentityRow, "userId"> | null,
+  now = Date.now(),
+): "redeem" | "already" | "used" | "expired" | "taken" {
+  if (found.usedAt) return existing?.userId === found.userId ? "already" : "used";
+  if (parsePgTimestamp(found.expiresAt) <= now) return "expired";
+  if (existing && existing.userId !== found.userId) return "taken";
+  return "redeem";
+}
+
 export type RedeemLinkCodeResult =
   | { ok: true; identity: ChatIdentityRow; orgId: string }
   /**
@@ -254,11 +270,15 @@ export async function redeemChatLinkCode(input: {
     .where(eq(chatLinkCodes.codeHash, codeHash))
     .limit(1);
   if (!found || found.provider !== input.provider) return { ok: false, reason: "invalid" };
-  if (found.usedAt) return { ok: false, reason: "used" };
-  if (parsePgTimestamp(found.expiresAt) <= Date.now()) return { ok: false, reason: "expired" };
 
   const existing = await findChatIdentity(input.provider, input.externalId);
-  if (existing && existing.userId !== found.userId) return { ok: false, reason: "taken" };
+  const check = checkLinkCode(found, existing);
+  if (check === "already") {
+    // 同一個人把同一句「綁定 123456」又傳了一次（點了兩次連結、佇列重送）：已經綁好了，照樣回成功，
+    // 不動目前選的組織。
+    return { ok: true, identity: existing!, orgId: existing!.activeOrgId ?? found.orgId };
+  }
+  if (check !== "redeem") return { ok: false, reason: check };
 
   // 用掉這組碼（條件 UPDATE：兩個請求同時兌換只有一個成功）。
   const consumed = await db

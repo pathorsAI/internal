@@ -333,6 +333,23 @@ describe("合成一題", () => {
     expect(w.lastText()).toContain("看得懂文字、照片和 PDF");
   });
 
+  test("檔案下載失敗：回一句話、不進暫存區，但記下這則訊息（之後引用得到）", async () => {
+    const w = world();
+    const real = w.deps.adapter("line")!;
+    w.deps.adapter = () => ({
+      ...real,
+      downloadMedia: async () => {
+        throw new Error("LINE API 401");
+      },
+    });
+    const e = ev({ kind: "media", media: { id: "img-x", mime: "image/jpeg" } });
+    await handleEvent(e, w.deps);
+    expect(w.lastText()).toContain("下載失敗");
+    expect(w.buffer.length).toBe(0);
+    expect(w.scheduled.length).toBe(0);
+    expect(w.refs.some((r) => r.direction === "in" && r.externalMessageId === e.messageId)).toBe(true);
+  });
+
   test("回覆的 [[選項：…]] 變成 quick reply", async () => {
     const w = world({ turnEvents: [[{ t: "msg", id: "r0" }, { t: "text", d: "誰付的？\n[[選項：我先墊的|公司信用卡]]" }]] });
     await handleEvent(ev({ kind: "text", text: "計程車 240" }), w.deps);
@@ -425,6 +442,26 @@ describe("確認卡", () => {
       cards: [{ cardId: "card000001", orgName: "派斯科技", actorName: "Tiger", ruleHint: "依規則：餐廳 → 交際費" }],
     });
     expect(w.refs.some((r) => r.direction === "out" && r.cardId === "card000001")).toBe(true);
+  });
+
+  test("卡片上的分類顯示名稱，不是 id；查不到就保留 id", async () => {
+    const withCategory: ChatEvent[] = pendingTurn.map((e) =>
+      e.t === "tool" ? { ...e, call: { ...e.call, args: { amount: 415, categoryId: 12 } } } : e,
+    );
+    const w = world({ turnEvents: [withCategory, withCategory] });
+    w.deps.directory.getCategoryName = async (orgId, id) => (orgId === "org-1" && id === 12 ? "雜項支出" : null);
+    await handleEvent(ev({ kind: "text", text: "記一筆" }), w.deps);
+    await w.runScheduled();
+    const rows = () => {
+      const m = w.sent.at(-1)!.msgs.find((x) => x.type === "cards");
+      return m && m.type === "cards" ? m.cards[0].rows : [];
+    };
+    expect(rows()).toContainEqual({ label: "分類", value: "雜項支出" });
+
+    w.deps.directory.getCategoryName = async () => null;
+    await handleEvent(ev({ kind: "text", text: "再一筆" }), w.deps);
+    await w.runScheduled();
+    expect(rows()).toContainEqual({ label: "分類", value: "12" });
   });
 
   test("按確認：用 runTurn 回覆那張卡", async () => {

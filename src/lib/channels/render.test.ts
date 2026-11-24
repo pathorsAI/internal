@@ -29,9 +29,14 @@ describe("markdownToChat", () => {
 
   test("站內連結轉絕對網址", () => {
     expect(markdownToChat("到[交易頁](/dashboard/transactions?x=1)看", BASE)).toBe(
-      `到交易頁：${BASE}/dashboard/transactions?x=1看`,
+      `到交易頁：${BASE}/dashboard/transactions?x=1 看`,
     );
     expect(markdownToChat("[https://a.b/c](https://a.b/c)", BASE)).toBe("https://a.b/c");
+  });
+
+  test("網址後面緊接中文時補空白（不然聊天 app 會把中文算進網址）", () => {
+    expect(markdownToChat("可至[代墊](/dashboard/advances)查看。", BASE)).toBe(`可至代墊：${BASE}/dashboard/advances 查看。`);
+    expect(markdownToChat("看 https://a.b/c，或 https://a.b/d", BASE)).toBe("看 https://a.b/c ，或 https://a.b/d");
   });
 
   test("截長度", () => {

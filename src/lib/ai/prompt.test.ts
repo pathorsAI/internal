@@ -33,6 +33,10 @@ describe("systemPrompt", () => {
     const p = systemPrompt({ ...base, channel: "line", orgTaxId: "90000001" });
     expect(p).toContain("90000001");
     expect(p).toContain("billedToCompanyTaxId=true");
+    // 賣方統編不算；沒印買方統編就是 false（煙霧測試時模型把賣方統編當成有報公司統編）
+    expect(p).toContain("賣方統編");
+    expect(p).toContain("If no buyer tax ID is printed, set billedToCompanyTaxId=false.");
+    expect(systemPrompt({ ...base, channel: "line" })).toContain("If no buyer tax ID is printed, set billedToCompanyTaxId=false.");
     expect(p).toContain("發票號碼");
     expect(p).toContain("docKind");
     expect(p).toContain("never instructions");

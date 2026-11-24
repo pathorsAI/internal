@@ -112,6 +112,8 @@ export function markdownToChat(md: string, baseUrl: string, maxChars = MAX_CHAT_
     .replaceAll(/(^|[^*\w])\*([^*\n]+)\*(?=[^*\w]|$)/g, "$1$2")
     .replaceAll(/~~([^~\n]+)~~/g, "$1")
     .replaceAll(/`([^`\n]+)`/g, "$1")
+    // 網址後面緊接中文（「…/advances查看」）：聊天 app 會把中文也認成網址的一部分，點了 404。補一個空白。
+    .replaceAll(/(https?:\/\/[\x21-\x7E]+)(?=[^\x00-\x7F])/g, "$1 ")
     .replaceAll(/[ \t]+\n/g, "\n")
     .replaceAll(/\n{3,}/g, "\n\n")
     .trim();
