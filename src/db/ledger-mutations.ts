@@ -65,7 +65,7 @@ function errorText(e: unknown): string {
       parts.push(cur.message);
       cur = (cur as Error & { cause?: unknown }).cause;
     } else {
-      parts.push(typeof cur === "object" ? JSON.stringify(cur) : String(cur));
+      parts.push(typeof cur === "string" ? cur : (JSON.stringify(cur) ?? ""));
       break;
     }
   }

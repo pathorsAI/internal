@@ -102,17 +102,27 @@ function StatementTableRow({
       <TableCell className="tabular-nums text-muted-foreground">{row.code ?? ""}</TableCell>
       <TableCell style={{ paddingLeft: `${16 + Math.max(0, row.level) * 16}px` }}>{label}</TableCell>
       <TableCell className="text-right">{isHeader ? null : <Amount value={row.amount} kind="neutral" />}</TableCell>
-      {hasCompare ? (
-        <TableCell className="text-right text-muted-foreground">
-          {isHeader || row.compareAmount === null ? null : <Amount value={row.compareAmount} kind="neutral" />}
-        </TableCell>
-      ) : null}
-      {hasCompare ? (
-        <TableCell className="text-right tabular-nums text-muted-foreground">
-          {isHeader ? null : formatPercent(changeRatio(row.amount, row.compareAmount), locale)}
-        </TableCell>
-      ) : null}
+      {hasCompare ? <CompareCells row={row} isHeader={isHeader} locale={locale} /> : null}
     </TableRow>
+  );
+}
+
+/** 比較期的兩欄：比較期金額、增減百分比。 */
+function CompareCells({
+  row,
+  isHeader,
+  locale,
+}: Readonly<{ row: StatementRow; isHeader: boolean; locale: string }>) {
+  const showAmount = !isHeader && row.compareAmount !== null;
+  return (
+    <>
+      <TableCell className="text-right text-muted-foreground">
+        {showAmount ? <Amount value={row.compareAmount as number} kind="neutral" /> : null}
+      </TableCell>
+      <TableCell className="text-right tabular-nums text-muted-foreground">
+        {isHeader ? null : formatPercent(changeRatio(row.amount, row.compareAmount), locale)}
+      </TableCell>
+    </>
   );
 }
 
