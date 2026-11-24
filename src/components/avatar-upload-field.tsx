@@ -48,16 +48,16 @@ export function AvatarUploadField({
   onModeChange?: (mode: AvatarMode) => void;
   className?: string;
 }>) {
-  const [mode, setModeState] = useState<AvatarMode>("keep");
+  const [mode, setMode] = useState<AvatarMode>("keep");
   const [preview, setPreview] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const pickerRef = useRef<HTMLInputElement>(null);
   const payloadRef = useRef<HTMLInputElement>(null);
 
-  const setMode = useCallback(
+  const changeMode = useCallback(
     (m: AvatarMode) => {
-      setModeState(m);
+      setMode(m);
       onModeChange?.(m);
     },
     [onModeChange],
@@ -90,14 +90,14 @@ export function AvatarUploadField({
         const ext = blob.type === "image/webp" ? "webp" : "jpg";
         setPayload(new File([blob], `avatar.${ext}`, { type: blob.type }));
         setPreview(URL.createObjectURL(blob));
-        setMode("replace");
+        changeMode("replace");
       } catch {
         toast.error(labels.errors.processFailed);
       } finally {
         setBusy(false);
       }
     },
-    [labels, setMode],
+    [labels, changeMode],
   );
 
   // 貼上：只攔「剪貼簿裡有圖片」的貼上，貼文字到其他欄位照常
@@ -122,7 +122,7 @@ export function AvatarUploadField({
   };
 
   const undo = () => {
-    setMode("keep");
+    changeMode("keep");
     setPreview(null);
     setPayload(null);
   };
@@ -132,7 +132,7 @@ export function AvatarUploadField({
       undo();
       return;
     }
-    setMode("remove");
+    changeMode("remove");
     setPreview(null);
     setPayload(null);
   };

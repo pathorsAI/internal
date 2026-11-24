@@ -88,21 +88,11 @@ export default async function ActivityPage() {
                     {formatDateTime(r.createdAt)}
                   </TableCell>
                   <TableCell className="whitespace-nowrap font-medium">
-                    {r.actorName || r.actorEmail ? (
-                      <span className="inline-flex items-center gap-2">
-                        <PartyAvatar
-                          name={r.actorName ?? r.actorEmail ?? ""}
-                          src={actorImages.get(r.id) ?? null}
-                          size="sm"
-                          className="rounded-full"
-                        />
-                        {r.actorName ?? r.actorEmail}
-                      </span>
-                    ) : r.channel === "system" ? (
-                      t("systemActor")
-                    ) : (
-                      "—"
-                    )}
+                    <ActorCell
+                      name={r.actorName ?? r.actorEmail}
+                      image={actorImages.get(r.id) ?? null}
+                      fallback={r.channel === "system" ? t("systemActor") : "—"}
+                    />
                   </TableCell>
                   <TableCell>
                     {r.channel === "mcp" || r.channel === "ai" || r.channel === "system" || r.channel === "api" ? (
@@ -134,5 +124,20 @@ export default async function ActivityPage() {
         </Table>
       </TableCard>
     </>
+  );
+}
+
+/** 操作人：有名字就畫頭像（有上傳圖用圖，沒有用首字）＋名字；沒有就是系統或「—」。 */
+function ActorCell({
+  name,
+  image,
+  fallback,
+}: Readonly<{ name: string | null; image: string | null; fallback: string }>) {
+  if (!name) return fallback;
+  return (
+    <span className="inline-flex items-center gap-2">
+      <PartyAvatar name={name} src={image} size="sm" className="rounded-full" />
+      {name}
+    </span>
   );
 }

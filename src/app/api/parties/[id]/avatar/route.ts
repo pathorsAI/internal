@@ -1,4 +1,5 @@
 import { requireOrg } from "@/lib/session";
+import { avatarNotFound, avatarResponse } from "@/lib/avatar-response";
 import { readPartyAvatar } from "@/lib/party-avatar-store";
 import { partyAvatarDeps } from "@/lib/party-avatar-deps";
 
@@ -23,25 +24,5 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   const { orgId } = await requireOrg();
   const avatar = await readPartyAvatar(partyAvatarDeps(), { orgId, partyId });
-  if (!avatar) {
-    return new Response("Not found", {
-      status: 404,
-      // 404 也不要被快取住：使用者剛上傳完，下一次就該拿得到
-      headers: { "Cache-Control": "no-store" },
-    });
-  }
-
-  return new Response(avatar.body, {
-    headers: {
-      "Content-Type": avatar.contentType,
-      "X-Content-Type-Options": "nosniff",
-      // 網址帶 ?v=<avatar_updated_at>，換圖就換網址，所以可以放心快取一天。
-      // private：組織私有資料，不能進共用快取（CDN / proxy）。
-      "Cache-Control": "private, max-age=86400",
-      "Content-Disposition": "inline",
-      "X-Robots-Tag": "noindex, nofollow",
-      // 圖片本來就不會執行腳本；這條是萬一被當成文件開啟時的第二道保險。
-      "Content-Security-Policy": "default-src 'none'; sandbox",
-    },
-  });
+  return avatar ? avatarResponse(avatar.body, avatar.contentType) : avatarNotFound();
 }
