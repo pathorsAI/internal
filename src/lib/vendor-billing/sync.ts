@@ -47,6 +47,8 @@ import {
   firstOfMonth,
   monthChunks,
   syncWindowStart,
+  invoiceWindowStart,
+  isSettledInvoiceStatus,
   taipeiToday,
   yyyymm,
   type CostLineInput,
@@ -332,6 +334,27 @@ async function upsertInvoices(
   return { synced: unique.length, created: rows.filter((r) => r.created).length };
 }
 
+/** 這個帳號最早一張還沒結清的發票日（狀態不是 Paid / Void…）；沒有就 null。 */
+async function oldestOpenInvoiceDate(
+  db: Db,
+  orgId: string,
+  billingAccountId: number,
+  source: "azure_invoice" | "gcp_bigquery",
+): Promise<string | null> {
+  const rows = await db
+    .select({ d: vendorInvoices.invoiceDate, status: vendorInvoices.status })
+    .from(vendorInvoices)
+    .where(
+      and(
+        eq(vendorInvoices.organizationId, orgId),
+        eq(vendorInvoices.billingAccountId, billingAccountId),
+        eq(vendorInvoices.source, source),
+      ),
+    );
+  const open = rows.filter((r) => !isSettledInvoiceStatus(r.status)).map((r) => r.d);
+  return open.length ? open.reduce((a, b) => (a < b ? a : b)) : null;
+}
+
 const COST_CHUNK = 500;
 
 async function upsertCostLines(
@@ -580,7 +603,11 @@ export async function syncAzureBilling(orgId: string, now: Date = new Date()): P
       if (links) r.paymentMethods += await syncAzurePaymentMethods(db, orgId, acct.id, links);
 
       const from = syncWindowStart(acct.lastInvoiceDate, today);
-      const invoices = await soft(r.warnings, `${p.displayName} 發票`, () => client.listInvoices(ba, p.id, from, today));
+      // 還沒結清的舊發票也要重抓，不然付清之後狀態永遠停在 OverDue（費用明細仍只抓一般視窗）
+      const invoiceFrom = invoiceWindowStart(from, await oldestOpenInvoiceDate(db, orgId, acct.id, "azure_invoice"));
+      const invoices = await soft(r.warnings, `${p.displayName} 發票`, () =>
+        client.listInvoices(ba, p.id, invoiceFrom, today),
+      );
       if (invoices) {
         const up = await upsertInvoices(db, orgId, acct.id, "azure_invoice", invoices.map(azureInvoiceInput));
         r.invoices.synced += up.synced;
