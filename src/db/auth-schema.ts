@@ -59,6 +59,9 @@ export const organization = pgTable("organization", {
   name: text("name").notNull(),
   slug: text("slug").unique(),
   logo: text("logo"),
+  // 營業稅別的組織預設（migrations/0040、src/lib/tax-treatment.ts）
+  taxTreatment: text("tax_treatment").default("taxable").notNull(),
+  amountBasis: text("amount_basis").default("net").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   metadata: text("metadata"),
 });

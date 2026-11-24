@@ -490,6 +490,9 @@ export const subscriptions = pgTable("subscriptions", {
 	endDate: date("end_date"),
 	status: text().default('active').notNull(),
 	note: text(),
+	// 營業稅別（migrations/0040）：NULL = 沿用（綁合約跟合約、否則組織預設），見 src/lib/tax-treatment.ts
+	taxTreatment: text("tax_treatment"),
+	amountBasis: text("amount_basis"),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	foreignKey({
@@ -562,6 +565,9 @@ export const contracts = pgTable("contracts", {
 	/** 各期百分比，逗號分隔（例 '30,40,30'）；NULL = 平均分攤 */
 	installmentSplit: text("installment_split"),
 	billingIntervalMonths: integer("billing_interval_months").default(1).notNull(),
+	// 營業稅別（migrations/0040）：NULL = 沿用（綁合約跟合約、否則組織預設），見 src/lib/tax-treatment.ts
+	taxTreatment: text("tax_treatment"),
+	amountBasis: text("amount_basis"),
 	dueRule: text("due_rule").default('signed_date').notNull(),
 	/** day_of_month 為第幾個日曆日；business_day_of_month 為第幾個工作日 */
 	dueDay: integer("due_day"),
@@ -609,6 +615,9 @@ export const billingItems = pgTable("billing_items", {
 	needsInvoice: boolean("needs_invoice").default(true).notNull(),
 	status: text().default('scheduled').notNull(),
 	note: text(),
+	// 營業稅別（migrations/0040）：NULL = 沿用（綁合約跟合約、否則組織預設），見 src/lib/tax-treatment.ts
+	taxTreatment: text("tax_treatment"),
+	amountBasis: text("amount_basis"),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
 }, (table) => [
