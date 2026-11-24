@@ -78,7 +78,7 @@ SELECT
   r.created_at, r.updated_at, r.deleted_at
 FROM recurring_expenses r;
 
-COMMENT ON TABLE recurring_expenses IS '已停用（0039）：資料已搬到 vendor_billing_accounts，下一支 migration 刪除';
+COMMENT ON TABLE recurring_expenses IS '已停用（0040）：資料已搬到 vendor_billing_accounts，下一支 migration 刪除';
 
 -- ---- 3. 既有交易補繼承 ----
 UPDATE transactions t
