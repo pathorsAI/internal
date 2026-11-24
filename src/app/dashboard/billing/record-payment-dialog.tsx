@@ -195,7 +195,7 @@ export function RecordPaymentDialog({
           </Button>
         </DialogContent>
       </Dialog>
-      {allocating != null ? (
+      {allocating == null ? null : (
         <PaymentAllocationSheet
           transactionId={allocating}
           open
@@ -208,7 +208,7 @@ export function RecordPaymentDialog({
           }}
           prefillKey={rowKey}
         />
-      ) : null}
+      )}
     </>
   );
 }

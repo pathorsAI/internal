@@ -97,9 +97,10 @@ type TargetProgress = {
   status: string;
 };
 
-/** 這次寫入前後碰到的應收，各自最新的收款進度；合約另外回 contractProgress（含 action 提示）。 */
-async function progressOf(orgId: string, keys: Set<string>) {
-  const db = getDb();
+type Db = ReturnType<typeof getDb>;
+
+/** targetKey 依種類分組：請款項目、訂閱（各要哪幾期）、直接分給的合約。 */
+function groupKeys(keys: Set<string>) {
   const itemIds: number[] = [];
   const subPeriods = new Map<number, Set<string>>();
   const directContracts: number[] = [];
@@ -109,35 +110,40 @@ async function progressOf(orgId: string, keys: Set<string>) {
     else if (kind === "sub") subPeriods.set(Number(a), (subPeriods.get(Number(a)) ?? new Set()).add(b));
     else if (kind === "c") directContracts.push(Number(a));
   }
+  return { itemIds, subPeriods, directContracts };
+}
 
-  const [board, schedules, itemContracts, subContracts] = await Promise.all([
-    itemIds.length ? listBillingBoard(orgId, { includeAllHistory: true }) : Promise.resolve([]),
-    Promise.all([...subPeriods.keys()].map((id) => getSubscriptionSchedule(orgId, id))),
-    itemIds.length
-      ? db
-          .select({ contractId: billingItems.contractId })
-          .from(billingItems)
-          .where(and(eq(billingItems.organizationId, orgId), inArray(billingItems.id, itemIds)))
-      : Promise.resolve([]),
-    subPeriods.size
-      ? db
-          .select({ contractId: subscriptions.contractId })
-          .from(subscriptions)
-          .where(
-            and(
-              eq(subscriptions.organizationId, orgId),
-              inArray(subscriptions.id, [...subPeriods.keys()]),
-              isNull(subscriptions.deletedAt),
-            ),
-          )
-      : Promise.resolve([]),
-  ]);
+function itemContractIds(db: Db, orgId: string, itemIds: number[]) {
+  if (!itemIds.length) return Promise.resolve([]);
+  return db
+    .select({ contractId: billingItems.contractId })
+    .from(billingItems)
+    .where(and(eq(billingItems.organizationId, orgId), inArray(billingItems.id, itemIds)));
+}
 
-  const targets: TargetProgress[] = [];
+function subscriptionContractIds(db: Db, orgId: string, subscriptionIds: number[]) {
+  if (!subscriptionIds.length) return Promise.resolve([]);
+  return db
+    .select({ contractId: subscriptions.contractId })
+    .from(subscriptions)
+    .where(
+      and(
+        eq(subscriptions.organizationId, orgId),
+        inArray(subscriptions.id, subscriptionIds),
+        isNull(subscriptions.deletedAt),
+      ),
+    );
+}
+
+function billingItemProgress(
+  board: Awaited<ReturnType<typeof listBillingBoard>>,
+  keys: Set<string>,
+): TargetProgress[] {
+  const out: TargetProgress[] = [];
   for (const r of board) {
     if (r.billingItemId == null || !keys.has(r.key)) continue;
     const { remaining, fullyCollected } = collectionProgress(r.expected, r.paid);
-    targets.push({
+    out.push({
       key: r.key,
       targetType: "billing_item",
       title: r.title,
@@ -150,13 +156,21 @@ async function progressOf(orgId: string, keys: Set<string>) {
       status: r.status,
     });
   }
+  return out;
+}
+
+function subscriptionPeriodProgress(
+  schedules: Awaited<ReturnType<typeof getSubscriptionSchedule>>[],
+  subPeriods: Map<number, Set<string>>,
+): TargetProgress[] {
+  const out: TargetProgress[] = [];
   for (const s of schedules) {
     if (!s) continue;
     const wanted = subPeriods.get(s.id);
     for (const p of s.periods) {
       if (!wanted?.has(p.periodStart)) continue;
       const { remaining, fullyCollected } = collectionProgress(p.expected, p.paid);
-      targets.push({
+      out.push({
         key: `sub:${s.id}:${p.periodStart}`,
         targetType: "subscription_period",
         title: `${s.name} (${p.periodLabel})`,
@@ -170,18 +184,18 @@ async function progressOf(orgId: string, keys: Set<string>) {
       });
     }
   }
+  return out;
+}
 
-  const contractIds = [
-    ...directContracts,
-    ...itemContracts.map((r) => r.contractId),
-    ...subContracts.map((r) => r.contractId),
-  ].filter((id): id is number => id != null);
-  const contractProgress = await getContractProgress(db, orgId, contractIds);
-  for (const c of contractProgress) {
-    if (!directContracts.includes(c.contractId)) continue;
-    targets.push({
+function contractTargetProgress(
+  contractProgress: Awaited<ReturnType<typeof getContractProgress>>,
+  directContracts: number[],
+): TargetProgress[] {
+  return contractProgress
+    .filter((c) => directContracts.includes(c.contractId))
+    .map((c) => ({
       key: `c:${c.contractId}`,
-      targetType: "contract",
+      targetType: "contract" as const,
       title: c.title,
       currency: c.currency,
       expected: c.gross,
@@ -190,8 +204,33 @@ async function progressOf(orgId: string, keys: Set<string>) {
       remaining: c.remaining,
       fullyCollected: c.fullyCollected,
       status: c.status,
-    });
-  }
+    }));
+}
+
+/** 這次寫入前後碰到的應收，各自最新的收款進度；合約另外回 contractProgress（含 action 提示）。 */
+async function progressOf(orgId: string, keys: Set<string>) {
+  const db = getDb();
+  const { itemIds, subPeriods, directContracts } = groupKeys(keys);
+  const subscriptionIds = [...subPeriods.keys()];
+
+  const [board, schedules, itemContracts, subContracts] = await Promise.all([
+    itemIds.length ? listBillingBoard(orgId, { includeAllHistory: true }) : Promise.resolve([]),
+    Promise.all(subscriptionIds.map((id) => getSubscriptionSchedule(orgId, id))),
+    itemContractIds(db, orgId, itemIds),
+    subscriptionContractIds(db, orgId, subscriptionIds),
+  ]);
+
+  const contractIds = [
+    ...directContracts,
+    ...itemContracts.map((r) => r.contractId),
+    ...subContracts.map((r) => r.contractId),
+  ].filter((id): id is number => id != null);
+  const contractProgress = await getContractProgress(db, orgId, contractIds);
+  const targets: TargetProgress[] = [
+    ...billingItemProgress(board, keys),
+    ...subscriptionPeriodProgress(schedules, subPeriods),
+    ...contractTargetProgress(contractProgress, directContracts),
+  ];
   return { targets, contractProgress };
 }
 

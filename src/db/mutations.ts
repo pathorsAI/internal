@@ -3118,6 +3118,86 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+/** 算可選應收時共用的脈絡：這筆交易的幣別、客戶、自己已經分出去的、目前分給哪些目標。 */
+type TargetContext = {
+  currency: string;
+  partyId: number | null;
+  own: Map<string, number>;
+  currentKeys: Set<string>;
+};
+
+function effectiveLines(effective: Awaited<ReturnType<typeof listEffectiveAllocations>>): AllocationLineInput[] {
+  const lines: AllocationLineInput[] = [];
+  for (const r of effective) {
+    const key = effectiveRowKey(r);
+    if (key) lines.push({ key, amount: r.amount, fee: r.fee, note: r.note });
+  }
+  return lines;
+}
+
+/** 請款看板上同幣別、還沒收齊（或目前就分給它）的請款項目與訂閱期別。 */
+function boardTargets(
+  board: Awaited<ReturnType<typeof listBillingBoard>>,
+  ctx: TargetContext,
+): AllocationTargetOption[] {
+  const out: AllocationTargetOption[] = [];
+  for (const r of board) {
+    if (r.currency.trim() !== ctx.currency) continue;
+    const outstanding = round2(r.expected - r.paid + (ctx.own.get(r.key) ?? 0));
+    if (outstanding <= 0 && !ctx.currentKeys.has(r.key)) continue;
+    out.push({
+      key: r.key,
+      kind: r.source === "billing_item" ? "billing_item" : "subscription_period",
+      label: r.title,
+      customerName: r.customerName,
+      sameCustomer: ctx.partyId != null && r.customerPartyId === ctx.partyId,
+      outstanding,
+      current: ctx.currentKeys.has(r.key),
+    });
+  }
+  return out;
+}
+
+/** 合約還開著嗎：金額未定時看狀態，有金額就看還差多少。 */
+function contractIsOpen(outstanding: number | null, status: string): boolean {
+  if (outstanding == null) return status === "active" || status === "draft";
+  return outstanding > 0;
+}
+
+/** 同幣別、沒取消、還開著（或目前就分給它）的合約。 */
+function contractTargets(
+  contractRows: Awaited<ReturnType<typeof listContracts>>,
+  ctx: TargetContext,
+): AllocationTargetOption[] {
+  const out: AllocationTargetOption[] = [];
+  for (const c of contractRows) {
+    if (c.currency.trim() !== ctx.currency || c.status === "cancelled") continue;
+    const key = `c:${c.id}`;
+    const outstanding = c.remaining == null ? null : round2(c.remaining + (ctx.own.get(key) ?? 0));
+    if (!contractIsOpen(outstanding, c.status) && !ctx.currentKeys.has(key)) continue;
+    out.push({
+      key,
+      kind: "contract",
+      label: c.title,
+      customerName: c.customerName,
+      sameCustomer: ctx.partyId != null && c.customerPartyId === ctx.partyId,
+      outstanding,
+      current: ctx.currentKeys.has(key),
+    });
+  }
+  return out;
+}
+
+/** 目前分給的在前，再來同客戶，然後依客戶名、標題排。 */
+function compareTargets(a: AllocationTargetOption, b: AllocationTargetOption): number {
+  return (
+    Number(b.current) - Number(a.current) ||
+    Number(b.sameCustomer) - Number(a.sameCustomer) ||
+    (a.customerName ?? "").localeCompare(b.customerName ?? "") ||
+    a.label.localeCompare(b.label)
+  );
+}
+
 /** 打開「分配收款」Sheet 時載入：交易、目前的分配、可以選的應收（同客戶在前）。 */
 export async function loadAllocationEditor(
   transactionId: number,
@@ -3157,53 +3237,16 @@ export async function loadAllocationEditor(
       listContracts(orgId),
     ]);
 
-    const lines: AllocationLineInput[] = [];
-    for (const r of effective) {
-      const key = effectiveRowKey(r);
-      if (key) lines.push({ key, amount: r.amount, fee: r.fee, note: r.note });
-    }
+    const lines = effectiveLines(effective);
     // 這筆交易自己已經分給各目標的（含手續費）：算「還差多少」時要加回去。
-    const own = new Map(lines.map((l) => [l.key, round2(l.amount + l.fee)]));
-    const currentKeys = new Set(lines.map((l) => l.key));
-
-    const targets: AllocationTargetOption[] = [];
-    for (const r of board) {
-      if (r.currency.trim() !== currency) continue;
-      const outstanding = round2(r.expected - r.paid + (own.get(r.key) ?? 0));
-      if (outstanding <= 0 && !currentKeys.has(r.key)) continue;
-      targets.push({
-        key: r.key,
-        kind: r.source === "billing_item" ? "billing_item" : "subscription_period",
-        label: r.title,
-        customerName: r.customerName,
-        sameCustomer: txn.partyId != null && r.customerPartyId === txn.partyId,
-        outstanding,
-        current: currentKeys.has(r.key),
-      });
-    }
-    for (const c of contractRows) {
-      if (c.currency.trim() !== currency || c.status === "cancelled") continue;
-      const key = `c:${c.id}`;
-      const outstanding = c.remaining == null ? null : round2(c.remaining + (own.get(key) ?? 0));
-      const open = outstanding == null ? c.status === "active" || c.status === "draft" : outstanding > 0;
-      if (!open && !currentKeys.has(key)) continue;
-      targets.push({
-        key,
-        kind: "contract",
-        label: c.title,
-        customerName: c.customerName,
-        sameCustomer: txn.partyId != null && c.customerPartyId === txn.partyId,
-        outstanding,
-        current: currentKeys.has(key),
-      });
-    }
-    targets.sort(
-      (a, b) =>
-        Number(b.current) - Number(a.current) ||
-        Number(b.sameCustomer) - Number(a.sameCustomer) ||
-        (a.customerName ?? "").localeCompare(b.customerName ?? "") ||
-        a.label.localeCompare(b.label),
-    );
+    const ctx: TargetContext = {
+      currency,
+      partyId: txn.partyId,
+      own: new Map(lines.map((l) => [l.key, round2(l.amount + l.fee)])),
+      currentKeys: new Set(lines.map((l) => l.key)),
+    };
+    const targets = [...boardTargets(board, ctx), ...contractTargets(contractRows, ctx)];
+    targets.sort(compareTargets);
 
     return {
       ok: true,

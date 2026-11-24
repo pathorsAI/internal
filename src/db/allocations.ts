@@ -27,7 +27,7 @@ export type Collected = { paid: number; fee: number };
 /** raw execute 的結果：node-postgres／neon-http 都是 { rows }，保險起見也接受直接回陣列的 driver。 */
 function rowsOf<T>(res: unknown): T[] {
   if (Array.isArray(res)) return res as T[];
-  return ((res as { rows?: T[] }).rows ?? []) as T[];
+  return (res as { rows?: T[] }).rows ?? [];
 }
 
 function idList(ids: readonly number[]): SQL {
@@ -78,7 +78,7 @@ export async function billingItemCollected(
   ids?: readonly number[],
   db: Db = getDb(),
 ): Promise<Map<number, Collected>> {
-  if (ids && ids.length === 0) return new Map();
+  if (ids?.length === 0) return new Map();
   const filter = ids ? sql`and e.billing_item_id in (${idList(ids)})` : sql``;
   const res = await db.execute(sql`
     with ${effectiveCte(orgId)}
@@ -105,7 +105,7 @@ export async function subscriptionPeriodCollected(
   subscriptionIds?: readonly number[],
   db: Db = getDb(),
 ): Promise<Map<number, PeriodCollected[]>> {
-  if (subscriptionIds && subscriptionIds.length === 0) return new Map();
+  if (subscriptionIds?.length === 0) return new Map();
   const filter = subscriptionIds ? sql`and e.subscription_id in (${idList(subscriptionIds)})` : sql``;
   const res = await db.execute(sql`
     with ${effectiveCte(orgId)}
@@ -136,7 +136,7 @@ export async function contractCollected(
   ids?: readonly number[],
   db: Db = getDb(),
 ): Promise<Map<number, Collected>> {
-  if (ids && ids.length === 0) return new Map();
+  if (ids?.length === 0) return new Map();
   const filter = ids ? sql`and c.id in (${idList(ids)})` : sql``;
   const res = await db.execute(sql`
     with ${effectiveCte(orgId)}

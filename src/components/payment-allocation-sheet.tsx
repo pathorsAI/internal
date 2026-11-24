@@ -53,6 +53,40 @@ function money(n: number): string {
   return String(Math.round(n * 100) / 100);
 }
 
+function numericLines(drafts: readonly Draft[]): { amount: number; fee: number }[] {
+  return drafts.map((d) => ({ amount: toNum(d.amount), fee: toNum(d.fee) }));
+}
+
+function withoutDraft(drafts: readonly Draft[], uidValue: string): Draft[] {
+  return drafts.filter((d) => d.uid !== uidValue);
+}
+
+/**
+ * 某一列選了目標：金額還空著就幫忙帶 min(還沒分出去的, 那一列還沒收的)。
+ * 「還沒分出去的」不算這一列自己。
+ */
+function applyTarget(
+  drafts: readonly Draft[],
+  uidValue: string,
+  key: string,
+  txnAmount: number,
+  byKey: ReadonlyMap<string, AllocationTargetOption>,
+): Draft[] {
+  return drafts.map((d) => {
+    if (d.uid !== uidValue) return d;
+    if (d.amount.trim() !== "") return { ...d, key };
+    const rest = allocationTotals(txnAmount, numericLines(withoutDraft(drafts, uidValue))).unallocated;
+    const outstanding = byKey.get(key)?.outstanding ?? rest;
+    return { ...d, key, amount: money(prefillAmount(rest, outstanding)) };
+  });
+}
+
+/** 目標下拉選單上的一行字：種類｜標題 · 客戶。 */
+function optionText(kindLabel: string, o: AllocationTargetOption): string {
+  const customer = o.customerName ? ` · ${o.customerName}` : "";
+  return `${kindLabel}｜${o.label}${customer}`;
+}
+
 let uidSeq = 0;
 function uid(): string {
   uidSeq += 1;
@@ -190,8 +224,7 @@ function EditorBody({
   const { txn, targets } = data;
   const byKey = React.useMemo(() => new Map(targets.map((o) => [o.key, o])), [targets]);
 
-  const numeric = drafts.map((d) => ({ amount: toNum(d.amount), fee: toNum(d.fee) }));
-  const totals = allocationTotals(txn.amount, numeric);
+  const totals = allocationTotals(txn.amount, numericLines(drafts));
   const over = totals.unallocated < 0;
 
   // 吸收的那一列：預設最後一列（選過的那列被刪掉也退回最後一列）。
@@ -209,19 +242,7 @@ function EditorBody({
   }
 
   function chooseTarget(uidValue: string, key: string) {
-    setDrafts((prev) =>
-      prev.map((d) => {
-        if (d.uid !== uidValue) return d;
-        // 金額還空著就幫忙帶 min(還沒分出去的, 那一列還沒收的)。
-        if (d.amount.trim() !== "") return { ...d, key };
-        const rest = allocationTotals(
-          txn.amount,
-          prev.filter((x) => x.uid !== uidValue).map((x) => ({ amount: toNum(x.amount), fee: toNum(x.fee) })),
-        ).unallocated;
-        const outstanding = byKey.get(key)?.outstanding ?? rest;
-        return { ...d, key, amount: money(prefillAmount(rest, outstanding)) };
-      }),
-    );
+    setDrafts((prev) => applyTarget(prev, uidValue, key, txn.amount, byKey));
   }
 
   function absorb() {
@@ -260,6 +281,9 @@ function EditorBody({
   const usedKeys = new Set(drafts.map((d) => d.key).filter(Boolean));
   const absorbLine = drafts[absorbIndex];
   const absorbLabel = absorbLine ? (byKey.get(absorbLine.key)?.label ?? `#${absorbIndex + 1}`) : "";
+  let saveLabel = t("sheet.save");
+  if (saving) saveLabel = t("sheet.saving");
+  else if (drafts.length === 0 && data.hasStoredAllocations) saveLabel = t("sheet.clearAll");
 
   return (
     <>
@@ -305,7 +329,7 @@ function EditorBody({
                 option={byKey.get(d.key)}
                 onTarget={(key) => chooseTarget(d.uid, key)}
                 onChange={(patch) => update(d.uid, patch)}
-                onRemove={() => setDrafts((prev) => prev.filter((x) => x.uid !== d.uid))}
+                onRemove={() => setDrafts((prev) => withoutDraft(prev, d.uid))}
               />
             ))}
           </ul>
@@ -358,7 +382,7 @@ function EditorBody({
             void save();
           }}
         >
-          {saving ? t("sheet.saving") : drafts.length === 0 && data.hasStoredAllocations ? t("sheet.clearAll") : t("sheet.save")}
+          {saveLabel}
         </Button>
       </SheetFooter>
     </>
@@ -428,7 +452,7 @@ function LineRow({
                   <SelectLabel>{g.label}</SelectLabel>
                   {g.items.map((o) => (
                     <SelectItem key={o.key} value={o.key} disabled={o.key !== draft.key && usedKeys.has(o.key)}>
-                      {`${t(`kind.${o.kind}`)}｜${o.label}${o.customerName ? ` · ${o.customerName}` : ""}`}
+                      {optionText(t(`kind.${o.kind}`), o)}
                     </SelectItem>
                   ))}
                 </SelectGroup>
