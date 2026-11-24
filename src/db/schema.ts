@@ -338,6 +338,12 @@ export const transactions = pgTable("transactions", {
 	externalRef: text("external_ref"),
 	externalMeta: jsonb("external_meta").$type<Record<string, unknown>>(),
 	needsReview: boolean("needs_review").default(false).notNull(),
+	// 待連結（migrations/0041，src/lib/linking）：跟 needsReview（分類待確認）分開。
+	// link_suggested / link_ambiguous / link_amount_mismatch / party_similar / link_skipped；NULL = 不用人看。
+	reviewReason: text("review_reason"),
+	linkCandidates: jsonb("link_candidates").$type<Record<string, unknown>>(),
+	// 這筆支出屬於哪個廠商計費帳戶（固定支出）。FK 在 DB 端（migrations/0041）。
+	vendorBillingAccountId: bigint("vendor_billing_account_id", { mode: "number" }),
 }, (table) => [
 	uniqueIndex("uq_txn_external_ref").on(table.organizationId, table.externalSource, table.externalRef).where(sql`external_ref IS NOT NULL`),
 	index("idx_txn_needs_review").on(table.organizationId).where(sql`needs_review AND deleted_at IS NULL`),
@@ -395,6 +401,8 @@ export const transactions = pgTable("transactions", {
 	check("chk_txn_book", sql`book = ANY (ARRAY['both'::text, 'internal'::text, 'external'::text])`),
 	check("chk_txn_type", sql`type = ANY (ARRAY['expense'::text, 'income'::text, 'advance'::text, 'reimbursement'::text, 'transfer'::text])`),
 	check("chk_txn_external_ref_source", sql`external_ref IS NULL OR external_source IS NOT NULL`),
+	check("chk_txn_review_reason", sql`review_reason IS NULL OR review_reason = ANY (ARRAY['link_suggested'::text, 'link_ambiguous'::text, 'link_amount_mismatch'::text, 'party_similar'::text, 'link_skipped'::text])`),
+	index("idx_txn_review_reason").on(table.organizationId).where(sql`review_reason IS NOT NULL AND review_reason <> 'link_skipped' AND deleted_at IS NULL`),
 ]);
 
 export const accountReconciliations = pgTable("account_reconciliations", {
@@ -892,7 +900,18 @@ export const vendorBillingAccounts = pgTable("vendor_billing_accounts", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
+	// 固定支出（migrations/0041，原本的 recurring_expenses）：一個廠商計費帳戶就是一筆固定支出。
+	// schedule NULL = 不提醒；fixed = 依 anchorDate 每 intervalMonths 個月；usage = 用量計費每月扣。
+	schedule: text(),
+	anchorDate: date("anchor_date"),
+	intervalMonths: integer("interval_months").default(1).notNull(),
+	expectedAmount: numeric("expected_amount", { precision: 18, scale: 2 }),
+	currency: char({ length: 3 }),
+	billingUrl: text("billing_url"),
 }, (table) => [
+	check("chk_vendor_billing_account_schedule", sql`schedule IS NULL OR schedule = ANY (ARRAY['fixed'::text, 'usage'::text])`),
+	check("chk_vendor_billing_account_anchor", sql`schedule IS DISTINCT FROM 'fixed' OR anchor_date IS NOT NULL`),
+	check("chk_vendor_billing_account_interval", sql`interval_months >= 1 AND interval_months <= 36`),
 	index("idx_vendor_billing_account_org").using("btree", table.organizationId.asc().nullsLast().op("text_ops")).where(sql`deleted_at IS NULL`),
 	index("idx_vendor_billing_account_payment_method").using("btree", table.paymentMethodId.asc().nullsLast().op("int8_ops")).where(sql`payment_method_id IS NOT NULL`),
 	index("idx_vendor_billing_account_party").using("btree", table.partyId.asc().nullsLast().op("int8_ops")).where(sql`party_id IS NOT NULL`),
@@ -1016,8 +1035,10 @@ export const vendorCostLines = pgTable("vendor_cost_lines", {
 	check("chk_vendor_cost_line_currency", sql`currency ~ '^[A-Z]{3}$'::text`),
 ]);
 
-// ---- 固定支出（migrations/0032，src/lib/recurring-expenses.ts）。公司定期付給廠商的費用，
-// Discord 扣款提醒與每月回顧的來源。交易不綁這張表：靠 match_pattern 比對對象名稱 / 說明。----
+// ---- @deprecated 固定支出的舊表（migrations/0032）。0039 已把資料搬到 vendor_billing_accounts
+// （一個廠商計費帳戶 = 一筆固定支出，排程欄位在帳戶上），下一支 migration 會 DROP 這張表。
+// 表還在，所以定義先留著；app 程式不要再讀寫它 —— 唯一的例外是 src/lib/party-merge-deps.ts 的
+// REPOINTS（合併對象時，表還在就要一起改指，免得外鍵擋住刪除來源對象）。----
 export const recurringExpenses = pgTable("recurring_expenses", {
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "recurring_expenses_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
 	organizationId: text("organization_id").notNull(),
@@ -1061,7 +1082,7 @@ export const notificationDeliveries = pgTable("notification_deliveries", {
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "notification_deliveries_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
 	organizationId: text("organization_id").notNull(),
 	channel: text().notNull(),
-	// reminder:<recurringExpenseId>:<chargeDate>、recap:<YYYY-MM>
+	// reminder:vba:<vendorBillingAccountId>:<chargeDate>、recap:<YYYY-MM>（0039 之前的提醒是 reminder:<recurringExpenseId>:<chargeDate>）
 	dedupeKey: text("dedupe_key").notNull(),
 	sentAt: timestamp("sent_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [

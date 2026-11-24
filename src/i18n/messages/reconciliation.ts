@@ -2,7 +2,6 @@ import type { Dictionary } from "./dictionary";
 
 const reconciliation = {
   title: { "zh-TW": "對帳", en: "Reconciliation" },
-  description: { "zh-TW": "比對帳面餘額與帳戶實際餘額，確保記帳對得上", en: "Compare book balance against the account's actual balance to make sure the books check out" },
   card: {
     lastReconciled: { "zh-TW": "上次對帳：{date}", en: "Last reconciled: {date}" },
     never: { "zh-TW": "尚未對帳", en: "Not reconciled yet" },

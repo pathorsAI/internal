@@ -146,7 +146,7 @@ function BigQueryInputs({
             onChange={(e) => onChange({ ...value, projectId: e.target.value })}
             disabled={disabled}
             spellCheck={false}
-            placeholder="internal-498514"
+            placeholder="my-project-123456"
           />
         </div>
         <div className="space-y-1.5">

@@ -8,9 +8,8 @@ import { SpendTrendSkeleton } from "./spend-trend-view";
 export default function Loading() {
   return (
     <>
-      <div className="grid-paper -mx-6 -mt-6 space-y-2 border-b bg-card/60 px-6 pt-6 pb-5">
+      <div className="grid-paper -mx-6 -mt-6 border-b bg-card/60 px-6 pt-6 pb-5">
         <Skeleton className="h-7 w-40" />
-        <Skeleton className="h-5 w-80 max-w-full" />
       </div>
       <Skeleton className="h-9 w-52" />
       <SpendTrendSkeleton />

@@ -340,7 +340,7 @@ export const simpanyTools: Record<string, ToolDef> = {
 
   simpany_get_invoice: {
     description:
-      "[read] Full detail of one Simpany e-invoice by invoice number (e.g. FW10873802) or Simpany id (R…): items, tax type, zero-rate reason, buyer emails, upload status to the Ministry of Finance, void info.",
+      "[read] Full detail of one Simpany e-invoice by invoice number (e.g. AB12345678) or Simpany id (R…): items, tax type, zero-rate reason, buyer emails, upload status to the Ministry of Finance, void info.",
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
     inputSchema: {
       type: "object",
@@ -570,7 +570,7 @@ export const simpanyTools: Record<string, ToolDef> = {
     inputSchema: {
       type: "object",
       properties: {
-        invoice: { type: "string", description: "Invoice number (e.g. FW10873800) or Simpany id (R…)." },
+        invoice: { type: "string", description: "Invoice number (e.g. AB12345678) or Simpany id (R…)." },
         reason: { type: "string", description: "Required 作廢原因, max 20 characters (e.g. 課稅別開立錯誤)." },
         ...ORG_ARG,
       },
@@ -685,7 +685,7 @@ export const simpanyTools: Record<string, ToolDef> = {
 
   simpany_prepare_salary_filing: {
     description:
-      "Prepare (but do NOT save) a month's salary declaration (薪資申報) in Simpany, the company's payroll filing to its bookkeeper. Loads the month's Simpany form and each employee's declaration as a template, changes only the pay/insurance dates and the amounts (本薪, optional 非經常性獎金 / 員工代墊款 / other items; insurance brackets, insurance flags, dependents and pension settings are kept), runs Simpany's own calculation (POST …/calculate, which does not save), and stores a draft valid for 2 hours. Returns draftId plus per employee: gross, personal insurance, company insurance, withholding, net pay (實際發薪), declared salary, insured brackets, owner flag, and warnings (month-sequence restriction, payday not the 5th of next month, brackets, one-off items not carried over). If employees are missing from the month's form it plans a copy from the latest settled month; the copy writes to Simpany and only runs with allowCopy: true (otherwise draftId is null and the plan is returned). Employees that don't exist in Simpany are reported — they must be added in Simpany's own UI (this tool never creates employees). Never put shareholder loan repayments (股東往來還款) into a salary declaration — they are not salary. Show the preview to the user and get explicit approval before simpany_apply_salary_filing. Owner/admin only.",
+      "Prepare (but do NOT save) a month's salary declaration (薪資申報) in Simpany, the company's payroll filing to its bookkeeper. Loads the month's Simpany form and each employee's declaration as a template, changes only the pay/insurance dates and the amounts (本薪, optional 非經常性獎金 / 員工代墊款 / other items; insurance brackets, insurance flags, dependents and pension settings are kept), runs Simpany's own calculation (POST …/calculate, which does not save), and stores a draft valid for 2 hours. Returns draftId plus per employee: gross, personal insurance, company insurance, withholding, net pay (實際發薪), declared salary, insured brackets, owner flag, and warnings (month-sequence restriction, payday not the 5th of next month, brackets, one-off items not carried over). If employees are missing from the month's form it plans a copy from the latest settled month; the copy writes to Simpany and only runs with allowCopy: true (otherwise draftId is null and the plan is returned). Employees that don't exist in Simpany are reported — they must be added in Simpany's own UI (this tool never creates employees). Never put non-salary payments (e.g. loan repayments or reimbursements) into a salary declaration. Show the preview to the user and get explicit approval before simpany_apply_salary_filing. Owner/admin only.",
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     inputSchema: {
       type: "object",
@@ -881,7 +881,7 @@ export const simpanyTools: Record<string, ToolDef> = {
         expectedMonthlyNet: {
           type: "object",
           additionalProperties: { type: "number" },
-          description: "Override the monthly net used for estimates, keyed by employee name, e.g. {\"呂安\": 38376}.",
+          description: "Override the monthly net used for estimates, keyed by employee name, e.g. {\"王小明\": 40000}.",
         },
         ...ORG_ARG,
       },

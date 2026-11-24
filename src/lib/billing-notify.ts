@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { logSystem } from "@/db/activity";
-import { countTransactions, listLedgerTransactionsForPeriod, listOutstandingAdvances, listRecurringExpenses } from "@/db/queries";
+import { countTransactions, listLedgerTransactionsForPeriod, listOutstandingAdvances } from "@/db/queries";
 import { notificationDeliveries, orgIntegrations } from "@/db/schema";
 import { runAsSystem } from "@/i18n/server-t";
 import { publicBaseUrl } from "@/lib/base-url";
@@ -14,29 +14,38 @@ import {
   assignTransactions,
   buildRecap,
   nextChargeDate,
+  periodRange,
   previousPeriod,
   renderRecapMessages,
   renderReminderMessages,
   sumByCurrency,
-  toRecurringExpense,
   type LedgerTransaction,
   type RecurringExpense,
   type ReminderItem,
 } from "@/lib/recurring-expenses";
 import { taipeiDate } from "@/lib/simpany-sync";
+import { listMatchedInvoices, listRecurringAccounts } from "@/lib/vendor-billing/service";
 
 /**
  * 固定支出的 Discord 通知：扣款提醒與每月回顧。
+ *
+ * 來源：廠商計費帳戶（vendor_billing_accounts）裡 status = active、schedule 不是 NULL 的那些 ——
+ * 一個帳戶就是一筆固定支出（migrations/0039 之前是 recurring_expenses 表，已停用）。
+ * 交易歸屬看外鍵（vendor_billing_account_id、雲端帳單綁定、過渡期的對象比對），不再比對字串；
+ * 規則在 src/lib/recurring-expenses.ts 的 assignTransactions。
  *
  * 觸發：每日 cron（台北 06:00）在整合自動同步之後呼叫（src/app/api/cron/integrations-autosync），
  * 所以 Wise 的交易已經是最新的。MCP `preview_billing_notifications` 走同一條路徑（預設 dryRun）。
  *
  * 範圍：Discord 整合 `enabled AND status = 'connected'` 的每個組織。
- *   - 扣款提醒：fixed、啟用中的固定支出，下一次扣款日落在 [今天, 今天 + reminderDays] 內。
+ *   - 扣款提醒：fixed、使用中的固定支出，下一次扣款日落在 [今天, 今天 + reminderDays] 內。
  *     用區間而不是「剛好等於今天 + N 天」：cron 漏跑一天、或剛登記一筆明天就扣的，下一輪照樣會提醒；
- *     去重鍵是 reminder:<id>:<扣款日>，同一次扣款只會提醒一次。
+ *     去重鍵是 reminder:vba:<廠商計費帳戶 id>:<扣款日>，同一次扣款只會提醒一次。
+ *     （0039 之前是 reminder:<recurring_expenses.id>:<扣款日>。換格式是刻意的：帳戶 id 跟舊表的 id
+ *     是兩套序號，沿用舊格式會讓新帳戶撞到舊紀錄、該發的提醒被當成已發過。代價是切換當下已經提醒過、
+ *     還沒扣款的那幾筆可能會再提醒一次。）
  *   - 每月回顧：台北日期 >= recapDay 時發上個月的回顧（去重鍵 recap:<YYYY-MM>，一個月只發一次；
- *     同樣容許 cron 漏跑）。一筆啟用中的固定支出都沒有的組織不發。
+ *     同樣容許 cron 漏跑；格式沒變，切換當月不會重發回顧）。一筆使用中的固定支出都沒有的組織不發。
  *
  * 冪等：送之前先 INSERT … ON CONFLICT DO NOTHING RETURNING 搶 notification_deliveries，
  * 搶到的才送；送失敗就刪掉自己搶的那幾列，下一輪再試。重跑、手動觸發、兩個 isolate 同時跑都不會重複發。
@@ -177,8 +186,9 @@ async function deliver(
 // 一個組織
 // ---------------------------------------------------------------------------
 
-export function reminderKey(expenseId: number, chargeDate: string): string {
-  return `reminder:${expenseId}:${chargeDate}`;
+/** accountId = 廠商計費帳戶 id（見檔頭關於格式的說明）。 */
+export function reminderKey(accountId: number, chargeDate: string): string {
+  return `reminder:vba:${accountId}:${chargeDate}`;
 }
 
 export function recapKey(period: string): string {
@@ -255,7 +265,7 @@ async function notifyOrg(
     return txnsByPeriod.get(period)!;
   };
   await step(async () => {
-    expenses = (await listRecurringExpenses(orgId, { activeOnly: true })).map(toRecurringExpense);
+    expenses = await listRecurringAccounts(orgId, { statuses: ["active"] });
   });
 
   if (kinds.has("reminder") && errors.length === 0) {
@@ -276,8 +286,10 @@ async function notifyOrg(
   const recapPeriod = forced ?? (Number(today.slice(8, 10)) >= config.recapDay ? lastPeriod : null);
   if (kinds.has("recap") && recapPeriod && (forced || expenses.length > 0)) {
     await step(async () => {
-      const [transactions, advances, needsReviewCount] = await Promise.all([
+      const { start, endExclusive } = periodRange(recapPeriod);
+      const [transactions, matchedInvoices, advances, needsReviewCount] = await Promise.all([
         txnsFor(recapPeriod),
+        listMatchedInvoices(orgId, expenses.map((e) => e.id), start, endExclusive),
         listOutstandingAdvances(orgId),
         countTransactions(orgId, { needsReview: true }),
       ]);
@@ -285,6 +297,7 @@ async function notifyOrg(
         period: recapPeriod,
         expenses,
         transactions,
+        matchedInvoices,
         outstandingAdvances: advances.map((a) => ({
           employeeName: a.settleName,
           txnDate: a.txnDate,

@@ -13,6 +13,10 @@ export type LedgerModeValue = (typeof LEDGER_MODES)[number];
 export const ACCOUNT_STATUSES = ["active", "closed", "missing"] as const;
 export type AccountStatus = (typeof ACCOUNT_STATUSES)[number];
 
+/** 固定支出的扣款週期（vendor_billing_accounts.schedule）；null = 不提醒（不算固定支出）。 */
+export const ACCOUNT_SCHEDULES = ["fixed", "usage"] as const;
+export type AccountSchedule = (typeof ACCOUNT_SCHEDULES)[number];
+
 export const INVOICE_ACTIONS = ["confirm", "link", "unlink", "ignore", "create"] as const;
 export type InvoiceAction = (typeof INVOICE_ACTIONS)[number];
 
@@ -167,7 +171,63 @@ export type BillingAccountPatch = {
   bookPromotionCredits?: boolean;
   status?: AccountStatus;
   note?: string | null;
+  // 固定支出（migrations/0039）：一個廠商計費帳戶就是一筆固定支出。
+  schedule?: AccountSchedule | null;
+  /** YYYY-MM-DD，任一次已知的扣款日；fixed 必填。 */
+  anchorDate?: string | null;
+  intervalMonths?: number;
+  /** 預估每期金額（十進位字串，存 numeric）。 */
+  expectedAmount?: string | null;
+  currency?: string | null;
+  billingUrl?: string | null;
 };
+
+function parseSchedule(v: unknown): AccountSchedule | null {
+  if (v === null || v === undefined || v === "" || v === "none") return null;
+  return oneOf(v, ACCOUNT_SCHEDULES, "扣款週期");
+}
+
+function parseDate(v: unknown): string | null {
+  const t = text(v, "扣款日", 10);
+  if (t === null) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t) || Number.isNaN(Date.parse(`${t}T00:00:00Z`))) {
+    throw new VendorBillingInputError("扣款日必須是 YYYY-MM-DD");
+  }
+  return t;
+}
+
+function parseInterval(v: unknown): number {
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isInteger(n) || n < 1 || n > 36) throw new VendorBillingInputError("每隔幾個月必須是 1～36 的整數");
+  return n;
+}
+
+function parseAmount(v: unknown): string | null {
+  if (v === null || v === undefined || v === "") return null;
+  const n = typeof v === "number" ? v : Number(String(v).replaceAll(",", "").trim());
+  if (!Number.isFinite(n) || n < 0 || n >= 1e16) throw new VendorBillingInputError("預估金額必須是 0 以上的數字");
+  return (Math.round(n * 100) / 100).toString();
+}
+
+function parseCurrency(v: unknown): string | null {
+  const t = text(v, "幣別", 3);
+  if (t === null) return null;
+  const c = t.toUpperCase();
+  if (!/^[A-Z]{3}$/.test(c)) throw new VendorBillingInputError("幣別必須是 3 個英文字母（例如 TWD）");
+  return c;
+}
+
+function parseUrl(v: unknown): string | null {
+  const t = text(v, "帳單頁網址", 500);
+  if (t === null) return null;
+  try {
+    const u = new URL(t);
+    if (u.protocol === "https:" || u.protocol === "http:") return t;
+  } catch {
+    // 落到下面的錯誤
+  }
+  throw new VendorBillingInputError("帳單頁網址必須是 http:// 或 https:// 開頭");
+}
 
 function parseIdList(v: unknown): number[] {
   if (!Array.isArray(v)) throw new VendorBillingInputError("matchPartyIds 必須是陣列");
@@ -187,6 +247,12 @@ const BILLING_ACCOUNT_FIELDS: FieldParsers = {
   bookPromotionCredits: parseBool("bookPromotionCredits"),
   status: (v) => oneOf(v, ACCOUNT_STATUSES, "狀態"),
   note: (v) => text(v, "備註", 2000),
+  schedule: parseSchedule,
+  anchorDate: parseDate,
+  intervalMonths: parseInterval,
+  expectedAmount: parseAmount,
+  currency: parseCurrency,
+  billingUrl: parseUrl,
 };
 
 export function normalizeBillingAccountInput(raw: Record<string, unknown>): BillingAccountPatch {
@@ -206,7 +272,42 @@ export const SYNCED_ACCOUNT_EDITABLE = new Set([
   "ledgerMode",
   "bookPromotionCredits",
   "note",
+  // 固定支出的排程是我們自己的設定，跟平台同步無關
+  "schedule",
+  "anchorDate",
+  "intervalMonths",
+  "expectedAmount",
+  "currency",
+  "billingUrl",
 ]);
+
+/** 目前存著的排程欄位（新增時全是 null）。 */
+export type ScheduleColumns = {
+  schedule: string | null;
+  anchorDate: string | null;
+  expectedAmount: string | null;
+  currency: string | null;
+};
+
+/**
+ * 排程欄位之間的規則（套在 normalize 過的 patch 上，current = 目前存著的值；新增時傳 null）：
+ *   - 存檔後是 fixed 卻沒有扣款日 → 擋（DB 的 chk_vendor_billing_account_anchor 也會擋，這裡給看得懂的錯誤）
+ *   - 這次把週期改成 usage / 不提醒 → 扣款日清掉，免得畫面上留著沒作用的值
+ *   - 這次填了預估金額、卻沒有任何幣別 → TWD；這次清掉預估金額、也沒另外指定幣別 → 幣別一起清掉
+ */
+export function applyScheduleRules(patch: BillingAccountPatch, current: ScheduleColumns | null): BillingAccountPatch {
+  const out = { ...patch };
+  const schedule = out.schedule === undefined ? (current?.schedule ?? null) : out.schedule;
+  if (out.schedule !== undefined && schedule !== "fixed") out.anchorDate = null;
+  const anchorDate = out.anchorDate === undefined ? (current?.anchorDate ?? null) : out.anchorDate;
+  if (schedule === "fixed" && !anchorDate) throw new VendorBillingInputError("固定日期扣款要填扣款日");
+  if (out.expectedAmount !== undefined) {
+    const currency = out.currency === undefined ? (current?.currency ?? null) : out.currency;
+    if (out.expectedAmount === null && out.currency === undefined) out.currency = null;
+    else if (out.expectedAmount !== null && !currency) out.currency = "TWD";
+  }
+  return out;
+}
 
 /** 把「同步來的不能改」的欄位挑出來（回傳不允許的欄位名）。 */
 export function forbiddenSyncedFields(patch: Record<string, unknown>, editable: ReadonlySet<string>): string[] {

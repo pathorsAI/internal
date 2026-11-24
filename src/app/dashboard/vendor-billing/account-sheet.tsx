@@ -26,7 +26,10 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Field } from "@/components/form-field";
 import { AuditMeta } from "@/components/audit-meta";
+import { CurrencySelect } from "@/components/currency-select";
+import { DatePicker } from "@/components/date-picker";
 import { cn } from "@/lib/utils";
+import type { PeriodStatus } from "@/lib/recurring-expenses";
 import {
   LEDGER_MODES,
   SYNCED_ACCOUNT_EDITABLE,
@@ -50,11 +53,13 @@ import {
   ExpiryChip,
   FormActions,
   FormError,
+  PeriodStatusChip,
   ProviderBadge,
   asKind,
   asLedgerMode,
   asProvider,
   dateTime,
+  day,
   expiryText,
   isoOf,
   textareaClass,
@@ -81,13 +86,26 @@ type AccountForm = {
   bookPromotionCredits: boolean;
   status: string;
   note: string;
+  // 固定支出（migrations/0039）：有扣款週期的帳號就是一筆固定支出
+  schedule: ScheduleValue;
+  anchorDate: string;
+  intervalMonths: string;
+  expectedAmount: string;
+  currency: string;
+  billingUrl: string;
 };
+
+/** Radix Select 不接受空字串，「不提醒」用 "none"（送出時轉回 null）。 */
+type ScheduleValue = "fixed" | "usage" | "none";
+const SCHEDULE_VALUES: readonly ScheduleValue[] = ["fixed", "usage", "none"];
+const asSchedule = (v: string | null | undefined): ScheduleValue => (v === "fixed" || v === "usage" ? v : "none");
 
 type FormKey = keyof AccountForm;
 
 function formOf(row: BillingAccountRow | undefined): AccountForm {
   return {
-    provider: row ? asProvider(row.provider) : "azure",
+    // 新增的多半是沒有 API 整合的廠商（Azure / GCP 由同步帶進來），預設「其他」
+    provider: row ? asProvider(row.provider) : "other",
     displayName: row?.displayName ?? "",
     externalId: row?.externalId ?? "",
     paymentMethodId: row?.paymentMethod?.id ?? null,
@@ -98,8 +116,16 @@ function formOf(row: BillingAccountRow | undefined): AccountForm {
     bookPromotionCredits: row?.bookPromotionCredits ?? true,
     status: row?.status ?? "active",
     note: row?.note ?? "",
+    schedule: asSchedule(row?.schedule),
+    anchorDate: row?.anchorDate ?? "",
+    intervalMonths: String(row?.intervalMonths ?? 1),
+    expectedAmount: row?.expectedAmount == null ? "" : String(row.expectedAmount),
+    currency: row?.currency ?? "",
+    billingUrl: row?.billingUrl ?? "",
   };
 }
+
+const SCHEDULE_KEYS: FormKey[] = ["schedule", "anchorDate", "intervalMonths", "expectedAmount", "currency", "billingUrl"];
 
 const same = (a: AccountForm[FormKey], b: AccountForm[FormKey]) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -114,6 +140,7 @@ const MANUAL_EDITABLE: ReadonlySet<FormKey> = new Set([
   "bookPromotionCredits",
   "status",
   "note",
+  ...SCHEDULE_KEYS,
 ]);
 const CREATE_KEYS: FormKey[] = [
   "provider",
@@ -124,12 +151,18 @@ const CREATE_KEYS: FormKey[] = [
   "matchPartyIds",
   "ownerUserId",
   "ledgerMode",
+  "status",
   "note",
+  ...SCHEDULE_KEYS,
 ];
+
+const TEXT_KEYS: ReadonlySet<FormKey> = new Set(["externalId", "note", "anchorDate", "expectedAmount", "currency", "billingUrl"]);
 
 /** 表單值 → action 的輸入；空字串存成 null。 */
 function wireValue(k: FormKey, v: AccountForm[FormKey]): unknown {
-  if (k === "externalId" || k === "note") return typeof v === "string" && v.trim() !== "" ? v : null;
+  if (TEXT_KEYS.has(k)) return typeof v === "string" && v.trim() !== "" ? v : null;
+  if (k === "schedule") return v === "none" ? null : v;
+  if (k === "intervalMonths") return Number(v);
   return v;
 }
 
@@ -477,6 +510,117 @@ function PromotionCreditsField({ form, set, editable }: FieldProps) {
   );
 }
 
+/** 固定支出：扣款週期、扣款日、預估金額、帳單頁；編輯時附上這期付了沒。 */
+function ScheduleFields({ form, set, editable, status }: FieldProps & Readonly<{ status: PeriodStatus | undefined }>) {
+  const t = useTranslations("vendorBilling");
+  const fixed = form.schedule === "fixed";
+  const scheduled = form.schedule !== "none";
+  return (
+    <fieldset className="grid gap-4 border-t pt-4 sm:col-span-2 sm:grid-cols-2">
+      <legend className="sr-only">{t("schedule.title")}</legend>
+      <div className="space-y-1 sm:col-span-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <SectionTitle>{t("schedule.title")}</SectionTitle>
+          {scheduled ? <PeriodStatusChip status={status} schedule={form.schedule} /> : null}
+          {scheduled && status?.nextChargeDate ? (
+            <span className="text-xs text-muted-foreground tabular-nums">
+              {t("cell.nextCharge", { date: day(status.nextChargeDate) })}
+            </span>
+          ) : null}
+        </div>
+        <p className="text-xs text-muted-foreground">{t("schedule.help")}</p>
+      </div>
+      <Field label={t("schedule.schedule")}>
+        <Select
+          value={form.schedule}
+          onValueChange={(v) => set("schedule", asSchedule(v))}
+          disabled={!editable("schedule")}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SCHEDULE_VALUES.map((v) => (
+              <SelectItem key={v} value={v}>
+                {t(`schedule.${v}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+      {fixed ? (
+        <Field label={t("schedule.intervalMonths")} htmlFor={fieldId("interval")}>
+          <Input
+            id={fieldId("interval")}
+            type="number"
+            min={1}
+            max={36}
+            step={1}
+            value={form.intervalMonths}
+            disabled={!editable("intervalMonths")}
+            onChange={(e) => set("intervalMonths", e.target.value)}
+          />
+        </Field>
+      ) : null}
+      {fixed ? (
+        <Field label={t("schedule.anchorDate")} required wide>
+          {editable("anchorDate") ? (
+            <DatePicker
+              name="anchorDate"
+              allowEmpty
+              defaultValue={form.anchorDate || undefined}
+              onValueChange={(iso) => set("anchorDate", iso)}
+            />
+          ) : (
+            <Input value={form.anchorDate} disabled readOnly />
+          )}
+          <p className="text-xs text-muted-foreground">{t("schedule.anchorHelp")}</p>
+        </Field>
+      ) : null}
+      {scheduled ? (
+        <>
+          <Field label={t("schedule.expectedAmount")} htmlFor={fieldId("amount")}>
+            <Input
+              id={fieldId("amount")}
+              type="number"
+              min={0}
+              step="0.01"
+              inputMode="decimal"
+              value={form.expectedAmount}
+              placeholder={t("account.optional")}
+              disabled={!editable("expectedAmount")}
+              onChange={(e) => set("expectedAmount", e.target.value)}
+            />
+          </Field>
+          <Field label={t("schedule.currency")} htmlFor={fieldId("currency")}>
+            {editable("currency") ? (
+              <CurrencySelect
+                id={fieldId("currency")}
+                name="currency"
+                defaultValue={form.currency || undefined}
+                onValueChange={(code) => set("currency", code)}
+              />
+            ) : (
+              <Input id={fieldId("currency")} value={form.currency} disabled readOnly />
+            )}
+          </Field>
+          <Field label={t("schedule.billingUrl")} htmlFor={fieldId("billing-url")} wide>
+            <Input
+              id={fieldId("billing-url")}
+              type="url"
+              value={form.billingUrl}
+              placeholder="https://…"
+              disabled={!editable("billingUrl")}
+              onChange={(e) => set("billingUrl", e.target.value)}
+              spellCheck={false}
+            />
+          </Field>
+        </>
+      ) : null}
+    </fieldset>
+  );
+}
+
 /** 表單下方的資源 / 帳單 / 費用；載入中顯示同尺寸的骨架。 */
 function DetailArea({
   detail,
@@ -510,6 +654,7 @@ function DetailArea({
 export function AccountSheet({
   target,
   row: liveRow,
+  status,
   open,
   onOpenChange,
   canManage,
@@ -521,6 +666,8 @@ export function AccountSheet({
   target: AccountSheetTarget;
   /** 編輯模式時列表上那一列（server 重新 render 後會帶最新值） */
   row: BillingAccountRow | undefined;
+  /** 固定支出這期付了沒（編輯模式、有排程時才有） */
+  status?: PeriodStatus;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   canManage: boolean;
@@ -635,9 +782,11 @@ export function AccountSheet({
 
               <PartyFields {...fieldProps} parties={parties} />
               <OwnerField {...fieldProps} members={members} />
-              {showDetail && !synced ? <StatusField {...fieldProps} /> : null}
+              {synced ? null : <StatusField {...fieldProps} />}
               <LedgerModeField {...fieldProps} />
               {synced && row?.provider === "gcp" ? <PromotionCreditsField {...fieldProps} /> : null}
+
+              <ScheduleFields {...fieldProps} status={status} />
 
               <Field label={t("account.note")} htmlFor={fieldId("note")} wide>
                 <textarea

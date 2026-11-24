@@ -99,6 +99,26 @@ export function countsFromResults(plan: MergePlan, results: readonly unknown[]):
   return counts;
 }
 
+/**
+ * 合併前的預覽：每張表有幾列會改指目標（只讀，跟 buildMergeStatements 用同一份 REPOINTS）。
+ * 網頁的合併確認畫面用。
+ */
+export async function previewMergeCounts(db: Db, plan: MergePlan): Promise<MergeCounts> {
+  const counts = await Promise.all(
+    REPOINTS.map(async (r) => {
+      const [row] = await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(r.table)
+        .where(and(eq(r.table.organizationId, plan.orgId), inArray(r.column, plan.sourceIds)));
+      return [r.key, row?.n ?? 0] as const;
+    }),
+  );
+  return {
+    ...(Object.fromEntries(counts) as Omit<MergeCounts, "vendorBillingMatchParties">),
+    vendorBillingMatchParties: plan.matchAccountUpdates.length,
+  };
+}
+
 /** 正式環境的 deps。每個查詢都帶 organization_id；寫入用 runBatch（neon-http batch／pg 交易，單一 transaction）。 */
 export function partyMergeDeps(db: Db = getDb()): PartyMergeDeps {
   return {

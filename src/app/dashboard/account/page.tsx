@@ -18,7 +18,7 @@ export default async function AccountPage() {
   const u = session.user;
   return (
     <>
-      <PageHeader title={t("title")} description={t("description")} />
+      <PageHeader title={t("title")} />
       <AccountClient name={u.name} email={u.email} image={u.image ?? null} />
     </>
   );

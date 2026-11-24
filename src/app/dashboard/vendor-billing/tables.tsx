@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { TableCard } from "@/components/table-card";
 import { EmptyRow } from "@/components/empty-state";
 import { isReseller } from "@/lib/vendor-billing/account-meta";
+import type { PeriodStatus } from "@/lib/recurring-expenses";
 import type { BillingAccountRow, InvoiceRow, PaymentMethodRow } from "@/lib/vendor-billing/service";
 import { InvoiceTxn, ProviderStatus } from "./invoice-list";
 import {
@@ -14,12 +15,14 @@ import {
   ClickableRow,
   ExpiryChip,
   MatchChip,
+  PeriodStatusChip,
   ProviderBadge,
   asKind,
   day,
   expiryText,
   isCardKind,
   period,
+  scheduleText,
 } from "./shared";
 
 /** 寬表格在自己的容器裡橫向捲動（表格有 min-w），不把整頁撐寬。 */
@@ -29,21 +32,49 @@ function Scroll({ children }: Readonly<{ children: React.ReactNode }>) {
 
 const muted = <span className="text-muted-foreground">—</span>;
 
+/** 扣款欄：週期、下次扣款日、這期付了沒；沒有排程（不算固定支出）的帳號顯示 —。 */
+function ChargeCell({ account, status }: Readonly<{ account: BillingAccountRow; status: PeriodStatus | undefined }>) {
+  const t = useTranslations("vendorBilling");
+  const label = scheduleText(account, t);
+  if (!label) return muted;
+  return (
+    <span className="flex flex-col gap-1">
+      <span className="flex flex-wrap items-center gap-x-1.5">
+        <span>{label}</span>
+        {status?.nextChargeDate ? (
+          <span className="text-xs text-muted-foreground tabular-nums">
+            {t("cell.nextCharge", { date: day(status.nextChargeDate) })}
+          </span>
+        ) : null}
+      </span>
+      <PeriodStatusChip status={status} schedule={account.schedule} />
+    </span>
+  );
+}
+
 export function AccountsTable({
   rows,
   today,
+  statuses,
   onOpen,
-}: Readonly<{ rows: BillingAccountRow[]; today: string; onOpen: (id: number) => void }>) {
+}: Readonly<{
+  rows: BillingAccountRow[];
+  today: string;
+  /** 固定支出這期付了沒（帳號 id → 狀態；沒排程或已關閉的沒有）。 */
+  statuses: Readonly<Record<number, PeriodStatus>>;
+  onOpen: (id: number) => void;
+}>) {
   const t = useTranslations("vendorBilling");
   return (
     <TableCard>
       <Scroll>
-        <Table className="min-w-[60rem]">
+        <Table className="min-w-[68rem]">
           <TableHeader>
             <TableRow>
               <TableHead>{t("columns.provider")}</TableHead>
               <TableHead>{t("columns.account")}</TableHead>
               <TableHead className="text-right">{t("columns.resources")}</TableHead>
+              <TableHead>{t("columns.charge")}</TableHead>
               <TableHead>{t("columns.paymentMethod")}</TableHead>
               <TableHead>{t("columns.party")}</TableHead>
               <TableHead>{t("columns.latestInvoice")}</TableHead>
@@ -53,7 +84,7 @@ export function AccountsTable({
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <EmptyRow colSpan={8} message={t("empty.accounts")} />
+              <EmptyRow colSpan={9} message={t("empty.accounts")} />
             ) : (
               rows.map((a) => {
                 const pm = a.paymentMethod;
@@ -75,6 +106,9 @@ export function AccountsTable({
                           {t("cell.missingResources", { count: a.missingResourceCount })}
                         </div>
                       ) : null}
+                    </TableCell>
+                    <TableCell>
+                      <ChargeCell account={a} status={statuses[a.id]} />
                     </TableCell>
                     <TableCell>
                       {pm ? (

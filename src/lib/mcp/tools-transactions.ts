@@ -2,6 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   bankAccounts,
+  billingItems,
   categories,
   contracts,
   documents,
@@ -43,7 +44,16 @@ import { resolvePayoutAccount } from "@/db/employee-accounts";
 import { summarizeSpendTrend } from "@/lib/spend-trend";
 import { PAYOUT_ACCOUNT_SCHEMA, payoutAccountOutput } from "./tools-employee-accounts";
 import { externalSingleLegSide } from "@/lib/external-transfer";
-import { resolveOrCreateParties, resolveOrCreateParty } from "@/lib/party-resolve";
+import { resolvePartiesForWrite, resolvePartyForWrite } from "@/lib/linking/party";
+import type { SimilarParty } from "@/lib/linking/party-similarity";
+import {
+  insertTransaction,
+  insertTransactions,
+  updateTransactionLinked,
+  updateTransactionsPlainByIds,
+  type LinkReport,
+  type TxnInsert,
+} from "@/lib/linking/write";
 import {
   assertAccountCurrency,
   findMismatchInMap,
@@ -76,6 +86,19 @@ const TXN_ROW_PROPS: Record<string, unknown> = {
   subscriptionId: { type: ["number", "null"] },
   subscriptionPeriod: { type: ["string", "null"], description: "Period start, YYYY-MM-DD." },
   billingItemId: { type: ["number", "null"] },
+  vendorBillingAccountId: {
+    type: ["number", "null"],
+    description: "Vendor billing account (固定支出) this expense pays; set automatically when the vendor has exactly one.",
+  },
+  reviewReason: {
+    type: ["string", "null"],
+    description:
+      "待連結 state: link_suggested | link_ambiguous | link_amount_mismatch | party_similar | link_skipped; null = nothing to review.",
+  },
+  linkCandidates: {
+    type: ["object", "null"],
+    description: "Candidates kept for 待連結 review (billing items / subscription periods / contracts, or similar parties).",
+  },
   invoiceId: { type: ["number", "null"] },
   relatedToId: { type: ["number", "null"], description: "The advance a reimbursement pays back." },
   externalSource: {
@@ -142,6 +165,135 @@ const CONTRACT_PROGRESS_SCHEMA = {
     "fullyCollected",
   ],
 };
+
+// ---- 連結層的回報（src/lib/linking/write.ts 的 LinkReport）----
+// 這幾個都不封 additionalProperties：連結層之後多帶欄位不該讓 structuredContent 變成不合法。
+
+const LINK_REF_SCHEMA = {
+  type: "object",
+  properties: {
+    kind: {
+      type: "string",
+      description: "billing_item | subscription | contract | project | vendor_billing_account",
+    },
+    id: { type: "number" },
+    name: { type: ["string", "null"] },
+    via: {
+      type: "string",
+      enum: ["given", "inherited", "matched"],
+      description: "given = you passed it; inherited = derived from a parent link; matched = auto-matched by amount.",
+    },
+    subscriptionPeriod: { type: "string", description: "Subscription links only: period start YYYY-MM-DD." },
+  },
+  required: ["kind", "id", "name", "via"],
+};
+
+const LINK_CANDIDATE_SCHEMA = {
+  type: "object",
+  properties: {
+    kind: { type: "string", enum: ["billing_item", "subscription", "contract"] },
+    id: { type: "number", description: "billingItemId / subscriptionId / contractId to pass to update_transaction." },
+    label: { type: "string" },
+    contractId: { type: ["number", "null"] },
+    projectId: { type: ["number", "null"] },
+    subscriptionPeriod: {
+      type: ["string", "null"],
+      description: "Subscription candidates: pass as subscriptionPeriod together with subscriptionId.",
+    },
+    expected: { type: "number", description: "Still outstanding on this candidate." },
+    currency: { type: "string" },
+    gap: { type: "number", description: "expected − transaction amount (positive = paid less, e.g. bank fees)." },
+    amountMatches: { type: "boolean" },
+  },
+  required: ["kind", "id", "label", "expected", "currency", "gap", "amountMatches"],
+};
+
+const SIMILAR_PARTY_SCHEMA = {
+  type: "object",
+  properties: {
+    id: { type: "number" },
+    name: { type: "string" },
+    score: { type: "number", description: "0–1 similarity." },
+    via: { type: "string", enum: ["name", "alias"] },
+  },
+  required: ["id", "name", "score", "via"],
+};
+
+const UNLINKED_SCHEMA = {
+  anyOf: [
+    {
+      type: "object",
+      properties: {
+        reason: {
+          type: "string",
+          description: "link_suggested | link_ambiguous | link_amount_mismatch | party_similar",
+        },
+        message: { type: "string" },
+        candidates: { type: "array", items: LINK_CANDIDATE_SCHEMA },
+        party: {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            label: { type: "string" },
+            candidates: { type: "array", items: SIMILAR_PARTY_SCHEMA },
+          },
+        },
+      },
+      required: ["reason", "message", "candidates"],
+    },
+    { type: "null" },
+  ],
+  description:
+    "What could not be linked automatically (null = nothing to ask). Ask the user ONCE which candidate applies (or to skip) — never guess.",
+};
+
+const STATUS_HINT_SCHEMA = {
+  type: "object",
+  properties: {
+    kind: { type: "string", enum: ["contract_fully_collected", "project_ready_to_close"] },
+    message: { type: "string" },
+    contractId: { type: "number" },
+    projectId: { type: "number" },
+    title: { type: "string" },
+    name: { type: "string" },
+    status: { type: "string" },
+    currency: { type: "string" },
+    amount: { type: "number" },
+    received: { type: "number" },
+  },
+  required: ["kind", "message"],
+};
+
+const LINK_REPORT_PROPS: Record<string, unknown> = {
+  links: { type: "array", items: LINK_REF_SCHEMA, description: "What this transaction is linked to." },
+  unlinked: UNLINKED_SCHEMA,
+  hints: {
+    type: "array",
+    items: STATUS_HINT_SCHEMA,
+    description: "Contracts / projects that now look ready to close. Tell the user and ask before changing any status.",
+  },
+};
+const LINK_REPORT_REQUIRED = ["links", "unlinked", "hints"];
+
+const PARTY_SIMILAR_PROP = {
+  type: "array",
+  items: SIMILAR_PARTY_SCHEMA,
+  description:
+    "partyName created a NEW party that looks like these existing ones. Ask the user once whether it is the same party (merge_parties can merge them).",
+};
+
+/** LinkReport → 工具輸出；只有真的新建了、又有相似既有對象時才帶 partySimilar。 */
+function linkOutput(report: LinkReport, similar: readonly SimilarParty[] = []) {
+  return {
+    links: report.links,
+    unlinked: report.unlinked,
+    hints: report.hints,
+    ...(similar.length ? { partySimilar: [...similar] } : {}),
+  };
+}
+
+const LINKING_NOTE =
+  " Linking: the system links income automatically — it inherits contract/project from billingItemId / subscriptionId / contractId, and when none is given it matches open billing items, subscription periods and contracts of that customer by amount. When `unlinked` comes back with candidates, ask the user ONCE which candidate applies (or skip) — never guess — then call update_transaction with the chosen billingItemId, subscriptionId+subscriptionPeriod, or contractId. When `partySimilar` is non-empty, ask once whether it is the same party (merge_parties). When `hints` is non-empty, tell the user and ask before changing any contract/project status.";
 
 // list_transactions 回的是 db/queries.ts listTransactions 的投影（不是整列）：
 // 交易本身的欄位加上 join 出來的分類 / 帳戶 / 對象 / 員工 / 專案名稱。
@@ -245,9 +397,19 @@ const ADVANCE_ROW = rowSchema({
 
 type Db = ReturnType<typeof getDb>;
 
-/** 名稱 → 交易對象 id（比對名稱 / 別名，只看未刪除的；查無就新建）。 */
-async function getOrCreateParty(db: Db, orgId: string, name: string, label: string): Promise<number> {
-  return (await resolveOrCreateParty(db, orgId, name, label)).id;
+/**
+ * 名稱 → 交易對象 id（比對名稱 / 別名，只看未刪除的；查無就新建）。
+ * 走連結層 mode "create"：AI 明確給了名字就照建，但把相似的既有對象一起回傳（partySimilar）。
+ */
+async function getOrCreateParty(
+  db: Db,
+  orgId: string,
+  name: string,
+  label: string,
+): Promise<{ id: number; similar: SimilarParty[] }> {
+  const r = await resolvePartyForWrite(db, orgId, name, label, "create");
+  if (r.partyId == null) throw new Error(`Could not resolve party "${name}".`);
+  return { id: r.partyId, similar: r.created ? r.similar : [] };
 }
 
 async function getOrCreateEmployee(db: Db, orgId: string, name: string): Promise<number> {
@@ -294,6 +456,8 @@ type TxnFields = {
   categoryId: number | null;
   partyId: number | null;
   settleEmployeeId: number | null;
+  /** partyName 新建了對象、而且跟既有對象很像時的候選（沒有就是空陣列） */
+  partySimilar: SimilarParty[];
 };
 
 // Mirrors mutations.ts resolveTxnFields, with org-scoped FK validation.
@@ -309,6 +473,7 @@ async function resolveTxnFields(
     categoryId: null,
     partyId: null,
     settleEmployeeId: null,
+    partySimilar: [],
   };
   if (type === "expense" || type === "income") {
     const isIncome = type === "income";
@@ -316,7 +481,7 @@ async function resolveTxnFields(
     await assertInOrg(db, bankAccounts, accountId, orgId, "Account");
     const categoryId = optNumber(args, "categoryId") ?? null; // 可省略＝未分類
     if (categoryId !== null) await assertInOrg(db, categories, categoryId, orgId, "Category");
-    const partyId = await getOrCreateParty(
+    const party = await getOrCreateParty(
       db,
       orgId,
       requireString(args, "partyName"),
@@ -325,7 +490,8 @@ async function resolveTxnFields(
     return {
       ...blank,
       categoryId,
-      partyId,
+      partyId: party.id,
+      partySimilar: party.similar,
       fromAccountId: isIncome ? null : accountId,
       toAccountId: isIncome ? accountId : null,
     };
@@ -333,10 +499,12 @@ async function resolveTxnFields(
   if (type === "advance") {
     const categoryId = optNumber(args, "categoryId") ?? null; // 可省略＝未分類
     if (categoryId !== null) await assertInOrg(db, categories, categoryId, orgId, "Category");
+    const party = await getOrCreateParty(db, orgId, requireString(args, "partyName"), "vendor");
     return {
       ...blank,
       categoryId,
-      partyId: await getOrCreateParty(db, orgId, requireString(args, "partyName"), "vendor"),
+      partyId: party.id,
+      partySimilar: party.similar,
       settleEmployeeId: await getOrCreateEmployee(
         db,
         orgId,
@@ -385,6 +553,17 @@ async function optSubscriptionId(
   return subscriptionId;
 }
 
+async function optBillingItemId(
+  db: Db,
+  args: Record<string, unknown>,
+  orgId: string,
+): Promise<number | undefined> {
+  const billingItemId = optNumber(args, "billingItemId");
+  if (billingItemId !== undefined)
+    await assertInOrg(db, billingItems, billingItemId, orgId, "Billing item");
+  return billingItemId;
+}
+
 // ---- bulk_create_transactions helpers ----
 
 type Norm = {
@@ -398,6 +577,7 @@ type Norm = {
   contractId: number | null;
   subscriptionId: number | null;
   subscriptionPeriod: string | null;
+  billingItemId: number | null;
   categoryId: number | null;
   fromAccountId: number | null;
   toAccountId: number | null;
@@ -412,6 +592,7 @@ type BulkTxnSets = {
   projSet: Set<number>;
   contractSet: Set<number>;
   subscriptionSet: Set<number>;
+  billingItemSet: Set<number>;
 };
 
 // A nullable FK, when present, must belong to the org's known ids.
@@ -510,6 +691,8 @@ function normalizeBulkTxnItem(
   if (subscriptionId !== null && subscriptionPeriod === null) {
     throw new Error(`${at}.subscriptionPeriod (YYYY-MM-DD) is required when subscriptionId is set.`);
   }
+  const billingItemId = optNumber(it, "billingItemId") ?? null;
+  assertOrgRef(billingItemId, sets.billingItemSet, at, "billingItemId");
   const n: Norm = {
     type,
     txnDate: requireDate(it, "txnDate"),
@@ -521,6 +704,7 @@ function normalizeBulkTxnItem(
     contractId,
     subscriptionId,
     subscriptionPeriod,
+    billingItemId,
     categoryId: null,
     fromAccountId: null,
     toAccountId: null,
@@ -540,10 +724,12 @@ function normalizeBulkTxnItem(
 
 // ---- update_transaction helpers ----
 
-// Apply the relation fields (category / project / contract / subscription) to
-// the patch. Each is only touched when its arg was provided; 0 clears the link.
+type TxnPatch = Partial<TxnInsert>;
+
+// Apply the relation fields (category / project / contract / subscription / billing item)
+// to the patch. Each is only touched when its arg was provided; 0 clears the link.
 async function applyTxnRelationPatch(
-  patch: Record<string, unknown>,
+  patch: TxnPatch,
   db: Db,
   args: Record<string, unknown>,
   orgId: string,
@@ -580,6 +766,15 @@ async function applyTxnRelationPatch(
       patch.subscriptionId = subscriptionId;
     }
   }
+  if (optNumber(args, "billingItemId") !== undefined) {
+    const billingItemId = requireNumber(args, "billingItemId");
+    if (billingItemId === 0) {
+      patch.billingItemId = null;
+    } else {
+      await assertInOrg(db, billingItems, billingItemId, orgId, "Billing item");
+      patch.billingItemId = billingItemId;
+    }
+  }
   // 期別：空字串代表清除；未提供則不動。只有在沒有因 subscriptionId=0 清空時才處理。
   if (args.subscriptionPeriod !== undefined && patch.subscriptionPeriod === undefined) {
     patch.subscriptionPeriod = optDate(args, "subscriptionPeriod") ?? null;
@@ -589,7 +784,7 @@ async function applyTxnRelationPatch(
 // Apply amount/currency and the reported→book flag to the patch, falling back to
 // the existing row's values when only one of amount/currency is supplied.
 function applyTxnAmountPatch(
-  patch: Record<string, unknown>,
+  patch: TxnPatch,
   args: Record<string, unknown>,
   existing: { type: string; amount: string; currency: string },
   singleLeg = false,
@@ -765,7 +960,8 @@ export const transactionTools: Record<string, ToolDef> = {
 
   create_transaction: {
     description:
-      "Write one bookkeeping entry into the ledger for money that has already moved elsewhere. This records history; it never sends, collects or transfers anything, and 'transfer' here means a book entry between two of the organization's own ledger accounts. Required per type — expense/income: accountId + partyName; advance: partyName + settleEmployeeName (no account); transfer: fromAccountId + toAccountId. categoryId is optional — omit it to leave the entry 未分類 (unclassified; no need for a separate holding account). Resolve ids with list_bank_accounts / list_categories / list_parties first. 'reported' (計入稅務帳 — include in the tax books) sets the book to 'both' (management + tax), otherwise 'internal' (management books only); transfers are always 'both'. Set billedToCompanyTaxId=true to mark 有報公司統編 (the invoice attachment itself is done in the app). To book a repaid advance use create_reimbursement. When contractId is set, the result carries `contractProgress` (amount/received/remaining/fullyCollected) — if `fullyCollected` is true while the contract is still draft/active, tell the user the contract is now fully collected and ask whether to set it to completed (已完成); on a yes, call update_contract with status='completed'. Never flip the status without asking.",
+      "Write one bookkeeping entry into the ledger for money that has already moved elsewhere. This records history; it never sends, collects or transfers anything, and 'transfer' here means a book entry between two of the organization's own ledger accounts. Required per type — expense/income: accountId + partyName; advance: partyName + settleEmployeeName (no account); transfer: fromAccountId + toAccountId. categoryId is optional — omit it to leave the entry 未分類 (unclassified; no need for a separate holding account). Resolve ids with list_bank_accounts / list_categories / list_parties first. 'reported' (計入稅務帳 — include in the tax books) sets the book to 'both' (management + tax), otherwise 'internal' (management books only); transfers are always 'both'. Set billedToCompanyTaxId=true to mark 有報公司統編 (the invoice attachment itself is done in the app). To book a repaid advance use create_reimbursement. When contractId is set, the result carries `contractProgress` (amount/received/remaining/fullyCollected) — if `fullyCollected` is true while the contract is still draft/active, tell the user the contract is now fully collected and ask whether to set it to completed (已完成); on a yes, call update_contract with status='completed'. Never flip the status without asking." +
+      LINKING_NOTE,
     inputSchema: {
       type: "object",
       properties: {
@@ -787,6 +983,11 @@ export const transactionTools: Record<string, ToolDef> = {
           description:
             "Optional contract to link. income counts toward the contract's 已收/未收; expense/advance are cost-only (does not reduce the contract amount). The response returns the contract's updated collection progress — check `contractProgress.fullyCollected` and follow the tool description when it is true.",
         },
+        billingItemId: {
+          type: "number",
+          description:
+            "Optional billing item (請款項) this payment settles; the transaction inherits its contract and project.",
+        },
         subscriptionId: {
           type: "number",
           description:
@@ -806,18 +1007,20 @@ export const transactionTools: Record<string, ToolDef> = {
       required: ["type", "txnDate", "amount"],
       additionalProperties: false,
     },
-    // 建立成功回的是整列交易；只有帶了 contractId 才多一個 contractProgress
+    // 建立成功回的是整列交易＋連結報告；有掛上合約（給的或繼承的）才多一個 contractProgress
     // （單一物件，跟 bulk/update 的陣列不同）。
     outputSchema: {
       type: "object",
       properties: {
         ...TXN_ROW_PROPS,
+        ...LINK_REPORT_PROPS,
+        partySimilar: PARTY_SIMILAR_PROP,
         contractProgress: {
           anyOf: [CONTRACT_PROGRESS_SCHEMA, { type: "null" }],
-          description: "Only present when contractId was supplied.",
+          description: "Only present when the transaction ended up linked to a contract.",
         },
       },
-      required: TXN_ROW_REQUIRED,
+      required: [...TXN_ROW_REQUIRED, ...LINK_REPORT_REQUIRED],
     },
     execute: async (args, ctx) => {
       const type = requireString(args, "type");
@@ -836,14 +1039,15 @@ export const transactionTools: Record<string, ToolDef> = {
           '"subscriptionPeriod" (YYYY-MM-DD) is required when "subscriptionId" is set.',
         );
       }
+      const billingItemId = await optBillingItemId(db, args, orgId);
       const amount = requireDecimal(args, "amount");
       const currency = normalizeCurrency(args, "currency");
       // 每一腳（expense/income 的單一帳戶、transfer 的 from + to）都要跟自己的帳戶同幣別。
       await assertAccountCurrency(db, orgId, currency, [f.fromAccountId, f.toAccountId]);
       const reported = type === "transfer" || optBoolean(args, "reported") === true;
-      const [row] = await db
-        .insert(transactions)
-        .values({
+      const { row, report } = await insertTransaction(
+        { db, orgId, source: "mcp" },
+        {
           organizationId: orgId,
           type,
           txnDate: requireDate(args, "txnDate"),
@@ -855,6 +1059,7 @@ export const transactionTools: Record<string, ToolDef> = {
           contractId: contractId ?? null,
           subscriptionId: subscriptionId ?? null,
           subscriptionPeriod: subscriptionPeriod ?? null,
+          billingItemId: billingItemId ?? null,
           amount,
           currency,
           amountTwd: currency === "TWD" ? amount : null,
@@ -862,17 +1067,20 @@ export const transactionTools: Record<string, ToolDef> = {
           toAccountId: f.toAccountId,
           book: reported ? "both" : "internal",
           billedToCompanyTaxId: optBoolean(args, "billedToCompanyTaxId") ?? false,
-        })
-        .returning();
-      if (contractId === undefined) return row;
-      const [progress] = await getContractProgress(db, orgId, [contractId]);
-      return { ...row, contractProgress: progress ?? null };
+        },
+      );
+      const out = { ...row, ...linkOutput(report, f.partySimilar) };
+      // 合約可能是給的，也可能是從請款項 / 訂閱繼承或比對到的 —— 以實際寫進去的為準。
+      if (row.contractId == null) return out;
+      const [progress] = await getContractProgress(db, orgId, [row.contractId]);
+      return { ...out, contractProgress: progress ?? null };
     },
   },
 
   bulk_create_transactions: {
     description:
-      "Write many ledger entries in one call — use this instead of calling create_transaction in a loop. Like create_transaction, this only records entries in the organization's own books; no money is moved. Pass `items`: an array where each element mirrors create_transaction's arguments (type, txnDate, amount, currency?, description?, reported?, accountId?, partyName?, categoryId?, settleEmployeeName?, fromAccountId?, toAccountId?, projectId?, contractId?, subscriptionId?, subscriptionPeriod?). Per-type requirements match create_transaction (expense/income: accountId+partyName; advance: partyName+settleEmployeeName; transfer: fromAccountId+toAccountId); categoryId is optional (omit → 未分類, unclassified). Account/category/project/contract/subscription ids are validated against your org; party/employee names are created on demand and deduped within the batch. subscriptionPeriod (YYYY-MM-DD) is required on any item that sets subscriptionId. All rows are written in a single database insert. Returns the created count, the ids, and — for every contract any item linked to — `contractProgress` (amount/received/remaining/fullyCollected). For each entry with `fullyCollected` true while the contract is still draft/active, tell the user that contract is now fully collected and ask whether to set it to completed (已完成); on a yes, call update_contract with status='completed'. Never flip the status without asking. Max 1000 items per call.",
+      "Write many ledger entries in one call — use this instead of calling create_transaction in a loop. Like create_transaction, this only records entries in the organization's own books; no money is moved. Pass `items`: an array where each element mirrors create_transaction's arguments (type, txnDate, amount, currency?, description?, reported?, accountId?, partyName?, categoryId?, settleEmployeeName?, fromAccountId?, toAccountId?, projectId?, contractId?, subscriptionId?, subscriptionPeriod?). Per-type requirements match create_transaction (expense/income: accountId+partyName; advance: partyName+settleEmployeeName; transfer: fromAccountId+toAccountId); categoryId is optional (omit → 未分類, unclassified). Account/category/project/contract/subscription ids are validated against your org; party/employee names are created on demand and deduped within the batch. subscriptionPeriod (YYYY-MM-DD) is required on any item that sets subscriptionId. All rows are written in a single database insert. Returns the created count, the ids, and — for every contract any item linked to — `contractProgress` (amount/received/remaining/fullyCollected). For each entry with `fullyCollected` true while the contract is still draft/active, tell the user that contract is now fully collected and ask whether to set it to completed (已完成); on a yes, call update_contract with status='completed'. Never flip the status without asking. Max 1000 items per call. Items also accept billingItemId; `results` carries each row's id, links, unlinked and hints (and partySimilar when its partyName created a party that looks like an existing one)." +
+      LINKING_NOTE,
     inputSchema: {
       type: "object",
       properties: {
@@ -909,6 +1117,10 @@ export const transactionTools: Record<string, ToolDef> = {
                 description:
                   "YYYY-MM-DD period start this payment covers. Required when subscriptionId is set.",
               },
+              billingItemId: {
+                type: "number",
+                description: "Optional billing item (請款項) this payment settles; inherits its contract and project.",
+              },
               billedToCompanyTaxId: {
                 type: "boolean",
                 description: "有報公司統編。Default false.",
@@ -923,19 +1135,28 @@ export const transactionTools: Record<string, ToolDef> = {
       required: ["items"],
       additionalProperties: false,
     },
-    // 只回 id，不回整列；沒有任何一列綁合約時 contractProgress 整個 key 不會出現。
+    // 只回 id 與每列的連結報告，不回整列；沒有任何一列綁合約時 contractProgress 整個 key 不會出現。
     outputSchema: {
       type: "object",
       properties: {
         created: { type: "number" },
         ids: { type: "array", items: { type: "number" } },
+        results: {
+          type: "array",
+          description: "One entry per created row, in input order.",
+          items: {
+            type: "object",
+            properties: { id: { type: "number" }, ...LINK_REPORT_PROPS, partySimilar: PARTY_SIMILAR_PROP },
+            required: ["id", ...LINK_REPORT_REQUIRED],
+          },
+        },
         contractProgress: {
           type: "array",
           items: CONTRACT_PROGRESS_SCHEMA,
           description: "One entry per contract any item linked to; omitted when none did.",
         },
       },
-      required: ["created", "ids"],
+      required: ["created", "ids", "results"],
       additionalProperties: false,
     },
     execute: async (args, ctx) => {
@@ -951,7 +1172,7 @@ export const transactionTools: Record<string, ToolDef> = {
 
       // Load the org's valid FK ids once, so each row is validated in memory
       // instead of issuing an assertInOrg round trip per row.
-      const [acctRows, catRows, projRows, contractRows, subscriptionRows] = await Promise.all([
+      const [acctRows, catRows, projRows, contractRows, subscriptionRows, billingItemRows] = await Promise.all([
         db
           .select({ id: bankAccounts.id, name: bankAccounts.name, currency: bankAccounts.currency })
           .from(bankAccounts)
@@ -960,6 +1181,7 @@ export const transactionTools: Record<string, ToolDef> = {
         db.select({ id: projects.id }).from(projects).where(eq(projects.organizationId, orgId)),
         db.select({ id: contracts.id }).from(contracts).where(eq(contracts.organizationId, orgId)),
         db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.organizationId, orgId)),
+        db.select({ id: billingItems.id }).from(billingItems).where(eq(billingItems.organizationId, orgId)),
       ]);
       const acctSet = new Set(acctRows.map((r) => r.id));
       // 幣別驗證跟 FK 驗證一樣在記憶體裡做，避免每列各發一次 query。
@@ -969,7 +1191,9 @@ export const transactionTools: Record<string, ToolDef> = {
       const contractSet = new Set(contractRows.map((r) => r.id));
       const subscriptionSet = new Set(subscriptionRows.map((r) => r.id));
 
-      const sets: BulkTxnSets = { acctSet, catSet, projSet, contractSet, subscriptionSet };
+      const billingItemSet = new Set(billingItemRows.map((r) => r.id));
+
+      const sets: BulkTxnSets = { acctSet, catSet, projSet, contractSet, subscriptionSet, billingItemSet };
       const partyLabelByName = new Map<string, string>();
       const employeeNames = new Set<string>();
       const norms: Norm[] = items.map((raw, i) =>
@@ -980,21 +1204,23 @@ export const transactionTools: Record<string, ToolDef> = {
         if (bad) throw new Error(`items[${i}]: ${accountCurrencyErrorMessage(bad)}`);
       });
 
-      const partyId = await resolveOrCreateParties(db, orgId, partyLabelByName);
+      const parties = await resolvePartiesForWrite(db, orgId, partyLabelByName, "create");
       const employeeId = await resolveEmployeeNames(db, orgId, employeeNames);
+      const partyOf = (n: Norm) => (n.partyName ? parties.get(n.partyName) : undefined);
 
-      const values = norms.map((n) => ({
+      const values: TxnInsert[] = norms.map((n) => ({
         organizationId: orgId,
         type: n.type,
         txnDate: n.txnDate,
         description: n.description,
         categoryId: n.categoryId,
-        partyId: n.partyName ? (partyId.get(n.partyName) ?? null) : null,
+        partyId: partyOf(n)?.partyId ?? null,
         settleEmployeeId: n.settleEmployeeName ? (employeeId.get(n.settleEmployeeName) ?? null) : null,
         projectId: n.projectId,
         contractId: n.contractId,
         subscriptionId: n.subscriptionId,
         subscriptionPeriod: n.subscriptionPeriod,
+        billingItemId: n.billingItemId,
         amount: n.amount,
         currency: n.currency,
         amountTwd: n.currency === "TWD" ? n.amount : null,
@@ -1003,14 +1229,22 @@ export const transactionTools: Record<string, ToolDef> = {
         book: n.reported ? "both" : "internal",
         billedToCompanyTaxId: n.billedToCompanyTaxId,
       }));
-      const inserted = await db.insert(transactions).values(values).returning({ id: transactions.id });
-      const linkedContractIds = norms
-        .map((n) => n.contractId)
+      // 一次 insert 全部（chunkSize = 筆數），維持「整批成功或整批失敗」。
+      const inserted = await insertTransactions({ db, orgId, source: "mcp" }, values, {
+        chunkSize: values.length,
+      });
+      // 合約以實際寫進去的為準（含從請款項 / 訂閱繼承、或比對到的）。
+      const linkedContractIds = inserted
+        .map((r) => r.row.contractId)
         .filter((id): id is number => id !== null);
       const contractProgress = await getContractProgress(db, orgId, linkedContractIds);
       return {
         created: inserted.length,
-        ids: inserted.map((r) => r.id),
+        ids: inserted.map((r) => r.row.id),
+        results: inserted.map((r, i) => {
+          const party = partyOf(norms[i]);
+          return { id: r.row.id, ...linkOutput(r.report, party?.created ? party.similar : []) };
+        }),
         ...(contractProgress.length ? { contractProgress } : {}),
       };
     },
@@ -1018,7 +1252,8 @@ export const transactionTools: Record<string, ToolDef> = {
 
   update_transaction: {
     description:
-      "Edit a transaction's date, amount, currency, description, category (categoryId 0 clears it → 未分類; setting a category also clears needsReview on imported rows), needsReview (待確認 flag on rows imported by e.g. the Wise sync; pass false to confirm a row without choosing a category; a synced Wise currency conversion is a transfer with only one account set — that is expected and it can be edited like any other row), project, contract, subscription, subscription period, reported flag, or billedToCompanyTaxId (有報公司統編) — only provided fields change. To change the account or counterparty, delete and recreate, or use the app. If the edit touches a contract-linked transaction, the result carries `contractProgress` for the contracts involved — when an entry is `fullyCollected` while the contract is still draft/active, tell the user and ask whether to set that contract to completed (已完成) via update_contract; never flip the status without asking.",
+      "Edit a transaction's date, amount, currency, description, category (categoryId 0 clears it → 未分類; setting a category also clears needsReview on imported rows), needsReview (待確認 flag on rows imported by e.g. the Wise sync; pass false to confirm a row without choosing a category; a synced Wise currency conversion is a transfer with only one account set — that is expected and it can be edited like any other row), project, contract, subscription, subscription period, billing item (billingItemId; 0 clears it), reported flag, or billedToCompanyTaxId (有報公司統編) — only provided fields change. To change the account or counterparty, delete and recreate, or use the app. If the edit touches a contract-linked transaction, the result carries `contractProgress` for the contracts involved — when an entry is `fullyCollected` while the contract is still draft/active, tell the user and ask whether to set that contract to completed (已完成) via update_contract; never flip the status without asking. Linking a billingItemId / subscriptionId / contractId re-derives the inherited contract and project (values you set yourself are kept)." +
+      LINKING_NOTE,
     inputSchema: {
       type: "object",
       properties: {
@@ -1035,6 +1270,10 @@ export const transactionTools: Record<string, ToolDef> = {
           type: "string",
           description: "Period start YYYY-MM-DD; empty string to unset.",
         },
+        billingItemId: {
+          type: "number",
+          description: "Link/relink to a billing item (請款項); 0 to unset. Inherits its contract and project.",
+        },
         reported: { type: "boolean" },
         billedToCompanyTaxId: { type: "boolean", description: "有報公司統編（進項可扣抵）。" },
         needsReview: {
@@ -1046,19 +1285,20 @@ export const transactionTools: Record<string, ToolDef> = {
       required: ["id"],
       additionalProperties: false,
     },
-    // 整列更新後的交易；有動到合約時才多一個 contractProgress（陣列，因為原本綁的與
+    // 整列更新後的交易＋連結報告；有動到合約時才多一個 contractProgress（陣列，因為原本綁的與
     // 改綁的合約可能各算一次）。
     outputSchema: {
       type: "object",
       properties: {
         ...TXN_ROW_PROPS,
+        ...LINK_REPORT_PROPS,
         contractProgress: {
           type: "array",
           items: CONTRACT_PROGRESS_SCHEMA,
           description: "The contracts whose progress this edit touched; omitted when none.",
         },
       },
-      required: TXN_ROW_REQUIRED,
+      required: [...TXN_ROW_REQUIRED, ...LINK_REPORT_REQUIRED],
     },
     execute: async (args, ctx) => {
       const id = requireNumber(args, "id");
@@ -1080,7 +1320,7 @@ export const transactionTools: Record<string, ToolDef> = {
       if (!existing) throw new Error(`Transaction ${id} not found in your organization.`);
       const singleLeg = externalSingleLegSide(existing) !== null;
 
-      const patch: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+      const patch: TxnPatch = {};
       if (optDate(args, "txnDate") !== undefined) patch.txnDate = optDate(args, "txnDate");
       if (optString(args, "description") !== undefined)
         patch.description = optString(args, "description");
@@ -1101,17 +1341,17 @@ export const transactionTools: Record<string, ToolDef> = {
           existing.toAccountId,
         ]);
       }
-      const [row] = await db
-        .update(transactions)
-        .set(patch)
-        .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)))
-        .returning();
+      // 經連結層：換了請款項 / 訂閱 / 合約會重新繼承專案與合約；改了金額、日期會重新比對候選。
+      const updated = await updateTransactionLinked({ db, orgId, source: "mcp" }, id, patch);
+      if (!updated) throw new Error(`Transaction ${id} not found in your organization.`);
+      const { row, report } = updated;
+      const out = { ...row, ...linkOutput(report) };
       // 進度受影響的合約：原本綁的（可能被解綁或金額變動）＋改綁的新合約。
       const touchedContractIds = [existing.contractId, row.contractId].filter(
         (cid): cid is number => cid != null,
       );
       const contractProgress = await getContractProgress(db, orgId, touchedContractIds);
-      return contractProgress.length ? { ...row, contractProgress } : row;
+      return contractProgress.length ? { ...out, contractProgress } : out;
     },
   },
 
@@ -1160,17 +1400,14 @@ export const transactionTools: Record<string, ToolDef> = {
         .update(documents)
         .set({ deletedAt })
         .where(eq(documents.transactionId, id));
-      await db
-        .update(transactions)
-        .set({ deletedAt })
-        .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)));
+      await updateTransactionsPlainByIds(db, orgId, [id], { deletedAt });
       return { deleted: true, id };
     },
   },
 
   create_reimbursement: {
     description:
-      "Record that an employee advance (代墊) has been repaid: writes a reimbursement entry in the ledger linked to the original advance. Bookkeeping only — it does not send the employee any money; do that through your bank and record it here. Find the advance via list_outstanding_advances.",
+      "Record that an employee advance (代墊) has been repaid: writes a reimbursement entry in the ledger linked to the original advance. Bookkeeping only — it does not send the employee any money; do that through your bank and record it here. Find the advance via list_outstanding_advances. The reimbursement inherits the advance's project and contract; `links` / `hints` report them (ask before changing any contract/project status).",
     inputSchema: {
       type: "object",
       properties: {
@@ -1191,8 +1428,8 @@ export const transactionTools: Record<string, ToolDef> = {
     // 回的是新建的那一列（type='reimbursement'，relatedToId 指回原代墊）。
     outputSchema: {
       type: "object",
-      properties: { ...TXN_ROW_PROPS, paidToAccount: PAYOUT_ACCOUNT_SCHEMA },
-      required: [...TXN_ROW_REQUIRED, "paidToAccount"],
+      properties: { ...TXN_ROW_PROPS, ...LINK_REPORT_PROPS, paidToAccount: PAYOUT_ACCOUNT_SCHEMA },
+      required: [...TXN_ROW_REQUIRED, ...LINK_REPORT_REQUIRED, "paidToAccount"],
     },
     execute: async (args, ctx) => {
       const advanceId = requireNumber(args, "advanceId");
@@ -1225,9 +1462,10 @@ export const transactionTools: Record<string, ToolDef> = {
         "reimbursement",
         optNumber(args, "toEmployeeAccountId") ?? null,
       );
-      const [row] = await db
-        .insert(transactions)
-        .values({
+      // relatedToId 指回原代墊：連結層讓撥款繼承代墊的專案與合約。
+      const { row, report } = await insertTransaction(
+        { db, orgId, source: "reimbursement" },
+        {
           organizationId: orgId,
           type: "reimbursement",
           txnDate: payDate,
@@ -1240,9 +1478,9 @@ export const transactionTools: Record<string, ToolDef> = {
           book: "internal",
           relatedToId: advanceId,
           description: "撥款還代墊",
-        })
-        .returning();
-      return { ...row, paidToAccount: payoutAccountOutput(payout) };
+        },
+      );
+      return { ...row, ...linkOutput(report), paidToAccount: payoutAccountOutput(payout) };
     },
   },
 };

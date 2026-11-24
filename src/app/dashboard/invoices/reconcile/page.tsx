@@ -34,7 +34,7 @@ export default async function InvoiceReconcilePage() {
 
   return (
     <>
-      <PageHeader title={t("title")} description={t("description")}>
+      <PageHeader title={t("title")}>
         <Button asChild size="sm" variant="outline">
           <Link href="/dashboard/invoices">
             <ArrowLeft className="size-4" /> {t("back")}

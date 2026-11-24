@@ -218,6 +218,20 @@ integration (the Wise sync) carry `externalSource` / `externalRef` and
 those, and `update_transaction` clears the flag when it sets a category (or pass
 `needsReview: false` explicitly).
 
+**Data links (資料聯動，see `docs/data-links.md`)** — every write goes through one
+linking layer: a billing item / subscription / contract passes its contract and project
+down to the transaction, and an income row with a customer but no link is matched
+against that customer's open billing items, subscription periods and contracts. Write
+tools (`create_transaction`, `bulk_create_transactions`, `update_transaction`,
+`create_reimbursement`) accept `billingItemId` and return `links` (what got linked and
+how), `unlinked` (reason + candidates) and `hints` (contract fully collected, project
+ready to close); `partySimilar` appears when `partyName` created a party that looks like
+an existing one. When there are candidates the assistant asks the user once instead of
+guessing. `list_unlinked_transactions` lists rows waiting for a link,
+`resolve_transaction_link` applies the user's choice (candidate, skip, or party), and
+`rescan_transaction_links` (dry run by default) flags older unlinked income for review
+without linking anything.
+
 **Spend analysis (支出分析)** — `monthly_spend_breakdown` (`dimension`:
 `category` | `vendor`, `months?` 1–24 default 12, `partyId?`, `categoryId?`).
 Read-only (annotated explicitly, since the name has no `list_`/`get_` verb).
@@ -302,7 +316,7 @@ auto-sync right now for the current organization only — the same code path as 
 06:00 Taipei Cron Trigger (Simpany invoices + salary declarations, Wise
 transactions, Azure / GCP billing within the ticked scope + reconciliation; never
 issues or voids invoices).
-**Recurring expenses (固定支出)** — `list_recurring_expenses` (with the next
+**Recurring expenses (固定支出)** — now stored on vendor billing accounts (one account with a charge schedule = one recurring expense; vendors without an integration are `provider: other` manual accounts). Prefer `upsert_vendor_billing_account` / `list_vendor_billing_accounts`; the recurring tools below remain as compatibility shims and return vendor billing account ids. `list_recurring_expenses` (with the next
 charge date on the Asia/Taipei calendar) and owner/admin-only
 `create_`/`update_`/`delete_recurring_expense` record which vendor charges on
 which schedule and with which payment method (`paymentMethodId`, from

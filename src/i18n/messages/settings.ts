@@ -3,7 +3,6 @@ import type { Dictionary } from "./dictionary";
 
 const settings = {
   title: { "zh-TW": "組織設定", en: "Organization settings" },
-  description: { "zh-TW": "管理這個組織的基本資料", en: "Manage this organization's basic info" },
   nav: {
     label: { "zh-TW": "設定分區", en: "Settings sections" },
     general: { "zh-TW": "基本資料", en: "General" },
@@ -85,10 +84,6 @@ const settings = {
   },
   api: {
     title: { "zh-TW": "API", en: "API" },
-    description: {
-      "zh-TW": "用 API key 讓腳本、排程或沒有 OAuth 的 agent 呼叫這個組織的 REST API 與 MCP。",
-      en: "API keys let scripts, scheduled jobs and agents without OAuth call this organization's REST API and MCP server.",
-    },
     readOnlyNote: {
       "zh-TW": "只有組織的擁有者或管理員可以建立、查看與撤銷 API key。",
       en: "Only organization owners or admins can create, view and revoke API keys.",
@@ -190,7 +185,6 @@ const settings = {
   },
   mcp: {
     title: { "zh-TW": "MCP", en: "MCP" },
-    description: { "zh-TW": "把這個系統接到 Claude 等 MCP 用戶端，用對話查詢專案、訂閱、合約與收款狀況", en: "Connect this system to Claude and other MCP clients to query projects, subscriptions, contracts, and payment status by chatting" },
     connectionInfo: {
       title: { "zh-TW": "連線資訊", en: "Connection info" },
       description: { "zh-TW": "在 Claude 或 ChatGPT 新增一個 connector，網址填下面這個。第一次連線會跳出 Google 登入授權（跟後台同一個帳號），之後就能用對話查資料。", en: "Add a connector in Claude or ChatGPT and use the URL below. The first connection opens a Google sign-in authorization (same account as this app), and after that you can query data by chatting." },

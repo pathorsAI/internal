@@ -160,7 +160,7 @@ export default async function SubscriptionsPage() {
 
   return (
     <>
-      <PageHeader title={t("list.title")} description={t("list.description")}>
+      <PageHeader title={t("list.title")}>
         <NewSubscriptionDialog
           parties={partyOptions}
           projects={projectOptions}

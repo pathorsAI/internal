@@ -7,6 +7,7 @@ import { Field, SelectField, TextField } from "@/components/form-field";
 import { DatePicker } from "@/components/date-picker";
 import { CurrencySelect } from "@/components/currency-select";
 import { PartyField } from "@/components/party-combobox";
+import { ProjectChoiceField, type ProjectChoiceOption } from "@/components/project-choice-field";
 import { DEFAULT_CURRENCY } from "@/lib/currency";
 import { SelectItem } from "@/components/ui/select";
 import { TaxFields } from "@/components/tax-fields";
@@ -17,6 +18,8 @@ import {
 } from "./contract-billing-plan";
 
 export type Option = { id: number; name: string };
+/** 專案選項帶推導狀態（進行中 / 已完成 / 尚無合約 / 封存），選單上一起顯示 */
+export type ProjectOption = ProjectChoiceOption;
 
 export type ContractFormValues = {
   customerPartyId: number;
@@ -56,7 +59,7 @@ export function ContractFields({
   orgTax,
 }: Readonly<{
   parties: Option[];
-  projects: Option[];
+  projects: ProjectOption[];
   values?: ContractFormValues;
   /** 組織的稅別預設：新增時預選它，並提供「沿用組織預設」選項 */
   orgTax: TaxSetting;
@@ -108,18 +111,13 @@ export function ContractFields({
         required
         defaultName={values?.customerName ?? ""}
       />
-      <SelectField
-        name="projectId"
-        label={t("newDialog.project.label")}
-        placeholder={t("newDialog.project.placeholder")}
-        defaultValue={values?.projectId == null ? undefined : String(values.projectId)}
-      >
-        {projects.map((p) => (
-          <SelectItem key={p.id} value={String(p.id)}>
-            {p.name}
-          </SelectItem>
-        ))}
-      </SelectField>
+      <Field label={t("newDialog.project.label")}>
+        {/* 新增時預設「新專案（同合約名）」；編輯時預設目前的專案，沒有就是「不歸屬專案」 */}
+        <ProjectChoiceField
+          projects={projects}
+          defaultChoice={values ? (values.projectId ?? "none") : "new"}
+        />
+      </Field>
       <TextField
         name="title"
         label={t("newDialog.titleField.label")}

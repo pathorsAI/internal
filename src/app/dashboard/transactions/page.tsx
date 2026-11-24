@@ -47,6 +47,8 @@ import { formatAccountShort } from "@/lib/employee-accounts";
 import { getTranslations } from "next-intl/server";
 import { PartyAvatar } from "@/components/party-avatar";
 import { parseIdsParam } from "@/lib/ids-param";
+import { getDb } from "@/db";
+import { countPendingLinks, pendingLinkIdsAmong } from "@/lib/linking/pending";
 
 export const dynamic = "force-dynamic";
 
@@ -77,6 +79,9 @@ function TransactionRow({
   uncategorizedLabel,
   needsReviewLabel,
   needsReviewHint,
+  pendingLink,
+  pendingLinkLabel,
+  pendingLinkHint,
   conversionLabel,
   categories,
   parties,
@@ -96,6 +101,10 @@ function TransactionRow({
   needsReviewLabel: string;
   /** 待確認 chip 的說明；{source} 會換成來源（wise）。 */
   needsReviewHint: (source: string) => string;
+  /** 待連結（review_reason 待處理）：顯示一個連到待連結頁的標記 */
+  pendingLink: boolean;
+  pendingLinkLabel: string;
+  pendingLinkHint: string;
   /** 外部同步的單腳轉帳（Wise 換匯）的類型標籤，例如「換匯 USD → THB」。 */
   conversionLabel: (c: { from: string; to: string } | null) => string;
   categories: Opt[];
@@ -158,6 +167,11 @@ function TransactionRow({
                   <span title={needsReviewHint(t.externalSource ?? "—")}>
                     <StatusTag tone="warning">{needsReviewLabel}</StatusTag>
                   </span>
+                ) : null}
+                {pendingLink ? (
+                  <Link href="/dashboard/links" title={pendingLinkHint}>
+                    <StatusTag tone="primary">{pendingLinkLabel}</StatusTag>
+                  </Link>
                 ) : null}
               </div>
             </div>
@@ -247,10 +261,13 @@ export default async function TransactionsPage({
     party?: string;
     /** ids=1,2,3：只看這幾筆（Discord 通知連到這裡）。 */
     ids?: string | string[];
+    /** link=pending：只看待連結（還沒確定屬於哪一筆請款 / 訂閱 / 合約，或對象待確認）。 */
+    link?: string;
   }>;
 }>) {
   const { orgId } = await requireOrg();
   const tr = await getTranslations("transactions");
+  const tl = await getTranslations("links");
   const typeLabel: Record<string, string> = {
     expense: tr("type.expense"),
     income: tr("type.income"),
@@ -269,7 +286,7 @@ export default async function TransactionsPage({
     { label: tr("columns.lastUpdated"), width: "w-32" },
     { label: tr("columns.amount"), width: "w-32", align: "right" },
   ];
-  const { book, category, account, period, page: pageParam, review, party, ids: idsParam } =
+  const { book, category, account, period, page: pageParam, review, party, ids: idsParam, link } =
     await searchParams;
   const active = (["internal", "external", "both"].includes(book ?? "") ? book : undefined) as
     | Book
@@ -281,8 +298,11 @@ export default async function TransactionsPage({
   const needsReview = review === "1" ? true : undefined;
   const ids = parseIdsParam(idsParam) ?? undefined;
   const idsQuery = ids?.join(",");
-  const filters = { book: active, categoryId, accountId, partyId, period, needsReview, ids };
-  const [rows, total, accounts, categories, parties, employees, projects, contracts, months, reviewCount] =
+  const pendingLink = link === "pending" ? true : undefined;
+  const linkQuery = pendingLink ? "pending" : undefined;
+  const filters = { book: active, categoryId, accountId, partyId, period, needsReview, ids, pendingLink };
+  const db = getDb();
+  const [rows, total, accounts, categories, parties, employees, projects, contracts, months, reviewCount, pendingLinkCount] =
     await Promise.all([
       listTransactions(orgId, filters, PAGE_SIZE, (page - 1) * PAGE_SIZE),
       countTransactions(orgId, filters),
@@ -294,11 +314,13 @@ export default async function TransactionsPage({
       listContractOptions(orgId),
       listTransactionMonths(orgId),
       countTransactions(orgId, { needsReview: true }),
+      countPendingLinks(db, orgId),
     ]);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const [docsMap, auditMap] = await Promise.all([
+  const [docsMap, auditMap, pendingLinkIds] = await Promise.all([
     listDocumentsForTransactions(orgId, rows.map((r) => r.id)),
     getAuditMeta(orgId, "transaction", rows.map((r) => r.id)),
+    pendingLinkIdsAmong(db, orgId, rows.map((r) => r.id)),
   ]);
   const partyOpts = parties.map((s) => ({ id: s.id, name: s.name }));
   const avatarByParty = new Map(parties.map((s) => [s.id, s.avatarVersion]));
@@ -314,7 +336,7 @@ export default async function TransactionsPage({
 
   return (
     <>
-      <PageHeader title={tr("page.title")} description={tr("page.description")}>
+      <PageHeader title={tr("page.title")}>
         <NewTransactionDialog
           accounts={accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }))}
           categories={categories}
@@ -353,11 +375,41 @@ export default async function TransactionsPage({
                   period,
                   review: needsReview ? undefined : "1",
                   ids: idsQuery,
+                  link: linkQuery,
                 }).filter(([, v]) => v !== undefined),
               ),
             }}
           >
             {needsReview ? tr("review.showAll") : tr("review.showOnly")}
+          </Link>
+        </div>
+      ) : null}
+
+      {pendingLinkCount > 0 || pendingLink ? (
+        <div className="flex items-center gap-2 text-sm">
+          <StatusTag tone="primary">{tl("count", { count: pendingLinkCount })}</StatusTag>
+          <Link
+            className="text-muted-foreground underline-offset-2 hover:underline"
+            href={{
+              pathname: "/dashboard/transactions",
+              query: Object.fromEntries(
+                Object.entries({
+                  book,
+                  category,
+                  account,
+                  party,
+                  period,
+                  review,
+                  ids: idsQuery,
+                  link: pendingLink ? undefined : "pending",
+                }).filter(([, v]) => v !== undefined),
+              ),
+            }}
+          >
+            {pendingLink ? tl("transactions.showAll") : tl("transactions.showOnly")}
+          </Link>
+          <Link className="text-muted-foreground underline-offset-2 hover:underline" href="/dashboard/links">
+            {tl("transactions.open")}
           </Link>
         </div>
       ) : null}
@@ -422,6 +474,9 @@ export default async function TransactionsPage({
                       uncategorizedLabel={tr("table.uncategorized")}
                       needsReviewLabel={tr("table.needsReview")}
                       needsReviewHint={(source) => tr("table.needsReviewHint", { source })}
+                      pendingLink={pendingLinkIds.has(t.id)}
+                      pendingLinkLabel={tl("transactions.badge")}
+                      pendingLinkHint={tl("transactions.badgeHint")}
                       conversionLabel={(c) =>
                         c ? tr("type.conversion", c) : tr("type.conversionPlain")
                       }
@@ -448,7 +503,7 @@ export default async function TransactionsPage({
         totalPages={totalPages}
         total={total}
         basePath="/dashboard/transactions"
-        params={{ book, category, account, party, period, review, ids: idsQuery }}
+        params={{ book, category, account, party, period, review, ids: idsQuery, link: linkQuery }}
       />
     </>
   );

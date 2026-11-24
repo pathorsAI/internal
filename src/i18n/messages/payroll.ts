@@ -2,7 +2,6 @@ import type { Dictionary } from "./dictionary";
 
 const payroll = {
   title: { "zh-TW": "薪資", en: "Payroll" },
-  description: { "zh-TW": "到「員工」頁對每位員工發放薪資；這裡是發放紀錄", en: "Pay each employee's salary from the Employees page; this is the payment history" },
   goToEmployees: { "zh-TW": "去員工頁發薪", en: "Go to Employees to pay salary" },
   table: {
     title: { "zh-TW": "發放紀錄", en: "Payment history" },
@@ -151,8 +150,8 @@ const payroll = {
       include: { "zh-TW": "申報", en: "File" },
       noEmployees: { "zh-TW": "沒有可申報的員工", en: "No employees to file" },
       shareholderNote: {
-        "zh-TW": "股東往來還款不是薪資，不要填進這裡。",
-        en: "Shareholder loan repayments are not salary — never put them here.",
+        "zh-TW": "只填薪資項目；借款還款、代墊撥款等非薪資款項不要填進這裡。",
+        en: "Only salary items belong here — leave out non-salary payments such as loan repayments or reimbursements.",
       },
       allowCopy: {
         "zh-TW": "表單上缺人時，從最近一個已結算的月份複製（會寫入 Simpany）",

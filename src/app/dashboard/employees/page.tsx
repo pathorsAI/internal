@@ -121,7 +121,7 @@ export default async function EmployeesPage() {
 
   return (
     <>
-      <PageHeader title={t("title")} description={t("description")}>
+      <PageHeader title={t("title")}>
         {canManage ? <NewEmployeeDialog members={members} /> : null}
       </PageHeader>
       <TableCard title={t("table.title")}>

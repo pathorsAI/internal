@@ -1,7 +1,8 @@
 import { and, eq, inArray, isNull, max, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { bankAccounts, transactions } from "@/db/schema";
-import { resolveOrCreateParties } from "@/lib/party-resolve";
+import { pendingPartyOf, resolvePartiesForWrite, type PartyResolution } from "@/lib/linking/party";
+import { insertTransactions, type LinkedInsert } from "@/lib/linking/write";
 import { getIntegration, updateConfig } from "@/lib/integrations/store";
 import type { IntegrationConfig } from "@/lib/integrations/types";
 import {
@@ -834,18 +835,25 @@ async function planAccount(
   };
 }
 
+function partyLabelOf(p: PlannedRow): string {
+  return p.type === "income" ? "customer" : "vendor";
+}
+
 function toInsertRow(
   orgId: string,
   p: PlannedRow,
-  partyIds: Map<string, number>,
-): typeof transactions.$inferInsert {
+  parties: Map<string, PartyResolution>,
+): LinkedInsert {
+  const party = p.partyName ? parties.get(p.partyName) : undefined;
   return {
     organizationId: orgId,
     type: p.type,
     txnDate: p.txnDate,
     description: p.description,
     categoryId: null,
-    partyId: p.partyName ? (partyIds.get(p.partyName) ?? null) : null,
+    partyId: party?.partyId ?? null,
+    // 名稱跟既有對象很像、沒自動新建 → 連結層把這筆標成 party_similar，等人在待連結頁選。
+    pendingParty: p.partyName ? pendingPartyOf(p.partyName, partyLabelOf(p), party) : null,
     amount: p.amount,
     currency: p.currency,
     // 與 create_transaction 相同：只有 TWD 才填 amount_twd，外幣不換算。
@@ -861,25 +869,23 @@ function toInsertRow(
   };
 }
 
-/** 寫入帳本（ON CONFLICT DO NOTHING），回傳實際寫進去的 external_ref。 */
+/**
+ * 寫入帳本（ON CONFLICT DO NOTHING，經連結層），回傳實際寫進去的 external_ref。
+ * 對象用 hold 模式：名稱跟既有對象很像就不自動新建，交易標 party_similar 待確認。
+ */
 async function insertPlanned(db: Db, orgId: string, toCreate: PlannedRow[]): Promise<Set<string>> {
   const labelByName = new Map<string, string>();
   for (const p of toCreate) {
-    if (p.partyName && !labelByName.has(p.partyName)) {
-      labelByName.set(p.partyName, p.type === "income" ? "customer" : "vendor");
-    }
+    if (p.partyName && !labelByName.has(p.partyName)) labelByName.set(p.partyName, partyLabelOf(p));
   }
-  const partyIds = await resolveOrCreateParties(db, orgId, labelByName);
+  const parties = await resolvePartiesForWrite(db, orgId, labelByName, "hold");
+  const inserted = await insertTransactions(
+    { db, orgId, source: "wise" },
+    toCreate.map((p) => toInsertRow(orgId, p, parties)),
+    { onConflictDoNothing: true, chunkSize: INSERT_CHUNK },
+  );
   const createdRefs = new Set<string>();
-  for (let i = 0; i < toCreate.length; i += INSERT_CHUNK) {
-    const chunk = toCreate.slice(i, i + INSERT_CHUNK);
-    const inserted = await db
-      .insert(transactions)
-      .values(chunk.map((p) => toInsertRow(orgId, p, partyIds)))
-      .onConflictDoNothing()
-      .returning({ ref: transactions.externalRef });
-    for (const r of inserted) if (r.ref) createdRefs.add(r.ref);
-  }
+  for (const r of inserted) if (r.row.externalRef) createdRefs.add(r.row.externalRef);
   return createdRefs;
 }
 

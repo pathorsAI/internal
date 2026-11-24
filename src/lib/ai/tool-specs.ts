@@ -28,7 +28,7 @@ export function assistantSchema(name: string, schema: Schema): Schema {
     properties[CONFIRM_SUMMARY_ARG] = {
       type: "string",
       description:
-        "One short line in the user's language describing exactly what this call will do, shown on the confirmation card (e.g. 「新增支出 11/24 Google Workspace NT$3,000，玉山信用卡」).",
+        "One short line in the user's language describing exactly what this call will do, shown on the confirmation card (e.g. 「新增支出 11/24 軟體訂閱 NT$3,000，公司信用卡」).",
     };
     if (baseToolLevel(name) !== "read") required.push(CONFIRM_SUMMARY_ARG);
   }

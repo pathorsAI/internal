@@ -17,7 +17,6 @@ import {
   Tags,
   FolderKanban,
   Repeat,
-  CalendarSync,
   FileSignature,
   CalendarClock,
   Receipt,
@@ -27,6 +26,7 @@ import {
   Plug,
   History,
   Sparkles,
+  Link2,
 } from "lucide-react";
 
 import {
@@ -38,6 +38,7 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
@@ -57,6 +58,7 @@ export type NavItemKey =
   | "account"
   | "billing"
   | "transactions"
+  | "links"
   | "parties"
   | "categories"
   | "advances"
@@ -66,7 +68,6 @@ export type NavItemKey =
   | "reconciliation"
   | "projects"
   | "subscriptions"
-  | "recurringExpenses"
   | "contracts"
   | "invoices"
   | "reports"
@@ -89,6 +90,7 @@ const daily = [
 
 const nav = [
   { key: "transactions", href: "/dashboard/transactions", icon: ArrowLeftRight },
+  { key: "links", href: "/dashboard/links", icon: Link2 },
   { key: "parties", href: "/dashboard/parties", icon: Truck },
   { key: "categories", href: "/dashboard/categories", icon: Tags },
   { key: "advances", href: "/dashboard/advances", icon: ReceiptText },
@@ -101,7 +103,6 @@ const nav = [
 const clients = [
   { key: "projects", href: "/dashboard/projects", icon: FolderKanban },
   { key: "subscriptions", href: "/dashboard/subscriptions", icon: Repeat },
-  { key: "recurringExpenses", href: "/dashboard/recurring-expenses", icon: CalendarSync },
   { key: "contracts", href: "/dashboard/contracts", icon: FileSignature },
   { key: "invoices", href: "/dashboard/invoices", icon: Receipt },
   { key: "reports", href: "/dashboard/reports", icon: BarChart3 },
@@ -136,10 +137,13 @@ export function AppSidebar({
   initialOrganizations,
   initialActiveOrgId,
   initialUser,
+  badges,
 }: Readonly<{
   initialOrganizations: OrgOption[];
   initialActiveOrgId: string | null;
   initialUser: MenuUser | null;
+  /** 項目右側的數字徽章（例如待連結筆數），0 或沒給就不顯示 */
+  badges?: Partial<Record<NavItemKey, number>>;
 }>) {
   const t = useTranslations("common");
   const pathname = usePathname();
@@ -221,6 +225,9 @@ export function AppSidebar({
                         <span>{t(`nav.items.${item.key}`)}</span>
                       </Link>
                     </SidebarMenuButton>
+                    {badges?.[item.key] ? (
+                      <SidebarMenuBadge className="text-warning">{badges[item.key]}</SidebarMenuBadge>
+                    ) : null}
                   </SidebarMenuItem>
                 ))}
               </SidebarMenu>

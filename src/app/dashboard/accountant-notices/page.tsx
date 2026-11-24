@@ -95,7 +95,7 @@ export default async function AccountantNoticesPage() {
 
   return (
     <>
-      <PageHeader title={t("title")} description={t("description")} />
+      <PageHeader title={t("title")} />
 
       <TableCard
         title={

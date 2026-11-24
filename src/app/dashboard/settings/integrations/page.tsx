@@ -140,7 +140,7 @@ export default async function IntegrationsPage({
 
   return (
     <>
-      <PageHeader title={t("title")} description={t("description")} />
+      <PageHeader title={t("title")} />
       <SettingsBody>
         <IntegrationsList
           rows={rows}

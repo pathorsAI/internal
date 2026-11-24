@@ -2,10 +2,6 @@ import type { Dictionary } from "./dictionary";
 
 const vendorBilling = {
   title: { "zh-TW": "廠商計費", en: "Vendor billing" },
-  description: {
-    "zh-TW": "雲端與廠商的計費帳號、付款卡，以及帳單和帳本交易的對帳",
-    en: "Cloud and vendor billing accounts, payment cards, and matching invoices to ledger transactions",
-  },
   actions: {
     syncNow: { "zh-TW": "立即同步", en: "Sync now" },
     syncing: { "zh-TW": "同步中…", en: "Syncing…" },
@@ -114,6 +110,7 @@ const vendorBilling = {
     usage: { "zh-TW": "用量", en: "Usage" },
     promotionCredit: { "zh-TW": "抵用點數", en: "Promotion credits" },
     paid: { "zh-TW": "實付", en: "Paid" },
+    charge: { "zh-TW": "扣款", en: "Charge" },
   },
   cell: {
     missingResources: { "zh-TW": "{count} 個不見了", en: "{count} gone" },
@@ -124,6 +121,37 @@ const vendorBilling = {
     overdue: { "zh-TW": "逾期未付", en: "Overdue" },
     daysLeft: { "zh-TW": "剩 {days} 天", en: "{days} days left" },
     suggestedTxn: { "zh-TW": "建議：{txn}", en: "Suggested: {txn}" },
+    nextCharge: { "zh-TW": "下次 {date}", en: "Next {date}" },
+  },
+  schedule: {
+    title: { "zh-TW": "固定支出", en: "Recurring expense" },
+    help: {
+      "zh-TW": "設定扣款週期，這個帳號就是一筆固定支出。交易對象只對應到這個帳號的支出會自動連過來；本期有連到的支出或已對帳的帳單，就算已付。",
+      en: "Give the account a charge schedule and it becomes a recurring expense. Expenses whose counterparty belongs to this account only are linked automatically; a linked expense or a matched invoice in the current period counts as paid.",
+    },
+    schedule: { "zh-TW": "扣款週期", en: "Charged" },
+    fixed: { "zh-TW": "固定日期", en: "Fixed date" },
+    usage: { "zh-TW": "用量計費 / 自動儲值", en: "Usage-based / auto top-up" },
+    none: { "zh-TW": "不提醒", en: "No reminders" },
+    anchorDate: { "zh-TW": "扣款日（任一次已知的）", en: "A known charge date" },
+    anchorHelp: {
+      "zh-TW": "之後每隔幾個月同一天扣（遇到小月壓到月底）。",
+      en: "It repeats on the same day every interval (clamped to month end).",
+    },
+    intervalMonths: { "zh-TW": "每隔幾個月扣一次", en: "Months between charges" },
+    expectedAmount: { "zh-TW": "預估金額", en: "Expected amount" },
+    currency: { "zh-TW": "幣別", en: "Currency" },
+    billingUrl: { "zh-TW": "廠商帳單頁", en: "Vendor billing page" },
+    monthly: { "zh-TW": "每月", en: "Monthly" },
+    everyNMonths: { "zh-TW": "每 {months} 個月", en: "Every {months} months" },
+    usageShort: { "zh-TW": "用量計費", en: "Usage-based" },
+    status: {
+      paid: { "zh-TW": "本期已付", en: "Paid this period" },
+      paidInvoice: { "zh-TW": "本期已付（帳單）", en: "Paid this period (invoice)" },
+      unpaid: { "zh-TW": "本期未見扣款", en: "Not seen this period" },
+      upcoming: { "zh-TW": "尚未開始扣款", en: "Not started yet" },
+    },
+    window: { "zh-TW": "本期 {start} – {end}", en: "This period {start} – {end}" },
   },
   empty: {
     accounts: { "zh-TW": "還沒有計費帳號", en: "No billing accounts yet" },
@@ -200,7 +228,7 @@ const vendorBilling = {
     newTitle: { "zh-TW": "新增付款方式", en: "Add payment method" },
     kind: { "zh-TW": "種類", en: "Type" },
     label: { "zh-TW": "名稱", en: "Name" },
-    labelPlaceholder: { "zh-TW": "例：Visa •4306", en: "e.g. Visa •4306" },
+    labelPlaceholder: { "zh-TW": "例：Visa •1234", en: "e.g. Visa •1234" },
     brand: { "zh-TW": "卡別", en: "Brand" },
     last4: { "zh-TW": "末四碼", en: "Last 4 digits" },
     last4Help: { "zh-TW": "只存末四碼", en: "Only the last four digits are stored" },

@@ -4,7 +4,7 @@ import { useTranslations } from "next-intl";
 import type { TaxSetting } from "@/lib/tax-treatment";
 import { createContract } from "@/db/mutations";
 import { CreateDialog } from "@/components/create-dialog";
-import { ContractFields, type Option } from "./contract-fields";
+import { ContractFields, type Option, type ProjectOption } from "./contract-fields";
 
 export function NewContractDialog({
   parties,
@@ -12,7 +12,7 @@ export function NewContractDialog({
   orgTax,
 }: Readonly<{
   parties: Option[];
-  projects: Option[];
+  projects: ProjectOption[];
   orgTax: TaxSetting;
 }>) {
   const t = useTranslations("contracts");

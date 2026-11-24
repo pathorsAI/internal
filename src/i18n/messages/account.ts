@@ -4,7 +4,6 @@ import type { Dictionary } from "./dictionary";
 /** 個人設定（/dashboard/account）：目前只有頭像。 */
 const account = {
   title: { "zh-TW": "個人設定", en: "Your profile" },
-  description: { "zh-TW": "你的頭像會顯示在側欄、操作紀錄與 AI 助理", en: "Your picture shows in the sidebar, the activity log and the AI assistant" },
   metaTitle: { "zh-TW": "個人設定 · Internal", en: "Your profile · Internal" },
   profile: {
     title: { "zh-TW": "頭像", en: "Profile picture" },

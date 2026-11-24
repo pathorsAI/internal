@@ -2,7 +2,6 @@ import type { Dictionary } from "./dictionary";
 
 const activity = {
   title: { "zh-TW": "操作紀錄", en: "Activity log" },
-  description: { "zh-TW": "誰在什麼時候新增 / 修改 / 刪除了哪筆資料（含透過 MCP 的操作），用來追查亂紀錄或亂刪除", en: "Who added / updated / deleted which record and when (including actions via MCP) — use this to trace stray edits or deletions" },
   columns: {
     time: { "zh-TW": "時間", en: "Time" },
     actor: { "zh-TW": "操作人", en: "Actor" },

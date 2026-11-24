@@ -62,10 +62,7 @@ export default async function ActivityPage() {
 
   return (
     <>
-      <PageHeader
-        title={t("title")}
-        description={t("description")}
-      />
+      <PageHeader title={t("title")} />
       <TableCard>
         <Table>
           <TableHeader>

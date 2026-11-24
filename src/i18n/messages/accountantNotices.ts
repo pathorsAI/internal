@@ -2,7 +2,6 @@ import type { Dictionary } from "./dictionary";
 
 const accountantNotices = {
   title: { "zh-TW": "待通知會計師", en: "Accountant notices" },
-  description: { "zh-TW": "電子發票會計師會自動看到；這裡是其他發票（三聯式等），要主動告訴會計師的清單", en: "The accountant automatically sees e-invoices; this is the list of other invoices (paper triplicate etc.) you need to flag to them" },
   columns: {
     date: { "zh-TW": "日期", en: "Date" },
     party: { "zh-TW": "對象", en: "Party" },

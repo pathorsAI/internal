@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "next-intl/server";
 import { headers } from "next/headers";
-import { eq, and, isNull, inArray, desc, sql } from "drizzle-orm";
+import { eq, and, isNull, inArray, desc } from "drizzle-orm";
 import type { AnyPgColumn, PgTable } from "drizzle-orm/pg-core";
 import { getDb } from "./index";
 import { billingItemPaidById } from "./queries";
@@ -25,7 +25,6 @@ import {
   contracts,
   billingItems,
   payrollItemTypes,
-  recurringExpenses,
 } from "./schema";
 import { oauthAccessToken, oauthConsent, member, organization } from "./auth-schema";
 import { isAmountBasis, isTaxTreatment } from "@/lib/tax-treatment";
@@ -49,7 +48,14 @@ import { findAccountCurrencyMismatches } from "@/lib/account-currency";
 import { nationalIdColumns, resolvePayoutAccount, type PayoutPurpose } from "./employee-accounts";
 import { EmployeeAccountError } from "@/lib/employee-accounts";
 import { externalSingleLegSide, type SingleLegSide } from "@/lib/external-transfer";
-import { assertOrgRefs } from "@/lib/vendor-billing/guards";
+import {
+  insertTransaction,
+  updateTransactionLinked,
+  updateTransactionsPlainByIds,
+} from "@/lib/linking/write";
+import { resolvePartyForWrite } from "@/lib/linking/party";
+import { linkPatchFromForm } from "@/lib/linking/form-links";
+import { createProjectForContract, parseProjectChoice } from "./project-choice";
 
 export type ActionState = { ok: boolean; error?: string };
 
@@ -337,14 +343,20 @@ export async function createReconciliation(
   }
 }
 
-/** 名稱 → 交易對象 id（比對名稱 / 別名，只看未刪除的；查無就新建）。 */
+/**
+ * 交易表單的對象名稱 → id（比對名稱 / 別名，只看未刪除的；查無就新建）。
+ * 走連結層的 resolvePartyForWrite（mode "create"）：人明確打的名字照建，
+ * 跟既有對象很像的話相似候選會留在 PartyResolution.similar（待連結頁可合併）。
+ */
 async function getOrCreateParty(
   db: ReturnType<typeof getDb>,
   orgId: string,
   name: string,
   label: string,
 ): Promise<number> {
-  return (await resolveOrCreateParty(db, orgId, name, label)).id;
+  const r = await resolvePartyForWrite(db, orgId, name, label, "create");
+  if (r.partyId == null) throw new Error(`無法建立交易對象：${name}`);
+  return r.partyId;
 }
 
 /**
@@ -584,14 +596,19 @@ async function transactionLinkError(
   orgId: string,
   formData: FormData,
 ): Promise<string | null> {
+  const links = linkPatchFromForm(formData);
   return unownedRefError(db, orgId, [
-    [projects, [num(formData.get("projectId"))]],
-    [contracts, [num(formData.get("contractId"))]],
-    [subscriptions, [num(formData.get("subscriptionId"))]],
+    [projects, [links.projectId]],
+    [contracts, [links.contractId]],
+    [subscriptions, [links.subscriptionId]],
+    [billingItems, [links.billingItemId]],
   ]);
 }
 
-/** insert 與 update 共用的欄位（type 只在新增時寫入，所以不在這裡）。 */
+/**
+ * insert 與 update 共用的欄位（type 只在新增時寫入，所以不在這裡）。
+ * 連結欄位（專案 / 合約 / 訂閱 / 請款項）只帶表單上真的有的 —— 見 linkPatchFromForm。
+ */
 function transactionColumns(formData: FormData, header: TxnHeader, f: TxnFields) {
   return {
     txnDate: header.txnDate,
@@ -602,10 +619,7 @@ function transactionColumns(formData: FormData, header: TxnHeader, f: TxnFields)
     categoryId: f.categoryId,
     partyId: f.partyId,
     settleEmployeeId: f.settleEmployeeId,
-    projectId: num(formData.get("projectId")),
-    contractId: num(formData.get("contractId")),
-    subscriptionId: num(formData.get("subscriptionId")),
-    subscriptionPeriod: str(formData.get("subscriptionPeriod")),
+    ...linkPatchFromForm(formData),
     fromAccountId: f.fromAccountId,
     toAccountId: f.toAccountId,
     book: header.book,
@@ -663,14 +677,10 @@ export async function createTransaction(
     ]);
     if (currencyError) return { ok: false, error: currencyError };
 
-    const [inserted] = await db
-      .insert(transactions)
-      .values({
-        organizationId: orgId,
-        type: header.type,
-        ...transactionColumns(formData, header, f),
-      })
-      .returning({ id: transactions.id });
+    const { row: inserted } = await insertTransaction(
+      { db, orgId, source: "web" },
+      { organizationId: orgId, type: header.type, ...transactionColumns(formData, header, f) },
+    );
 
     await storeTransactionDocument(db, orgId, inserted.id, formData, header.billed);
 
@@ -830,9 +840,10 @@ export async function createReimbursement(
     const currencyError = await accountCurrencyError(db, orgId, advCurrency, [fromAccountId]);
     if (currencyError) return { ok: false, error: currencyError };
 
-    const [inserted] = await db
-      .insert(transactions)
-      .values({
+    // relatedToId 指向原代墊：連結層會讓撥款繼承代墊的專案與合約。
+    const { row: inserted } = await insertTransaction(
+      { db, orgId, source: "reimbursement" },
+      {
         organizationId: orgId,
         type: "reimbursement",
         txnDate: payDate,
@@ -845,8 +856,8 @@ export async function createReimbursement(
         book: "internal",
         relatedToId: advanceId,
         description: tRec("records.advanceSettled"),
-      })
-      .returning({ id: transactions.id });
+      },
+    );
 
     await logWeb(orgId, "create", "transaction", inserted.id, tRec("activity.advanceReimbursed"));
 
@@ -1247,10 +1258,7 @@ export async function deleteTransaction(id: number): Promise<ActionState> {
       .update(documents)
       .set({ deletedAt: new Date().toISOString() })
       .where(eq(documents.transactionId, id));
-    await db
-      .update(transactions)
-      .set({ deletedAt: new Date().toISOString() })
-      .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)));
+    await updateTransactionsPlainByIds(db, orgId, [id], { deletedAt: new Date().toISOString() });
     await logWeb(orgId, "delete", "transaction", id);
     revalidatePath("/dashboard/transactions");
     revalidatePath("/dashboard/advances");
@@ -1370,15 +1378,12 @@ export async function updateTransaction(
     ]);
     if (currencyError) return { ok: false, error: currencyError };
 
-    await db
-      .update(transactions)
-      .set({
-        ...transactionColumns(formData, header, f),
-        // 自動匯入（Wise 同步）的列：有人在編輯時指定了分類，就算確認過了。
-        ...(f.categoryId === null ? {} : { needsReview: false }),
-        updatedAt: new Date().toISOString(),
-      })
-      .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, id)));
+    // 表單沒有的連結欄位（訂閱、期別、請款項）不在 patch 裡 → 連結層保留既有值。
+    await updateTransactionLinked({ db, orgId, source: "web" }, id, {
+      ...transactionColumns(formData, header, f),
+      // 自動匯入（Wise 同步）的列：有人在編輯時指定了分類，就算確認過了。
+      ...(f.categoryId === null ? {} : { needsReview: false }),
+    });
     // 編輯時若有補上憑證，新增一筆 documents
     await storeTransactionDocument(db, orgId, id, formData, header.billed);
     await logWeb(orgId, "update", "transaction", id);
@@ -1853,9 +1858,9 @@ export async function payEmployeeSalary(
     // 薪資固定以 TWD 記帳，所以發薪帳戶也必須是 TWD 帳戶。
     const currencyError = await accountCurrencyError(db, orgId, "TWD", [fromAccountId]);
     if (currencyError) return { ok: false, error: currencyError };
-    const [txn] = await db
-      .insert(transactions)
-      .values({
+    const { row: txn } = await insertTransaction(
+      { db, orgId, source: "payroll" },
+      {
         organizationId: orgId,
         type: "expense",
         txnDate: payDate,
@@ -1869,8 +1874,8 @@ export async function payEmployeeSalary(
         fromAccountId,
         book,
         billedToCompanyTaxId: false,
-      })
-      .returning({ id: transactions.id });
+      },
+    );
 
     const slipValues = {
       taxableTotal: String(taxable),
@@ -1934,10 +1939,7 @@ export async function deletePayslip(id: number): Promise<ActionState> {
     const deletedAt = new Date().toISOString();
     await db.update(payslips).set({ deletedAt }).where(eq(payslips.id, id));
     if (slip?.paidTransactionId) {
-      await db
-        .update(transactions)
-        .set({ deletedAt })
-        .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, slip.paidTransactionId)));
+      await updateTransactionsPlainByIds(db, orgId, [slip.paidTransactionId], { deletedAt });
     }
     await logWeb(orgId, "delete", "payslip", id);
     revalidatePath("/dashboard/payroll");
@@ -2171,166 +2173,6 @@ export async function deleteSubscription(id: number): Promise<ActionState> {
   }
 }
 
-// ---- 固定支出（recurring_expenses）----
-// 寫入只給 owner / admin：這裡決定 Discord 頻道提醒「用哪個付款方式扣」，
-// 跟整合設定同一個層級。成員仍可在頁面上看。
-const RECURRING_SCHEDULE = new Set(["fixed", "usage"]);
-
-function recurringExpenseValues(formData: FormData) {
-  const expectedAmount = str(formData.get("expectedAmount"));
-  return {
-    name: str(formData.get("name")),
-    partyName: str(formData.get("partyName")),
-    matchPattern: str(formData.get("matchPattern")),
-    paymentMethodId: optRefNum(formData.get("paymentMethodId")),
-    schedule: str(formData.get("schedule")) ?? "fixed",
-    anchorDate: str(formData.get("anchorDate")),
-    intervalMonths: clampInt(num(formData.get("intervalMonths")), 1, 36, 1) ?? 1,
-    expectedAmount,
-    // 沒有預估金額時幣別沒有意義，不存（下拉一定會送一個預設值）。
-    currency: expectedAmount === null ? null : (str(formData.get("currency")) ?? "TWD"),
-    billingUrl: str(formData.get("billingUrl")),
-    isActive: str(formData.get("isActive")) !== "inactive",
-    note: str(formData.get("note")),
-  };
-}
-
-type RecurringExpenseValues = ReturnType<typeof recurringExpenseValues>;
-
-function isHttpUrl(v: string): boolean {
-  try {
-    const u = new URL(v);
-    return u.protocol === "https:" || u.protocol === "http:";
-  } catch {
-    return false;
-  }
-}
-
-/** 欄位驗證，過了就回傳收窄成 non-null 的名稱（同 requiredSubscriptionFields 的理由）。 */
-async function requiredRecurringExpenseFields(
-  v: RecurringExpenseValues,
-): Promise<{ name: string } | { error: string }> {
-  const t = await getTranslations("errors");
-  if (!v.name) return { error: t("required.name") };
-  if (!RECURRING_SCHEDULE.has(v.schedule)) return { error: t("validation.scheduleInvalid") };
-  if (v.schedule === "fixed" && !v.anchorDate) return { error: t("required.anchorDate") };
-  if (v.billingUrl !== null && !isHttpUrl(v.billingUrl)) return { error: t("validation.httpUrl") };
-  return { name: v.name };
-}
-
-function recurringExpenseColumns(v: RecurringExpenseValues, name: string, partyId: number | null) {
-  return {
-    name,
-    partyId,
-    matchPattern: v.matchPattern,
-    paymentMethodId: v.paymentMethodId,
-    schedule: v.schedule,
-    // usage 沒有扣款日；表單切回 usage 時把舊的日期清掉，免得畫面上留著沒作用的值。
-    anchorDate: v.schedule === "fixed" ? v.anchorDate : null,
-    intervalMonths: v.intervalMonths,
-    expectedAmount: v.expectedAmount,
-    currency: v.currency,
-    billingUrl: v.billingUrl,
-    isActive: v.isActive,
-    note: v.note,
-  };
-}
-
-async function requireRecurringExpenseManager(): Promise<{ orgId: string } | { error: string }> {
-  const { orgId, role } = await requireOrgWithRole();
-  if (!canManageOrg(role)) {
-    const t = await getTranslations("errors");
-    return { error: t("forbidden.manageRecurringExpenses") };
-  }
-  return { orgId };
-}
-
-/** 新增與編輯共用：驗欄位 → 驗外鍵歸屬 → 廠商名稱轉 id（查無就新建）。 */
-async function prepareRecurringExpense(
-  orgId: string,
-  formData: FormData,
-): Promise<{ columns: ReturnType<typeof recurringExpenseColumns>; partyCreated: boolean } | { error: string }> {
-  const v = recurringExpenseValues(formData);
-  const required = await requiredRecurringExpenseFields(v);
-  if ("error" in required) return required;
-  // 找不到（別的組織、已刪除）會丟 OrgRefError，訊息由呼叫端的 catch 回給表單。
-  await assertOrgRefs(orgId, { paymentMethod: [v.paymentMethodId] });
-  const party = await resolvePartyName(getDb(), orgId, v.partyName, "vendor");
-  return { columns: recurringExpenseColumns(v, required.name, party.id), partyCreated: party.created };
-}
-
-export async function createRecurringExpense(
-  _prev: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  const t = await getTranslations("errors");
-  // 在 try 外面：未登入時 requireOrg() 會 redirect，那個例外不能被吞掉。
-  const me = await requireRecurringExpenseManager();
-  if ("error" in me) return { ok: false, error: me.error };
-  try {
-    const prepared = await prepareRecurringExpense(me.orgId, formData);
-    if ("error" in prepared) return { ok: false, error: prepared.error };
-    const [inserted] = await getDb()
-      .insert(recurringExpenses)
-      .values({ organizationId: me.orgId, ...prepared.columns })
-      .returning({ id: recurringExpenses.id });
-    await logWeb(me.orgId, "create", "recurring_expense", inserted.id, prepared.columns.name);
-    revalidatePath("/dashboard/recurring-expenses");
-    if (prepared.partyCreated) revalidatePath("/dashboard/parties");
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : t("failed.create") };
-  }
-}
-
-export async function updateRecurringExpense(
-  _prev: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  const t = await getTranslations("errors");
-  const id = num(formData.get("id"));
-  if (!id) return { ok: false, error: t("required.id") };
-  const me = await requireRecurringExpenseManager();
-  if ("error" in me) return { ok: false, error: me.error };
-  try {
-    const prepared = await prepareRecurringExpense(me.orgId, formData);
-    if ("error" in prepared) return { ok: false, error: prepared.error };
-    await getDb()
-      .update(recurringExpenses)
-      .set({ ...prepared.columns, updatedAt: new Date().toISOString() })
-      .where(
-        and(
-          eq(recurringExpenses.organizationId, me.orgId),
-          eq(recurringExpenses.id, id),
-          isNull(recurringExpenses.deletedAt),
-        ),
-      );
-    await logWeb(me.orgId, "update", "recurring_expense", id, prepared.columns.name);
-    revalidatePath("/dashboard/recurring-expenses");
-    if (prepared.partyCreated) revalidatePath("/dashboard/parties");
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : t("failed.update") };
-  }
-}
-
-export async function deleteRecurringExpense(id: number): Promise<ActionState> {
-  const t = await getTranslations("errors");
-  const me = await requireRecurringExpenseManager();
-  if ("error" in me) return { ok: false, error: me.error };
-  try {
-    await getDb()
-      .update(recurringExpenses)
-      .set({ deletedAt: new Date().toISOString() })
-      .where(and(eq(recurringExpenses.organizationId, me.orgId), eq(recurringExpenses.id, id)));
-    await logWeb(me.orgId, "delete", "recurring_expense", id);
-    revalidatePath("/dashboard/recurring-expenses");
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
-  }
-}
-
 // ---- 合約 ----
 const CONTRACT_STATUS = new Set(["draft", "active", "completed", "cancelled"]);
 const CONTRACT_BILLING_PLAN = new Set(["single", "installments", "milestones", "subscription"]);
@@ -2521,6 +2363,38 @@ function contractColumns(v: ContractValues, customerPartyId: number, title: stri
   };
 }
 
+/**
+ * 合約表單的「歸屬專案」：把 projectChoice（新專案 / 不歸屬 / 既有專案 id）收斂進 v.projectId。
+ * 欄位沒送（舊呼叫端）就沿用 projectId 欄位。既有專案的歸屬驗證交給呼叫端的 unownedRefError。
+ *
+ * 換專案時，這張合約底下既有的請款項 / 訂閱不跟著改 —— 它們沒有自己的專案時，
+ * 專案損益會經由合約算進來（src/db/project-links.ts）。
+ */
+async function applyProjectChoice(formData: FormData, v: ContractValues): Promise<string | null> {
+  const choice = parseProjectChoice(formData.get("projectChoice"));
+  if (choice === null) return null;
+  if (choice.kind === "invalid") {
+    const t = await getTranslations("errors");
+    return t("notFound.referencedRecord");
+  }
+  v.projectId = choice.kind === "id" ? choice.id : null;
+  return null;
+}
+
+/** 選了「新專案（同合約名）」→ 客戶確定之後才建，名稱用合約名、客戶用合約的客戶。 */
+async function createChosenProject(
+  db: ReturnType<typeof getDb>,
+  orgId: string,
+  formData: FormData,
+  v: ContractValues,
+  contract: { title: string; customerPartyId: number },
+): Promise<boolean> {
+  if (parseProjectChoice(formData.get("projectChoice"))?.kind !== "new") return false;
+  v.projectId = await createProjectForContract(db, orgId, contract);
+  await logWeb(orgId, "create", "project", v.projectId, contract.title);
+  return true;
+}
+
 export async function createContract(
   _prev: ActionState,
   formData: FormData,
@@ -2532,11 +2406,17 @@ export async function createContract(
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
+    const choiceError = await applyProjectChoice(formData, v);
+    if (choiceError) return { ok: false, error: choiceError };
     // projectId 也會被 expandContractSchedule 帶進 billing_items，一定要先驗。
     const refError = await unownedRefError(db, orgId, [[projects, [v.projectId]]]);
     if (refError) return { ok: false, error: refError };
     const customer = await requireCustomer(db, orgId, v.customerPartyName);
     if ("error" in customer) return { ok: false, error: customer.error };
+    await createChosenProject(db, orgId, formData, v, {
+      title: required.title,
+      customerPartyId: customer.id,
+    });
     const [inserted] = await db
       .insert(contracts)
       .values({ organizationId: orgId, ...contractColumns(v, customer.id, required.title) })
@@ -2545,6 +2425,7 @@ export async function createContract(
     // 新合約一定沒有既有排程，直接展開（展不出來就是 0 期，不是錯誤）。
     const created = await expandContractSchedule(db, orgId, inserted.id, customer.id, v, false);
     revalidatePath("/dashboard/contracts");
+    revalidatePath("/dashboard/projects");
     if (customer.created) revalidatePath("/dashboard/parties");
     if (created > 0) {
       revalidatePath("/dashboard/billing");
@@ -2569,10 +2450,16 @@ export async function updateContract(
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
+    const choiceError = await applyProjectChoice(formData, v);
+    if (choiceError) return { ok: false, error: choiceError };
     const refError = await unownedRefError(db, orgId, [[projects, [v.projectId]]]);
     if (refError) return { ok: false, error: refError };
     const customer = await requireCustomer(db, orgId, v.customerPartyName);
     if ("error" in customer) return { ok: false, error: customer.error };
+    await createChosenProject(db, orgId, formData, v, {
+      title: required.title,
+      customerPartyId: customer.id,
+    });
     await db
       .update(contracts)
       .set(contractColumns(v, customer.id, required.title))
@@ -2588,6 +2475,7 @@ export async function updateContract(
       v.regenerateSchedule,
     );
     revalidatePath("/dashboard/contracts");
+    revalidatePath("/dashboard/projects");
     if (customer.created) revalidatePath("/dashboard/parties");
     if (changed > 0) {
       revalidatePath("/dashboard/billing");
@@ -2609,6 +2497,7 @@ export async function deleteContract(id: number): Promise<ActionState> {
       .where(and(eq(contracts.organizationId, orgId), eq(contracts.id, id)));
     await logWeb(orgId, "delete", "contract", id);
     revalidatePath("/dashboard/contracts");
+    revalidatePath("/dashboard/projects");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };
@@ -2987,7 +2876,7 @@ export async function linkPaymentToBillingRow(
     const { orgId } = await requireOrg();
     const db = getDb();
     const [txn] = await db
-      .select({ id: transactions.id, txnDate: transactions.txnDate })
+      .select({ id: transactions.id, partyId: transactions.partyId })
       .from(transactions)
       .where(
         and(
@@ -2998,17 +2887,13 @@ export async function linkPaymentToBillingRow(
       )
       .limit(1);
     if (!txn) return { ok: false, error: t("notFound.transaction") };
+    const ctx = { db, orgId, source: "billing_board" as const };
 
     if (rowKey.startsWith("bi:")) {
       const itemId = Number(rowKey.slice(3));
       if (!Number.isFinite(itemId)) return { ok: false, error: t("validation.invalidItemCode") };
       const [item] = await db
-        .select({
-          id: billingItems.id,
-          contractId: billingItems.contractId,
-          projectId: billingItems.projectId,
-          customerPartyId: billingItems.customerPartyId,
-        })
+        .select({ id: billingItems.id, customerPartyId: billingItems.customerPartyId })
         .from(billingItems)
         .where(
           and(
@@ -3020,26 +2905,12 @@ export async function linkPaymentToBillingRow(
         .limit(1);
       if (!item) return { ok: false, error: t("notFound.billingItem") };
 
-      // 交易上還沒填的關聯順手補上（已經有值的不覆蓋，人填的優先）。
-      await db
-        .update(transactions)
-        .set({
-          billingItemId: itemId,
-          partyId: sql`coalesce(${transactions.partyId}, ${item.customerPartyId})`,
-          contractId: sql`coalesce(${transactions.contractId}, ${item.contractId})`,
-          projectId: sql`coalesce(${transactions.projectId}, ${item.projectId})`,
-        })
-        .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, transactionId)));
-      await db
-        .update(billingItems)
-        .set({ paidOn: txn.txnDate })
-        .where(
-          and(
-            eq(billingItems.organizationId, orgId),
-            eq(billingItems.id, itemId),
-            isNull(billingItems.paidOn),
-          ),
-        );
+      // 合約、專案由連結層從請款項繼承（交易上已經有值的不覆蓋，人填的優先）；
+      // 請款項的 paid_on 也由連結層補上。對象還空著就用請款項的客戶。
+      await updateTransactionLinked(ctx, transactionId, {
+        billingItemId: itemId,
+        ...(txn.partyId == null ? { partyId: item.customerPartyId } : {}),
+      });
       await logWeb(orgId, "update", "billing_item", itemId, tRec("activity.paymentMatched", { id: transactionId }));
     } else if (rowKey.startsWith("sub:")) {
       const [, rawId, periodStart] = rowKey.split(":");
@@ -3048,25 +2919,19 @@ export async function linkPaymentToBillingRow(
         return { ok: false, error: t("validation.invalidPeriodCode") };
       }
       const [sub] = await db
-        .select({
-          customerPartyId: subscriptions.customerPartyId,
-          projectId: subscriptions.projectId,
-        })
+        .select({ customerPartyId: subscriptions.customerPartyId })
         .from(subscriptions)
         .where(
           and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, subscriptionId)),
         )
         .limit(1);
       if (!sub) return { ok: false, error: t("notFound.subscription") };
-      await db
-        .update(transactions)
-        .set({
-          subscriptionId,
-          subscriptionPeriod: periodStart,
-          partyId: sql`coalesce(${transactions.partyId}, ${sub.customerPartyId})`,
-          projectId: sql`coalesce(${transactions.projectId}, ${sub.projectId})`,
-        })
-        .where(and(eq(transactions.organizationId, orgId), eq(transactions.id, transactionId)));
+      // 訂閱的合約與專案由連結層繼承（以前只補專案、漏了合約）。
+      await updateTransactionLinked(ctx, transactionId, {
+        subscriptionId,
+        subscriptionPeriod: periodStart,
+        ...(txn.partyId == null ? { partyId: sub.customerPartyId } : {}),
+      });
       await logWeb(
         orgId,
         "update",

@@ -48,6 +48,23 @@ export function syncWindowStart(lastInvoiceDate: string | null, today: string): 
   return addDays(lastInvoiceDate, -RESYNC_OVERLAP_DAYS);
 }
 
+/** Azure 發票已經結清的狀態（不分大小寫）；其餘（Due、OverDue、PastDue、Pending…）都算還沒結清。 */
+const SETTLED_INVOICE_STATUS = new Set(["paid", "void", "voided", "cancelled", "canceled"]);
+
+export function isSettledInvoiceStatus(status: string | null | undefined): boolean {
+  return status != null && SETTLED_INVOICE_STATUS.has(status.trim().toLowerCase());
+}
+
+/**
+ * 發票要從哪天開始抓：一般視窗（syncWindowStart）跟「最早一張還沒結清的舊發票」取較早者。
+ * 只抓最近一段的話，舊的 OverDue 發票之後付清了也永遠不會更新狀態與 amountDue。
+ * 費用明細仍用一般視窗（往回抓很貴），只有發票清單延長。
+ */
+export function invoiceWindowStart(windowStart: string, oldestOpenInvoiceDate: string | null): string {
+  if (!oldestOpenInvoiceDate) return windowStart;
+  return oldestOpenInvoiceDate < windowStart ? oldestOpenInvoiceDate : windowStart;
+}
+
 /** [from, to] 切成每段最多 maxMonths 個日曆月（第一段從 from 所在月份的 1 號開始）。 */
 export function monthChunks(from: string, to: string, maxMonths = COST_CHUNK_MONTHS): { from: string; to: string }[] {
   const out: { from: string; to: string }[] = [];

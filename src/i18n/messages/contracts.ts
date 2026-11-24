@@ -9,7 +9,6 @@ const contracts = {
   },
   list: {
     title: { "zh-TW": "合約", en: "Contracts" },
-    description: { "zh-TW": "客戶合約，點列可編輯", en: "Client contracts — click a row to edit" },
     newButton: { "zh-TW": "新增合約", en: "Add contract" },
     rowDescription: { "zh-TW": "合約", en: "Contract" },
     columns: {

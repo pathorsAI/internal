@@ -181,7 +181,7 @@ export default async function InvoicesPage({
 
   return (
     <>
-      <PageHeader title={t("title")} description={t("description")}>
+      <PageHeader title={t("title")}>
         {simpanyUsable && canManage ? (
           <SimpanySyncSheet defaultStart={syncRange.startDate} defaultEnd={syncRange.endDate} />
         ) : null}

@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { contracts, parties, projects, subscriptions } from "@/db/schema";
+import { createProjectForContract } from "@/db/project-choice";
 import {
   assertInOrg,
   type JsonSchemaObject,
@@ -185,7 +186,8 @@ function subscriptionPatch(args: Record<string, unknown>): Record<string, unknow
 export const clientTools: Record<string, ToolDef> = {
   // ---- projects ----
   create_project: {
-    description: "Create a client project. Per-project P&L is computed from tagged transactions.",
+    description:
+      "Create a client project. A project is made of contracts and subscriptions: its status is derived from them and its P&L includes transactions tagged with it or linked through its contracts, subscriptions or billing items (see list_projects). To start a project together with a contract, create_contract with createProject=true does both.",
     inputSchema: {
       type: "object",
       properties: {
@@ -414,12 +416,17 @@ export const clientTools: Record<string, ToolDef> = {
   // ---- contracts ----
   create_contract: {
     description:
-      "Create a client contract. amount is net (未稅) unless amountBasis=gross. taxTreatment/amountBasis left null inherit the organization default; subscriptions and billing items bound to this contract follow the contract's setting.",
+      "Create a client contract. amount is net (未稅) unless amountBasis=gross. taxTreatment/amountBasis left null inherit the organization default; subscriptions and billing items bound to this contract follow the contract's setting. Projects are made of contracts: pass projectId to put it in an existing project (see list_projects), or createProject=true to create a new project named after the contract title with the same customer. Leave both out to create it without a project. Before creating a new project, ASK the user whether they want one (or which existing project it belongs to) — don't create projects on your own.",
     inputSchema: {
       type: "object",
       properties: {
         customerPartyId: { type: "number" },
-        projectId: { type: "number" },
+        projectId: { type: "number", description: "Existing project; see list_projects." },
+        createProject: {
+          type: "boolean",
+          description:
+            "Default false. true = also create a project named after the contract title (customer = this contract's customer) and attach the contract to it. Cannot be combined with projectId. Only after the user agreed.",
+        },
         title: { type: "string" },
         amount: { type: "number", description: "Total value; optional." },
         currency: { type: "string", description: "3-letter; default TWD." },
@@ -444,16 +451,24 @@ export const clientTools: Record<string, ToolDef> = {
       const orgId = await resolveOrg(args, ctx);
       const db = getDb();
       const customerPartyId = requireNumber(args, "customerPartyId");
-      const projectId = optNumber(args, "projectId");
+      let projectId = optNumber(args, "projectId");
+      const createProject = args.createProject === true;
+      if (createProject && projectId !== undefined) {
+        throw new Error("Pass either projectId or createProject=true, not both.");
+      }
       await assertClientRefs(db, orgId, { customerPartyId, projectId });
       checkEnum(optString(args, "status"), CONTRACT_STATUS, "status");
+      const title = requireString(args, "title");
+      if (createProject) {
+        projectId = await createProjectForContract(db, orgId, { title, customerPartyId });
+      }
       const [row] = await db
         .insert(contracts)
         .values({
           organizationId: orgId,
           customerPartyId,
           projectId: projectId ?? null,
-          title: requireString(args, "title"),
+          title,
           amount: optDecimal(args, "amount") ?? null,
           currency: normalizeCurrency(args, "currency"),
           startDate: optString(args, "startDate") ?? null,
@@ -476,7 +491,11 @@ export const clientTools: Record<string, ToolDef> = {
       properties: {
         id: { type: "number" },
         customerPartyId: { type: "number" },
-        projectId: { type: "number" },
+        projectId: {
+          type: ["number", "null"],
+          description:
+            "Move the contract to this project (see list_projects); null = take it out of its project. Its billing items / subscriptions without a project of their own follow through the contract automatically.",
+        },
         title: { type: "string" },
         amount: { type: "number" },
         currency: { type: "string" },
@@ -506,7 +525,9 @@ export const clientTools: Record<string, ToolDef> = {
       checkEnum(optString(args, "status"), CONTRACT_STATUS, "status");
       const patch: Record<string, unknown> = {};
       if (customerPartyId !== undefined) patch.customerPartyId = customerPartyId;
-      if (projectId !== undefined) patch.projectId = projectId;
+      // 明確傳 null = 移出專案；沒帶這個 key = 不動（optNumber 分不開兩者，先攔 null）
+      if (args.projectId === null) patch.projectId = null;
+      else if (projectId !== undefined) patch.projectId = projectId;
       if (optString(args, "title") !== undefined) patch.title = requireString(args, "title");
       if (optNumber(args, "amount") !== undefined) patch.amount = optDecimal(args, "amount");
       if (optString(args, "currency") !== undefined) patch.currency = normalizeCurrency(args, "currency");

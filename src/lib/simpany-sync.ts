@@ -10,6 +10,7 @@ import {
 } from "@/db/schema";
 import { matchParty, type PartyCandidate } from "@/lib/party-aliases";
 import { listBillingBoard } from "@/db/queries";
+import { updateTransactionsPlain } from "@/lib/linking/write";
 import {
   getSimpanyClient,
   type SimpanyClient,
@@ -395,16 +396,13 @@ export async function applyInvoiceLinks(
   }
   const txnIds = (links.transactionIds ?? []).filter((n) => Number.isFinite(n));
   if (txnIds.length) {
-    await db
-      .update(transactions)
-      .set({ invoiceId })
-      .where(
-        and(
-          eq(transactions.organizationId, orgId),
-          inArray(transactions.id, txnIds),
-          isNull(transactions.invoiceId),
-        ),
-      );
+    // 只掛發票，跟連結無關 → plain 更新（組織條件由 updateTransactionsPlain 補上）
+    await updateTransactionsPlain(
+      db,
+      orgId,
+      and(inArray(transactions.id, txnIds), isNull(transactions.invoiceId)),
+      { invoiceId },
+    );
   }
   if (links.billingItemId != null && invoiceDate) {
     await db
@@ -505,11 +503,9 @@ export async function clearLinksForVoidedInvoice(
       };
     }
   }
-  const unlinked = await db
-    .update(transactions)
-    .set({ invoiceId: null })
-    .where(and(eq(transactions.organizationId, orgId), eq(transactions.invoiceId, invoiceId)))
-    .returning({ id: transactions.id });
+  const unlinked = await updateTransactionsPlain(db, orgId, eq(transactions.invoiceId, invoiceId), {
+    invoiceId: null,
+  });
   out.unlinkedTransactionIds = unlinked.map((r) => r.id);
   return out;
 }

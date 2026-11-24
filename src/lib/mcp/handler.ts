@@ -40,6 +40,8 @@ const AUDIT_BY_NAME: Record<string, Pick<McpAudit, "action" | "entityType">> = {
   resolve_vendor_invoice: { action: "update", entityType: "vendor_invoice" },
   // 合併交易對象：記在目標上（結果的 id）；來源同時被軟刪除。
   merge_parties: { action: "update", entityType: "party" },
+  // 待連結：掛上候選 / 略過 / 指定對象，都記在交易上
+  resolve_transaction_link: { action: "update", entityType: "transaction" },
 };
 
 /** The numeric entity id a tool result names, if any (`id`, else first of `ids`). */
@@ -307,7 +309,7 @@ const OPENWORLD_OVERRIDES: Record<string, Partial<ToolAnnotations>> = {
   // (GET-only for this path), Wise transaction sync (GET-only) and Azure / GCP billing
   // sync (read-only allowlists); writes only our books.
   run_integration_sync: { openWorldHint: true },
-  // Dry run by default; send=true posts the recurring-expense recap to the org's
+  // Dry run by default; send=true posts the recurring-expense (scheduled vendor billing account) recap to the org's
   // Discord channel via its webhook (src/lib/billing-notify.ts).
   preview_billing_notifications: { openWorldHint: true },
 };

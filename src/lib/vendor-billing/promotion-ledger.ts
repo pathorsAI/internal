@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { categories, transactions, vendorBillingAccounts, vendorInvoices } from "@/db/schema";
 import type { GcpPromotionMonth } from "@/lib/integrations/gcp";
+import { insertTransactions } from "@/lib/linking/write";
 import { booksPromotionCredits, matchPartiesOf } from "./account-meta";
 
 /**
@@ -187,41 +188,41 @@ export async function bookPromotionCredits(
   const expenseCategoryId = await expenseCategoryFor(db, orgId, billingAccountRowId, partyId);
   const incomeCategoryId = todo.some((p) => p.type === "income") ? await promotionIncomeCategory(db, orgId) : null;
 
-  const inserted = await db
-    .insert(transactions)
-    .values(
-      todo.map((p) => {
-        const categoryId = p.type === "expense" ? expenseCategoryId : incomeCategoryId;
-        return {
-          organizationId: orgId,
-          type: p.type,
-          txnDate: p.txnDate,
-          description: p.description,
-          categoryId,
-          partyId,
-          amount: p.amount,
-          currency: p.currency,
-          amountTwd: p.currency === "TWD" ? p.amount : null,
-          fromAccountId: null,
-          toAccountId: null,
-          book: "internal",
-          billedToCompanyTaxId: false,
-          externalSource: PROMO_EXTERNAL_SOURCE,
-          externalRef: p.externalRef,
-          externalMeta: {
-            kind: p.type === "expense" ? "promotion_usage" : "promotion_credit",
-            billingAccountId: billingAccountRowId,
-            billingAccount: account.displayName,
-            month: p.month,
-            source: "gcp_bigquery",
-          },
-          // 分類有了就不用人看；支出找不到雲端分類時留給人確認
-          needsReview: categoryId === null,
-        };
-      }),
-    )
-    .onConflictDoNothing()
-    .returning({ id: transactions.id });
+  const inserted = await insertTransactions(
+    { db, orgId, source: "promotion" },
+    todo.map((p) => {
+      const categoryId = p.type === "expense" ? expenseCategoryId : incomeCategoryId;
+      return {
+        organizationId: orgId,
+        type: p.type,
+        txnDate: p.txnDate,
+        description: p.description,
+        categoryId,
+        partyId,
+        // 兩筆（使用與抵用）都掛在這個計費帳戶上
+        vendorBillingAccountId: billingAccountRowId,
+        amount: p.amount,
+        currency: p.currency,
+        amountTwd: p.currency === "TWD" ? p.amount : null,
+        fromAccountId: null,
+        toAccountId: null,
+        book: "internal",
+        billedToCompanyTaxId: false,
+        externalSource: PROMO_EXTERNAL_SOURCE,
+        externalRef: p.externalRef,
+        externalMeta: {
+          kind: p.type === "expense" ? "promotion_usage" : "promotion_credit",
+          billingAccountId: billingAccountRowId,
+          billingAccount: account.displayName,
+          month: p.month,
+          source: "gcp_bigquery",
+        },
+        // 分類有了就不用人看；支出找不到雲端分類時留給人確認
+        needsReview: categoryId === null,
+      };
+    }),
+    { onConflictDoNothing: true },
+  );
   return inserted.length;
 }
 

@@ -32,6 +32,8 @@ import { ContractFileLink } from "./contract-file-link";
 import { requireOrg } from "@/lib/session";
 import { ContractBillingItems } from "./contract-billing-items";
 import { ContractSubscriptions } from "./contract-subscriptions";
+import { ReadyToClose } from "./ready-to-close";
+import { contractReadyToClose } from "@/lib/linking/project-status";
 
 export const dynamic = "force-dynamic";
 
@@ -122,7 +124,7 @@ export default async function ContractsPage() {
     getOrgTaxSetting(orgId),
   ]);
   const partyOptions = parties.map((p) => ({ id: p.id, name: p.name }));
-  const projectOptions = projects.map((p) => ({ id: p.id, name: p.name }));
+  const projectOptions = projects.map((p) => ({ id: p.id, name: p.name, status: p.derivedStatus }));
   const statusLabels: Record<string, string> = {
     draft: t("status.draft"),
     active: t("status.active"),
@@ -141,7 +143,7 @@ export default async function ContractsPage() {
 
   return (
     <>
-      <PageHeader title={t("list.title")} description={t("list.description")}>
+      <PageHeader title={t("list.title")}>
         <NewContractDialog parties={partyOptions} projects={projectOptions} orgTax={orgTax} />
       </PageHeader>
 
@@ -197,6 +199,14 @@ export default async function ContractsPage() {
                         <StatusTag tone={statusTone[c.status] ?? "neutral"}>
                           {statusLabels[c.status] ?? c.status}
                         </StatusTag>
+                        {contractReadyToClose({
+                          status: c.status,
+                          // 入帳是含稅的錢，跟含稅應收比（未稅金額會讓應稅合約提早誤報收齊）
+                          amount: c.gross,
+                          received: c.received,
+                        }) ? (
+                          <ReadyToClose contractId={c.id} />
+                        ) : null}
                       </TableCell>
                       <TableCell>
                         {c.fileUrl ? (

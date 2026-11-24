@@ -20,6 +20,8 @@ import { CurrencyFlag } from "@/components/currency-flag";
 import { NewPartyDialog } from "./new-party-dialog";
 import { requireOrg } from "@/lib/session";
 import { PartyAvatar } from "@/components/party-avatar";
+import { similarPartiesWithin } from "@/lib/linking/party-similarity";
+import { MergePartiesDialog } from "./merge-parties-dialog";
 
 export const dynamic = "force-dynamic";
 
@@ -48,8 +50,13 @@ function MoneyLines({
 
 export default async function PartiesPage() {
   const t = await getTranslations("parties");
+  const tl = await getTranslations("links");
   const { orgId } = await requireOrg();
   const [rows, accounts] = await Promise.all([listParties(orgId), listBankAccounts(orgId)]);
+
+  // 「可能重複」：名稱跟其他對象（名稱或別名）很像的。純字串比對，在 server 算一次。
+  const similarById = similarPartiesWithin(rows, 3);
+  const mergeOptions = rows.map((r) => ({ id: r.id, name: r.name, txnCount: r.txnCount }));
 
   const labelMap: Record<string, string> = {
     vendor: t("label.vendor"),
@@ -60,7 +67,8 @@ export default async function PartiesPage() {
 
   return (
     <>
-      <PageHeader title={t("title")} description={t("description")}>
+      <PageHeader title={t("title")}>
+        <MergePartiesDialog parties={mergeOptions} />
         <NewPartyDialog
           accounts={accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }))}
         />
@@ -94,6 +102,17 @@ export default async function PartiesPage() {
                         <div className="flex min-w-0 items-center gap-2.5">
                           <PartyAvatar name={s.name} partyId={s.id} avatarVersion={s.avatarVersion} />
                           <span className="truncate">{s.name}</span>
+                          {similarById.has(s.id) ? (
+                            <MergePartiesDialog
+                              variant="hint"
+                              parties={mergeOptions}
+                              initialTargetId={s.id}
+                              initialSourceIds={similarById.get(s.id)!.map((x) => x.id)}
+                              hint={tl("merge.similarTo", {
+                                names: similarById.get(s.id)!.map((x) => x.name).join("、"),
+                              })}
+                            />
+                          ) : null}
                         </div>
                       </TableCell>
                       <TableCell className="text-muted-foreground">

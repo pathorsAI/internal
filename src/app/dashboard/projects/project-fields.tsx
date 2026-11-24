@@ -46,10 +46,15 @@ export function ProjectFields({
         name="clientPartyName"
         defaultName={values?.clientName ?? ""}
       />
-      <SelectField name="status" label={t("newDialog.status")} defaultValue={values?.status ?? "active"}>
-        <SelectItem value="active">{t("status.active")}</SelectItem>
-        <SelectItem value="archived">{t("status.archived")}</SelectItem>
-      </SelectField>
+      {/* 狀態由合約與訂閱推導，這裡只剩「封存」這個手動 override；新增時一律不封存 */}
+      {values ? (
+        <SelectField name="status" label={t("newDialog.status")} defaultValue={values.status}>
+          <SelectItem value="active">{t("status.active")}</SelectItem>
+          <SelectItem value="archived">{t("status.archived")}</SelectItem>
+        </SelectField>
+      ) : (
+        <input type="hidden" name="status" value="active" />
+      )}
       <TextField
         name="description"
         label={t("newDialog.descriptionField.label")}
