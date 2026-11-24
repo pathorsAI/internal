@@ -34,6 +34,7 @@ export default async function DashboardLayout({
     id: o.id,
     name: o.name,
     slug: o.slug,
+    logo: o.logo ?? null,
   }));
   const initialActiveOrgId = session?.session.activeOrganizationId ?? null;
 

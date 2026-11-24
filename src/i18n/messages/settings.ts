@@ -12,15 +12,35 @@ const settings = {
   },
   org: {
     title: { "zh-TW": "基本資料", en: "Basic info" },
-    descriptionEditable: { "zh-TW": "修改組織名稱", en: "Edit the organization name" },
+    descriptionEditable: { "zh-TW": "修改組織名稱與 logo", en: "Edit the organization name and logo" },
     descriptionReadOnly: { "zh-TW": "只有擁有者或管理員可以修改組織資料", en: "Only owners or admins can edit organization info" },
     nameLabel: { "zh-TW": "組織名稱", en: "Organization name" },
+    logoLabel: { "zh-TW": "組織 logo", en: "Organization logo" },
+    logo: {
+    choose: { "zh-TW": "上傳logo", en: "Upload logo" },
+    replace: { "zh-TW": "更換", en: "Replace" },
+    remove: { "zh-TW": "移除", en: "Remove" },
+    undo: { "zh-TW": "復原", en: "Undo" },
+    hint: {
+      "zh-TW": "PNG、JPEG、WebP，1 MB 以內。可點擊、拖曳或直接貼上（⌘V / Ctrl+V）；會裁成正方形。",
+      en: "PNG, JPEG or WebP up to 1 MB. Click, drag & drop, or paste (⌘V / Ctrl+V); it is cropped to a square.",
+    },
+    processing: { "zh-TW": "處理中…", en: "Processing…" },
+    pendingReplace: { "zh-TW": "按「儲存」後套用新logo", en: "The new logo is applied when you save" },
+    pendingRemove: { "zh-TW": "按「儲存」後移除logo", en: "The logo is removed when you save" },
+    errors: {
+      empty: { "zh-TW": "這個檔案是空的", en: "That file is empty" },
+      type: { "zh-TW": "只支援 PNG、JPEG、WebP 圖片", en: "Only PNG, JPEG and WebP images are supported" },
+      tooLarge: { "zh-TW": "圖片超過 1 MB", en: "The image is larger than 1 MB" },
+      processFailed: { "zh-TW": "無法讀取這張圖片", en: "Could not read that image" },
+    },
+    },
     save: { "zh-TW": "儲存", en: "Save" },
     saving: { "zh-TW": "儲存中…", en: "Saving…" },
     toast: {
       nameRequired: { "zh-TW": "組織名稱不可空白", en: "Organization name cannot be blank" },
       updateFailed: { "zh-TW": "更新失敗", en: "Failed to update" },
-      updated: { "zh-TW": "已更新組織名稱", en: "Organization name updated" },
+      updated: { "zh-TW": "已更新組織資料", en: "Organization updated" },
     },
   },
   calendar: {

@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronsUpDown, LogOut, MailCheck } from "lucide-react";
+import { ChevronsUpDown, LogOut, MailCheck, UserRound } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { signOut, useActiveOrganization, useSession } from "@/lib/auth-client";
 import {
@@ -120,6 +121,12 @@ export function UserMenu() {
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <Link href="/dashboard/account">
+                <UserRound className="size-4" />
+                {t("userMenu.account")}
+              </Link>
+            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setInvitesOpen(true)}>
               <MailCheck className="size-4" />
               <span className="flex-1">{t("userMenu.invitations")}</span>

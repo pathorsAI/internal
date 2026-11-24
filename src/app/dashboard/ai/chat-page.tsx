@@ -10,7 +10,7 @@ import { AiChat } from "./ai-chat";
 /** /dashboard/ai 與 /dashboard/ai/[id] 共用：左側歷史對話、右側對話區。 */
 export async function AiChatPage({ conversationId }: Readonly<{ conversationId?: string }>) {
   const t = await getTranslations("ai");
-  const { orgId, userId, role } = await requireOrgWithRole();
+  const { orgId, userId, role, session } = await requireOrgWithRole();
   const owner = { orgId, userId };
   const [conversations, current] = await Promise.all([
     listAiConversations(owner),
@@ -33,6 +33,7 @@ export async function AiChatPage({ conversationId }: Readonly<{ conversationId?:
           updatedAt: c.updatedAt,
         }))}
         canWrite={canUseWrites(role)}
+        user={{ name: session.user.name, image: session.user.image ?? null }}
       />
     </>
   );

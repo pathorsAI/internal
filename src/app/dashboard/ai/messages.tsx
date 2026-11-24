@@ -5,16 +5,20 @@ import { AlertTriangle, Check, Loader2, PencilLine, Wrench } from "lucide-react"
 import { Button } from "@/components/ui/button";
 import { StatusTag } from "@/components/ds/status-dot";
 import { Markdown } from "@/components/ai/markdown";
+import { PartyAvatar } from "@/components/party-avatar";
 import { LOAD_TOOL_GROUPS } from "@/lib/ai/tool-groups";
 import type { UiMessage, UiToolCall } from "@/lib/ai/types";
 import { cn } from "@/lib/utils";
 
-export function UserMessage({ text }: Readonly<{ text: string }>) {
+export type ChatUser = { name: string; image: string | null };
+
+export function UserMessage({ text, user }: Readonly<{ text: string; user: ChatUser }>) {
   return (
-    <div className="flex justify-end">
+    <div className="flex items-start justify-end gap-2">
       <p className="max-w-[85%] rounded-xl bg-muted px-3.5 py-2 text-sm leading-6 whitespace-pre-wrap">
         {text}
       </p>
+      <PartyAvatar name={user.name} src={user.image} size="md" className="mt-1 rounded-full" />
     </div>
   );
 }

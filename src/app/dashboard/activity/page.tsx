@@ -11,7 +11,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { listActivity } from "@/db/queries";
+import { activityActorImages, listActivity } from "@/db/queries";
+import { PartyAvatar } from "@/components/party-avatar";
 import { formatDateTime } from "@/lib/format";
 import { requireOrg } from "@/lib/session";
 
@@ -54,6 +55,10 @@ export default async function ActivityPage() {
   };
   const { orgId } = await requireOrg();
   const rows = await listActivity(orgId, { limit: 300 });
+  const actorImages = await activityActorImages(
+    orgId,
+    rows.map((r) => r.id),
+  );
 
   return (
     <>
@@ -83,7 +88,21 @@ export default async function ActivityPage() {
                     {formatDateTime(r.createdAt)}
                   </TableCell>
                   <TableCell className="whitespace-nowrap font-medium">
-                    {r.actorName ?? r.actorEmail ?? (r.channel === "system" ? t("systemActor") : "—")}
+                    {r.actorName || r.actorEmail ? (
+                      <span className="inline-flex items-center gap-2">
+                        <PartyAvatar
+                          name={r.actorName ?? r.actorEmail ?? ""}
+                          src={actorImages.get(r.id) ?? null}
+                          size="sm"
+                          className="rounded-full"
+                        />
+                        {r.actorName ?? r.actorEmail}
+                      </span>
+                    ) : r.channel === "system" ? (
+                      t("systemActor")
+                    ) : (
+                      "—"
+                    )}
                   </TableCell>
                   <TableCell>
                     {r.channel === "mcp" || r.channel === "ai" || r.channel === "system" || r.channel === "api" ? (

@@ -2438,6 +2438,20 @@ export async function listActivity(
     .limit(opts.limit ?? 200);
 }
 
+/**
+ * 操作紀錄每一列 actor 的頭像網址（user.image），給操作紀錄頁畫頭像。
+ * 不併進 listActivity：那個形狀是 MCP list_activity 的 outputSchema，改了要跟著改 schema。
+ */
+export async function activityActorImages(orgId: string, ids: number[]): Promise<Map<number, string>> {
+  if (ids.length === 0) return new Map();
+  const rows = await getDb()
+    .select({ id: activityLog.id, image: user.image })
+    .from(activityLog)
+    .innerJoin(user, eq(user.id, activityLog.actorUserId))
+    .where(and(eq(activityLog.organizationId, orgId), inArray(activityLog.id, ids), isNotNull(user.image)));
+  return new Map(rows.filter((r) => r.image).map((r) => [r.id, r.image as string]));
+}
+
 // 每筆資料的「誰、何時建立 / 最後修改」，從 activity_log 衍生（不需在各表加欄位）。
 // 一次查一批 id：取每個 entity 最後一筆 create 與最後一筆 update。
 // #15（操作紀錄）之前的舊資料在 log 裡沒有紀錄，呼叫端可退回該列自己的 createdAt。

@@ -54,6 +54,7 @@ import { Logo } from "@/components/logo";
 export type NavItemKey =
   | "dashboard"
   | "ai"
+  | "account"
   | "billing"
   | "transactions"
   | "parties"

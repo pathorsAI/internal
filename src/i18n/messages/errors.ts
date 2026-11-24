@@ -103,6 +103,8 @@ const errors = {
     tooLarge: { "zh-TW": "圖片太大（縮圖後須在 200 KB 以內）", en: "The image is too large (must be under 200 KB after resizing)" },
     type: { "zh-TW": "只支援 PNG、JPEG、WebP 圖片", en: "Only PNG, JPEG and WebP images are supported" },
     uploadFailed: { "zh-TW": "其他欄位已儲存，但頭像上傳失敗，請再試一次", en: "Other fields were saved, but the avatar upload failed. Please try again." },
+    saveFailed: { "zh-TW": "圖片儲存失敗，請再試一次", en: "Couldn't save the image. Please try again." },
+    forbidden: { "zh-TW": "只有擁有者或管理員可以更改組織 logo", en: "Only owners and admins can change the organization logo" },
   },
   unsupported: {
     transactionType: { "zh-TW": "不支援的交易類型", en: "Unsupported transaction type" },
