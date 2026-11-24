@@ -1010,6 +1010,18 @@ export async function listMatchedInvoices(
   return rows.flatMap((r) => (r.transactionId === null ? [] : [{ ...r, transactionId: r.transactionId }]));
 }
 
+/** 兩個 YYYY-MM-DD 字串取較早的（字串比較即日期先後；Math.min 不適用字串）。 */
+function earlierDate(a: string, b: string): string {
+  if (b < a) return b;
+  return a;
+}
+
+/** 兩個 YYYY-MM-DD 字串取較晚的。 */
+function laterDate(a: string, b: string): string {
+  if (b > a) return b;
+  return a;
+}
+
 /**
  * 每個固定支出這期付了沒（src/lib/recurring-expenses.ts 的 periodStatuses）。
  * 預設看所有沒關閉的（使用中、平台上找不到）；accounts 可以直接給已經讀好的列。
@@ -1025,8 +1037,8 @@ export async function recurringStatuses(
     .map((e) => currentPeriodWindow(e, today))
     .filter((w): w is NonNullable<typeof w> => w !== null);
   if (windows.length === 0) return periodStatuses(expenses, today, [], []);
-  const start = windows.reduce((m, w) => (w.start < m ? w.start : m), windows[0].start);
-  const end = windows.reduce((m, w) => (w.endExclusive > m ? w.endExclusive : m), windows[0].endExclusive);
+  const start = windows.reduce((m, w) => earlierDate(m, w.start), windows[0].start);
+  const end = windows.reduce((m, w) => laterDate(m, w.endExclusive), windows[0].endExclusive);
   const accountIds = expenses.map((e) => e.id);
   const [txns, invoices] = await Promise.all([
     listLedgerTransactionsInRange(orgId, start, end, {

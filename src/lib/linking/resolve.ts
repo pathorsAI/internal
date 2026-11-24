@@ -16,6 +16,7 @@ import type { TaxSetting } from "@/lib/tax-treatment";
 import { matchPartiesOf } from "@/lib/vendor-billing/account-meta";
 import {
   decideAutoLink,
+  feeTolerance,
   scoreCandidates,
   type LinkCandidate,
   type LinkKind,
@@ -124,6 +125,7 @@ type BillingItemRef = {
   amount: string;
   currency: string;
   status: string;
+  dueDate: string | null;
 } & TaxColumns;
 type SubscriptionRef = {
   id: number;
@@ -169,6 +171,7 @@ async function loadRefs(ctx: LinkContext, drafts: readonly LinkDraft[], matchPar
     amount: billingItems.amount,
     currency: billingItems.currency,
     status: billingItems.status,
+    dueDate: billingItems.dueDate,
     taxTreatment: billingItems.taxTreatment,
     amountBasis: billingItems.amountBasis,
   };
@@ -340,19 +343,41 @@ async function loadPaid(ctx: LinkContext, refs: Refs) {
           )
       : Promise.resolve([]),
   ]);
-  const bi = new Map<number, number>();
-  for (const r of biPaid) if (r.id != null) bi.set(r.id, Number(r.paid));
-  const sub = new Map<string, number>();
-  for (const r of subPaid) if (r.id != null && r.period) sub.set(`${r.id}:${r.period}`, Number(r.paid));
-  const ct = new Map<number, number>();
-  for (const r of ctPaid) if (r.id != null) ct.set(r.id, Number(r.paid));
-  const overrideBySub = new Map<number, { periodStart: string; expectedAmount: number | null }[]>();
-  for (const o of overrides) {
-    const list = overrideBySub.get(o.subscriptionId) ?? [];
+  return {
+    bi: paidById(biPaid),
+    sub: paidBySubPeriod(subPaid),
+    ct: paidById(ctPaid),
+    overrideBySub: overridesBySub(overrides),
+  };
+}
+
+/** 已收加總列 → id 對已收金額。 */
+function paidById(rows: readonly { id: number | null; paid: string }[]): Map<number, number> {
+  const out = new Map<number, number>();
+  for (const r of rows) if (r.id != null) out.set(r.id, Number(r.paid));
+  return out;
+}
+
+/** 訂閱各期已收 → 「訂閱 id:期別」對已收金額。 */
+function paidBySubPeriod(
+  rows: readonly { id: number | null; period: string | null; paid: string }[],
+): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const r of rows) if (r.id != null && r.period) out.set(`${r.id}:${r.period}`, Number(r.paid));
+  return out;
+}
+
+/** 訂閱期別的金額覆寫，依訂閱分組。 */
+function overridesBySub(
+  rows: readonly { subscriptionId: number; periodStart: string; expectedAmount: string | null }[],
+) {
+  const out = new Map<number, { periodStart: string; expectedAmount: number | null }[]>();
+  for (const o of rows) {
+    const list = out.get(o.subscriptionId) ?? [];
     list.push({ periodStart: o.periodStart, expectedAmount: o.expectedAmount == null ? null : Number(o.expectedAmount) });
-    overrideBySub.set(o.subscriptionId, list);
+    out.set(o.subscriptionId, list);
   }
-  return { bi, sub, ct, overrideBySub };
+  return out;
 }
 
 type Paid = Awaited<ReturnType<typeof loadPaid>>;
@@ -364,79 +389,144 @@ function grossOf(refs: Refs, amount: number, own: TaxColumns, contractId: number
   return taxedAmountOrNull(amount, setting, currency).gross ?? amount;
 }
 
+type RawCandidate = Omit<LinkCandidate, "gap" | "amountMatches">;
+
 /** 某位客戶、某個幣別、某天的候選（還沒算 gap）。expected 一律是含稅應收減已收。 */
-function rawCandidates(
+function rawCandidates(refs: Refs, paid: Paid, partyId: number, currency: string, txnDate: string): RawCandidate[] {
+  // 有開著的請款項 / 訂閱的合約（不論幣別），合約本身就不再當候選
+  const busyContracts = new Set<number>();
+  return [
+    ...billingItemCandidates(refs, paid, partyId, currency, txnDate, busyContracts),
+    ...subscriptionCandidates(refs, paid, partyId, currency, txnDate, busyContracts),
+    ...contractCandidates(refs, paid, partyId, currency, busyContracts),
+  ];
+}
+
+function billingItemCandidates(
   refs: Refs,
   paid: Paid,
   partyId: number,
   currency: string,
   txnDate: string,
-): Omit<LinkCandidate, "gap" | "amountMatches">[] {
-  const out: Omit<LinkCandidate, "gap" | "amountMatches">[] = [];
-  const busyContracts = new Set<number>();
-
+  busyContracts: Set<number>,
+): RawCandidate[] {
+  const out: RawCandidate[] = [];
   for (const b of refs.openBi) {
     if (b.customerPartyId !== partyId) continue;
     if (b.contractId) busyContracts.add(b.contractId);
     if (b.currency !== currency) continue;
-    const remaining = grossOf(refs, Number(b.amount), b, b.contractId, b.currency) - (paid.bi.get(b.id) ?? 0);
-    if (remaining <= 0) continue;
-    const ct = b.contractId ? refs.ctById.get(b.contractId) : undefined;
-    out.push({
-      kind: "billing_item",
-      id: b.id,
-      label: ct ? `${ct.title}・${b.title}` : b.title,
-      contractId: b.contractId,
-      projectId: b.projectId ?? ct?.projectId ?? null,
-      subscriptionPeriod: null,
-      expected: round2(remaining),
-      currency: b.currency,
-    });
+    const c = billingItemCandidate(refs, paid, b, txnDate);
+    if (c) out.push(c);
   }
+  return out;
+}
 
+/** 請款項的應請款日最多可以比收款日晚幾天（預收）。 */
+const DUE_AHEAD_DAYS = 60;
+
+function addDaysIso(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * 還沒收的金額在匯款手續費容許差以內 → 視同收齊，不再當候選。
+ * 例：應收 13,060.17、實收 13,054.06，剩 6.11 是被扣的電匯費，不是還有一筆錢沒進來。
+ */
+function settled(remaining: number, gross: number, currency: string): boolean {
+  return remaining <= 0 || remaining <= feeTolerance(gross, currency);
+}
+
+function billingItemCandidate(refs: Refs, paid: Paid, b: BillingItemRef, txnDate: string): RawCandidate | null {
+  // 應請款日在收款日之後太久的不算（去年的匯款不會是明年那期的錢）
+  if (b.dueDate && b.dueDate > addDaysIso(txnDate, DUE_AHEAD_DAYS)) return null;
+  const gross = grossOf(refs, Number(b.amount), b, b.contractId, b.currency);
+  const remaining = gross - (paid.bi.get(b.id) ?? 0);
+  if (settled(remaining, gross, b.currency)) return null;
+  const ct = b.contractId ? refs.ctById.get(b.contractId) : undefined;
+  return {
+    kind: "billing_item",
+    id: b.id,
+    label: ct ? `${ct.title}・${b.title}` : b.title,
+    contractId: b.contractId,
+    projectId: b.projectId ?? ct?.projectId ?? null,
+    subscriptionPeriod: null,
+    expected: round2(remaining),
+    currency: b.currency,
+  };
+}
+
+function subscriptionCandidates(
+  refs: Refs,
+  paid: Paid,
+  partyId: number,
+  currency: string,
+  txnDate: string,
+  busyContracts: Set<number>,
+): RawCandidate[] {
+  const out: RawCandidate[] = [];
   for (const s of refs.openSub) {
     if (s.customerPartyId !== partyId) continue;
     if (s.contractId) busyContracts.add(s.contractId);
     if (s.currency !== currency) continue;
-    const paidByPeriod = [...paid.sub.entries()]
-      .filter(([k]) => k.startsWith(`${s.id}:`))
-      .map(([k, v]) => ({ periodStart: k.slice(String(s.id).length + 1), paid: v }));
-    const gross = (n: number) => grossOf(refs, n, s, s.contractId, s.currency);
-    const overrides = (paid.overrideBySub.get(s.id) ?? []).map((o) => ({
-      ...o,
-      expectedAmount: o.expectedAmount == null ? null : gross(o.expectedAmount),
-      note: null,
-      dueDate: null,
-      billedOn: null,
-      invoicedOn: null,
-    }));
-    const { periods } = computeSubscriptionSchedule(
-      { ...s, amount: String(gross(Number(s.amount))) },
-      paidByPeriod,
-      overrides,
-      txnDate,
-    );
-    const open = periods.find((p) => p.paid < p.expected);
-    if (!open) continue;
-    const ct = s.contractId ? refs.ctById.get(s.contractId) : undefined;
-    out.push({
-      kind: "subscription",
-      id: s.id,
-      label: `${s.name}（${open.periodStart} 期）`,
-      contractId: s.contractId,
-      projectId: s.projectId ?? ct?.projectId ?? null,
-      subscriptionPeriod: open.periodStart,
-      expected: round2(open.expected - open.paid),
-      currency: s.currency,
-    });
+    const c = subscriptionCandidate(refs, paid, s, txnDate);
+    if (c) out.push(c);
   }
+  return out;
+}
 
-  // 合約本身只在它底下沒有開著的請款項 / 訂閱時才當候選（不然會跟子項目重複）
+/** 訂閱目前第一個還沒收齊的期別。 */
+function subscriptionCandidate(refs: Refs, paid: Paid, s: SubscriptionRef, txnDate: string): RawCandidate | null {
+  const paidByPeriod = [...paid.sub.entries()]
+    .filter(([k]) => k.startsWith(`${s.id}:`))
+    .map(([k, v]) => ({ periodStart: k.slice(String(s.id).length + 1), paid: v }));
+  const gross = (n: number) => grossOf(refs, n, s, s.contractId, s.currency);
+  const overrides = (paid.overrideBySub.get(s.id) ?? []).map((o) => ({
+    ...o,
+    expectedAmount: o.expectedAmount == null ? null : gross(o.expectedAmount),
+    note: null,
+    dueDate: null,
+    billedOn: null,
+    invoicedOn: null,
+  }));
+  const { periods } = computeSubscriptionSchedule(
+    { ...s, amount: String(gross(Number(s.amount))) },
+    paidByPeriod,
+    overrides,
+    txnDate,
+  );
+  const open = periods.find((p) => !settled(p.expected - p.paid, p.expected, s.currency));
+  // 預收最多抓 DUE_AHEAD_DAYS 天後開始的期別（訂閱還沒開始前的匯款不會是它的錢）
+  if (!open || open.periodStart > addDaysIso(txnDate, DUE_AHEAD_DAYS)) return null;
+  const ct = s.contractId ? refs.ctById.get(s.contractId) : undefined;
+  return {
+    kind: "subscription",
+    id: s.id,
+    label: `${s.name}（${open.periodStart} 期）`,
+    contractId: s.contractId,
+    projectId: s.projectId ?? ct?.projectId ?? null,
+    subscriptionPeriod: open.periodStart,
+    expected: round2(open.expected - open.paid),
+    currency: s.currency,
+  };
+}
+
+// 合約本身只在它底下沒有開著的請款項 / 訂閱時才當候選（不然會跟子項目重複）
+function contractCandidates(
+  refs: Refs,
+  paid: Paid,
+  partyId: number,
+  currency: string,
+  busyContracts: Set<number>,
+): RawCandidate[] {
+  const out: RawCandidate[] = [];
   for (const c of refs.openCt) {
     if (c.customerPartyId !== partyId || c.currency !== currency || busyContracts.has(c.id)) continue;
     const amount = c.amount == null ? 0 : grossOf(refs, Number(c.amount), c, c.id, c.currency);
     const remaining = amount - (paid.ct.get(c.id) ?? 0);
-    if (!(amount > 0) || remaining <= 0) continue;
+    // NaN 金額也不當候選（跟 !(amount > 0) 同義）
+    if (Number.isNaN(amount) || amount <= 0 || settled(remaining, amount, c.currency)) continue;
     out.push({
       kind: "contract",
       id: c.id,
@@ -626,43 +716,78 @@ export async function resolveLinksMany(drafts: readonly LinkDraft[], ctx: LinkCo
     const d = drafts[i];
     const links: LinkedRef[] = [];
     const v = inherit(d, refs, links);
-    let unlinked: Unlinked | null = null;
-
-    if (d.pendingParty) {
-      v.reviewReason = "party_similar";
-      v.linkCandidates = { party: d.pendingParty };
-      unlinked = { reason: "party_similar", message: reviewMessage("party_similar"), candidates: [], party: d.pendingParty };
-    } else if (d.reviewReason === "link_skipped" && !hasAnyLink(d)) {
-      v.reviewReason = "link_skipped";
-    } else if (paid && wantsMatch(ctx, d) && d.partyId != null) {
-      const amount = Number(d.amount);
-      const candidates = scoreCandidates(rawCandidates(refs, paid, d.partyId, d.currency, d.txnDate), amount);
-      const decision = decideAutoLink(candidates);
-      if (decision.kind === "link" && !ctx.suggestOnly) {
-        applyPick(v, decision.pick, refs, links);
-        consume(paid, decision.pick, amount);
-      } else if (decision.kind !== "none") {
-        const reason = decision.kind === "review" ? decision.reason : "link_suggested";
-        const list = decision.kind === "review" ? decision.candidates : [decision.pick];
-        v.reviewReason = reason;
-        v.linkCandidates = { links: list };
-        unlinked = { reason, message: reviewMessage(reason), candidates: list };
-      }
-    }
-
-    if (d.type === "expense" && !v.vendorBillingAccountId && d.partyId != null) {
-      const accts = vendorAccounts.get(d.partyId) ?? [];
-      if (accts.length === 1) {
-        v.vendorBillingAccountId = accts[0].id;
-        links.push({ kind: "vendor_billing_account", id: accts[0].id, name: accts[0].name, via: "matched" });
-      }
-    } else if (v.vendorBillingAccountId) {
-      links.push({ kind: "vendor_billing_account", id: v.vendorBillingAccountId, name: null, via: "given" });
-    }
+    const unlinked = resolveReview(d, v, links, ctx, refs, paid);
+    linkVendorAccount(d, v, links, vendorAccounts);
     out[i] = { values: v, links, unlinked };
   }
   await projectNames(ctx, out.map((r) => r.links));
   return out;
+}
+
+/** 一筆 draft 的待連結狀態：對象待確認、略過，或比對客戶的候選（自動掛或標待連結）。 */
+function resolveReview(
+  d: LinkDraft,
+  v: LinkValues,
+  links: LinkedRef[],
+  ctx: LinkContext,
+  refs: Refs,
+  paid: Paid | null,
+): Unlinked | null {
+  if (d.pendingParty) {
+    v.reviewReason = "party_similar";
+    v.linkCandidates = { party: d.pendingParty };
+    return { reason: "party_similar", message: reviewMessage("party_similar"), candidates: [], party: d.pendingParty };
+  }
+  if (d.reviewReason === "link_skipped" && !hasAnyLink(d)) {
+    v.reviewReason = "link_skipped";
+    return null;
+  }
+  if (paid && wantsMatch(ctx, d) && d.partyId != null) return matchDraft(d, d.partyId, v, links, ctx, refs, paid);
+  return null;
+}
+
+/** 比對客戶開著的候選：唯一相符就掛上（並記進已收），否則標待連結。 */
+function matchDraft(
+  d: LinkDraft,
+  partyId: number,
+  v: LinkValues,
+  links: LinkedRef[],
+  ctx: LinkContext,
+  refs: Refs,
+  paid: Paid,
+): Unlinked | null {
+  const amount = Number(d.amount);
+  const candidates = scoreCandidates(rawCandidates(refs, paid, partyId, d.currency, d.txnDate), amount);
+  const decision = decideAutoLink(candidates);
+  if (decision.kind === "none") return null;
+  if (decision.kind === "link" && !ctx.suggestOnly) {
+    applyPick(v, decision.pick, refs, links);
+    consume(paid, decision.pick, amount);
+    return null;
+  }
+  const reason = decision.kind === "review" ? decision.reason : "link_suggested";
+  const list = decision.kind === "review" ? decision.candidates : [decision.pick];
+  v.reviewReason = reason;
+  v.linkCandidates = { links: list };
+  return { reason, message: reviewMessage(reason), candidates: list };
+}
+
+/** 支出沒給廠商計費帳戶、對象剛好只有一個 → 掛上；有給的就記成 given。 */
+function linkVendorAccount(
+  d: LinkDraft,
+  v: LinkValues,
+  links: LinkedRef[],
+  vendorAccounts: Map<number, { id: number; name: string }[]>,
+) {
+  if (d.type === "expense" && !v.vendorBillingAccountId && d.partyId != null) {
+    const accts = vendorAccounts.get(d.partyId) ?? [];
+    if (accts.length === 1) {
+      v.vendorBillingAccountId = accts[0].id;
+      links.push({ kind: "vendor_billing_account", id: accts[0].id, name: accts[0].name, via: "matched" });
+    }
+  } else if (v.vendorBillingAccountId) {
+    links.push({ kind: "vendor_billing_account", id: v.vendorBillingAccountId, name: null, via: "given" });
+  }
 }
 
 /** 單筆版。 */

@@ -49,7 +49,8 @@ export function ProjectChoiceField({
     for (const p of projects) {
       // 同名專案加上 #id 區分，不然選了也對不回唯一一筆
       const base = (counts.get(p.name) ?? 0) > 1 ? `${p.name} #${p.id}` : p.name;
-      const label = p.status ? `${base}（${t(`derivedStatus.${p.status}`)}）` : base;
+      const statusKey = p.status ? (`derivedStatus.${p.status}` as const) : null;
+      const label = statusKey ? `${base}（${t(statusKey)}）` : base;
       list.push({ value: p.id, label });
     }
     return list;

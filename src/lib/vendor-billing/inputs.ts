@@ -204,7 +204,9 @@ function parseInterval(v: unknown): number {
 
 function parseAmount(v: unknown): string | null {
   if (v === null || v === undefined || v === "") return null;
-  const n = typeof v === "number" ? v : Number(String(v).replaceAll(",", "").trim());
+  // 只接受數字或字串；其他型別（物件、布林…）原本也會變成 NaN 而被擋下
+  if (typeof v !== "number" && typeof v !== "string") throw new VendorBillingInputError("預估金額必須是 0 以上的數字");
+  const n = typeof v === "number" ? v : Number(v.replaceAll(",", "").trim());
   if (!Number.isFinite(n) || n < 0 || n >= 1e16) throw new VendorBillingInputError("預估金額必須是 0 以上的數字");
   return (Math.round(n * 100) / 100).toString();
 }

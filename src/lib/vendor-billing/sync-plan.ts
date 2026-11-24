@@ -62,8 +62,13 @@ export function isSettledInvoiceStatus(status: string | null | undefined): boole
  */
 export function invoiceWindowStart(windowStart: string, oldestOpenInvoiceDate: string | null): string {
   if (!oldestOpenInvoiceDate) return windowStart;
-  return oldestOpenInvoiceDate < windowStart ? oldestOpenInvoiceDate : windowStart;
+  // Azure 的 periodStartDate 篩選不一定看發票日（實測 9/9 開的發票用 from=9/9 抓不到），
+  // 往前多留 OPEN_INVOICE_MARGIN_DAYS 天，確保那張還沒結清的發票一定在範圍內。
+  const from = addDays(oldestOpenInvoiceDate, -OPEN_INVOICE_MARGIN_DAYS);
+  return from < windowStart ? from : windowStart;
 }
+
+const OPEN_INVOICE_MARGIN_DAYS = 45;
 
 /** [from, to] 切成每段最多 maxMonths 個日曆月（第一段從 from 所在月份的 1 號開始）。 */
 export function monthChunks(from: string, to: string, maxMonths = COST_CHUNK_MONTHS): { from: string; to: string }[] {

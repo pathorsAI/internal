@@ -17,7 +17,7 @@ const ZH_SUFFIXES = ["股份有限公司", "有限公司", "企業社", "工作�
 export function normalizePartyKey(name: string): string {
   let s = name.normalize("NFKC").toLowerCase();
   for (const suf of ZH_SUFFIXES) s = s.split(suf).join(" ");
-  s = s.replace(/[^\p{L}\p{N}]+/gu, " ");
+  s = s.replaceAll(/[^\p{L}\p{N}]+/gu, " ");
   const words = s.split(" ").filter((w) => w && !EN_SUFFIXES.has(w));
   return words.join(" ").trim();
 }
@@ -62,7 +62,7 @@ type PreparedKey = { key: string; compact: string; words: string[]; wordSet: Set
 
 function prepareKey(key: string): PreparedKey {
   const words = key ? key.split(" ") : [];
-  return { key, compact: key.replace(/ /g, ""), words, wordSet: new Set(words) };
+  return { key, compact: key.replaceAll(" ", ""), words, wordSet: new Set(words) };
 }
 
 /**
@@ -115,7 +115,26 @@ export function rankSimilarParties(
     }
     if (best) out.push({ ...best, score: Math.round(best.score * 100) / 100 });
   }
-  return out.sort((x, y) => y.score - x.score || x.id - y.id).slice(0, limit);
+  return out.toSorted(bySimilarity).slice(0, limit);
+}
+
+type KeyedParty = { id: number; name: string; nameKey: PreparedKey; aliasKeys: PreparedKey[] };
+
+/** 分數高的在前，同分依 id 小的在前。 */
+function bySimilarity(x: SimilarParty, y: SimilarParty): number {
+  return y.score - x.score || x.id - y.id;
+}
+
+/** 拿 key 跟一個對象的名稱與所有別名比，回傳最像的那個（分數四捨五入到小數兩位）；都不夠像就是 null。 */
+function bestPreparedMatch(key: PreparedKey, c: KeyedParty): SimilarParty | null {
+  let best: SimilarParty | null = null;
+  const nameScore = preparedSimilarity(key, c.nameKey, SIMILAR_THRESHOLD);
+  if (nameScore >= SIMILAR_THRESHOLD) best = { id: c.id, name: c.name, score: nameScore, via: "name" };
+  for (const k of c.aliasKeys) {
+    const s = preparedSimilarity(key, k, SIMILAR_THRESHOLD);
+    if (s >= SIMILAR_THRESHOLD && (!best || s > best.score)) best = { id: c.id, name: c.name, score: s, via: "alias" };
+  }
+  return best ? { ...best, score: Math.round(best.score * 100) / 100 } : null;
 }
 
 /**
@@ -126,7 +145,7 @@ export function similarPartiesWithin(
   candidates: readonly { id: number; name: string; aliases: readonly string[] }[],
   limit = 3,
 ): Map<number, SimilarParty[]> {
-  const keyed = candidates.map((c) => ({
+  const keyed: KeyedParty[] = candidates.map((c) => ({
     id: c.id,
     name: c.name,
     nameKey: prepareKey(normalizePartyKey(c.name)),
@@ -137,16 +156,10 @@ export function similarPartiesWithin(
     const list: SimilarParty[] = [];
     for (const c of keyed) {
       if (c.id === p.id) continue;
-      let best: SimilarParty | null = null;
-      const nameScore = preparedSimilarity(p.nameKey, c.nameKey, SIMILAR_THRESHOLD);
-      if (nameScore >= SIMILAR_THRESHOLD) best = { id: c.id, name: c.name, score: nameScore, via: "name" };
-      for (const k of c.aliasKeys) {
-        const s = preparedSimilarity(p.nameKey, k, SIMILAR_THRESHOLD);
-        if (s >= SIMILAR_THRESHOLD && (!best || s > best.score)) best = { id: c.id, name: c.name, score: s, via: "alias" };
-      }
-      if (best) list.push({ ...best, score: Math.round(best.score * 100) / 100 });
+      const best = bestPreparedMatch(p.nameKey, c);
+      if (best) list.push(best);
     }
-    if (list.length > 0) out.set(p.id, list.sort((x, y) => y.score - x.score || x.id - y.id).slice(0, limit));
+    if (list.length > 0) out.set(p.id, list.toSorted(bySimilarity).slice(0, limit));
   }
   return out;
 }

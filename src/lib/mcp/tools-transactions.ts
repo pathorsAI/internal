@@ -726,6 +726,23 @@ function normalizeBulkTxnItem(
 
 type TxnPatch = Partial<TxnInsert>;
 
+// 關聯 id 參數：有給才處理；0＝清除（回傳 null），其他值先確認屬於這個組織。
+// 沒給則回傳 undefined（不動）。
+async function optRelationId(
+  db: Db,
+  args: Record<string, unknown>,
+  key: string,
+  table: Parameters<typeof assertInOrg>[1],
+  orgId: string,
+  label: string,
+): Promise<number | null | undefined> {
+  if (optNumber(args, key) === undefined) return undefined;
+  const id = requireNumber(args, key);
+  if (id === 0) return null;
+  await assertInOrg(db, table, id, orgId, label);
+  return id;
+}
+
 // Apply the relation fields (category / project / contract / subscription / billing item)
 // to the patch. Each is only touched when its arg was provided; 0 clears the link.
 async function applyTxnRelationPatch(
@@ -734,47 +751,22 @@ async function applyTxnRelationPatch(
   args: Record<string, unknown>,
   orgId: string,
 ) {
-  if (optNumber(args, "categoryId") !== undefined) {
-    const categoryId = requireNumber(args, "categoryId");
-    if (categoryId === 0) {
-      patch.categoryId = null; // 0＝清除分類（未分類）
-    } else {
-      await assertInOrg(db, categories, categoryId, orgId, "Category");
-      patch.categoryId = categoryId;
-    }
-  }
+  // 0＝清除分類（未分類）
+  const categoryId = await optRelationId(db, args, "categoryId", categories, orgId, "Category");
+  if (categoryId !== undefined) patch.categoryId = categoryId;
   if (optNumber(args, "projectId") !== undefined) {
     patch.projectId = await optProjectId(db, args, orgId);
   }
-  if (optNumber(args, "contractId") !== undefined) {
-    const contractId = requireNumber(args, "contractId");
-    if (contractId === 0) {
-      patch.contractId = null;
-    } else {
-      await assertInOrg(db, contracts, contractId, orgId, "Contract");
-      patch.contractId = contractId;
-    }
+  const contractId = await optRelationId(db, args, "contractId", contracts, orgId, "Contract");
+  if (contractId !== undefined) patch.contractId = contractId;
+  const subscriptionId = await optRelationId(db, args, "subscriptionId", subscriptions, orgId, "Subscription");
+  if (subscriptionId !== undefined) {
+    patch.subscriptionId = subscriptionId;
+    // 解除訂閱綁定時，期別一併清空。
+    if (subscriptionId === null) patch.subscriptionPeriod = null;
   }
-  if (optNumber(args, "subscriptionId") !== undefined) {
-    const subscriptionId = requireNumber(args, "subscriptionId");
-    if (subscriptionId === 0) {
-      // 解除訂閱綁定時，期別一併清空。
-      patch.subscriptionId = null;
-      patch.subscriptionPeriod = null;
-    } else {
-      await assertInOrg(db, subscriptions, subscriptionId, orgId, "Subscription");
-      patch.subscriptionId = subscriptionId;
-    }
-  }
-  if (optNumber(args, "billingItemId") !== undefined) {
-    const billingItemId = requireNumber(args, "billingItemId");
-    if (billingItemId === 0) {
-      patch.billingItemId = null;
-    } else {
-      await assertInOrg(db, billingItems, billingItemId, orgId, "Billing item");
-      patch.billingItemId = billingItemId;
-    }
-  }
+  const billingItemId = await optRelationId(db, args, "billingItemId", billingItems, orgId, "Billing item");
+  if (billingItemId !== undefined) patch.billingItemId = billingItemId;
   // 期別：空字串代表清除；未提供則不動。只有在沒有因 subscriptionId=0 清空時才處理。
   if (args.subscriptionPeriod !== undefined && patch.subscriptionPeriod === undefined) {
     patch.subscriptionPeriod = optDate(args, "subscriptionPeriod") ?? null;
