@@ -13,6 +13,7 @@ import {
   type MatchTransaction,
   type MatchUpdate,
 } from "./match";
+import { notPromotionTransaction } from "./promotion-ledger";
 import { taipeiToday } from "./sync-plan";
 
 /**
@@ -213,6 +214,7 @@ async function loadCandidateTransactions(db: Db, orgId: string, open: LoadedInvo
         eq(transactions.type, "expense"),
         isNull(transactions.deletedAt),
         inArray(transactions.partyId, parties),
+        notPromotionTransaction,
         gte(transactions.txnDate, dates[0]),
         lte(transactions.txnDate, addDays(dates.at(-1) as string, GROUP_WINDOW_DAYS)),
       ),

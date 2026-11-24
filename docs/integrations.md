@@ -337,9 +337,32 @@ POST `iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{sa}:generateA
 （jobs.query，SELECT）與 GET `…/queries/{jobId}`（取結果）。
 
 費用（選填）：設定頁填 BigQuery export 的專案 ID 與 dataset（例如 `billing_export`）。每個勾選的帳號自動找
-`gcp_billing_export_v1_<帳號 id，- 換成 _>` 表（一個帳號一張），以參數化的標準 SQL 依 `invoice.month × project ×
-service × currency` 加總 `cost + credits` → `vendor_cost_lines`，並為**已結束的月份**各建一張月帳
-（`external_ref = <帳號>:<YYYYMM>`，發票日 = 月底）拿去對帳。
+`gcp_billing_export_v1_<帳號 id，- 換成 _>`（標準用量表），沒有的話找 `gcp_billing_export_resource_v1_<…>`
+（明細表，欄位相同）；兩張都在時用標準表。以參數化的標準 SQL 依 `invoice.month × project × service × currency`
+加總，credits 依 `type` 拆開：
+
+| 欄位（`vendor_cost_lines`） | 內容 |
+| --- | --- |
+| `gross_amount` | 用量 = `cost` + 非 `PROMOTION` 的 credits（`DISCOUNT`、`FREE_TIER`、`SUSTAINED_USAGE_DISCOUNT`、`COMMITTED_USAGE_DISCOUNT`… 視為折扣，直接降低成本） |
+| `promotion_credit` | `PROMOTION` credits（Google 給的抵用點數）加總，負數；Azure 永遠 0 |
+| `amount` | 實付淨額 = `gross_amount + promotion_credit` |
+
+（migration 0037；`gross_amount` 為 NULL 的舊列視同 `amount`。）**已結束的月份**各建一張**淨額**月帳
+（`external_ref = <帳號>:<YYYYMM>`，發票日 = 月底）拿去跟帳本的卡費對帳，跟以前一樣。
+
+**抵用點數記進管理帳**（`src/lib/vendor-billing/promotion-ledger.ts`）：點數抵掉的成本在卡費上看不到，點數用完
+那天會突然冒出一大筆。所以每個 GCP 計費帳號、每個已結束月份 PROMOTION 抵用不為 0 時，在帳本建兩筆
+**`book = internal`**（只進管理帳，稅務帳完全不受影響）、不掛帳戶（不是現金）的交易，日期 = 月底、幣別 = 帳單幣別：
+
+- 支出：|抵用|，對象 = 計費帳號的 party（沒設就用第一個比對廠商，都沒有就留空），「GCP 2026-10 用量（點數抵用部分）」；
+  分類沿用這個帳號已對到的卡費交易的分類，沒有就找名字像雲端服務的支出分類，再沒有就留空（標待確認），不自己建。
+- 收入：同額，分類「抵用點數」（組織沒有這個收入分類就建這一個），「GCP 2026-10 抵用點數」。
+
+管理帳的雲端成本 = 實付（卡費，book both）+ 抵用部分（internal）= 全額，收入另記一筆抵用點數，淨額不變。
+冪等：`external_source = 'gcp'`、`external_ref = <帳號>:<YYYYMM>:promo-usage` / `:promo-credit`，走 0026 的唯一索引
+`ON CONFLICT DO NOTHING`；建過又被人刪掉的不會長回來。這兩種交易不會出現在對帳候選裡。每個帳號有一個設定
+「抵用點數記進管理帳」（`meta.bookPromotionCredits`，GCP 預設開），廠商計費頁的帳號編輯與 MCP
+`upsert_vendor_billing_account` 都能切；關掉只停止新建，不刪既有的。廠商計費頁的每月費用顯示 用量／抵用點數／實付。
 
 ### Workload Identity Federation（GCP，不存金鑰）
 

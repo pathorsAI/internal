@@ -5,6 +5,7 @@
 //   meta.billingAccountId            Azure：profile 所屬的 billing account
 //   meta.masterBillingAccount        GCP：經銷商 master account；有值 → meta.reseller = true
 //   meta.currency                    GCP：帳號幣別
+//   meta.bookPromotionCredits        GCP：抵用點數記進管理帳（沒設 = 開；false = 停止新建，不刪既有的）
 //   （帳單）meta.rejectedTransactionIds 人工解除過的交易，不再自動配給這張帳單
 
 function positiveIds(raw: unknown): number[] {
@@ -42,4 +43,9 @@ export function withRejected(current: readonly number[], add: readonly (number |
 
 export function isReseller(meta: Record<string, unknown> | null | undefined): boolean {
   return meta?.reseller === true || (typeof meta?.masterBillingAccount === "string" && meta.masterBillingAccount !== "");
+}
+
+/** 這個計費帳號的抵用點數要不要記進管理帳：只有 GCP 有點數；沒設過就是開。 */
+export function booksPromotionCredits(provider: string, meta: Record<string, unknown> | null | undefined): boolean {
+  return provider === "gcp" && meta?.bookPromotionCredits !== false;
 }

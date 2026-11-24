@@ -163,6 +163,8 @@ export type BillingAccountPatch = {
   paymentMethodId?: number | null;
   ownerUserId?: string | null;
   ledgerMode?: LedgerModeValue;
+  /** GCP：抵用點數記進管理帳（存在 meta.bookPromotionCredits）。 */
+  bookPromotionCredits?: boolean;
   status?: AccountStatus;
   note?: string | null;
 };
@@ -182,6 +184,7 @@ const BILLING_ACCOUNT_FIELDS: FieldParsers = {
   paymentMethodId: (v) => id(v, "付款方式"),
   ownerUserId: (v) => text(v, "負責人", 100),
   ledgerMode: (v) => oneOf(v, LEDGER_MODES, "入帳模式"),
+  bookPromotionCredits: parseBool("bookPromotionCredits"),
   status: (v) => oneOf(v, ACCOUNT_STATUSES, "狀態"),
   note: (v) => text(v, "備註", 2000),
 };
@@ -195,7 +198,15 @@ export function normalizeBillingAccountInput(raw: Record<string, unknown>): Bill
 }
 
 /** 同步來的帳號：平台、ID、名稱、狀態由同步決定，人只能改這些。 */
-export const SYNCED_ACCOUNT_EDITABLE = new Set(["partyId", "matchPartyIds", "paymentMethodId", "ownerUserId", "ledgerMode", "note"]);
+export const SYNCED_ACCOUNT_EDITABLE = new Set([
+  "partyId",
+  "matchPartyIds",
+  "paymentMethodId",
+  "ownerUserId",
+  "ledgerMode",
+  "bookPromotionCredits",
+  "note",
+]);
 
 /** 把「同步來的不能改」的欄位挑出來（回傳不允許的欄位名）。 */
 export function forbiddenSyncedFields(patch: Record<string, unknown>, editable: ReadonlySet<string>): string[] {

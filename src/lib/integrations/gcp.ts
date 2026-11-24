@@ -441,41 +441,61 @@ export type GcpCostRow = {
   projectId: string;
   projectName: string | null;
   service: string;
+  /** 淨額 = grossAmount + promotionCredit（實際要付的錢）。 */
   amount: number;
+  /** 沒有抵用點數時要付的錢 = cost + 非 PROMOTION 的 credits（免費額度、各種折扣直接降低成本）。 */
+  grossAmount: number;
+  /** PROMOTION 類 credits（Google 給的抵用點數）加總，負數或 0。 */
+  promotionCredit: number;
   currency: string;
 };
 
+/** credits 裡算「抵用點數」的 type；其他 type（DISCOUNT、FREE_TIER、SUSTAINED_USAGE_DISCOUNT…）都當折扣。 */
+export const GCP_PROMOTION_CREDIT_TYPE = "PROMOTION";
+
 /**
- * 一個 billing account 的標準用量費用 export 表 → 每月 × 專案 × 服務的淨額（費用 + credits）。
+ * 一個 billing account 的用量費用 export 表（標準或明細表，欄位相同）→ 每月 × 專案 × 服務的
+ * 用量（cost + 折扣類 credits）與抵用點數（PROMOTION credits）。
  * 資料表名不能參數化，呼叫端要先用 scope.ts 的 isValidBigQueryTable / isValidBigQueryExport 驗過。
  */
 export function buildCostQuery(projectId: string, dataset: string, table: string): string {
+  const credits = (where: string) => "SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c WHERE " + where + "), 0))";
+  const promo = "'" + GCP_PROMOTION_CREDIT_TYPE + "'";
+  const discounts = credits("IFNULL(c.type, '') <> " + promo);
+  const promotions = credits("c.type = " + promo);
   return [
     "SELECT invoice.month AS invoice_month,",
     "  IFNULL(project.id, '') AS project_id,",
     "  ANY_VALUE(project.name) AS project_name,",
     "  IFNULL(service.description, '') AS service,",
     "  currency,",
-    "  SUM(cost) + SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c), 0)) AS amount",
+    `  SUM(cost) + ${discounts} AS gross_amount,`,
+    `  ${promotions} AS promotion_credit`,
     `FROM \`${projectId}.${dataset}.${table}\``,
     "WHERE billing_account_id = @account AND invoice.month >= @fromMonth",
     "GROUP BY invoice_month, project_id, service, currency",
   ].join("\n");
 }
 
+const round4 = (n: number) => Math.round(n * 10_000) / 10_000;
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
 export function parseCostRows(rows: Record<string, string | null>[]): GcpCostRow[] {
   return rows.flatMap((r) => {
     const m = r.invoice_month ?? "";
-    const amount = Number(r.amount);
+    const grossAmount = Number(r.gross_amount);
+    const promotionCredit = Number(r.promotion_credit ?? 0);
     const currency = (r.currency ?? "").toUpperCase();
-    if (!/^\d{6}$/.test(m) || !Number.isFinite(amount) || currency.length !== 3) return [];
+    if (!/^\d{6}$/.test(m) || !Number.isFinite(grossAmount) || !Number.isFinite(promotionCredit) || currency.length !== 3) return [];
     return [
       {
         month: `${m.slice(0, 4)}-${m.slice(4, 6)}-01`,
         projectId: r.project_id ?? "",
         projectName: r.project_name ?? null,
         service: r.service ?? "",
-        amount,
+        amount: round4(grossAmount + promotionCredit),
+        grossAmount: round4(grossAmount),
+        promotionCredit: round4(promotionCredit),
         currency,
       },
     ];
@@ -520,7 +540,51 @@ export function monthlyInvoicesFromCosts(
       periodStart: month,
       periodEnd,
       invoiceDate: periodEnd,
-      amount: Math.round(m.amount * 100) / 100,
+      amount: round2(m.amount),
+      currency: [...m.currencies][0],
+    });
+  }
+  return out;
+}
+
+export type GcpPromotionMonth = {
+  billingAccountId: string;
+  /** YYYY-MM-01 */
+  month: string;
+  /** 月底（管理帳兩筆交易的日期） */
+  periodEnd: string;
+  /** 被抵用點數抵掉的金額（正數）。 */
+  amount: number;
+  currency: string;
+};
+
+/**
+ * 每個「已結束的月份」被 PROMOTION 抵掉多少（正數）。本月還在累積、抵用為 0、或同月多種幣別
+ * 都不產生。管理帳記全額用（見 vendor-billing/promotion-ledger.ts）。
+ */
+export function promotionMonthsFromCosts(
+  billingAccountId: string,
+  rows: readonly GcpCostRow[],
+  currentMonth: string,
+): GcpPromotionMonth[] {
+  const byMonth = new Map<string, { amount: number; currencies: Set<string> }>();
+  for (const r of rows) {
+    if (r.month >= currentMonth) continue;
+    const m = byMonth.get(r.month) ?? { amount: 0, currencies: new Set<string>() };
+    m.amount += r.promotionCredit;
+    m.currencies.add(r.currency);
+    byMonth.set(r.month, m);
+  }
+  const out: GcpPromotionMonth[] = [];
+  for (const [month, m] of [...byMonth.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const amount = round2(-m.amount);
+    if (m.currencies.size !== 1 || amount === 0) continue;
+    const [y, mo] = month.split("-").map(Number);
+    out.push({
+      billingAccountId,
+      month,
+      periodEnd: new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10),
+      amount,
       currency: [...m.currencies][0],
     });
   }

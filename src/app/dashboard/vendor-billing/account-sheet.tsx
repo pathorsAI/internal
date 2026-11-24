@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { Amount } from "@/components/amount";
 import {
   Select,
@@ -77,6 +78,7 @@ type AccountForm = {
   matchPartyIds: number[];
   ownerUserId: string | null;
   ledgerMode: LedgerModeValue;
+  bookPromotionCredits: boolean;
   status: string;
   note: string;
 };
@@ -93,6 +95,7 @@ function formOf(row: BillingAccountRow | undefined): AccountForm {
     matchPartyIds: row?.matchPartyIds ?? [],
     ownerUserId: row?.ownerUserId ?? null,
     ledgerMode: asLedgerMode(row?.ledgerMode ?? "match_only"),
+    bookPromotionCredits: row?.bookPromotionCredits ?? true,
     status: row?.status ?? "active",
     note: row?.note ?? "",
   };
@@ -108,6 +111,7 @@ const MANUAL_EDITABLE: ReadonlySet<FormKey> = new Set([
   "matchPartyIds",
   "ownerUserId",
   "ledgerMode",
+  "bookPromotionCredits",
   "status",
   "note",
 ]);
@@ -455,6 +459,24 @@ function LedgerModeField({ form, set, editable }: FieldProps) {
   );
 }
 
+/** GCP：抵用點數記進管理帳（同步來的 GCP 帳號才有點數資料）。 */
+function PromotionCreditsField({ form, set, editable }: FieldProps) {
+  const t = useTranslations("vendorBilling");
+  return (
+    <div className="space-y-0.5 sm:col-span-2">
+      <label className="flex items-center gap-2 text-sm">
+        <Switch
+          checked={form.bookPromotionCredits}
+          onCheckedChange={(v) => set("bookPromotionCredits", v)}
+          disabled={!editable("bookPromotionCredits")}
+        />
+        {t("account.bookPromotionCredits")}
+      </label>
+      <p className="pl-11 text-xs text-muted-foreground">{t("account.bookPromotionCreditsHelp")}</p>
+    </div>
+  );
+}
+
 /** 表單下方的資源 / 帳單 / 費用；載入中顯示同尺寸的骨架。 */
 function DetailArea({
   detail,
@@ -615,6 +637,7 @@ export function AccountSheet({
               <OwnerField {...fieldProps} members={members} />
               {showDetail && !synced ? <StatusField {...fieldProps} /> : null}
               <LedgerModeField {...fieldProps} />
+              {synced && row?.provider === "gcp" ? <PromotionCreditsField {...fieldProps} /> : null}
 
               <Field label={t("account.note")} htmlFor={fieldId("note")} wide>
                 <textarea
@@ -750,17 +773,50 @@ function DetailSections({
         {costs.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t("empty.costs")}</p>
         ) : (
-          <ul className="max-w-sm space-y-1 text-sm">
-            {costs.map((c) => (
-              <li key={`${c.month}-${c.currency}`} className="flex items-center gap-3">
-                <span className="tabular-nums text-muted-foreground">{c.month.slice(0, 7).replace("-", "/")}</span>
-                <span className="text-xs text-muted-foreground">{c.currency}</span>
-                <Amount value={c.amount} currency={c.currency} kind="neutral" className="ml-auto" />
-              </li>
-            ))}
-          </ul>
+          <CostTable costs={costs} hasPromotion={detail.account.provider === "gcp"} />
         )}
       </section>
     </>
+  );
+}
+
+/** 每月費用：用量／抵用點數／實付（Azure 沒有抵用點數，那欄顯示 —）。 */
+function CostTable({ costs, hasPromotion }: Readonly<{ costs: Detail["costs"]; hasPromotion: boolean }>) {
+  const t = useTranslations("vendorBilling");
+  return (
+    <div className="min-w-0 overflow-x-auto">
+      <Table className="text-xs">
+        <TableHeader>
+          <TableRow>
+            <TableHead>{t("columns.month")}</TableHead>
+            <TableHead>{t("columns.currency")}</TableHead>
+            <TableHead className="text-right">{t("columns.usage")}</TableHead>
+            <TableHead className="text-right">{t("columns.promotionCredit")}</TableHead>
+            <TableHead className="text-right">{t("columns.paid")}</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {costs.map((c) => (
+            <TableRow key={`${c.month}-${c.currency}`}>
+              <TableCell className="tabular-nums text-muted-foreground">{c.month.slice(0, 7).replace("-", "/")}</TableCell>
+              <TableCell className="text-muted-foreground">{c.currency}</TableCell>
+              <TableCell className="text-right">
+                <Amount value={c.grossAmount} currency={c.currency} kind="neutral" />
+              </TableCell>
+              <TableCell className="text-right">
+                {hasPromotion ? (
+                  <Amount value={c.promotionCredit} currency={c.currency} kind="neutral" />
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+              </TableCell>
+              <TableCell className="text-right font-medium">
+                <Amount value={c.amount} currency={c.currency} kind="neutral" />
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
   );
 }
