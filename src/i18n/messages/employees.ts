@@ -2,7 +2,6 @@ import type { Dictionary } from "./dictionary";
 
 const employees = {
   title: { "zh-TW": "員工", en: "Employees" },
-  description: { "zh-TW": "員工名冊、基本聯絡資訊與勞健保 / 勞退投保狀態", en: "Employee roster, contact info, and labor / health insurance & pension status" },
   table: {
     title: { "zh-TW": "員工名冊", en: "Employee roster" },
     columns: {

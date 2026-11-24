@@ -8,10 +8,6 @@ import type { Dictionary } from "./dictionary";
  */
 const integrations = {
   title: { "zh-TW": "整合", en: "Integrations" },
-  description: {
-    "zh-TW": "把這個組織接上外部服務。每個整合預設關閉：先連接（輸入憑證並實測），再手動開啟。",
-    en: "Connect this organization to external services. Every integration starts off: connect it first (credentials are tested), then switch it on.",
-  },
   connectLinkOtherOrg: {
     "zh-TW": "這個連接網址是給組織「{org}」的。請先從左上角切換到那個組織，再重新打開網址。",
     en: "This connect link is for the organization \"{org}\". Switch to it from the top-left menu, then open the link again.",

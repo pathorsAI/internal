@@ -133,7 +133,7 @@ export default async function ContractsPage() {
 
   return (
     <>
-      <PageHeader title={t("list.title")} description={t("list.description")}>
+      <PageHeader title={t("list.title")}>
         <NewContractDialog parties={partyOptions} projects={projectOptions} />
       </PageHeader>
 

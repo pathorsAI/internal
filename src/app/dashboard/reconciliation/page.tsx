@@ -46,7 +46,7 @@ export default async function ReconciliationPage() {
 
   return (
     <>
-      <PageHeader title={t("title")} description={t("description")}>
+      <PageHeader title={t("title")}>
         <NewReconciliationDialog
           accounts={accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }))}
         />

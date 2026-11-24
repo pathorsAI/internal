@@ -67,7 +67,7 @@ const PAYMENT_METHOD_BRIEF = {
   anyOf: [
     rowSchema({
       id: { type: "number" },
-      label: { type: "string", description: "e.g. MasterCard •2579" },
+      label: { type: "string", description: "e.g. Visa •1234" },
       kind: { type: "string", enum: [...PAYMENT_METHOD_KINDS] },
       last4: NULLABLE_STRING,
       expiry: { type: ["string", "null"], description: "MM/YYYY" },
@@ -392,7 +392,7 @@ function present(args: Record<string, unknown>, keys: readonly string[]): Record
 export const vendorBillingTools: Record<string, ToolDef> = {
   list_vendor_billing_accounts: {
     description:
-      "List this organization's vendor billing accounts — which platform account (Azure billing profile, GCP billing account, Cloudflare, AWS, any other vendor such as Neon / LiveKit / Anthropic, …) is paid by which payment method (card, reseller invoice, bank transfer, Wise card), with its ledger party, owner, resources count, latest invoice and anything that needs attention (expiring card, no payment method, stale manual data, unmatched/overdue invoices, things gone missing at the provider). Recurring expenses (固定支出) ARE these accounts: an account with a schedule gets Discord charge reminders and the monthly recap, and periodStatus says whether this period is paid. Azure/GCP accounts are synced read-only by the integrations (run_integration_sync); others are entered by hand (provider other, source manual).",
+      "List this organization's vendor billing accounts — which platform account (Azure billing profile, GCP billing account, Cloudflare, AWS or any other vendor) is paid by which payment method (card, reseller invoice, bank transfer, Wise card), with its ledger party, owner, resources count, latest invoice and anything that needs attention (expiring card, no payment method, stale manual data, unmatched/overdue invoices, things gone missing at the provider). Recurring expenses (固定支出) ARE these accounts: an account with a schedule gets Discord charge reminders and the monthly recap, and periodStatus says whether this period is paid. Azure/GCP accounts are synced read-only by the integrations (run_integration_sync); others are entered by hand (provider other, source manual).",
     inputSchema: {
       type: "object",
       properties: {
@@ -470,7 +470,7 @@ export const vendorBillingTools: Record<string, ToolDef> = {
 
   upsert_vendor_billing_account: {
     description:
-      "Create (omit id) or update a vendor billing account (owner/admin only). This is also how recurring expenses (固定支出) are registered: one account = one recurring expense — set schedule (fixed + anchorDate + intervalMonths, or usage), expectedAmount/currency and billingUrl. Creating is for vendors without an integration (Cloudflare, AWS, Neon, LiveKit, Anthropic, …; use provider other for anything not listed): provider + displayName required. For accounts synced from Azure/GCP only partyId, matchPartyIds, paymentMethodId, ownerUserId, ledgerMode, bookPromotionCredits (GCP), note and the schedule fields can be changed. Ledger expenses are linked to the account automatically when their party has exactly one open account, so set partyId to the vendor's ledger party. Bookkeeping metadata only: nothing here pays, charges or moves money. Look ids up first: partyId/matchPartyIds via list_parties, paymentMethodId via list_payment_methods, ownerUserId via list_org_members. Omitted fields are left unchanged; pass null to clear. Keep ledgerMode = match_only unless the user explicitly wants missing invoices booked automatically.",
+      "Create (omit id) or update a vendor billing account (owner/admin only). This is also how recurring expenses (固定支出) are registered: one account = one recurring expense — set schedule (fixed + anchorDate + intervalMonths, or usage), expectedAmount/currency and billingUrl. Creating is for vendors without an integration (Cloudflare, AWS, or provider other for any other vendor): provider + displayName required. For accounts synced from Azure/GCP only partyId, matchPartyIds, paymentMethodId, ownerUserId, ledgerMode, bookPromotionCredits (GCP), note and the schedule fields can be changed. Ledger expenses are linked to the account automatically when their party has exactly one open account, so set partyId to the vendor's ledger party. Bookkeeping metadata only: nothing here pays, charges or moves money. Look ids up first: partyId/matchPartyIds via list_parties, paymentMethodId via list_payment_methods, ownerUserId via list_org_members. Omitted fields are left unchanged; pass null to clear. Keep ledgerMode = match_only unless the user explicitly wants missing invoices booked automatically.",
     inputSchema: {
       type: "object",
       properties: {
@@ -525,7 +525,7 @@ export const vendorBillingTools: Record<string, ToolDef> = {
         ...ORG_ARG,
         id: { type: "number", description: "Omit to create." },
         kind: { type: "string", enum: [...PAYMENT_METHOD_KINDS] },
-        label: { type: "string", description: "e.g. MasterCard •2579, TWGCP 經銷商帳單" },
+        label: { type: "string", description: "e.g. Visa •1234, 經銷商帳單" },
         brand: { type: ["string", "null"] },
         last4: { type: ["string", "null"], description: "Exactly 4 digits." },
         expiryMonth: { type: ["number", "null"], minimum: 1, maximum: 12 },

@@ -56,10 +56,7 @@ export default async function McpPage() {
 
   return (
     <>
-      <PageHeader
-        title={t("mcp.title")}
-        description={t("mcp.description")}
-      />
+      <PageHeader title={t("mcp.title")} />
 
       <SettingsBody>
         <Card>

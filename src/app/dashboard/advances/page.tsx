@@ -62,7 +62,6 @@ export default async function AdvancesPage() {
             </TooltipProvider>
           </span>
         }
-        description={t("description")}
       />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

@@ -20,7 +20,7 @@ export default async function PendingLinksPage() {
 
   return (
     <>
-      <PageHeader title={t("title")} description={t("description")}>
+      <PageHeader title={t("title")}>
         <RescanButton />
       </PageHeader>
 

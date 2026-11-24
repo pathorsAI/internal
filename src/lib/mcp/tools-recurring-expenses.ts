@@ -197,7 +197,7 @@ const PREVIEW_RESULT: JsonSchemaObject = {
 
 export const recurringExpenseTools: Record<string, ToolDef> = {
   list_recurring_expenses: {
-    description: `${MERGED} Lists vendor billing accounts that have a schedule (固定支出: GCP, Neon, LiveKit, Anthropic…) with the expected payment method (and the ledger account it settles from), the next charge date (Asia/Taipei) and this period's paid status. ${NO_MONEY_MOVES}`,
+    description: `${MERGED} Lists vendor billing accounts that have a schedule (固定支出: cloud, SaaS and other vendor charges on a schedule) with the expected payment method (and the ledger account it settles from), the next charge date (Asia/Taipei) and this period's paid status. ${NO_MONEY_MOVES}`,
     inputSchema: {
       type: "object",
       properties: {

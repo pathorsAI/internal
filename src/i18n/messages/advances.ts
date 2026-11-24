@@ -2,7 +2,6 @@ import type { Dictionary } from "./dictionary";
 
 const advances = {
   title: { "zh-TW": "代墊", en: "Advances" },
-  description: { "zh-TW": "員工先付、公司尚未撥款的費用", en: "Expenses employees paid for before the company reimbursed them" },
   tooltipAria: { "zh-TW": "代墊說明", en: "About advances" },
   tooltipContent: { "zh-TW": "員工已代墊並納入帳務（進項），公司尚未撥款", en: "The employee already paid and it's booked (as an input), the company hasn't reimbursed it yet" },
   card: {

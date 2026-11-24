@@ -2,7 +2,6 @@ import type { Dictionary } from "./dictionary";
 
 const members = {
   title: { "zh-TW": "成員", en: "Members" },
-  description: { "zh-TW": "邀請同事加入這個組織，或管理現有成員", en: "Invite teammates to join this organization, or manage existing members" },
   loading: { "zh-TW": "載入中…", en: "Loading…" },
   role: {
     owner: { "zh-TW": "擁有者", en: "Owner" },

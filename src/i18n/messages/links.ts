@@ -6,10 +6,6 @@ import type { Dictionary } from "./dictionary";
  */
 const links = {
   title: { "zh-TW": "待連結", en: "Pending links" },
-  description: {
-    "zh-TW": "還沒確定屬於哪一筆請款、訂閱或合約的收款，以及對象名稱跟既有對象很像、沒有自動新建的交易",
-    en: "Payments not yet matched to a billing item, subscription or contract, and transactions whose counterparty name looks like an existing one",
-  },
   count: { "zh-TW": "{count} 筆待連結", en: "{count} pending" },
   columns: {
     date: { "zh-TW": "日期", en: "Date" },

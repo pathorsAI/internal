@@ -50,10 +50,7 @@ export default async function PayrollPage({
 
   return (
     <>
-      <PageHeader
-        title={t("title")}
-        description={t("description")}
-      >
+      <PageHeader title={t("title")}>
         <GlowButton size="sm" asChild>
           <Link href="/dashboard/employees">
             <Users className="size-4" /> {t("goToEmployees")}

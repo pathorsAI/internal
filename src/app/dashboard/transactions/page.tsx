@@ -336,7 +336,7 @@ export default async function TransactionsPage({
 
   return (
     <>
-      <PageHeader title={tr("page.title")} description={tr("page.description")}>
+      <PageHeader title={tr("page.title")}>
         <NewTransactionDialog
           accounts={accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }))}
           categories={categories}

@@ -3,7 +3,6 @@ import type { Dictionary } from "./dictionary";
 const transactions = {
   page: {
     title: { "zh-TW": "收支紀錄", en: "Ledger" },
-    description: { "zh-TW": "所有交易紀錄，可依帳別、分類篩選", en: "All transactions, filterable by book and category" },
   },
   columns: {
     date: { "zh-TW": "日期", en: "Date" },

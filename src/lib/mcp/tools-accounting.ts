@@ -64,7 +64,7 @@ const ALIASES_PROP = {
   type: "array",
   items: { type: "string" },
   description:
-    "Other names this party is matched by when importing (Wise, create_transaction partyName, …). Case-insensitive exact match; an alias ending in * is a prefix match (e.g. 'Facebk *', 'Grab*').",
+    "Other names this party is matched by when importing (Wise, create_transaction partyName, …). Case-insensitive exact match; an alias ending in * is a prefix match (e.g. 'ACME *', 'ACME*').",
 } as const;
 
 const PARTY_ROW_PROPS = {
@@ -401,7 +401,7 @@ export const accountingTools: Record<string, ToolDef> = {
 
   update_party: {
     description:
-      "Update a counterparty. Only provided fields change. Set isActive=false to deactivate (soft-delete). Use aliases to file differently spelled imports under this party (e.g. card statement merchants like 'Facebk *'); to fold existing duplicate parties into one, use merge_parties.",
+      "Update a counterparty. Only provided fields change. Set isActive=false to deactivate (soft-delete). Use aliases to file differently spelled imports under this party (e.g. card statement merchants like 'ACME *'); to fold existing duplicate parties into one, use merge_parties.",
     inputSchema: {
       type: "object",
       properties: {
@@ -487,7 +487,7 @@ export const accountingTools: Record<string, ToolDef> = {
 
   merge_parties: {
     description:
-      "Merge duplicate counterparties into one. Every record pointing at a source party (transactions, projects, subscriptions, contracts, billing items, invoices, vendor billing accounts incl. their extra match parties, recurring expenses) is moved to the target; each source's name and aliases are added to the target's aliases so future imports (Wise, partyName) land on the target; the sources are then deleted. Runs in one database transaction. Cannot be undone from MCP — confirm the target and sources with the user (list_parties) before calling. Typical use: card-statement merchants split per charge, e.g. 'Facebk *26qx2aj6e4' + 'Facebk *9kq…' → 'Meta Ads' with alias 'Facebk *' (add prefix aliases afterwards with update_party).",
+      "Merge duplicate counterparties into one. Every record pointing at a source party (transactions, projects, subscriptions, contracts, billing items, invoices, vendor billing accounts incl. their extra match parties, recurring expenses) is moved to the target; each source's name and aliases are added to the target's aliases so future imports (Wise, partyName) land on the target; the sources are then deleted. Runs in one database transaction. Cannot be undone from MCP — confirm the target and sources with the user (list_parties) before calling. Typical use: card-statement merchants split per charge, e.g. 'ACME *26qx2aj6e4' + 'ACME *9kq…' → 'ACME' with alias 'ACME *' (add prefix aliases afterwards with update_party).",
     inputSchema: {
       type: "object",
       properties: {

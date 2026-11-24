@@ -250,10 +250,7 @@ export default async function BillingPage({
 
   return (
     <>
-      <PageHeader
-        title={t("page.title")}
-        description={t("page.description")}
-      >
+      <PageHeader title={t("page.title")}>
         <SyncCalendarButton
           connected={Boolean(calendar?.ownerUserId && calendar?.googleCalendarId)}
         />

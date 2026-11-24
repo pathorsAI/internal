@@ -2,7 +2,6 @@ import type { Dictionary } from "./dictionary";
 
 const invoices = {
   title: { "zh-TW": "發票", en: "Invoices" },
-  description: { "zh-TW": "開給客戶與廠商開給我的發票，點列可編輯", en: "Invoices issued to clients and received from vendors — click a row to edit" },
   reconcileLink: { "zh-TW": "Simpany 對帳", en: "Simpany reconciliation" },
   direction: {
     issued: { "zh-TW": "開給客戶", en: "Issued to client" },
@@ -197,7 +196,6 @@ const invoices = {
   },
   reconcile: {
     title: { "zh-TW": "Simpany 對帳", en: "Simpany reconciliation" },
-    description: { "zh-TW": "本系統該開的發票，與 Simpany 實際開的對得起來嗎", en: "Do the invoices this system expects match what Simpany actually issued?" },
     back: { "zh-TW": "回發票", en: "Back to invoices" },
     footerNote: { "zh-TW": "Simpany 才是發票的真相來源。本系統只負責「該開什麼」與「開了沒」，兩邊不一致時以 Simpany 為準，回來這裡修正紀錄。", en: "Simpany is the source of truth for invoices. This system only tracks what should be issued and whether it was — when the two disagree, trust Simpany and correct the record here." },
     missing: {

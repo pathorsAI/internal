@@ -2,7 +2,6 @@ import type { Dictionary } from "./dictionary";
 
 const categories = {
   title: { "zh-TW": "分類", en: "Categories" },
-  description: { "zh-TW": "收入 / 成本 / 費用 科目，用於交易分類與損益表", en: "Income / cost of sales / expense accounts, used to categorize transactions and build the P&L" },
   tabs: {
     income: {
       label: { "zh-TW": "收入分類", en: "Income categories" },

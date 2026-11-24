@@ -22,7 +22,7 @@ export default async function SettingsPage() {
 
   return (
     <>
-      <PageHeader title={t("title")} description={t("description")} />
+      <PageHeader title={t("title")} />
       <SettingsBody>
         <OrgSettingsClient
           orgId={orgId}

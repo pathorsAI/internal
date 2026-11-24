@@ -66,7 +66,7 @@ export default async function ProjectsPage() {
 
   return (
     <>
-      <PageHeader title={t("list.title")} description={t("list.description")}>
+      <PageHeader title={t("list.title")}>
         <NewProjectDialog parties={partyOptions} />
       </PageHeader>
 

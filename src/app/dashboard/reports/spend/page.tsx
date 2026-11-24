@@ -19,7 +19,7 @@ export default async function SpendAnalysisPage() {
   const { orgId } = await requireOrg();
   return (
     <>
-      <PageHeader title={t("title")} description={t("description")} />
+      <PageHeader title={t("title")} />
       <ReportsNav active="spend" />
       <Suspense fallback={<SpendTrendSkeleton />}>
         <SpendTrendSection orgId={orgId} />

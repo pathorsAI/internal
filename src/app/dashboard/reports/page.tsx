@@ -58,7 +58,7 @@ export default async function ReportsPage() {
 
   return (
     <>
-      <PageHeader title={t("title")} description={t("description")} />
+      <PageHeader title={t("title")} />
       <ReportsNav active="overview" />
 
       <div className="grid gap-6">

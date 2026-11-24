@@ -64,7 +64,7 @@ export default async function BankAccountsPage() {
 
   return (
     <>
-      <PageHeader title={t("title")} description={t("description")}>
+      <PageHeader title={t("title")}>
         {canSyncWise ? <WiseSyncButton /> : null}
         <NewBankAccountDialog />
       </PageHeader>

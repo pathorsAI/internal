@@ -2,10 +2,6 @@ import type { Dictionary } from "./dictionary";
 
 const vendorBilling = {
   title: { "zh-TW": "廠商計費", en: "Vendor billing" },
-  description: {
-    "zh-TW": "雲端與廠商的計費帳號（有扣款週期的就是固定支出）、付款卡，以及帳單和帳本交易的對帳",
-    en: "Cloud and vendor billing accounts (those with a charge schedule are your recurring expenses), payment cards, and matching invoices to ledger transactions",
-  },
   actions: {
     syncNow: { "zh-TW": "立即同步", en: "Sync now" },
     syncing: { "zh-TW": "同步中…", en: "Syncing…" },
@@ -130,8 +126,8 @@ const vendorBilling = {
   schedule: {
     title: { "zh-TW": "固定支出", en: "Recurring expense" },
     help: {
-      "zh-TW": "設定扣款週期，這個帳號就是一筆固定支出：接上 Discord 後扣款前會提醒，每月發上個月的回顧。支出的交易對象是這個帳號的交易對象（且只有這一個帳號）時會自動連過來；這期有連到的支出、或有已對帳的帳單，就算已付。",
-      en: "Give the account a charge schedule and it becomes a recurring expense: with Discord connected you get a reminder before each charge and a monthly recap. Expenses whose counterparty is this account's counterparty (and no other account's) are linked automatically; a linked expense or a matched invoice in the current period counts as paid.",
+      "zh-TW": "設定扣款週期，這個帳號就是一筆固定支出。交易對象只對應到這個帳號的支出會自動連過來；本期有連到的支出或已對帳的帳單，就算已付。",
+      en: "Give the account a charge schedule and it becomes a recurring expense. Expenses whose counterparty belongs to this account only are linked automatically; a linked expense or a matched invoice in the current period counts as paid.",
     },
     schedule: { "zh-TW": "扣款週期", en: "Charged" },
     fixed: { "zh-TW": "固定日期", en: "Fixed date" },
@@ -232,7 +228,7 @@ const vendorBilling = {
     newTitle: { "zh-TW": "新增付款方式", en: "Add payment method" },
     kind: { "zh-TW": "種類", en: "Type" },
     label: { "zh-TW": "名稱", en: "Name" },
-    labelPlaceholder: { "zh-TW": "例：Visa •4306", en: "e.g. Visa •4306" },
+    labelPlaceholder: { "zh-TW": "例：Visa •1234", en: "e.g. Visa •1234" },
     brand: { "zh-TW": "卡別", en: "Brand" },
     last4: { "zh-TW": "末四碼", en: "Last 4 digits" },
     last4Help: { "zh-TW": "只存末四碼", en: "Only the last four digits are stored" },

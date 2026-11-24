@@ -12,7 +12,7 @@ export default async function CategoriesPage() {
   const categories = await listCategories(orgId);
   return (
     <>
-      <PageHeader title={t("title")} description={t("description")} />
+      <PageHeader title={t("title")} />
       <CategoryBoard categories={categories} />
     </>
   );

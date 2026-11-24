@@ -29,7 +29,7 @@ export default async function ApiSettingsPage() {
 
   return (
     <>
-      <PageHeader title={t("api.title")} description={t("api.description")}>
+      <PageHeader title={t("api.title")}>
         {canManage ? <CreateApiKeyButton /> : null}
       </PageHeader>
 

@@ -50,10 +50,6 @@ const projects = {
   },
   list: {
     title: { "zh-TW": "專案", en: "Projects" },
-    description: {
-      "zh-TW": "專案由合約與訂閱組成：收支包含直接標在專案上的交易，以及經由合約、訂閱、請款項連到專案的交易（P&L，以 TWD 彙總）",
-      en: "A project is made of its contracts and subscriptions: income and expense include transactions tagged with the project and those linked through its contracts, subscriptions or billing items (P&L, in TWD)",
-    },
     newButton: { "zh-TW": "新增專案", en: "Add project" },
     rowDescription: { "zh-TW": "專案", en: "Project" },
     columns: {

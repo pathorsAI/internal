@@ -84,7 +84,7 @@ const COMPACT_TXN = {
         { type: "null" },
       ],
     },
-    referenceNumber: { type: "string", description: "Wise's unique reference, e.g. CARD-4370840324." },
+    referenceNumber: { type: "string", description: "Wise's unique reference, e.g. CARD-1234567890." },
     runningBalance: { type: ["number", "null"] },
   },
   required: [

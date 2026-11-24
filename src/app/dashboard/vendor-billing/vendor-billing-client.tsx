@@ -258,7 +258,7 @@ export function VendorBillingClient({
 
   return (
     <>
-      <PageHeader title={t("title")} description={t("description")}>
+      <PageHeader title={t("title")}>
         {canManage ? (
           <HeaderActions view={view} syncing={syncing} onSync={syncNow} onNewAccount={newAccount} onNewMethod={newMethod} />
         ) : null}

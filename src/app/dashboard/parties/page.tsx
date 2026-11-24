@@ -67,7 +67,7 @@ export default async function PartiesPage() {
 
   return (
     <>
-      <PageHeader title={t("title")} description={t("description")}>
+      <PageHeader title={t("title")}>
         <MergePartiesDialog parties={mergeOptions} />
         <NewPartyDialog
           accounts={accounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }))}

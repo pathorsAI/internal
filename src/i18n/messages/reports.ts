@@ -2,7 +2,6 @@ import type { Dictionary } from "./dictionary";
 
 const reports = {
   title: { "zh-TW": "報表", en: "Reports" },
-  description: { "zh-TW": "應收帳齡、營業稅期、合約完整性，以及成本與專案損益", en: "Receivables ageing, VAT periods, contract coverage, and cost & project P&L" },
   missingClient: { "zh-TW": "（未指定客戶）", en: "(no client)" },
   partyLabel: {
     vendor: { "zh-TW": "廠商", en: "Vendor" },
@@ -96,10 +95,6 @@ const reports = {
   },
   spendTrend: {
     title: { "zh-TW": "支出分析", en: "Spend analysis" },
-    description: {
-      "zh-TW": "每個類別、每個廠商每個月花了多少，怎麼在變。金額一律以台幣計（外幣用入帳時的台幣金額）",
-      en: "How much each category and vendor costs per month, and how it changes. All amounts in TWD (foreign currency at its booked TWD amount)",
-    },
     dimension: {
       category: { "zh-TW": "依類別", en: "By category" },
       party: { "zh-TW": "依廠商", en: "By vendor" },

@@ -20,7 +20,6 @@ const subscriptions = {
   },
   list: {
     title: { "zh-TW": "訂閱 / 月費", en: "Subscriptions" },
-    description: { "zh-TW": "客戶定期收費的方案，點列可編輯", en: "Recurring billing plans for clients — click a row to edit" },
     newButton: { "zh-TW": "新增訂閱", en: "Add subscription" },
     rowDescription: { "zh-TW": "訂閱 / 月費", en: "Subscription" },
     contractLinkLabel: { "zh-TW": "合約：", en: "Contract: " },

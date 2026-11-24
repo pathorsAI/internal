@@ -2,7 +2,6 @@ import type { Dictionary } from "./dictionary";
 
 const parties = {
   title: { "zh-TW": "交易對象", en: "Counterparties" },
-  description: { "zh-TW": "往來的廠商、客戶、機關；收款＝對方付我們、付款＝我們付對方，依幣別分開加總", en: "Vendors, clients, and agencies you deal with. Received = they pay us, paid = we pay them, totaled separately per currency" },
   label: {
     vendor: { "zh-TW": "廠商", en: "Vendor" },
     customer: { "zh-TW": "客戶", en: "Client" },
@@ -28,7 +27,7 @@ const parties = {
   },
   form: {
     name: { "zh-TW": "名稱", en: "Name" },
-    namePlaceholder: { "zh-TW": "例：AWS、美國客戶、健保署", en: "e.g. AWS, US client, tax office" },
+    namePlaceholder: { "zh-TW": "例：ACME 公司", en: "e.g. ACME Inc." },
     type: { "zh-TW": "類型", en: "Type" },
     taxId: { "zh-TW": "統一編號", en: "Tax ID" },
     taxIdPlaceholder: { "zh-TW": "選填", en: "Optional" },
@@ -42,10 +41,10 @@ const parties = {
     note: { "zh-TW": "備註", en: "Note" },
     notePlaceholder: { "zh-TW": "選填", en: "Optional" },
     aliases: { "zh-TW": "別名", en: "Aliases" },
-    aliasesPlaceholder: { "zh-TW": "一行一個，例：\nGithub, Inc.\nFacebk *", en: "One per line, e.g.\nGithub, Inc.\nFacebk *" },
+    aliasesPlaceholder: { "zh-TW": "一行一個，例：\nACME Inc.\nACME *", en: "One per line, e.g.\nACME Inc.\nACME *" },
     aliasesHint: {
-      "zh-TW": "匯入的對象名稱跟別名相同（不分大小寫）就歸到這裡；結尾加 * 代表開頭相同就算，例如「Grab*」。",
-      en: "Imported names that equal an alias (case-insensitive) are filed here; end with * to match by prefix, e.g. \"Grab*\".",
+      "zh-TW": "匯入的對象名稱跟別名相同（不分大小寫）就歸到這裡；結尾加 * 代表開頭相同就算，例如「ACME*」。",
+      en: "Imported names that equal an alias (case-insensitive) are filed here; end with * to match by prefix, e.g. \"ACME*\".",
     },
     isActive: { "zh-TW": "啟用", en: "Active" },
     cancel: { "zh-TW": "取消", en: "Cancel" },

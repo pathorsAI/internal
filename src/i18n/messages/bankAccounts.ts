@@ -2,7 +2,6 @@ import type { Dictionary } from "./dictionary";
 
 const bankAccounts = {
   title: { "zh-TW": "銀行帳戶", en: "Bank accounts" },
-  description: { "zh-TW": "現金與銀行帳戶", en: "Cash and bank accounts" },
   columns: {
     name: { "zh-TW": "名稱", en: "Name" },
     type: { "zh-TW": "類型", en: "Type" },
@@ -29,7 +28,7 @@ const bankAccounts = {
   },
   form: {
     name: { "zh-TW": "名稱", en: "Name" },
-    namePlaceholder: { "zh-TW": "例：永豐銀行、Wise USD", en: "e.g. SinoPac Bank, Wise USD" },
+    namePlaceholder: { "zh-TW": "例：公司活存、Wise USD", en: "e.g. Main checking, Wise USD" },
     type: { "zh-TW": "類型", en: "Type" },
     currency: { "zh-TW": "幣別", en: "Currency" },
     openingBalance: { "zh-TW": "期初餘額", en: "Opening balance" },
