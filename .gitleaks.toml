@@ -30,3 +30,12 @@ description = "Sonar API calls that reference the SONAR_TOKEN secret by env var"
 targetRules = ["curl-auth-user"]
 paths = ['''^\.github/workflows/sonar\.yml$''']
 regexes = ['''-u "\$SONAR_TOKEN:"''']
+
+# LINE webhook tests: the replyToken is the sample value from LINE's Messaging API
+# docs (webhook event example). Reply tokens are single-use and expire in a minute;
+# this one was never issued to us.
+[[allowlists]]
+description = "LINE docs sample replyToken in channel tests"
+targetRules = ["generic-api-key"]
+paths = ['''^src/lib/channels/line\.test\.ts$''']
+regexes = ['''38ef843bde154d9b91c21320ffd17a0f''']
