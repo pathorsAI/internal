@@ -16,26 +16,12 @@ const ai = {
       record: { "zh-TW": "記一筆支出", en: "Record an expense" },
     },
   },
-  connect: {
-    label: { "zh-TW": "在其他 AI 使用", en: "Use from other AI" },
-    claude: { "zh-TW": "Claude", en: "Claude" },
-    chatgpt: { "zh-TW": "ChatGPT", en: "ChatGPT" },
-    cursor: { "zh-TW": "Cursor", en: "Cursor" },
-    claudeCode: { "zh-TW": "Claude Code", en: "Claude Code" },
-    copiedUrl: { "zh-TW": "已複製 MCP 網址", en: "MCP URL copied" },
-    copiedUrlHint: {
-      "zh-TW": "到 ChatGPT 設定 → 應用程式與連接器 → 建立，貼上網址",
-      en: "In ChatGPT, open Settings → Apps & Connectors → Create and paste it",
-    },
-    copiedCursor: { "zh-TW": "已複製 Cursor 設定", en: "Cursor config copied" },
-    copiedCursorHint: {
-      "zh-TW": "貼進 ~/.cursor/mcp.json 的 mcpServers",
-      en: "Paste it under mcpServers in ~/.cursor/mcp.json",
-    },
-    copiedCommand: { "zh-TW": "已複製指令", en: "Command copied" },
-    copiedCommandHint: { "zh-TW": "在終端機執行，第一次使用時登入授權", en: "Run it in a terminal, then sign in on first use" },
-    copyFailed: { "zh-TW": "無法複製，請到 MCP 設定頁手動複製", en: "Couldn't copy. Copy it from the MCP settings page" },
-    more: { "zh-TW": "MCP 設定", en: "MCP settings" },
+  onboard: {
+    label: { "zh-TW": "把你的 AI agent 接上 internal", en: "Connect your AI agent to internal" },
+    tooltip: { "zh-TW": "複製設定提示詞，貼到你的 AI 工具", en: "Copies a setup prompt for your AI tool" },
+    copied: { "zh-TW": "已複製，貼到 Claude Code、Cursor 或 ChatGPT", en: "Copied. Paste it into Claude Code, Cursor or ChatGPT" },
+    copyFailed: { "zh-TW": "無法複製，請到 MCP 設定頁手動設定", en: "Couldn't copy. Set it up from the MCP settings page" },
+    dismiss: { "zh-TW": "不再顯示", en: "Dismiss" },
   },
   history: {
     title: { "zh-TW": "對話", en: "Chats" },

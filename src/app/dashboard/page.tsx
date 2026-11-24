@@ -19,7 +19,7 @@ import {
   getMonthlyTrends,
   listMyOrgs,
 } from "@/db/queries";
-import { AgentConnectRow } from "@/components/ai/agent-connect-row";
+import { AgentOnboardPill } from "@/components/ai/agent-onboard-pill";
 import { AiPromptForm } from "@/components/ai/prompt-form";
 import { internalConnectorName, orgMcpUrl } from "@/lib/claude-connector";
 import { requestOrigin } from "@/lib/request-origin";
@@ -49,9 +49,9 @@ export default async function DashboardPage() {
     headers(),
   ]);
 
-  // 外部 agent 列用目前組織的固定 MCP 網址；找不到目前組織就只留 MCP 設定頁的連結。
+  // 「把 AI agent 接上 internal」複製的提示詞用目前組織的固定 MCP 網址；找不到目前組織就不顯示。
   const activeOrg = myOrgs.find((o) => o.id === orgId);
-  const claudeConnector = activeOrg
+  const agentConnector = activeOrg
     ? {
         name: internalConnectorName(activeOrg.name),
         url: orgMcpUrl(`${requestOrigin(h)}/mcp`, activeOrg),
@@ -112,11 +112,11 @@ export default async function DashboardPage() {
     <>
       <PageHeader title={t("title")} description={t("description")} />
 
-      {/* 問 AI 的入口放最上面：送出後帶著問題到 /dashboard/ai；下方 logo 列接外部 agent。 */}
+      {/* 問 AI 的入口放最上面：送出後帶著問題到 /dashboard/ai；上方膠囊按鈕複製外部 agent 的設定提示詞。 */}
       <section className="mx-auto w-full max-w-3xl space-y-4 py-2">
+        {agentConnector ? <AgentOnboardPill connector={agentConnector} /> : null}
         <h2 className="text-lg font-semibold tracking-tight">{tAi("heading")}</h2>
         <AiPromptForm />
-        <AgentConnectRow connector={claudeConnector} />
       </section>
 
       {/* 資產總覽：每種幣別一張卡，顯示總資產（含期初餘額）與各帳戶餘額 */}
