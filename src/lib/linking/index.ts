@@ -8,3 +8,6 @@ export * from "./project-status";
 export * from "./hints";
 export * from "./resolve";
 export * from "./write";
+export * from "./pending";
+export * from "./rescan";
+export * from "./choose";

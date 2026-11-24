@@ -52,6 +52,8 @@ describe("tool policy", () => {
     expect(toolLevel("preview_billing_notifications", { send: true })).toBe("write");
     expect(toolLevel("simpany_prepare_salary_filing", {})).toBe("read");
     expect(toolLevel("simpany_prepare_salary_filing", { allowCopy: true })).toBe("write");
+    expect(toolLevel("rescan_transaction_links", {})).toBe("read");
+    expect(toolLevel("rescan_transaction_links", { dryRun: false })).toBe("write");
   });
 
   test("members only get reads; owner/admin get everything allowed", () => {

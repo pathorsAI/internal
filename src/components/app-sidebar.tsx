@@ -27,6 +27,7 @@ import {
   Plug,
   History,
   Sparkles,
+  Link2,
 } from "lucide-react";
 
 import {
@@ -38,6 +39,7 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
@@ -57,6 +59,7 @@ export type NavItemKey =
   | "account"
   | "billing"
   | "transactions"
+  | "links"
   | "parties"
   | "categories"
   | "advances"
@@ -89,6 +92,7 @@ const daily = [
 
 const nav = [
   { key: "transactions", href: "/dashboard/transactions", icon: ArrowLeftRight },
+  { key: "links", href: "/dashboard/links", icon: Link2 },
   { key: "parties", href: "/dashboard/parties", icon: Truck },
   { key: "categories", href: "/dashboard/categories", icon: Tags },
   { key: "advances", href: "/dashboard/advances", icon: ReceiptText },
@@ -136,10 +140,13 @@ export function AppSidebar({
   initialOrganizations,
   initialActiveOrgId,
   initialUser,
+  badges,
 }: Readonly<{
   initialOrganizations: OrgOption[];
   initialActiveOrgId: string | null;
   initialUser: MenuUser | null;
+  /** 項目右側的數字徽章（例如待連結筆數），0 或沒給就不顯示 */
+  badges?: Partial<Record<NavItemKey, number>>;
 }>) {
   const t = useTranslations("common");
   const pathname = usePathname();
@@ -221,6 +228,9 @@ export function AppSidebar({
                         <span>{t(`nav.items.${item.key}`)}</span>
                       </Link>
                     </SidebarMenuButton>
+                    {badges?.[item.key] ? (
+                      <SidebarMenuBadge className="text-warning">{badges[item.key]}</SidebarMenuBadge>
+                    ) : null}
                   </SidebarMenuItem>
                 ))}
               </SidebarMenu>

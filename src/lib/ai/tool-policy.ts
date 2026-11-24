@@ -68,10 +68,12 @@ export function baseToolLevel(name: string): ToolLevel {
  * 依這次呼叫的參數分類。少數工具同一支可以只看、也可以真的送出：
  * - preview_billing_notifications：預設 dry run；send=true 會發到團隊的 Discord。
  * - simpany_prepare_salary_filing：預設只試算；allowCopy=true 會複製上月申報、寫進 Simpany。
+ * - rescan_transaction_links：預設 dry run；dryRun=false 才會把交易標成待連結。
  */
 export function toolLevel(name: string, args: Record<string, unknown>): ToolLevel {
   if (name === "preview_billing_notifications") return args.send === true ? "write" : "read";
   if (name === "simpany_prepare_salary_filing") return args.allowCopy === true ? "write" : "read";
+  if (name === "rescan_transaction_links") return args.dryRun === false ? "write" : "read";
   return baseToolLevel(name);
 }
 
@@ -97,7 +99,8 @@ export function canOffer(name: string, role: OrgRole): boolean {
   return (
     baseToolLevel(name) === "read" ||
     name === "preview_billing_notifications" ||
-    name === "simpany_prepare_salary_filing"
+    name === "simpany_prepare_salary_filing" ||
+    name === "rescan_transaction_links"
   );
 }
 

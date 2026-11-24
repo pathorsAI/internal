@@ -30,6 +30,8 @@ import { ContractFileLink } from "./contract-file-link";
 import { requireOrg } from "@/lib/session";
 import { ContractBillingItems } from "./contract-billing-items";
 import { ContractSubscriptions } from "./contract-subscriptions";
+import { ReadyToClose } from "./ready-to-close";
+import { contractReadyToClose } from "@/lib/linking/project-status";
 
 export const dynamic = "force-dynamic";
 
@@ -184,6 +186,13 @@ export default async function ContractsPage() {
                         <StatusTag tone={statusTone[c.status] ?? "neutral"}>
                           {statusLabels[c.status] ?? c.status}
                         </StatusTag>
+                        {contractReadyToClose({
+                          status: c.status,
+                          amount: c.amount == null ? null : Number(c.amount),
+                          received: c.received,
+                        }) ? (
+                          <ReadyToClose contractId={c.id} />
+                        ) : null}
                       </TableCell>
                       <TableCell>
                         {c.fileUrl ? (

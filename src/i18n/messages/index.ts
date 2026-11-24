@@ -5,6 +5,7 @@ import dashboard from "./dashboard";
 import ai from "./ai";
 import account from "./account";
 import transactions from "./transactions";
+import links from "./links";
 import billing from "./billing";
 import contracts from "./contracts";
 import subscriptions from "./subscriptions";
@@ -39,6 +40,7 @@ const catalogue = {
   ai,
   account,
   transactions,
+  links,
   billing,
   contracts,
   subscriptions,

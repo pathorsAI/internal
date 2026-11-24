@@ -63,11 +63,15 @@ export const TOOL_GROUPS: Record<ToolGroupId, GroupDef> = {
       "list_projects",
       "list_contracts",
       "list_subscriptions",
+      "list_unlinked_transactions",
+      "resolve_transaction_link",
+      "rescan_transaction_links",
     ],
     keywords: [
-      "交易", "記帳", "記一筆", "支出", "收入", "花了", "花費", "付了", "收到", "轉帳", "帳戶", "銀行", "餘額",
+      "交易", "記帳", "待連結", "連結", "掛上", "對不上", "記一筆", "支出", "收入", "花了", "花費", "付了", "收到", "轉帳", "帳戶", "銀行", "餘額",
       "分類", "代墊", "報帳", "總覽", "淨額", "現金", "信用卡", "廠商", "前五", "前十",
       "transaction", "expense", "income", "spend", "balance", "account", "category", "advance", "ledger",
+      "unlinked", "link",
     ],
   },
   clients: {

@@ -40,6 +40,7 @@ import { vendorBillingTools } from "./tools-vendor-billing";
 import { recurringExpenseTools } from "./tools-recurring-expenses";
 import { settingsTools } from "./tools-settings";
 import { vendorBillingAdminTools } from "./tools-vendor-billing-admin";
+import { linkTools } from "./tools-links";
 
 export type { ToolContext, ToolDef } from "./shared";
 
@@ -777,4 +778,5 @@ export const tools: Record<string, ToolDef> = {
   ...recurringExpenseTools,
   ...settingsTools,
   ...vendorBillingAdminTools,
+  ...linkTools,
 };

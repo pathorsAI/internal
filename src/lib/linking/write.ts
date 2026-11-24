@@ -274,3 +274,39 @@ export async function updateTransactionsPlainByIds(
   if (idList.length === 0) return [];
   return updateTransactionsPlain(db, orgId, inArray(transactions.id, [...idList]), set);
 }
+
+export type ReviewFlag = {
+  id: number;
+  reviewReason: NonNullable<LinkResolution["values"]["reviewReason"]>;
+  linkCandidates: Record<string, unknown> | null;
+};
+
+/**
+ * 重新掃描用：只把「還沒人看過」（review_reason IS NULL）的交易標成待連結，只寫 review_reason 與
+ * link_candidates 兩欄（+ updatedAt），其他欄位一律不動。已經在待連結或略過的列不覆蓋。
+ * 回傳實際被標記的 id。
+ */
+export async function flagTransactionsForReview(
+  db: Db,
+  orgId: string,
+  items: readonly ReviewFlag[],
+): Promise<number[]> {
+  const out: number[] = [];
+  const now = new Date().toISOString();
+  for (const it of items) {
+    const got = await db
+      .update(transactions)
+      .set({ reviewReason: it.reviewReason, linkCandidates: it.linkCandidates, updatedAt: now })
+      .where(
+        and(
+          eq(transactions.organizationId, orgId),
+          eq(transactions.id, it.id),
+          isNull(transactions.reviewReason),
+          isNull(transactions.deletedAt),
+        ),
+      )
+      .returning({ id: transactions.id });
+    if (got[0]) out.push(got[0].id);
+  }
+  return out;
+}

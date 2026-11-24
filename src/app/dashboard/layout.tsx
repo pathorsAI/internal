@@ -16,6 +16,8 @@ import {
 } from "@/components/ui/sidebar";
 import { auth } from "@/lib/auth";
 import { getSession } from "@/lib/session";
+import { getDb } from "@/db";
+import { countPendingLinks } from "@/lib/linking/pending";
 
 export default async function DashboardLayout({
   children,
@@ -41,6 +43,10 @@ export default async function DashboardLayout({
   const initialUser = session
     ? { name: session.user.name, email: session.user.email, image: session.user.image ?? null }
     : null;
+  // 側欄「待連結」的筆數徽章。查不到（還沒 migrate、DB 暫時連不上）就不顯示，不擋整個版面。
+  const pendingLinks = initialActiveOrgId
+    ? await countPendingLinks(getDb(), initialActiveOrgId).catch(() => 0)
+    : 0;
 
   return (
     <RefreshPendingProvider>
@@ -49,6 +55,7 @@ export default async function DashboardLayout({
           initialOrganizations={initialOrganizations}
           initialActiveOrgId={initialActiveOrgId}
           initialUser={initialUser}
+          badges={{ links: pendingLinks }}
         />
         {/* min-w-0：SidebarInset 是 flex 子項，沒有它寬表格會把整頁撐寬（表格應在自己的容器裡捲動） */}
         <SidebarInset className="min-w-0">

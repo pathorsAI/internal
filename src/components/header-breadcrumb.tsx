@@ -24,6 +24,7 @@ const routeKeys: Record<string, NavItemKey> = {
   "/dashboard/ai": "ai",
   "/dashboard/account": "account",
   "/dashboard/transactions": "transactions",
+  "/dashboard/links": "links",
   "/dashboard/parties": "parties",
   "/dashboard/categories": "categories",
   "/dashboard/advances": "advances",

@@ -13,6 +13,7 @@ import {
   projectLinkedTransactions,
   projectTransactionIds,
 } from "./project-links";
+import { PENDING_REVIEW_REASONS } from "@/lib/linking/match";
 import {
   transactions,
   categories,
@@ -96,6 +97,8 @@ export type TxnFilters = {
   partyId?: number | "none";
   /** 只看指定的交易 id（Discord 通知連結用）；仍受 organization 範圍限制。 */
   ids?: number[];
+  /** 只看待連結（review_reason 在 PENDING_REVIEW_REASONS 裡；跟 needsReview 分開）。 */
+  pendingLink?: boolean;
 };
 
 /** id 篩選："none" = 沒有指定（IS NULL），數字 = 等於，沒給 = 不篩。 */
@@ -106,7 +109,7 @@ function idFilter(column: typeof transactions.categoryId | typeof transactions.p
 
 // 收支紀錄列表與筆數共用的 where（篩選條件的 single source of truth）
 function txnWhere(orgId: string, filters: TxnFilters) {
-  const { book, categoryId, accountId, projectId, period, needsReview, partyId, ids } = filters;
+  const { book, categoryId, accountId, projectId, period, needsReview, partyId, ids, pendingLink } = filters;
   return and(
     eq(transactions.organizationId, orgId),
     book ? eq(transactions.book, book) : undefined,
@@ -123,6 +126,7 @@ function txnWhere(orgId: string, filters: TxnFilters) {
     period ? sql`to_char(${transactions.txnDate}, 'YYYY-MM') = ${period}` : undefined,
     needsReview === undefined ? undefined : eq(transactions.needsReview, needsReview),
     ids && ids.length > 0 ? inArray(transactions.id, ids) : undefined,
+    pendingLink ? inArray(transactions.reviewReason, [...PENDING_REVIEW_REASONS]) : undefined,
     isNull(transactions.deletedAt),
   );
 }

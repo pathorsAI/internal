@@ -31,6 +31,7 @@ const common = {
       account: { "zh-TW": "個人設定", en: "Your profile" },
       billing: { "zh-TW": "請款看板", en: "Billing board" },
       transactions: { "zh-TW": "收支紀錄", en: "Ledger" },
+      links: { "zh-TW": "待連結", en: "Pending links" },
       parties: { "zh-TW": "交易對象", en: "Counterparty" },
       categories: { "zh-TW": "分類", en: "Category" },
       advances: { "zh-TW": "代墊", en: "Advance" },
