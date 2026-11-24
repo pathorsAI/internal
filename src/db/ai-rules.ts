@@ -2,7 +2,7 @@ import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { AiRuleKind, AiRuleScope, RuleAction, RuleMatch } from "@/lib/ai/rules";
 import { getDb } from "./index";
 import { user } from "./auth-schema";
-import { aiRules } from "./schema";
+import { aiRules, categories } from "./schema";
 
 /**
  * AI 規則（ai_rules，migrations/0040）。每個查詢都過濾 organization_id；個人規則（scope = user）
@@ -209,4 +209,36 @@ export async function markAiRulesApplied(ids: readonly number[]): Promise<void> 
     .update(aiRules)
     .set({ applyCount: sql`${aiRules.applyCount} + 1`, lastAppliedAt: sql`now()` })
     .where(inArray(aiRules.id, unique));
+}
+
+/**
+ * 匯入一次套了好幾筆：每條規則加上各自用到的筆數（counts：規則 id → 筆數）。
+ * 規則通常只有幾條，逐條 UPDATE 就好。
+ */
+export async function recordAiRuleApplications(counts: ReadonlyMap<number, number>): Promise<void> {
+  const db = getDb();
+  for (const [id, n] of counts) {
+    if (!Number.isInteger(n) || n <= 0) continue;
+    await db
+      .update(aiRules)
+      .set({ applyCount: sql`${aiRules.applyCount} + ${n}`, lastAppliedAt: sql`now()` })
+      .where(eq(aiRules.id, id));
+  }
+}
+
+/** 匯入套規則前：規則指到的分類現在的種類（只回這個組織、啟用中、未刪除的）。 */
+export async function listCategoryKinds(orgId: string, ids: readonly number[]): Promise<Map<number, string>> {
+  if (ids.length === 0) return new Map();
+  const rows = await getDb()
+    .select({ id: categories.id, kind: categories.kind })
+    .from(categories)
+    .where(
+      and(
+        eq(categories.organizationId, orgId),
+        inArray(categories.id, [...ids]),
+        eq(categories.isActive, true),
+        isNull(categories.deletedAt),
+      ),
+    );
+  return new Map(rows.map((r) => [r.id, r.kind]));
 }

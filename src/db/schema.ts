@@ -1157,7 +1157,7 @@ export const apiKeys = pgTable("api_keys", {
 	check("chk_api_keys_scope", sql`scope = ANY (ARRAY['read'::text, 'write'::text])`),
 ]);
 
-// ---- LINE／WhatsApp bot（migrations/0040，src/db/chat.ts）。"user" / organization 的 FK 在 DB 端
+// ---- LINE／WhatsApp bot（migrations/0042，src/db/chat.ts）。"user" / organization 的 FK 在 DB 端
 // （better-auth 的表在 auth-schema.ts，這裡不跨檔宣告）。----
 
 // 聊天平台帳號 ↔ internal 使用者。busy_until 是「同一人同時只跑一題」的鎖。
@@ -1297,7 +1297,7 @@ export const chatMessageRefs = pgTable("chat_message_refs", {
 	check("chk_chat_message_refs_direction", sql`direction = ANY (ARRAY['in'::text, 'out'::text])`),
 ]);
 
-// ---- AI 規則（migrations/0040，src/db/ai-rules.ts、src/lib/ai/rules.ts）----
+// ---- AI 規則（migrations/0042，src/db/ai-rules.ts、src/lib/ai/rules.ts）----
 export const aiRules = pgTable("ai_rules", {
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "ai_rules_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
 	organizationId: text("organization_id").notNull(),

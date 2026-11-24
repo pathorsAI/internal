@@ -574,6 +574,10 @@ export type TxnDocument = {
   contentType: string | null;
   r2Key: string;
   uploadedAt: string;
+  /** 從哪裡上傳的（web／line／whatsapp／mcp；舊資料是 null）。 */
+  source: string | null;
+  /** 上傳的人（聊天收件匣的檔案才有）。 */
+  uploadedByName: string | null;
 };
 
 // 一批交易的憑證 / 相關證明，回傳以 transactionId 分組的 Map
@@ -594,8 +598,11 @@ export async function listDocumentsForTransactions(
       contentType: documents.contentType,
       r2Key: documents.r2Key,
       uploadedAt: documents.uploadedAt,
+      source: documents.source,
+      uploadedByName: user.name,
     })
     .from(documents)
+    .leftJoin(user, eq(user.id, documents.uploadedBy))
     .where(
       and(
         eq(documents.organizationId, orgId),

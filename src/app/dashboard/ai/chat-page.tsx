@@ -31,6 +31,7 @@ export async function AiChatPage({ conversationId }: Readonly<{ conversationId?:
           id: c.id,
           title: c.title,
           updatedAt: c.updatedAt,
+          channel: c.channel,
         }))}
         canWrite={canUseWrites(role)}
         user={{ name: session.user.name, image: session.user.image ?? null }}

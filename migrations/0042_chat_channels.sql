@@ -1,4 +1,4 @@
--- 0040: LINE／WhatsApp bot（站內 AI 的聊天入口）與 AI 規則。
+-- 0042: LINE／WhatsApp bot（站內 AI 的聊天入口）與 AI 規則。
 --
 -- chat_identities     一個聊天平台帳號 ↔ 一位 internal 使用者。每個平台每人只能綁一個帳號、
 --                     每個平台帳號只能綁一個人。active_org_id 是 bot 目前替這個人操作的組織
@@ -25,7 +25,7 @@
 -- activity_log.channel       加 'line'、'whatsapp'。程式碼比 migration 先上也安全：record() 會吞掉
 --                            CHECK 違規，只是少記那幾筆。
 --
--- Forward-only，全部 additive。Run AFTER 0039.
+-- Forward-only，全部 additive。Run AFTER 0041.
 
 CREATE TABLE chat_identities (
   id text PRIMARY KEY,

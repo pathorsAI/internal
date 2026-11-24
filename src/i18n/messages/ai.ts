@@ -32,6 +32,11 @@ const ai = {
     deleted: { "zh-TW": "已刪除對話", en: "Chat deleted" },
     cancel: { "zh-TW": "取消", en: "Cancel" },
     untitled: { "zh-TW": "未命名對話", en: "Untitled chat" },
+    rules: { "zh-TW": "規則", en: "Rules" },
+    channel: {
+      line: { "zh-TW": "LINE", en: "LINE" },
+      whatsapp: { "zh-TW": "WhatsApp", en: "WhatsApp" },
+    },
   },
   chat: {
     emptyTitle: { "zh-TW": "想查什麼、記什麼，直接說", en: "Ask anything about the books" },
@@ -39,7 +44,10 @@ const ai = {
       "zh-TW": "查詢會直接回答；新增、修改、刪除會先給你確認。",
       en: "Lookups are answered right away. Anything that changes data asks you first.",
     },
-    readOnly: { "zh-TW": "你的角色只能查詢，不能新增或修改。", en: "Your role can look things up but not change data." },
+    readOnly: {
+      "zh-TW": "你的角色可以查詢，以及提交自己的代墊；其他新增或修改要請管理者處理。",
+      en: "Your role can look things up and submit your own advances. Other changes need an owner or admin.",
+    },
     stop: { "zh-TW": "停止", en: "Stop" },
     thinking: { "zh-TW": "思考中", en: "Thinking" },
     you: { "zh-TW": "你", en: "You" },
@@ -72,6 +80,48 @@ const ai = {
     failed: { "zh-TW": "執行失敗", en: "Failed" },
     running: { "zh-TW": "執行中", en: "Running" },
     details: { "zh-TW": "參數", en: "Details" },
+  },
+  options: {
+    label: { "zh-TW": "快速回覆", en: "Quick replies" },
+  },
+  rules: {
+    title: { "zh-TW": "AI 規則", en: "AI rules" },
+    metaTitle: { "zh-TW": "AI 規則 · Internal", en: "AI rules · Internal" },
+    columns: {
+      text: { "zh-TW": "原話", en: "What was said" },
+      effect: { "zh-TW": "條件 → 動作", en: "When → then" },
+      scope: { "zh-TW": "範圍", en: "Scope" },
+      createdBy: { "zh-TW": "誰教的", en: "Taught by" },
+      source: { "zh-TW": "從哪裡", en: "From" },
+      applyCount: { "zh-TW": "套用次數", en: "Applied" },
+      lastApplied: { "zh-TW": "最後套用", en: "Last applied" },
+      actions: { "zh-TW": "動作", en: "Actions" },
+    },
+    scope: {
+      org: { "zh-TW": "組織", en: "Organization" },
+      user: { "zh-TW": "個人", en: "Just me" },
+    },
+    source: {
+      web: { "zh-TW": "網頁", en: "Web" },
+      line: { "zh-TW": "LINE", en: "LINE" },
+      whatsapp: { "zh-TW": "WhatsApp", en: "WhatsApp" },
+      mcp: { "zh-TW": "MCP", en: "MCP" },
+    },
+    kind: {
+      category: { "zh-TW": "分類", en: "Category" },
+      advance_default: { "zh-TW": "代墊預設", en: "Advance default" },
+      note: { "zh-TW": "備註", en: "Note" },
+    },
+    disabled: { "zh-TW": "已停用", en: "Off" },
+    disable: { "zh-TW": "停用", en: "Turn off" },
+    enable: { "zh-TW": "啟用", en: "Turn on" },
+    updateFailed: { "zh-TW": "更新失敗", en: "Couldn't update" },
+    deleteTitle: { "zh-TW": "刪除這條規則？", en: "Delete this rule?" },
+    deleteDescription: { "zh-TW": "AI 之後不會再照這條規則做，已經記好的交易不受影響。", en: "The assistant stops following it. Entries already recorded are not changed." },
+    empty: {
+      "zh-TW": "還沒有規則，在對話裡說「以後 Google Workspace 都歸軟體工具」就會記下來。",
+      en: "No rules yet. Tell the assistant something like “always file Google Workspace under Software”.",
+    },
   },
 } satisfies Dictionary;
 

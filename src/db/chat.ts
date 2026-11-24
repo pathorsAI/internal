@@ -13,7 +13,7 @@ import {
 } from "./schema";
 
 /**
- * LINE／WhatsApp bot 的資料存取（migrations/0040）。轉接層（src/lib/channels/*）與網頁設定頁
+ * LINE／WhatsApp bot 的資料存取（migrations/0042）。轉接層（src/lib/channels/*）與網頁設定頁
  * （/dashboard/settings/chat）都直接用這裡的函式，不自己寫 SQL。
  *
  * 安全相關的約定：
@@ -322,6 +322,14 @@ export async function recordInboundEvent(provider: ChatProvider, eventId: string
     .onConflictDoNothing()
     .returning({ eventId: chatInboundEvents.eventId });
   return rows.length > 0;
+}
+
+/** 送進佇列失敗時撤回去重紀錄，讓平台重送時能再處理一次。 */
+export async function forgetInboundEvents(provider: ChatProvider, eventIds: string[]): Promise<void> {
+  if (eventIds.length === 0) return;
+  await getDb()
+    .delete(chatInboundEvents)
+    .where(and(eq(chatInboundEvents.provider, provider), inArray(chatInboundEvents.eventId, eventIds)));
 }
 
 /** 每日 cron：刪掉 days 天前的去重紀錄（預設 7 天）。回傳刪了幾筆。 */

@@ -80,6 +80,11 @@ export type RunTurnParams = {
   userName: string;
   /** 組織統編（知道的話）。 */
   orgTaxId?: string | null;
+  /**
+   * 教模型在問題最後一行寫 [[選項：…]]。聊天預設開；網頁 /api/ai/chat 傳 true，
+   * 畫面把標記拆成可點的 chips（src/app/dashboard/ai/messages.tsx）。
+   */
+  quickReplies?: boolean;
   emit: (e: ChatEvent) => void;
   signal?: AbortSignal;
   deps: TurnDeps;
@@ -153,6 +158,7 @@ export async function runTurn(p: RunTurnParams): Promise<RunTurnResult> {
       hasEmployee,
       rules,
       orgTaxId: p.orgTaxId ?? null,
+      ...(p.quickReplies === undefined ? {} : { quickReplies: p.quickReplies }),
     }),
     emit: p.emit,
     signal: p.signal,

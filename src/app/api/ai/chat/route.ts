@@ -145,6 +145,7 @@ export async function POST(req: Request): Promise<Response> {
           owner,
           role,
           channel: "web",
+          quickReplies: true,
           conversationId: body.conversationId ?? null,
           message: body.message,
           confirm: body.confirm,

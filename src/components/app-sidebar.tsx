@@ -80,6 +80,8 @@ export type NavItemKey =
   | "mcp"
   | "api"
   | "integrations"
+  | "chatAccounts"
+  | "aiRules"
   | "settings";
 
 const daily = [

@@ -1,7 +1,8 @@
 import { and, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { paymentMethods, transactions, vendorBillingAccounts, vendorInvoices } from "@/db/schema";
+import { parties, paymentMethods, transactions, vendorBillingAccounts, vendorInvoices } from "@/db/schema";
 import { insertTransactions } from "@/lib/linking/write";
+import { applyImportCategoryRules, recordImportRuleApplications } from "@/lib/ai/import-rules";
 import { matchPartiesOf, parseRejectedTransactionIds } from "./account-meta";
 import {
   addDays,
@@ -98,6 +99,16 @@ export async function createLedgerTransactionForInvoice(
   }
   const amount = invoice.amount.toFixed(2);
   const period = invoice.periodStart && invoice.periodEnd ? `（${invoice.periodStart}～${invoice.periodEnd}）` : "";
+  const description = `${PROVIDER_NAME[account.provider] ?? account.provider} ${account.displayName} 帳單 ${invoice.externalRef}${period}`;
+  // 組織的 AI 分類規則（例如「Google Cloud 都歸雲端主機」）：只填分類，仍是待確認。
+  const [party] = await db
+    .select({ name: parties.name, taxId: parties.taxId })
+    .from(parties)
+    .where(and(eq(parties.id, partyId), eq(parties.organizationId, orgId)))
+    .limit(1);
+  const ruled = await applyImportCategoryRules(orgId, [
+    { type: "expense", categoryId: null, needsReview: true, partyName: party?.name ?? null, taxId: party?.taxId ?? null, description },
+  ]);
   const inserted = await insertTransactions(
     { db, orgId, source: "vendor_billing" },
     [
@@ -105,8 +116,8 @@ export async function createLedgerTransactionForInvoice(
         organizationId: orgId,
         type: "expense",
         txnDate: invoice.invoiceDate,
-        description: `${PROVIDER_NAME[account.provider] ?? account.provider} ${account.displayName} 帳單 ${invoice.externalRef}${period}`,
-        categoryId: null,
+        description,
+        categoryId: ruled.rows[0].categoryId,
         partyId,
         vendorBillingAccountId: invoice.billingAccountId,
         amount,
@@ -131,6 +142,7 @@ export async function createLedgerTransactionForInvoice(
     { onConflictDoNothing: true },
   );
 
+  if (inserted.length > 0) await recordImportRuleApplications(ruled.ruleIds);
   let txnId = inserted[0]?.row.id ?? null;
   let status: "created" | "linked" | "deleted" = "created";
   if (txnId === null) {

@@ -1,27 +1,50 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { AlertTriangle, Check, Loader2, PencilLine, Wrench } from "lucide-react";
+import { AlertTriangle, BookMarked, Check, Loader2, Paperclip, PencilLine, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusTag } from "@/components/ds/status-dot";
 import { Markdown } from "@/components/ai/markdown";
 import { PartyAvatar } from "@/components/party-avatar";
 import { LOAD_TOOL_GROUPS } from "@/lib/ai/tool-groups";
-import type { UiMessage, UiToolCall } from "@/lib/ai/types";
+import type { AttachmentRef, UiMessage, UiToolCall } from "@/lib/ai/types";
 import { cn } from "@/lib/utils";
+import { splitOptions } from "./split-options";
 
 export type ChatUser = { name: string; image: string | null };
 
-export function UserMessage({ text, user }: Readonly<{ text: string; user: ChatUser }>) {
+export function UserMessage({
+  text,
+  user,
+  attachments,
+}: Readonly<{ text: string; user: ChatUser; attachments?: AttachmentRef[] }>) {
   return (
     <div className="flex items-start justify-end gap-2">
-      <p className="max-w-[85%] rounded-xl bg-muted px-3.5 py-2 text-sm leading-6 whitespace-pre-wrap">
-        {text}
-      </p>
+      <div className="flex max-w-[85%] flex-col items-end gap-1.5">
+        {text ? (
+          <p className="rounded-xl bg-muted px-3.5 py-2 text-sm leading-6 whitespace-pre-wrap">
+            {text}
+          </p>
+        ) : null}
+        {/* 從 LINE／WhatsApp 傳來的單據：列檔名，點了開原檔 */}
+        {attachments?.map((a) => (
+          <a
+            key={a.documentId}
+            href={`/api/documents/${a.documentId}`}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex max-w-full items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground"
+          >
+            <Paperclip className="size-3.5 shrink-0" aria-hidden />
+            <span className="truncate">{a.fileName ?? `#${a.documentId}`}</span>
+          </a>
+        ))}
+      </div>
       <PartyAvatar name={user.name} src={user.image} size="md" className="mt-1 rounded-full" />
     </div>
   );
 }
+
 
 /** 只讀工具列成一行：list_categories · list_bank_accounts（跟提案示意一樣，用原本的工具名）。 */
 function ToolLine({ tools }: Readonly<{ tools: UiToolCall[] }>) {
@@ -95,6 +118,12 @@ export function ConfirmCard({
         <p className="text-sm font-medium">{call.summary ?? call.name}</p>
         {call.summary ? <p className="font-mono text-xs text-muted-foreground">{call.name}</p> : null}
       </div>
+      {call.ruleHint ? (
+        <p className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+          <BookMarked className="size-3.5 shrink-0 text-primary" aria-hidden />
+          {call.ruleHint}
+        </p>
+      ) : null}
       {args.length > 0 ? (
         <details className="group text-xs" open={!call.summary}>
           <summary className="cursor-pointer text-muted-foreground select-none hover:text-foreground">
@@ -159,17 +188,23 @@ export function AssistantMessage({
   streaming,
   disabled,
   onConfirm,
+  onOption,
 }: Readonly<{
   message: Extract<UiMessage, { kind: "assistant" }>;
   streaming: boolean;
   disabled: boolean;
   onConfirm: (call: UiToolCall, approve: boolean) => void;
+  /** 只有最後一則回覆給：點快速選項就把那段字當成下一題送出。其他則只拆掉標記不顯示選項。 */
+  onOption?: (text: string) => void;
 }>) {
   const t = useTranslations("ai.chat");
+  const tOptions = useTranslations("ai.options");
   const visible = message.tools.filter((x) => x.name !== LOAD_TOOL_GROUPS);
   const reads = visible.filter((x) => x.level === "read");
   const writes = visible.filter((x) => x.level !== "read");
-  const empty = !message.text && visible.length === 0;
+  const { text, options } = splitOptions(message.text, streaming);
+  const empty = !text && visible.length === 0;
+  const showOptions = Boolean(onOption) && !streaming && options.length > 0;
 
   return (
     <div className="space-y-3">
@@ -178,7 +213,24 @@ export function AssistantMessage({
       {writes.map((c) => (
         <ConfirmCard key={c.id} call={c} disabled={disabled} onConfirm={onConfirm} />
       ))}
-      {message.text ? <Markdown text={message.text} /> : null}
+      {text ? <Markdown text={text} /> : null}
+      {showOptions ? (
+        <div role="group" aria-label={tOptions("label")} className="flex flex-wrap gap-2">
+          {options.map((o) => (
+            <Button
+              key={o}
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 px-2.5 text-xs font-normal"
+              disabled={disabled}
+              onClick={() => onOption?.(o)}
+            >
+              {o}
+            </Button>
+          ))}
+        </div>
+      ) : null}
       {empty && streaming ? (
         <p className="inline-flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="size-3.5 animate-spin" aria-hidden />
