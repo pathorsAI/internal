@@ -91,6 +91,11 @@ function AmountCell({ row, t }: Readonly<{ row: BillingRow; t: T }>) {
       <div className="text-xs text-muted-foreground tabular-nums">
         {outstandingLabel(t, row.expected, row.paid, row.currency)}
       </div>
+      {row.feeAbsorbed > 0 ? (
+        <div className="text-xs text-muted-foreground tabular-nums">
+          {t("amount.feeAbsorbed", { amount: formatCurrency(row.feeAbsorbed, row.currency) })}
+        </div>
+      ) : null}
       <TaxBreakdown net={row.net} tax={row.tax} />
     </div>
   );

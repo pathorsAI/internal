@@ -1,7 +1,8 @@
 import { addMonths, format, isAfter, isBefore, parseISO } from "date-fns";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getDb } from "@/db";
-import { contracts, transactions } from "@/db/schema";
+import { contracts } from "@/db/schema";
+import { contractCollected } from "@/db/allocations";
 import { resolveOrgId } from "./org";
 import { getOrgTaxSetting } from "@/db/org-tax";
 import { collectionProgress, effectiveTaxSetting, taxedAmountOrNull } from "@/lib/tax-amounts";
@@ -380,7 +381,10 @@ export type ContractProgress = {
   gross: number | null;
   taxTreatment: TaxTreatment;
   amountBasis: AmountBasis;
+  /** 已收（含吸收的手續費），來自有效收款分配 */
   received: number;
+  /** received 裡「同意少收」的手續費／匯差 */
+  feeAbsorbed: number;
   /** gross − received */
   remaining: number | null;
   fullyCollected: boolean;
@@ -391,9 +395,11 @@ export type ContractProgress = {
 const OPEN_CONTRACT_STATUS = new Set(["draft", "active"]);
 
 /**
- * Collection progress for the given contracts (same-currency income only, the
- * same rule list_contracts uses). Returned by the transaction tools so that a
- * payment which fills a contract surfaces "已收滿" right where it happens —
+ * Collection progress for the given contracts — the same rule list_contracts
+ * uses: effective payment allocations (src/db/allocations.ts) to the contract,
+ * its billing items and the periods of subscriptions bound to it, same currency
+ * only, absorbed fees included. Returned by the transaction / allocation tools so
+ * that a payment which fills a contract surfaces "已收滿" right where it happens —
  * otherwise a fully-collected contract silently stays 進行中 until someone
  * happens to run list_contracts. Status is never changed automatically; the
  * `action` hint asks the caller to confirm with the user first.
@@ -405,39 +411,32 @@ export async function getContractProgress(
 ): Promise<ContractProgress[]> {
   const ids = [...new Set(contractIds)];
   if (ids.length === 0) return [];
-  const receivedSum = sql<string>`coalesce(sum(${transactions.amount}) filter (where ${transactions.type} = 'income'), 0)`;
-  const orgTax = await getOrgTaxSetting(orgId);
-  const rows = await db
-    .select({
-      contractId: contracts.id,
-      title: contracts.title,
-      status: contracts.status,
-      currency: contracts.currency,
-      amount: contracts.amount,
-      taxTreatment: contracts.taxTreatment,
-      amountBasis: contracts.amountBasis,
-      received: receivedSum,
-    })
-    .from(contracts)
-    .leftJoin(
-      transactions,
-      and(
-        eq(transactions.contractId, contracts.id),
-        eq(transactions.currency, contracts.currency),
-        isNull(transactions.deletedAt),
+  const [orgTax, rows, collected] = await Promise.all([
+    getOrgTaxSetting(orgId),
+    db
+      .select({
+        contractId: contracts.id,
+        title: contracts.title,
+        status: contracts.status,
+        currency: contracts.currency,
+        amount: contracts.amount,
+        taxTreatment: contracts.taxTreatment,
+        amountBasis: contracts.amountBasis,
+      })
+      .from(contracts)
+      .where(
+        and(
+          eq(contracts.organizationId, orgId),
+          inArray(contracts.id, ids),
+          isNull(contracts.deletedAt),
+        ),
       ),
-    )
-    .where(
-      and(
-        eq(contracts.organizationId, orgId),
-        inArray(contracts.id, ids),
-        isNull(contracts.deletedAt),
-      ),
-    )
-    .groupBy(contracts.id);
+    contractCollected(orgId, ids, db),
+  ]);
   return rows.map((r) => {
     const amount = r.amount == null ? null : Number(r.amount);
-    const received = Number(r.received);
+    const got = collected.get(r.contractId);
+    const received = got?.paid ?? 0;
     const taxed = taxedAmountOrNull(
       amount,
       effectiveTaxSetting(orgTax, { taxTreatment: r.taxTreatment, amountBasis: r.amountBasis }),
@@ -453,6 +452,7 @@ export async function getContractProgress(
       amount,
       ...taxed,
       received,
+      feeAbsorbed: got?.fee ?? 0,
       remaining,
       fullyCollected,
     };

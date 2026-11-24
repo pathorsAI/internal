@@ -123,7 +123,8 @@ the `tools-*.ts` modules):
   `pay_employee_salary` gets `destructiveHint: true`
   — it writes the payslip plus the salary-expense ledger entry, the month can't
   be booked twice and no tool reverses it; and `set_subscription_period`
-  (an upsert) and `unmark_accountant_notified` (clears a flag to null) get
+  (an upsert), `set_payment_allocations` (replaces the whole set) and
+  `unmark_accountant_notified` (clears a flag to null) get
   `idempotentHint: true`, which the `update_`/`delete_` prefix rule misses;
 - a `[read]` / `[write]` / `[delete]` tag prefixed to the description, so
   clients can group read vs write at a glance;
@@ -190,9 +191,35 @@ managed with `create_billing_item` / `update_billing_item` / `delete_billing_ite
 recurring fees belong in subscriptions instead, and their periods appear on the
 board automatically. `sync_billing_calendar` pushes the board to Google Calendar.
 
-> Money actually received is always computed from ledger transactions bound to the
-> charge (`billingItemId`) or to a subscription period — never from `paidOn`, which
-> is only a human annotation.
+> Money actually received is always computed from ledger income — through its
+> payment allocations, or its single binding (`billingItemId` / subscription period /
+> `contractId`) when it has none — never from `paidOn`, which is only a human annotation.
+
+**Payment allocations (收款分配, migrations/0041)** — one income transaction can be
+split across several receivables with `set_payment_allocations` (`transactionId`,
+`allocations: [{ subscriptionId + subscriptionPeriod | billingItemId | contractId,
+amount, fee?, note? }]`), which replaces the transaction's whole set (`[]` clears it).
+`fee` is not money: it is an agreed shortfall (remittance fee / FX) that we absorb,
+so the receivable counts as collected. Rules (`src/lib/payment-allocation.ts`,
+SQL in `src/db/allocations.ts`): a transaction with any allocation rows is counted
+only through them; one without falls back to its single binding as one allocation
+of the full amount, fee 0 (precedence subscription period > billing item >
+contract). Collected for a target = Σ(amount + fee) of its effective allocations,
+same currency only, compared with the gross receivable; Σ amount ≤ the transaction
+amount. A contract's 已收 = allocations to the contract + to its billing items + to
+periods of subscriptions bound to it. So `paid` / `received` on `list_billing_status`,
+`get_subscription_schedule`, `list_contracts` and `contractProgress` include absorbed
+fees, and each also returns `feeAbsorbed`. `set_payment_allocations` returns the
+stored rows plus the progress of every target touched (before and after) and
+`contractProgress`. `list_payment_allocations` lists effective allocations by
+`transactionId`, by one target, or by transaction-date range (`source` =
+`allocation` | `legacy`, with the transaction's `book`) and totals `absorbedFees`
+per currency; the 報表 page shows the 管理帳 year-to-date total under 應收帳齡.
+`update_transaction` can set `billingItemId` (0 clears); editing a transaction's
+single binding or amount first drops an allocation set that is only a mirror of
+the old binding (what 0041 migrated), so the edit takes effect — a real split is
+left alone. `set_payment_allocations` is annotated idempotent and audit-logged as
+an `update` of the transaction.
 
 **營業稅別 (VAT treatment, migrations/0040)** — contracts, subscriptions and billing
 items carry optional `taxTreatment` (`taxable` 應稅 5% | `zero_rated` 零稅率 |
@@ -211,7 +238,7 @@ revenue estimates should use **net**. `set_subscription_period`'s
 
 **Ledger (management & tax books)** — `list_transactions`, `get_transaction`,
 `list_outstanding_advances`, `create_transaction` (expense/income/advance/transfer),
-`update_transaction` (date/amount/category/project/…), `delete_transaction`,
+`update_transaction` (date/amount/category/project/contract/billing item/…), `delete_transaction`,
 `create_reimbursement` (book an advance as repaid). Rows imported by an
 integration (the Wise sync) carry `externalSource` / `externalRef` and
 `needsReview` (待確認); `list_transactions` takes `needsReview: true` to list only

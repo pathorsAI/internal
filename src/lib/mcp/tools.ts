@@ -11,6 +11,7 @@ import {
   upsertSubscriptionPeriod,
 } from "@/db/queries";
 import { getOrgTaxSetting } from "@/db/org-tax";
+import { contractCollected } from "@/db/allocations";
 import {
   collectionProgress,
   effectiveTaxSetting,
@@ -50,6 +51,7 @@ import { recurringExpenseTools } from "./tools-recurring-expenses";
 import { settingsTools } from "./tools-settings";
 import { vendorBillingAdminTools } from "./tools-vendor-billing-admin";
 import { linkTools } from "./tools-links";
+import { allocationTools } from "./tools-allocations";
 import { aiRuleTools } from "./tools-ai-rules";
 
 export type { ToolContext, ToolDef } from "./shared";
@@ -90,7 +92,15 @@ const CONTRACT_LIST_ROW: JsonSchemaObject = rowSchema({
   customer: { type: ["string", "null"], description: "Customer party name." },
   ...taxBreakdownProps(true),
   ...EFFECTIVE_TAX_PROPS,
-  received: { type: "number", description: "已收: linked income in the contract currency." },
+  received: {
+    type: "number",
+    description:
+      "已收 in the contract currency: payment allocations to the contract itself + to its billing items + to periods of subscriptions bound to it (an income transaction without allocations counts through its single binding). Includes feeAbsorbed.",
+  },
+  feeAbsorbed: {
+    type: "number",
+    description: "The part of `received` that is an absorbed bank fee / FX shortfall (allocation `fee`), not money.",
+  },
   cost: { type: "number", description: "Linked expense/advance; reference only." },
   remaining: { type: ["number", "null"], description: "未收 = gross − received; null when amount is unset." },
 });
@@ -486,7 +496,7 @@ const billingTools: Record<string, ToolDef> = {
 
   get_subscription_schedule: {
     description:
-      "Per-period collection status for one subscription: lists each billing period (from start_date + interval_months, up to and including the next due one) with 應收/已收 and a status — paid (已收滿), partial (部分), overdue (未收且已到期), upcoming (未到期). Income transactions linked to the subscription via subscriptionId + subscriptionPeriod count toward that period's 已收. Use this to answer 'which 期/季 is collected vs outstanding'. totalOutstanding sums the未收 of every non-upcoming period. Each period's `expected` is the gross receivable (含稅): `amount` (the default or a set_subscription_period override, in the subscription's amountBasis) plus 5% when taxable; `net`/`tax` split it.",
+      "Per-period collection status for one subscription: lists each billing period (from start_date + interval_months, up to and including the next due one) with 應收/已收 and a status — paid (已收滿), partial (部分), overdue (未收且已到期), upcoming (未到期). A period's 已收 is the sum of payment allocations to that subscription + period (amount + absorbed fee; an income transaction without allocations counts through its subscriptionId + subscriptionPeriod binding, full amount). See set_payment_allocations. Use this to answer 'which 期/季 is collected vs outstanding'. totalOutstanding sums the未收 of every non-upcoming period. Each period's `expected` is the gross receivable (含稅): `amount` (the default or a set_subscription_period override, in the subscription's amountBasis) plus 5% when taxable; `net`/`tax` split it.",
     inputSchema: {
       type: "object",
       properties: {
@@ -527,7 +537,11 @@ const billingTools: Record<string, ToolDef> = {
               net: { type: "number", description: "未稅." },
               tax: { type: "number", description: "稅額." },
               expected: { type: "number", description: "應收 for the period = gross (含稅)." },
-              paid: { type: "number", description: "已收 for the period." },
+              paid: { type: "number", description: "已收 for the period, including feeAbsorbed." },
+              feeAbsorbed: {
+                type: "number",
+                description: "Absorbed bank fee / FX shortfall counted in `paid` (allocation fees), not money.",
+              },
               status: {
                 type: "string",
                 enum: ["paid", "partial", "overdue", "upcoming"],
@@ -549,6 +563,7 @@ const billingTools: Record<string, ToolDef> = {
               "tax",
               "expected",
               "paid",
+              "feeAbsorbed",
               "status",
               "note",
               "isOverride",
@@ -698,8 +713,7 @@ const billingTools: Record<string, ToolDef> = {
             isNull(contracts.deletedAt),
           )
         : and(eq(contracts.organizationId, orgId), isNull(contracts.deletedAt));
-      // 收款進度只計同幣別、綁定此合約的交易；income=已收，expense/advance=成本。
-      const receivedSum = sql<string>`coalesce(sum(${transactions.amount}) filter (where ${transactions.type} = 'income'), 0)`;
+      // 已收來自有效收款分配（src/db/allocations.ts，與合約頁同一個口徑）；cost＝綁定此合約、同幣別的 expense/advance。
       const costSum = sql<string>`coalesce(sum(${transactions.amount}) filter (where ${transactions.type} in ('expense','advance')), 0)`;
       const rows = await db
         .select({
@@ -714,7 +728,6 @@ const billingTools: Record<string, ToolDef> = {
           customer: parties.name,
           ownTaxTreatment: contracts.taxTreatment,
           ownAmountBasis: contracts.amountBasis,
-          received: receivedSum,
           cost: costSum,
         })
         .from(contracts)
@@ -730,17 +743,28 @@ const billingTools: Record<string, ToolDef> = {
         .where(where)
         .groupBy(contracts.id, parties.name)
         .orderBy(desc(contracts.id));
-      const orgTax = await getOrgTaxSetting(orgId);
+      const [orgTax, collected] = await Promise.all([
+        getOrgTaxSetting(orgId),
+        contractCollected(orgId, rows.map((r) => r.id)),
+      ]);
       return listResult(
         rows.map(({ ownTaxTreatment, ownAmountBasis, ...r }) => {
-          const received = Number(r.received);
+          const got = collected.get(r.id);
+          const received = got?.paid ?? 0;
           const taxed = taxedAmountOrNull(
             r.amount,
             effectiveTaxSetting(orgTax, { taxTreatment: ownTaxTreatment, amountBasis: ownAmountBasis }),
             r.currency,
           );
           const { remaining } = collectionProgress(taxed.gross, received);
-          return { ...r, ...taxed, received, cost: Number(r.cost), remaining };
+          return {
+            ...r,
+            ...taxed,
+            received,
+            feeAbsorbed: got?.fee ?? 0,
+            cost: Number(r.cost),
+            remaining,
+          };
         }),
       );
     },
@@ -867,6 +891,7 @@ export const tools: Record<string, ToolDef> = {
   ...billingItemTools,
   ...accountingTools,
   ...transactionTools,
+  ...allocationTools,
   ...clientTools,
   ...hrTools,
   ...integrationTools,

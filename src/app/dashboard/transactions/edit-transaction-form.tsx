@@ -33,6 +33,7 @@ import { DatePicker } from "@/components/date-picker";
 import { CategoryCombobox } from "./category-combobox";
 import { PartyCombobox } from "@/components/party-combobox";
 import { ContractCombobox, type ContractOption } from "./contract-combobox";
+import { AllocatePaymentButton } from "@/components/payment-allocation-sheet";
 
 const initial: ActionState = { ok: false };
 
@@ -448,6 +449,12 @@ function PartyAccountFields({
       <Field label={t("form.contract")} wide>
         <ContractCombobox contracts={contracts} defaultId={txn.contractId} />
       </Field>
+      {isIncome ? (
+        <div className="flex flex-col gap-2 rounded-md border px-3 py-2.5 sm:col-span-2 sm:flex-row sm:items-center sm:justify-between">
+          <span className="text-xs text-muted-foreground">{t("form.allocationHint")}</span>
+          <AllocatePaymentButton transactionId={txn.id} />
+        </div>
+      ) : null}
     </>
   );
 }

@@ -104,13 +104,15 @@ export const TOOL_GROUPS: Record<ToolGroupId, GroupDef> = {
       "delete_project",
       "list_upcoming_billing",
       "list_billing_status",
+      "set_payment_allocations",
+      "list_payment_allocations",
       "create_billing_item",
       "update_billing_item",
       "delete_billing_item",
       "sync_billing_calendar",
     ],
     keywords: [
-      "客戶", "合約", "訂閱", "專案", "請款", "收款", "付款", "未收", "還沒付", "沒付", "應收", "到期", "逾期", "續約", "報價",
+      "客戶", "合約", "訂閱", "專案", "請款", "收款", "付款", "未收", "分配", "手續費", "匯差", "還沒付", "沒付", "應收", "到期", "逾期", "續約", "報價",
       "customer", "client", "contract", "subscription", "project", "billing", "overdue", "unpaid", "invoice due",
     ],
   },
@@ -171,8 +173,10 @@ export const TOOL_GROUPS: Record<ToolGroupId, GroupDef> = {
   },
   review: {
     summary:
-      "Review & audit: bank reconciliations, notices for the accountant (mark / unmark as sent), and the activity log of who changed what.",
+      "Review & audit: bank reconciliations, splitting one payment across receivables and absorbing bank fees (payment allocations), notices for the accountant (mark / unmark as sent), and the activity log of who changed what.",
     tools: [
+      "set_payment_allocations",
+      "list_payment_allocations",
       "list_reconciliations",
       "create_reconciliation",
       "update_reconciliation",

@@ -42,6 +42,8 @@ const AUDIT_BY_NAME: Record<string, Pick<McpAudit, "action" | "entityType">> = {
   merge_parties: { action: "update", entityType: "party" },
   // 待連結：掛上候選 / 略過 / 指定對象，都記在交易上
   resolve_transaction_link: { action: "update", entityType: "transaction" },
+  // 收款分配（0043）：記在交易上（結果的 id 就是 transactionId），與網頁端 logWeb 一致。
+  set_payment_allocations: { action: "update", entityType: "transaction" },
   // 成員提交自己的代墊（tools-transactions.ts）：建一筆 advance 交易。
   submit_advance: { action: "create", entityType: "transaction" },
   // AI 規則（tools-ai-rules.ts）：remove_ 是軟刪。
@@ -89,7 +91,7 @@ export function deriveMcpAudit(name: string, out: unknown): McpAudit | null {
 
 /** Bump on every published change to tools, schemas or instructions. Clients
  *  (and OpenAI's plugin "Scan Tools") key their cached snapshot off this. */
-export const SERVER_VERSION = "1.15.0";
+export const SERVER_VERSION = "1.16.0";
 
 /** Public base URL of this deployment; doubles as the OAuth issuer.
  *  Keep in sync with the `resource` passed to `mcp()` in src/lib/auth.ts. */
@@ -339,6 +341,8 @@ const IDEMPOTENT_OVERRIDES: Record<string, Partial<ToolAnnotations>> = {
   set_subscription_period: { idempotentHint: true },
   // Clears a flag to null; running it twice changes nothing the second time.
   unmark_accountant_notified: { idempotentHint: true },
+  // Replaces a transaction's whole allocation set; the same set lands the same rows.
+  set_payment_allocations: { idempotentHint: true },
 };
 
 // Human-readable tool titles (MCP `BaseMetadata.title`; required for the OpenAI

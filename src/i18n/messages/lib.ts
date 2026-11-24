@@ -15,6 +15,8 @@ const lib = {
     accountRevealed: { "zh-TW": "顯示完整帳號：{account}", en: "Revealed full account number: {account}" },
     paymentMatched: { "zh-TW": "收款配對 #{id}", en: "Payment matched #{id}" },
     paymentMatchedPeriod: { "zh-TW": "{period} 收款配對 #{id}", en: "{period} payment matched #{id}" },
+    paymentAllocated: { "zh-TW": "收款分配：{count} 列，吸收手續費 {fee}", en: "Payment allocated: {count} lines, {fee} fee absorbed" },
+    paymentAllocationCleared: { "zh-TW": "清除收款分配", en: "Payment allocations cleared" },
   },
   installment: {
     full: { "zh-TW": "全額", en: "Full amount" },

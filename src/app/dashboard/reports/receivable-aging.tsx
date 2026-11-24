@@ -28,7 +28,14 @@ const bucketTone: Record<AgingBucket, string> = {
  * 只列已請款而未收齊的金額 —— 還沒請款的不叫應收帳款。逾期天數以「應該收到錢
  * 的那天」起算（有月結條件就是請款日 + 天數），與看板的逾期判斷同一個基準。
  */
-export async function ReceivableAging({ rows }: Readonly<{ rows: AgingRow[] }>) {
+export async function ReceivableAging({
+  rows,
+  absorbedFees,
+}: Readonly<{
+  rows: AgingRow[];
+  /** 管理帳今年至今吸收的匯款手續費（收款分配的 fee，0043），依幣別；不給就不顯示那一行 */
+  absorbedFees?: { year: string; totals: { currency: string; total: number }[] };
+}>) {
   const t = await getTranslations("reports");
   const bucketLabels: Record<AgingBucket, string> = {
     current: t("aging.buckets.current"),
@@ -127,6 +134,16 @@ export async function ReceivableAging({ rows }: Readonly<{ rows: AgingRow[] }>) 
           )}
         </TableBody>
       </Table>
+      {absorbedFees ? (
+        <div className="border-t px-4 py-2.5 text-xs text-muted-foreground tabular-nums">
+          {absorbedFees.totals.length === 0
+            ? t("aging.absorbedFeesNone", { year: absorbedFees.year })
+            : t("aging.absorbedFees", {
+                year: absorbedFees.year,
+                amounts: absorbedFees.totals.map((f) => formatCurrency(f.total, f.currency)).join("　·　"),
+              })}
+        </div>
+      ) : null}
     </TableCard>
   );
 }

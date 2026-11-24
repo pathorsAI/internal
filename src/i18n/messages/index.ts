@@ -7,6 +7,7 @@ import account from "./account";
 import transactions from "./transactions";
 import links from "./links";
 import billing from "./billing";
+import allocations from "./allocations";
 import contracts from "./contracts";
 import subscriptions from "./subscriptions";
 import projects from "./projects";
@@ -41,6 +42,7 @@ const catalogue = {
   transactions,
   links,
   billing,
+  allocations,
   contracts,
   subscriptions,
   projects,
