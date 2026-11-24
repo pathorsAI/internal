@@ -74,6 +74,42 @@ function updateTool(messages: UiMessage[], id: string, patch: Partial<UiToolCall
   );
 }
 
+/** 把一段文字接到指定的 assistant 泡泡；新的一輪（separate）前面空一行。 */
+function appendText(
+  messages: UiMessage[],
+  targetId: string | null,
+  delta: string,
+  separate: boolean,
+): UiMessage[] {
+  return messages.map((m) =>
+    m.kind === "assistant" && m.id === targetId
+      ? { ...m, text: m.text && separate ? `${m.text}\n\n${delta}` : m.text + delta }
+      : m,
+  );
+}
+
+/** 在指定的 assistant 泡泡新增或取代一張工具卡（同 id 的移到最後）。 */
+function upsertTool(messages: UiMessage[], targetId: string | null, call: UiToolCall): UiMessage[] {
+  return messages.map((m) =>
+    m.kind === "assistant" && m.id === targetId
+      ? { ...m, tools: [...m.tools.filter((x) => x.id !== call.id), call] }
+      : m,
+  );
+}
+
+function cancelPendingTools(tools: UiToolCall[]): UiToolCall[] {
+  return tools.map((x) => (x.status === "pending" ? { ...x, status: "cancelled" as const } : x));
+}
+
+/** 把所有還沒按的確認卡標成取消。 */
+function cancelPendingCards(messages: UiMessage[]): UiMessage[] {
+  return messages.map((m) =>
+    m.kind === "assistant" && m.tools.some((x) => x.status === "pending")
+      ? { ...m, tools: cancelPendingTools(m.tools) }
+      : m,
+  );
+}
+
 export function AiChat({ conversationId, initialMessages, initialConversations, canWrite }: Props) {
   const t = useTranslations("ai");
   const router = useRouter();
@@ -123,24 +159,12 @@ export function AiChat({ conversationId, initialMessages, initialConversations, 
           const target = targetRef.current;
           const sep = separateRef.current;
           separateRef.current = false;
-          setMessages((ms) =>
-            ms.map((m) =>
-              m.kind === "assistant" && m.id === target
-                ? { ...m, text: m.text && sep ? `${m.text}\n\n${e.d}` : m.text + e.d }
-                : m,
-            ),
-          );
+          setMessages((ms) => appendText(ms, target, e.d, sep));
           break;
         }
         case "tool": {
           const target = targetRef.current;
-          setMessages((ms) =>
-            ms.map((m) =>
-              m.kind === "assistant" && m.id === target
-                ? { ...m, tools: [...m.tools.filter((x) => x.id !== e.call.id), e.call] }
-                : m,
-            ),
-          );
+          setMessages((ms) => upsertTool(ms, target, e.call));
           break;
         }
         case "tool_done":
@@ -157,6 +181,7 @@ export function AiChat({ conversationId, initialMessages, initialConversations, 
   );
 
   const post = useCallback(
+    // 錯誤都在裡面處理掉，這個 promise 不會 reject，呼叫端不用 await。
     async (body: ChatRequest) => {
       const controller = new AbortController();
       abortRef.current = controller;
@@ -196,21 +221,12 @@ export function AiChat({ conversationId, initialMessages, initialConversations, 
       separateRef.current = false;
       // 伺服器收到新問題會把上一題沒按的確認卡當成取消，畫面上同步標示。
       setMessages((ms) => [
-        ...ms.map((m) =>
-          m.kind === "assistant" && m.tools.some((x) => x.status === "pending")
-            ? {
-                ...m,
-                tools: m.tools.map((x) =>
-                  x.status === "pending" ? { ...x, status: "cancelled" as const } : x,
-                ),
-              }
-            : m,
-        ),
+        ...cancelPendingCards(ms),
         { kind: "user", id: `u${stamp}`, text: q },
         { kind: "assistant", id: bubbleId, text: "", tools: [] },
       ]);
       setInput("");
-      void post({
+      post({
         conversationId: activeRef.current ?? undefined,
         message: q,
         ...(page && !activeRef.current ? { page } : {}),
@@ -226,7 +242,7 @@ export function AiChat({ conversationId, initialMessages, initialConversations, 
       targetRef.current = bubble?.id ?? null;
       separateRef.current = true;
       setMessages((ms) => updateTool(ms, call.id, { status: approve ? "running" : "cancelled" }));
-      void post({ conversationId: activeRef.current, confirm: { toolCallId: call.id, approve } });
+      post({ conversationId: activeRef.current, confirm: { toolCallId: call.id, approve } });
     },
     [busy, messages, post],
   );

@@ -11,13 +11,17 @@ type Schema = {
   additionalProperties?: boolean;
 };
 
+/** 複製一份物件、拿掉指定的 key（不改原物件）。 */
+function omit(obj: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(obj).filter(([k]) => !keys.includes(k)));
+}
+
 /**
  * 給模型看的 inputSchema：拿掉 organizationId（站內 AI 的組織固定是目前登入的組織，
  * 執行時由伺服器塞進去），寫入工具多一個 confirmSummary，讓模型寫一句確認卡上的說明。
  */
 export function assistantSchema(name: string, schema: Schema): Schema {
-  const { organizationId: _org, ...properties } = schema.properties;
-  void _org;
+  const properties = omit(schema.properties, ["organizationId"]);
   const required = (schema.required ?? []).filter((r) => r !== "organizationId");
   const mayWrite = baseToolLevel(name) !== "read" || name === "preview_billing_notifications" || name === "simpany_prepare_salary_filing";
   if (mayWrite) {
@@ -84,8 +88,5 @@ export function prepareArgs(
 
 /** 確認卡上要列的參數：拿掉 organizationId 與 confirmSummary。 */
 export function displayArgs(args: Record<string, unknown>): Record<string, unknown> {
-  const { organizationId: _org, [CONFIRM_SUMMARY_ARG]: _summary, ...rest } = args;
-  void _org;
-  void _summary;
-  return rest;
+  return omit(args, ["organizationId", CONFIRM_SUMMARY_ARG]);
 }

@@ -28,5 +28,5 @@ export const MAX_USER_MESSAGE_CHARS = 4_000;
 
 export function openRouterApiKey(): string | null {
   const key = process.env.OPENROUTER_API_KEY?.trim();
-  return key ? key : null;
+  return key || null;
 }

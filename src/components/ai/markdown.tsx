@@ -53,60 +53,79 @@ function headingText(line: string): string | null {
   return t.slice(i + 1).trim();
 }
 
+/** 讀到一個區塊後回傳區塊本身與下一行的位置。 */
+type Read = { block: Block; next: number };
+
+/** ``` 圍起來的程式碼區塊；沒有收尾的 ``` 就吃到結尾。 */
+function readCodeBlock(lines: string[], start: number): Read {
+  const code: string[] = [];
+  let i = start + 1;
+  while (i < lines.length && !lines[i].trim().startsWith("```")) code.push(lines[i++]);
+  return { block: { type: "code", text: code.join("\n") }, next: i + 1 };
+}
+
+/** 表格要有表頭列加分隔列才算，否則回 null 讓它當一般段落。 */
+function readTable(lines: string[], start: number): Read | null {
+  if (!isTableRow(lines[start]) || start + 1 >= lines.length || !isTableSeparator(lines[start + 1])) return null;
+  const head = cells(lines[start]);
+  const rows: string[][] = [];
+  let i = start + 2;
+  while (i < lines.length && isTableRow(lines[i])) rows.push(cells(lines[i++]));
+  return { block: { type: "table", head, rows }, next: i };
+}
+
+function bulletItem(line: string): string | null {
+  return isBullet(line) ? line.trimStart().slice(2) : null;
+}
+
+/** 連續的清單項目；第一行決定是有序還是無序，遇到不同種類就停。 */
+function readList(lines: string[], start: number): Read | null {
+  const ordered = orderedItem(lines[start]) !== null;
+  if (!ordered && !isBullet(lines[start])) return null;
+  const itemOf = ordered ? orderedItem : bulletItem;
+  const items: string[] = [];
+  let i = start;
+  while (i < lines.length) {
+    const item = itemOf(lines[i]);
+    if (item === null) break;
+    items.push(item.trim());
+    i++;
+  }
+  return { block: { type: ordered ? "ol" : "ul", items }, next: i };
+}
+
+/** 標題、表格、清單其中之一；都不是就回 null。 */
+function readStructured(lines: string[], start: number): Read | null {
+  const h = headingText(lines[start]);
+  if (h !== null) return { block: { type: "h", text: h }, next: start + 1 };
+  return readTable(lines, start) ?? readList(lines, start);
+}
+
 export function parseBlocks(src: string): Block[] {
-  const lines = src.replace(/\r\n/g, "\n").split("\n");
+  const lines = src.replaceAll("\r\n", "\n").split("\n");
   const blocks: Block[] = [];
   let para: string[] = [];
   const flush = () => {
     if (para.length > 0) blocks.push({ type: "p", text: para.join("\n") });
     para = [];
   };
-  for (let i = 0; i < lines.length; i++) {
+  let i = 0;
+  while (i < lines.length) {
     const line = lines[i];
-    if (line.trim().startsWith("```")) {
-      flush();
-      const code: string[] = [];
-      i++;
-      while (i < lines.length && !lines[i].trim().startsWith("```")) code.push(lines[i++]);
-      blocks.push({ type: "code", text: code.join("\n") });
-      continue;
-    }
     if (!line.trim()) {
       flush();
+      i++;
       continue;
     }
-    const h = headingText(line);
-    if (h !== null) {
+    const read = line.trim().startsWith("```") ? readCodeBlock(lines, i) : readStructured(lines, i);
+    if (read) {
       flush();
-      blocks.push({ type: "h", text: h });
-      continue;
-    }
-    if (isTableRow(line) && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
-      flush();
-      const head = cells(line);
-      const rows: string[][] = [];
-      i += 2;
-      while (i < lines.length && isTableRow(lines[i])) rows.push(cells(lines[i++]));
-      i--;
-      blocks.push({ type: "table", head, rows });
-      continue;
-    }
-    if (isBullet(line) || orderedItem(line) !== null) {
-      flush();
-      const ordered = orderedItem(line) !== null;
-      const items: string[] = [];
-      while (i < lines.length) {
-        const l = lines[i];
-        const item = ordered ? orderedItem(l) : isBullet(l) ? l.trimStart().slice(2) : null;
-        if (item === null) break;
-        items.push(item.trim());
-        i++;
-      }
-      i--;
-      blocks.push({ type: ordered ? "ol" : "ul", items });
+      blocks.push(read.block);
+      i = read.next;
       continue;
     }
     para.push(line);
+    i++;
   }
   flush();
   return blocks;
@@ -118,75 +137,84 @@ function safeHref(href: string): { internal: boolean } | null {
   return null;
 }
 
+/** 行內片段：渲染好的節點與片段結束後的位置；不成立就回 null，交給下一種規則或當純文字。 */
+type Inline = { node: ReactNode; end: number };
+
+function readBold(text: string, i: number, key: () => string): Inline | null {
+  if (!text.startsWith("**", i)) return null;
+  const end = text.indexOf("**", i + 2);
+  if (end <= i + 2) return null;
+  return {
+    node: (
+      <strong key={key()} className="font-semibold">
+        {renderInline(text.slice(i + 2, end), key())}
+      </strong>
+    ),
+    end: end + 2,
+  };
+}
+
+function readCode(text: string, i: number, key: () => string): Inline | null {
+  if (text[i] !== "`") return null;
+  const end = text.indexOf("`", i + 1);
+  if (end <= i + 1) return null;
+  return {
+    node: (
+      <code key={key()} className="rounded-sm bg-muted px-1 py-0.5 font-mono text-[0.85em]">
+        {text.slice(i + 1, end)}
+      </code>
+    ),
+    end: end + 1,
+  };
+}
+
+function linkNode(label: string, href: string, key: string): ReactNode {
+  const safe = safeHref(href);
+  if (!safe) return label;
+  if (safe.internal) {
+    return (
+      <Link key={key} href={href} className="text-primary underline-offset-2 hover:underline">
+        {label}
+      </Link>
+    );
+  }
+  return (
+    <a key={key} href={href} target="_blank" rel="noopener noreferrer" className="text-primary underline-offset-2 hover:underline">
+      {label}
+    </a>
+  );
+}
+
+function readLink(text: string, i: number, key: () => string): Inline | null {
+  if (text[i] !== "[") return null;
+  const close = text.indexOf("](", i + 1);
+  const end = close === -1 ? -1 : text.indexOf(")", close + 2);
+  if (close <= i || end <= close) return null;
+  const label = text.slice(i + 1, close);
+  const href = text.slice(close + 2, end).trim();
+  return { node: linkNode(label, href, key()), end: end + 1 };
+}
+
 /** 行內：**粗體**、`code`、[文字](網址)。 */
 export function renderInline(text: string, keyPrefix = "i"): ReactNode[] {
   const out: ReactNode[] = [];
   let buf = "";
   let k = 0;
   const key = () => `${keyPrefix}-${k++}`;
-  const flush = () => {
-    if (buf) out.push(buf);
-    buf = "";
-  };
   let i = 0;
   while (i < text.length) {
-    if (text.startsWith("**", i)) {
-      const end = text.indexOf("**", i + 2);
-      if (end > i + 2) {
-        flush();
-        out.push(
-          <strong key={key()} className="font-semibold">
-            {renderInline(text.slice(i + 2, end), key())}
-          </strong>,
-        );
-        i = end + 2;
-        continue;
-      }
-    }
-    if (text[i] === "`") {
-      const end = text.indexOf("`", i + 1);
-      if (end > i + 1) {
-        flush();
-        out.push(
-          <code key={key()} className="rounded-sm bg-muted px-1 py-0.5 font-mono text-[0.85em]">
-            {text.slice(i + 1, end)}
-          </code>,
-        );
-        i = end + 1;
-        continue;
-      }
-    }
-    if (text[i] === "[") {
-      const close = text.indexOf("](", i + 1);
-      const end = close === -1 ? -1 : text.indexOf(")", close + 2);
-      if (close > i && end > close) {
-        const label = text.slice(i + 1, close);
-        const href = text.slice(close + 2, end).trim();
-        const safe = safeHref(href);
-        flush();
-        if (safe?.internal) {
-          out.push(
-            <Link key={key()} href={href} className="text-primary underline-offset-2 hover:underline">
-              {label}
-            </Link>,
-          );
-        } else if (safe) {
-          out.push(
-            <a key={key()} href={href} target="_blank" rel="noopener noreferrer" className="text-primary underline-offset-2 hover:underline">
-              {label}
-            </a>,
-          );
-        } else {
-          out.push(label);
-        }
-        i = end + 1;
-        continue;
-      }
+    const hit = readBold(text, i, key) ?? readCode(text, i, key) ?? readLink(text, i, key);
+    if (hit) {
+      if (buf) out.push(buf);
+      buf = "";
+      out.push(hit.node);
+      i = hit.end;
+      continue;
     }
     buf += text[i];
     i++;
   }
-  flush();
+  if (buf) out.push(buf);
   return out;
 }
 

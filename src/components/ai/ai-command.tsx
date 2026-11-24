@@ -8,7 +8,7 @@ import { AiPromptForm } from "./prompt-form";
 /** 頁面上已經有 AI 輸入框（首頁、AI 助理頁）時 ⌘K 直接聚焦它，不另開視窗。 */
 function focusInlineInput(): boolean {
   const el = document.querySelector<HTMLElement>("[data-ai-composer], [data-ai-prompt-input]");
-  if (!el || el.offsetParent === null) return false;
+  if (!el?.offsetParent) return false;
   el.focus();
   return true;
 }

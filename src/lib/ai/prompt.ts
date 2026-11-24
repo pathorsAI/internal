@@ -49,6 +49,7 @@ export function systemPrompt(opts: {
   now?: Date;
 }): string {
   const language = opts.locale === "en" ? "English" : "Traditional Chinese as used in Taiwan (繁體中文)";
+  const pageList = PAGES.map(([p, w]) => `${p} (${w})`).join(", ");
   const lines = [
     `You are the AI assistant inside Pathors Internal, the bookkeeping system of the organization "${opts.orgName}". Today is ${taipeiToday(opts.now ?? new Date())} (Asia/Taipei). Amounts are TWD unless stated.`,
     `Reply in ${language}. Be brief: lead with the answer, then at most a few bullets or a small Markdown table. Never use emoji.`,
@@ -57,7 +58,7 @@ export function systemPrompt(opts: {
     "No tool moves money: pay, payment, transfer and salary always mean recording an entry in the books.",
     `Not available here: issuing or voiding e-invoices, emailing payslips, uploading tax files, writing or settling salary filings. For those, tell the user to use the Simpany pages in the app or an external agent connected over MCP.`,
     `If the tools you have cannot answer, call ${LOAD_TOOL_GROUPS} to load another group, then continue.`,
-    `When useful, link the page where the user can check the result, with a relative Markdown link such as [交易](/dashboard/transactions). Pages: ${PAGES.map(([p, w]) => `${p} (${w})`).join(", ")}.`,
+    `When useful, link the page where the user can check the result, with a relative Markdown link such as [交易](/dashboard/transactions). Pages: ${pageList}.`,
   ];
   if (canUseWrites(opts.role)) {
     lines.push(

@@ -86,6 +86,74 @@ async function execute(
   return { status: "error", content: JSON.stringify({ error: res.error }), error: res.error };
 }
 
+type Prepared = { args: Record<string, unknown>; summary: string | null };
+type SaveResult = (status: "ok" | "error" | "pending", content: string | null) => Promise<unknown>;
+
+/** 把這支工具呼叫的結果存成一則 tool 訊息。 */
+function saverFor(ctx: TurnContext, call: AiToolCall): SaveResult {
+  return (status, content) =>
+    ctx.deps.db.insertAiMessage(ctx.conversationId, {
+      role: "tool",
+      toolCallId: call.id,
+      toolName: call.name,
+      status,
+      content,
+    });
+}
+
+/** load_tool_groups：把模型選的工具組併進來，回傳新的工具組。 */
+async function handleLoadGroups(
+  call: AiToolCall,
+  groups: ToolGroupId[],
+  save: SaveResult,
+): Promise<ToolGroupId[]> {
+  let requested: unknown[] = [];
+  try {
+    const parsed = JSON.parse(call.arguments || "{}") as { groups?: unknown };
+    requested = Array.isArray(parsed.groups) ? parsed.groups : [];
+  } catch {
+    // 壞掉的參數當成沒選
+  }
+  const added = requested.filter(isToolGroupId);
+  const nextGroups = [...new Set([...groups, ...added])];
+  await save("ok", JSON.stringify({ loaded: nextGroups }));
+  return nextGroups;
+}
+
+/** 一支一般工具呼叫：檢查參數與權限，只讀就執行，寫入就存成待確認。回傳是否在等確認。 */
+async function handleOneCall(ctx: TurnContext, call: AiToolCall, save: SaveResult): Promise<boolean> {
+  let prepared: Prepared;
+  try {
+    prepared = prepareArgs(call.arguments, ctx.owner.orgId);
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    await save("error", JSON.stringify({ error: `Invalid arguments: ${error}` }));
+    ctx.emit({ t: "tool", call: uiToolCall(call, "error", error) });
+    return false;
+  }
+
+  if (!isAssistantTool(call.name) || !canRun(call.name, prepared.args, ctx.role)) {
+    const error = isAssistantTool(call.name)
+      ? "This member has read-only access; writes need an owner or admin."
+      : "This tool is not available in the in-app assistant.";
+    await save("error", JSON.stringify({ error }));
+    ctx.emit({ t: "tool", call: uiToolCall(call, "error", error) });
+    return false;
+  }
+
+  if (toolLevel(call.name, prepared.args) !== "read") {
+    await save("pending", null);
+    ctx.emit({ t: "tool", call: uiToolCall(call, "pending") });
+    return true;
+  }
+
+  ctx.emit({ t: "tool", call: uiToolCall(call, "running") });
+  const result = await execute(ctx, call.name, prepared.args, prepared.summary);
+  await save(result.status, result.content);
+  ctx.emit({ t: "tool_done", id: call.id, status: result.status, error: result.error });
+  return false;
+}
+
 /** 處理模型這一輪要求的工具呼叫。回傳是否有寫入在等確認、以及新載入的工具組。 */
 async function handleToolCalls(
   ctx: TurnContext,
@@ -95,59 +163,12 @@ async function handleToolCalls(
   let pending = false;
   let nextGroups = groups;
   for (const call of calls) {
-    const save = (status: "ok" | "error" | "pending", content: string | null) =>
-      ctx.deps.db.insertAiMessage(ctx.conversationId, {
-        role: "tool",
-        toolCallId: call.id,
-        toolName: call.name,
-        status,
-        content,
-      });
-
+    const save = saverFor(ctx, call);
     if (call.name === LOAD_TOOL_GROUPS) {
-      let requested: unknown[] = [];
-      try {
-        const parsed = JSON.parse(call.arguments || "{}") as { groups?: unknown };
-        requested = Array.isArray(parsed.groups) ? parsed.groups : [];
-      } catch {
-        // 壞掉的參數當成沒選
-      }
-      const added = requested.filter(isToolGroupId);
-      nextGroups = [...new Set([...nextGroups, ...added])];
-      await save("ok", JSON.stringify({ loaded: nextGroups }));
-      continue;
-    }
-
-    let prepared: { args: Record<string, unknown>; summary: string | null };
-    try {
-      prepared = prepareArgs(call.arguments, ctx.owner.orgId);
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
-      await save("error", JSON.stringify({ error: `Invalid arguments: ${error}` }));
-      ctx.emit({ t: "tool", call: uiToolCall(call, "error", error) });
-      continue;
-    }
-
-    if (!isAssistantTool(call.name) || !canRun(call.name, prepared.args, ctx.role)) {
-      const error = isAssistantTool(call.name)
-        ? "This member has read-only access; writes need an owner or admin."
-        : "This tool is not available in the in-app assistant.";
-      await save("error", JSON.stringify({ error }));
-      ctx.emit({ t: "tool", call: uiToolCall(call, "error", error) });
-      continue;
-    }
-
-    if (toolLevel(call.name, prepared.args) !== "read") {
-      await save("pending", null);
-      ctx.emit({ t: "tool", call: uiToolCall(call, "pending") });
+      nextGroups = await handleLoadGroups(call, nextGroups, save);
+    } else if (await handleOneCall(ctx, call, save)) {
       pending = true;
-      continue;
     }
-
-    ctx.emit({ t: "tool", call: uiToolCall(call, "running") });
-    const result = await execute(ctx, call.name, prepared.args, prepared.summary);
-    await save(result.status, result.content);
-    ctx.emit({ t: "tool_done", id: call.id, status: result.status, error: result.error });
   }
   return { pending, groups: nextGroups };
 }
@@ -220,6 +241,41 @@ function findCall(history: readonly AiMessageRow[], toolCallId: string) {
 }
 
 /**
+ * 確認卡按下確認：再檢查一次權限（角色可能在這段時間被改）、搶下這張卡、執行、存結果。
+ * 卡已經被別的請求搶走時回傳 null。
+ */
+async function approveCall(
+  ctx: TurnContext,
+  toolCallId: string,
+  call: AiToolCall,
+): Promise<{ status: UiToolStatus; error?: string } | null> {
+  let prepared: Prepared | null = null;
+  try {
+    prepared = prepareArgs(call.arguments, ctx.owner.orgId);
+  } catch {
+    prepared = null;
+  }
+  if (!prepared || !canRun(call.name, prepared.args, ctx.role)) {
+    const error = prepared
+      ? "This member has read-only access; writes need an owner or admin."
+      : "Invalid arguments.";
+    await ctx.deps.db.resolvePendingToolMessage(
+      ctx.conversationId,
+      toolCallId,
+      "error",
+      JSON.stringify({ error }),
+    );
+    return { status: "error", error };
+  }
+  const claimed = await ctx.deps.db.claimPendingToolMessage(ctx.conversationId, toolCallId);
+  if (!claimed) return null;
+  ctx.emit({ t: "tool_done", id: toolCallId, status: "running" });
+  const result = await execute(ctx, call.name, prepared.args, prepared.summary);
+  await ctx.deps.db.setToolMessageResult(ctx.conversationId, toolCallId, result.status, result.content);
+  return { status: result.status, error: result.error };
+}
+
+/**
  * 確認卡按下確認／取消。確認：再檢查一次權限（角色可能在這段時間被改）、搶下這張卡
  * （同一張卡按兩次只會執行一次）、執行、存結果。這一輪的卡都處理完、而且不是全部取消時，
  * 接著讓模型把結果講給使用者聽。
@@ -237,48 +293,23 @@ export async function resolveConfirmation(
     return;
   }
 
-  let status: UiToolStatus;
-  let error: string | undefined;
-  if (!approve) {
+  let outcome: { status: UiToolStatus; error?: string } | null;
+  if (approve) {
+    outcome = await approveCall(ctx, toolCallId, call);
+    if (!outcome) {
+      ctx.emit({ t: "error", code: "not_found" });
+      return;
+    }
+  } else {
     await ctx.deps.db.resolvePendingToolMessage(
       ctx.conversationId,
       toolCallId,
       "cancelled",
       JSON.stringify({ status: "cancelled" }),
     );
-    status = "cancelled";
-  } else {
-    let prepared: { args: Record<string, unknown>; summary: string | null } | null = null;
-    try {
-      prepared = prepareArgs(call.arguments, ctx.owner.orgId);
-    } catch {
-      prepared = null;
-    }
-    if (!prepared || !canRun(call.name, prepared.args, ctx.role)) {
-      error = prepared
-        ? "This member has read-only access; writes need an owner or admin."
-        : "Invalid arguments.";
-      await ctx.deps.db.resolvePendingToolMessage(
-        ctx.conversationId,
-        toolCallId,
-        "error",
-        JSON.stringify({ error }),
-      );
-      status = "error";
-    } else {
-      const claimed = await ctx.deps.db.claimPendingToolMessage(ctx.conversationId, toolCallId);
-      if (!claimed) {
-        ctx.emit({ t: "error", code: "not_found" });
-        return;
-      }
-      ctx.emit({ t: "tool_done", id: toolCallId, status: "running" });
-      const result = await execute(ctx, call.name, prepared.args, prepared.summary);
-      await ctx.deps.db.setToolMessageResult(ctx.conversationId, toolCallId, result.status, result.content);
-      status = result.status;
-      error = result.error;
-    }
+    outcome = { status: "cancelled" };
   }
-  ctx.emit({ t: "tool_done", id: toolCallId, status, error });
+  ctx.emit({ t: "tool_done", id: toolCallId, status: outcome.status, error: outcome.error });
 
   // 同一輪還有別張卡沒按，就等使用者；全部處理完才讓模型接著講。
   const after = await ctx.deps.db.listAiMessages(ctx.conversationId);

@@ -1,6 +1,4 @@
-import { ClaudeLogo } from "@/components/add-to-claude-button";
-
-export { ClaudeLogo };
+export { ClaudeLogo } from "@/components/add-to-claude-button";
 
 /**
  * 外部 agent 的品牌 logo，vendor 進 repo（不從 CDN 載）。

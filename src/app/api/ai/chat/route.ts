@@ -43,26 +43,42 @@ function sameOrigin(req: Request): boolean {
   }
 }
 
+/** 欄位不合法時丟出的記號，parseBody 收到就回 null。 */
+const INVALID = Symbol("invalid");
+
+function parseConversationId(v: unknown): string | undefined | typeof INVALID {
+  if (v === undefined) return undefined;
+  if (typeof v !== "string" || v.length > 64) return INVALID;
+  return v;
+}
+
+function parseMessage(v: unknown): string | undefined | typeof INVALID {
+  if (v === undefined) return undefined;
+  if (typeof v !== "string") return INVALID;
+  const m = v.trim();
+  if (!m || m.length > MAX_USER_MESSAGE_CHARS) return INVALID;
+  return m;
+}
+
+function parseConfirm(v: unknown): ChatRequest["confirm"] | typeof INVALID {
+  if (v === undefined) return undefined;
+  const c = v as Record<string, unknown> | null;
+  if (!c || typeof c.toolCallId !== "string" || typeof c.approve !== "boolean") return INVALID;
+  return { toolCallId: c.toolCallId, approve: c.approve };
+}
+
 function parseBody(raw: unknown): ChatRequest | null {
   if (!raw || typeof raw !== "object") return null;
   const b = raw as Record<string, unknown>;
+  const conversationId = parseConversationId(b.conversationId);
+  const message = parseMessage(b.message);
+  const confirm = parseConfirm(b.confirm);
+  if (conversationId === INVALID || message === INVALID || confirm === INVALID) return null;
   const out: ChatRequest = {};
-  if (b.conversationId !== undefined) {
-    if (typeof b.conversationId !== "string" || b.conversationId.length > 64) return null;
-    out.conversationId = b.conversationId;
-  }
-  if (b.message !== undefined) {
-    if (typeof b.message !== "string") return null;
-    const m = b.message.trim();
-    if (!m || m.length > MAX_USER_MESSAGE_CHARS) return null;
-    out.message = m;
-  }
+  if (conversationId !== undefined) out.conversationId = conversationId;
+  if (message !== undefined) out.message = message;
   if (b.page !== undefined) out.page = typeof b.page === "string" ? b.page : undefined;
-  if (b.confirm !== undefined) {
-    const c = b.confirm as Record<string, unknown> | null;
-    if (!c || typeof c.toolCallId !== "string" || typeof c.approve !== "boolean") return null;
-    out.confirm = { toolCallId: c.toolCallId, approve: c.approve };
-  }
+  if (confirm !== undefined) out.confirm = confirm;
   // 一次只做一件事：問新題目，或回覆一張確認卡。
   if (Boolean(out.message) === Boolean(out.confirm)) return null;
   if (out.confirm && !out.conversationId) return null;
@@ -70,7 +86,7 @@ function parseBody(raw: unknown): ChatRequest | null {
 }
 
 function titleFrom(message: string): string {
-  const oneLine = message.replace(/\s+/g, " ").trim();
+  const oneLine = message.replaceAll(/\s+/g, " ").trim();
   return oneLine.length > 60 ? `${oneLine.slice(0, 59)}…` : oneLine;
 }
 
@@ -108,9 +124,7 @@ export async function POST(req: Request): Promise<Response> {
   if (body.conversationId && !conversation) return json(404, { t: "error", code: "not_found" });
 
   const isNew = !conversation;
-  if (!conversation) {
-    conversation = await createAiConversation(owner, titleFrom(body.message ?? ""));
-  }
+  conversation ??= await createAiConversation(owner, titleFrom(body.message ?? ""));
   const conversationId = conversation.id;
   const toolGroups = conversation.toolGroups;
   const title = conversation.title;

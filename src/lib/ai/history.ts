@@ -104,7 +104,8 @@ export function uiToolCall(
 ): UiToolCall {
   const args = parseArgs(call.arguments);
   const level = call.name === LOAD_TOOL_GROUPS ? "read" : toolLevel(call.name, args);
-  const summary = typeof args[CONFIRM_SUMMARY_ARG] === "string" ? (args[CONFIRM_SUMMARY_ARG] as string) : undefined;
+  const rawSummary = args[CONFIRM_SUMMARY_ARG];
+  const summary = typeof rawSummary === "string" ? rawSummary : undefined;
   return {
     id: call.id,
     name: call.name,
@@ -114,6 +115,17 @@ export function uiToolCall(
     ...(level === "read" ? {} : { args: displayArgs(args) }),
     ...(error ? { error } : {}),
   };
+}
+
+type AssistantBubble = Extract<UiMessage, { kind: "assistant" }>;
+
+/** 同一題接在最後一個 assistant 泡泡後面；最後一則不是 assistant 就開一個新的。 */
+function currentBubble(out: UiMessage[], id: string): AssistantBubble {
+  const last = out.at(-1);
+  if (last?.kind === "assistant") return last;
+  const bubble: AssistantBubble = { kind: "assistant", id, text: "", tools: [] };
+  out.push(bubble);
+  return bubble;
 }
 
 /**
@@ -129,16 +141,7 @@ export function toUiMessages(rows: readonly AiMessageRow[]): UiMessage[] {
       continue;
     }
     if (r.role !== "assistant") continue;
-    const last = out.at(-1);
-    const bubble =
-      last?.kind === "assistant"
-        ? last
-        : (() => {
-            const b: UiMessage = { kind: "assistant", id: `m${r.id}`, text: "", tools: [] };
-            out.push(b);
-            return b;
-          })();
-    if (bubble.kind !== "assistant") continue;
+    const bubble = currentBubble(out, `m${r.id}`);
     if (r.content) bubble.text = bubble.text ? `${bubble.text}\n\n${r.content}` : r.content;
     for (const c of r.toolCalls ?? []) {
       const t = toolRows.get(c.id);

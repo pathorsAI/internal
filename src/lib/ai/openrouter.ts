@@ -44,6 +44,16 @@ type StreamChunk = {
   error?: { message?: string };
 };
 
+const SSE_DONE = Symbol("sse-done");
+
+/** 一行 SSE：`data:` 的內容；不是 data 行或內容是空的回 null，`[DONE]` 回 SSE_DONE。 */
+function dataOf(line: string): string | null | typeof SSE_DONE {
+  if (!line.startsWith("data:")) return null;
+  const data = line.slice(5).trim();
+  if (data === "[DONE]") return SSE_DONE;
+  return data || null;
+}
+
 /**
  * 把 SSE 的位元組流切成一個個 `data:` 的內容。OpenRouter 會穿插 `: OPENROUTER PROCESSING`
  * 這種註解行保持連線，直接略過；`[DONE]` 代表結束。
@@ -59,19 +69,14 @@ export async function* sseData(body: ReadableStream<Uint8Array>): AsyncGenerator
       buffer += decoder.decode(value, { stream: true });
       let nl: number;
       while ((nl = buffer.indexOf("\n")) !== -1) {
-        const line = buffer.slice(0, nl).replace(/\r$/, "");
+        const data = dataOf(buffer.slice(0, nl).replace(/\r$/, ""));
         buffer = buffer.slice(nl + 1);
-        if (!line.startsWith("data:")) continue;
-        const data = line.slice(5).trim();
-        if (data === "[DONE]") return;
+        if (data === SSE_DONE) return;
         if (data) yield data;
       }
     }
-    const rest = buffer.trim();
-    if (rest.startsWith("data:")) {
-      const data = rest.slice(5).trim();
-      if (data && data !== "[DONE]") yield data;
-    }
+    const rest = dataOf(buffer.trim());
+    if (typeof rest === "string") yield rest;
   } finally {
     reader.releaseLock();
   }
@@ -83,7 +88,7 @@ export async function* sseData(body: ReadableStream<Uint8Array>): AsyncGenerator
  */
 export class TurnAccumulator {
   content = "";
-  private calls = new Map<number, ModelToolCall>();
+  private readonly calls = new Map<number, ModelToolCall>();
   inputTokens: number | null = null;
   outputTokens: number | null = null;
 
@@ -162,7 +167,7 @@ export async function streamModelTurn(opts: {
   if (!res.ok || !res.body) {
     let detail = "";
     try {
-      const body = (await res.json()) as { error?: { message?: string } };
+      const body: { error?: { message?: string } } = await res.json();
       detail = body.error?.message ?? "";
     } catch {
       // 沒有 JSON 就只回狀態碼
