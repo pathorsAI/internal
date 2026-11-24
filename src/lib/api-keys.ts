@@ -37,7 +37,9 @@ export function looksLikeApiKey(v: string | null | undefined): v is string {
 function base64url(bytes: Uint8Array): string {
   let s = "";
   for (const b of bytes) s += String.fromCodePoint(b);
-  return btoa(s).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+  let out = btoa(s).replaceAll("+", "-").replaceAll("/", "_");
+  while (out.endsWith("=")) out = out.slice(0, -1);
+  return out;
 }
 
 /** 產生一把新金鑰（純函式，不碰 DB）。 */
@@ -236,8 +238,8 @@ export async function verifyApiKey(raw: string, now = new Date()): Promise<Verif
 
 /** 從 `Authorization: Bearer <key>` 或 `X-API-Key: <key>` 取出長得像 API key 的值。 */
 export function extractApiKey(req: Request): string | null {
-  const header = req.headers.get("authorization");
-  const bearer = header?.match(/^Bearer\s+(\S+)\s*$/i)?.[1] ?? null;
+  const header = req.headers.get("authorization")?.trim() ?? "";
+  const bearer = header.slice(0, 7).toLowerCase() === "bearer " ? header.slice(7).trim() : null;
   if (looksLikeApiKey(bearer)) return bearer;
   const x = req.headers.get("x-api-key")?.trim() ?? null;
   return looksLikeApiKey(x) ? x : null;

@@ -526,12 +526,14 @@ export async function runToolWithAudit(
 ): Promise<ToolRunResult> {
   const tool = tools[name];
   if (!tool) return { ok: false, error: `Unknown tool: ${name}`, code: "unknown_tool" };
+  const apiKey = ctx.apiKey;
+  // An API-key call is logged exactly once per call (reads, refusals and failures included).
+  const auditKey = (out: unknown, error: string | null) =>
+    apiKey ? auditApiKeyCall(name, args, { ...ctx, apiKey }, out, error) : Promise.resolve();
+
   if (!toolAllowedFor(name, ctx)) {
-    const reason = API_KEY_EXCLUDED_TOOLS.has(name)
-      ? `${name} acts on a user account and is not available to API keys.`
-      : `${name} is not a [read] tool; this API key is read-only. Create a read-write key to call it.`;
-    // Refused calls are logged too: a key probing tools it may not use is worth seeing.
-    if (ctx.apiKey) await auditApiKeyCall(name, args, { ...ctx, apiKey: ctx.apiKey }, undefined, `refused: ${reason}`);
+    const reason = refusalReason(name);
+    await auditKey(undefined, `refused: ${reason}`);
     return { ok: false, error: reason, code: "forbidden" };
   }
   let out: unknown;
@@ -539,28 +541,41 @@ export async function runToolWithAudit(
     out = await tool.execute(args, ctx);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (ctx.apiKey) await auditApiKeyCall(name, args, { ...ctx, apiKey: ctx.apiKey }, undefined, message);
+    await auditKey(undefined, message);
     return { ok: false, error: message };
   }
-  if (ctx.apiKey) {
-    await auditApiKeyCall(name, args, { ...ctx, apiKey: ctx.apiKey }, out, null);
-    return { ok: true, out };
-  }
-  // Best-effort audit log for writes (never affects the response).
-  const audit = deriveMcpAudit(name, out);
-  if (audit) {
-    try {
-      const orgId = await resolveOrg(
-        audit.organizationId ? { organizationId: audit.organizationId } : args,
-        ctx,
-      );
-      const log = channel === "ai" ? logAi : logMcp;
-      await log(orgId, ctx.userId, audit.action, audit.entityType, audit.entityId, summary ?? name);
-    } catch {
-      // ignore audit failures
-    }
-  }
+  if (apiKey) await auditKey(out, null);
+  else await auditToolWrite(name, args, ctx, channel, out, summary);
   return { ok: true, out };
+}
+
+function refusalReason(name: string): string {
+  return API_KEY_EXCLUDED_TOOLS.has(name)
+    ? `${name} acts on a user account and is not available to API keys.`
+    : `${name} is not a [read] tool; this API key is read-only. Create a read-write key to call it.`;
+}
+
+/** Best-effort audit log for writes over OAuth MCP / the in-app AI (never affects the response). */
+async function auditToolWrite(
+  name: string,
+  args: Record<string, unknown>,
+  ctx: ToolContext,
+  channel: "mcp" | "ai",
+  out: unknown,
+  summary?: string,
+): Promise<void> {
+  const audit = deriveMcpAudit(name, out);
+  if (!audit) return;
+  try {
+    const orgId = await resolveOrg(
+      audit.organizationId ? { organizationId: audit.organizationId } : args,
+      ctx,
+    );
+    const log = channel === "ai" ? logAi : logMcp;
+    await log(orgId, ctx.userId, audit.action, audit.entityType, audit.entityId, summary ?? name);
+  } catch {
+    // ignore audit failures
+  }
 }
 
 async function handleToolCall(

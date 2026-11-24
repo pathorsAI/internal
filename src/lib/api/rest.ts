@@ -128,6 +128,11 @@ const ERROR_SCHEMA = {
   required: ["error"],
 };
 
+function toolTag(name: string, destructive: boolean): "read" | "write" | "delete" {
+  if (isReadOnlyTool(name)) return "read";
+  return destructive ? "delete" : "write";
+}
+
 /** OpenAPI 3.1：每支工具一個 POST 端點，schema 直接取自工具註冊表。 */
 export function buildOpenApi(baseUrl = publicBaseUrl()) {
   const paths: Record<string, unknown> = {
@@ -152,7 +157,7 @@ export function buildOpenApi(baseUrl = publicBaseUrl()) {
         operationId: name,
         summary: d.title,
         description: `${d.description}${isReadOnlyTool(name) ? "" : "\n\nRequires a read-write API key."}`,
-        tags: [isReadOnlyTool(name) ? "read" : d.annotations.destructiveHint ? "delete" : "write"],
+        tags: [toolTag(name, Boolean(d.annotations.destructiveHint))],
         requestBody: {
           required: false,
           content: { "application/json": { schema: d.inputSchema } },

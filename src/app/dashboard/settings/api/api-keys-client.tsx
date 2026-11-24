@@ -33,6 +33,11 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { createApiKeyAction, revokeApiKeyAction } from "./actions";
 
+function formText(form: FormData, key: string): string {
+  const v = form.get(key);
+  return typeof v === "string" ? v : "";
+}
+
 /**
  * 建立金鑰：表單 → 成功後同一個對話框換成「複製金鑰」畫面。完整金鑰只在這裡出現一次，
  * 關掉對話框就從記憶體消失（state 清空），之後只看得到 prefix。
@@ -60,9 +65,9 @@ export function CreateApiKeyButton() {
     const form = new FormData(e.currentTarget);
     start(async () => {
       const res = await createApiKeyAction({
-        name: String(form.get("name") ?? ""),
+        name: formText(form, "name"),
         scope,
-        expiresOn: String(form.get("expiresOn") ?? ""),
+        expiresOn: formText(form, "expiresOn"),
       });
       if (res.ok) setCreated({ key: res.key, name: res.name });
       else toast.error(res.error);

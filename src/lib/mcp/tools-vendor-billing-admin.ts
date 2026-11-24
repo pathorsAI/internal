@@ -117,7 +117,7 @@ export const vendorBillingAdminTools: Record<string, ToolDef> = {
         "update",
         "vendor_invoice",
         null,
-        `立即對帳：自動綁定 ${r.matched}、建議 ${r.suggested}${r.created ? `、新建交易 ${r.created}` : ""}`,
+        ["立即對帳：自動綁定 " + r.matched, "建議 " + r.suggested, ...(r.created ? ["新建交易 " + r.created] : [])].join("、"),
       );
       return r;
     },

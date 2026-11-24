@@ -6,6 +6,8 @@ import { apiError, apiJson, authenticateApiKey } from "@/lib/api/rest";
 import { runToolWithAudit } from "@/lib/mcp/handler";
 import { tools } from "@/lib/mcp/tools";
 
+const RUN_ERROR_CODE = { forbidden: "forbidden", unknown_tool: "not_found", tool_error: "tool_error" } as const;
+
 export async function POST(req: Request, { params }: { params: Promise<{ name: string }> }): Promise<Response> {
   const auth = await authenticateApiKey(req);
   if (!auth.ok) {
@@ -31,8 +33,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ name: s
 
   const res = await runToolWithAudit(name, args, auth.ctx);
   if (!res.ok) {
-    const code = res.code === "forbidden" ? "forbidden" : res.code === "unknown_tool" ? "not_found" : "tool_error";
-    return apiError(code, res.error, auth.headers);
+    return apiError(RUN_ERROR_CODE[res.code ?? "tool_error"], res.error, auth.headers);
   }
   return apiJson({ result: res.out ?? null }, { headers: auth.headers });
 }
