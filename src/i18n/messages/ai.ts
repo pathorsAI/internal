@@ -3,7 +3,6 @@ import type { Dictionary } from "./dictionary";
 /** 站內 AI 助理：/dashboard/ai、首頁輸入框、⌘K、外部 agent logo 列。 */
 const ai = {
   title: { "zh-TW": "AI 助理", en: "AI assistant" },
-  description: { "zh-TW": "用一句話查帳、記帳", en: "Look up and record entries in plain words" },
   metaTitle: { "zh-TW": "AI 助理 · Internal", en: "AI assistant · Internal" },
   prompt: {
     heading: { "zh-TW": "今天要處理什麼帳？", en: "What do you need to do today?" },

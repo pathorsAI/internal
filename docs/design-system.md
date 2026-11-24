@@ -93,6 +93,10 @@ The glow uses the brand blue only. It is deliberately restrained in light mode a
 </>
 ```
 
+- Exceptions without `<PageHeader>`: the overview (`/dashboard`) opens with the centred AI
+  input block (agent pill, `h1`, input, chips) and wider section gaps (`gap-8`/`gap-10`); the AI
+  assistant (`/dashboard/ai`) is a full-height chat with an `sr-only` `h1`. The breadcrumb already
+  names both pages, and neither has a page-level action to put in a header.
 - Tables: `<TableCard>` around a plain `<Table>`. Numbers right-aligned. Rows that open a dialog
   are clickable as a whole. Wide tables scroll inside their card.
 - No card inside a card. No grid of bordered boxes for short text — use a table or a `dl`.
