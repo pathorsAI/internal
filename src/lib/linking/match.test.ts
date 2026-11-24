@@ -78,5 +78,9 @@ describe("project status", () => {
     expect(contractReadyToClose({ status: "active", amount: 100, received: 100 })).toBe(true);
     expect(contractReadyToClose({ status: "completed", amount: 100, received: 100 })).toBe(false);
     expect(contractReadyToClose({ status: "draft", amount: 0, received: 5 })).toBe(false);
+    // 差匯款手續費（NT$15）也算收齊；不帶幣別時要收滿
+    expect(contractReadyToClose({ status: "active", amount: 29_316, received: 29_301, currency: "TWD" })).toBe(true);
+    expect(contractReadyToClose({ status: "active", amount: 29_316, received: 29_301 })).toBe(false);
+    expect(contractReadyToClose({ status: "active", amount: 29_316, received: 20_000, currency: "TWD" })).toBe(false);
   });
 });

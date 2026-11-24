@@ -35,7 +35,7 @@ export async function contractHints(db: Db, orgId: string, contractIds: readonly
   const progress = await getContractProgress(db, orgId, list);
   const out: StatusHint[] = [];
   for (const c of progress) {
-    if (c.gross === null || !contractReadyToClose({ status: c.status, amount: c.gross, received: c.received })) continue;
+    if (c.gross === null || !contractReadyToClose({ status: c.status, amount: c.gross, received: c.received, currency: c.currency })) continue;
     out.push({
       kind: "contract_fully_collected",
       contractId: c.contractId,
@@ -45,7 +45,7 @@ export async function contractHints(db: Db, orgId: string, contractIds: readonly
       amount: c.gross,
       received: c.received,
       message:
-        `合約「${c.title}」已收 ${c.received} ${c.currency} ≥ 含稅應收 ${c.gross}，但狀態仍是 ${c.status}。` +
+        `合約「${c.title}」已收 ${c.received} ${c.currency}，含稅應收 ${c.gross}（差額在匯款手續費容許範圍內視同收齊），但狀態仍是 ${c.status}。` +
         "請告訴使用者，並詢問是否改成 completed（已完成）；得到明確同意後才呼叫 update_contract，不要自行更改。",
     });
   }
