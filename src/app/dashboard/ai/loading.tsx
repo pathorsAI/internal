@@ -1,14 +1,10 @@
 import { Skeleton } from "@/components/ui/skeleton";
 import { CHAT_FRAME } from "./frame";
 
-/** 跟 AI 助理頁同尺寸的骨架：頁首帶、左側對話列表、右側訊息與輸入框。 */
+/** 跟 AI 助理頁同尺寸的骨架：左側對話列表、右側訊息與輸入框。 */
 export default function Loading() {
   return (
     <>
-      <div className="grid-paper -mx-6 -mt-6 space-y-1 border-b bg-card/60 px-6 pt-6 pb-5">
-        <Skeleton className="h-7 w-32" />
-        <Skeleton className="h-5 w-48" />
-      </div>
       <div className={CHAT_FRAME}>
         <div className="hidden w-64 shrink-0 flex-col gap-2 border-r p-3 md:flex">
           <Skeleton className="h-8 w-full" />

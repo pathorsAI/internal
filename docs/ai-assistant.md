@@ -48,6 +48,15 @@ homepage box / ⌘K ──► /dashboard/ai ──► POST /api/ai/chat (NDJSON 
   the actor; the summary is the line the confirmation card showed.
 - **Conversations** are private to the user and scoped to the org they were started in.
 
+## Connecting an external agent
+
+The homepage also has a dismissible "Connect your AI agent to internal" pill above the input box.
+It copies one setup prompt (`src/lib/ai/setup-prompt.ts`, in the UI language) that any agent can
+follow on its own: the current org's MCP URL (`orgMcpUrl`), Streamable HTTP + OAuth, how to add it
+in Claude Code / Cursor / Claude / ChatGPT, and a final `list_organizations` call to confirm the
+connection. The logos on the pill are decoration only. Once dismissed (localStorage), the same
+details stay on the MCP settings page.
+
 ## Setup
 
 Set `OPENROUTER_API_KEY` (`wrangler secret put OPENROUTER_API_KEY` in production, `.env.local`

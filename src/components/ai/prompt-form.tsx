@@ -57,11 +57,14 @@ export function useAskAssistant() {
 
 export function AiPromptForm({
   size = "lg",
+  centered = false,
   autoFocus,
   onSubmitted,
   className,
 }: Readonly<{
-  size?: "lg" | "md";
+  size?: "xl" | "lg" | "md";
+  /** 建議問題置中（首頁）。 */
+  centered?: boolean;
   autoFocus?: boolean;
   onSubmitted?: () => void;
   className?: string;
@@ -105,7 +108,7 @@ export function AiPromptForm({
         }}
         className={cn(
           "flex items-center gap-2 rounded-xl border bg-card pr-2 pl-4 shadow-xs transition-[box-shadow,border-color] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/30",
-          size === "lg" ? "h-14" : "h-12",
+          { xl: "h-16 pl-5", lg: "h-14", md: "h-12" }[size],
         )}
       >
         <Sparkles className="size-4 shrink-0 text-primary" aria-hidden />
@@ -120,16 +123,16 @@ export function AiPromptForm({
           maxLength={4000}
           className="h-full min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground md:text-sm"
         />
-        {size === "lg" ? (
+        {size === "md" ? null : (
           <kbd className="hidden h-6 items-center rounded-sm border bg-muted px-1.5 font-mono text-xs text-muted-foreground sm:inline-flex">
             ⌘K
           </kbd>
-        ) : null}
+        )}
         <Button type="submit" size="icon-sm" aria-label={t("submit")} disabled={!value.trim()}>
           <ArrowUp className="size-4" />
         </Button>
       </form>
-      <div className="flex flex-wrap gap-2">
+      <div className={cn("flex flex-wrap gap-2", centered && "justify-center")}>
         {suggestions.map((s) => (
           <Button
             key={s.label}

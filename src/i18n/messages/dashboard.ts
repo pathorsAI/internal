@@ -1,8 +1,6 @@
 import type { Dictionary } from "./dictionary";
 
 const dashboard = {
-  title: { "zh-TW": "總覽", en: "Overview" },
-  description: { "zh-TW": "收支與財務概況", en: "Ledger and financial summary" },
   currency: {
     TWD: { "zh-TW": "台幣", en: "TWD" },
     USD: { "zh-TW": "美金", en: "USD" },

@@ -11,7 +11,6 @@ import {
   Receipt,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { PageHeader } from "@/components/page-header";
 import {
   getOverview,
   listTransactions,
@@ -19,7 +18,7 @@ import {
   getMonthlyTrends,
   listMyOrgs,
 } from "@/db/queries";
-import { AgentConnectRow } from "@/components/ai/agent-connect-row";
+import { AgentOnboardPill } from "@/components/ai/agent-onboard-pill";
 import { AiPromptForm } from "@/components/ai/prompt-form";
 import { internalConnectorName, orgMcpUrl } from "@/lib/claude-connector";
 import { requestOrigin } from "@/lib/request-origin";
@@ -49,9 +48,9 @@ export default async function DashboardPage() {
     headers(),
   ]);
 
-  // 外部 agent 列用目前組織的固定 MCP 網址；找不到目前組織就只留 MCP 設定頁的連結。
+  // 「把 AI agent 接上 internal」複製的提示詞用目前組織的固定 MCP 網址；找不到目前組織就不顯示。
   const activeOrg = myOrgs.find((o) => o.id === orgId);
-  const claudeConnector = activeOrg
+  const agentConnector = activeOrg
     ? {
         name: internalConnectorName(activeOrg.name),
         url: orgMcpUrl(`${requestOrigin(h)}/mcp`, activeOrg),
@@ -109,14 +108,15 @@ export default async function DashboardPage() {
   ];
 
   return (
-    <>
-      <PageHeader title={t("title")} description={t("description")} />
-
-      {/* 問 AI 的入口放最上面：送出後帶著問題到 /dashboard/ai；下方 logo 列接外部 agent。 */}
-      <section className="mx-auto w-full max-w-3xl space-y-4 py-2">
-        <h2 className="text-lg font-semibold tracking-tight">{tAi("heading")}</h2>
-        <AiPromptForm />
-        <AgentConnectRow connector={claudeConnector} />
+    // 首頁不放 PageHeader：頁名 breadcrumb 已經有了，最上面留給問 AI 的入口（參考 Cloudflare 首頁）。
+    // 區塊間距比其他頁寬（gap-8／10），讓輸入區跟下方 dashboard 分得開。
+    <div className="flex flex-col gap-8 sm:gap-10">
+      {/* 問 AI 的入口：整塊置中、上下留白（手機 40px、桌機 64–80px，加上 layout 的 24px）。
+          最上面是複製外部 agent 設定提示詞的膠囊按鈕，送出問題後帶到 /dashboard/ai。 */}
+      <section className="mx-auto flex w-full max-w-3xl flex-col items-center gap-5 py-10 sm:gap-6 sm:py-16 lg:py-20">
+        {agentConnector ? <AgentOnboardPill connector={agentConnector} /> : null}
+        <h1 className="text-center text-2xl font-semibold tracking-tight sm:text-3xl">{tAi("heading")}</h1>
+        <AiPromptForm size="xl" centered className="w-full" />
       </section>
 
       {/* 資產總覽：每種幣別一張卡，顯示總資產（含期初餘額）與各帳戶餘額 */}
@@ -262,6 +262,6 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
       </section>
-    </>
+    </div>
   );
 }

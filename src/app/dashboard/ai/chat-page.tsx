@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
-import { PageHeader } from "@/components/page-header";
 import { getAiConversation, listAiConversations, listAiMessages } from "@/db/ai";
 import { toUiMessages } from "@/lib/ai/history";
 import { canUseWrites } from "@/lib/ai/tool-policy";
@@ -22,7 +21,8 @@ export async function AiChatPage({ conversationId }: Readonly<{ conversationId?:
 
   return (
     <>
-      <PageHeader title={t("title")} description={t("description")} />
+      {/* 不放 PageHeader（頁名 breadcrumb 已經有了），對話區直接貼齊頂部 header；標題留給讀螢幕的人。 */}
+      <h1 className="sr-only">{t("title")}</h1>
       <AiChat
         key={current?.id ?? "new"}
         conversationId={current?.id ?? null}
