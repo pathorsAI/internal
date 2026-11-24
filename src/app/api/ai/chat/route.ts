@@ -120,12 +120,30 @@ export async function POST(req: Request): Promise<Response> {
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      const emit = (e: ChatEvent) => {
+      const write = (e: ChatEvent) => {
         try {
           controller.enqueue(encoder.encode(`${JSON.stringify(e)}\n`));
         } catch {
           // 使用者關掉頁面之後 enqueue 會丟錯，忽略
         }
+      };
+      // 模型幾乎是一個 token 一段：文字先攢 50ms 再一起送，其他事件來時先把文字送出去保持順序。
+      let textBuf = "";
+      let textTimer: ReturnType<typeof setTimeout> | null = null;
+      const flushText = () => {
+        if (textTimer) clearTimeout(textTimer);
+        textTimer = null;
+        if (textBuf) write({ t: "text", d: textBuf });
+        textBuf = "";
+      };
+      const emit = (e: ChatEvent) => {
+        if (e.t === "text") {
+          textBuf += e.d;
+          textTimer ??= setTimeout(flushText, 50);
+          return;
+        }
+        flushText();
+        write(e);
       };
       const ctx: TurnContext = {
         owner,
@@ -162,6 +180,7 @@ export async function POST(req: Request): Promise<Response> {
           });
         }
       } finally {
+        flushText();
         try {
           controller.close();
         } catch {

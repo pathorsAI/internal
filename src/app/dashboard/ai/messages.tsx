@@ -170,6 +170,10 @@ export function AssistantMessage({
   return (
     <div className="space-y-3">
       <ToolLine tools={reads} />
+      {/* 確認卡在文字前面：按下確認後模型接著講的結果，會接在卡片下方 */}
+      {writes.map((c) => (
+        <ConfirmCard key={c.id} call={c} disabled={disabled} onConfirm={onConfirm} />
+      ))}
       {message.text ? <Markdown text={message.text} /> : null}
       {empty && streaming ? (
         <p className="inline-flex items-center gap-2 text-sm text-muted-foreground">
@@ -177,9 +181,6 @@ export function AssistantMessage({
           {t("thinking")}
         </p>
       ) : null}
-      {writes.map((c) => (
-        <ConfirmCard key={c.id} call={c} disabled={disabled} onConfirm={onConfirm} />
-      ))}
     </div>
   );
 }

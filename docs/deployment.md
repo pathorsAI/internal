@@ -30,7 +30,7 @@ This document describes two paths:
 | Postgres | Any Postgres. Schema is introspect-only (`bun run db:pull`); migrations under [`migrations/`](../migrations) are plain forward-only SQL, applied with `bun run db:apply` (see [Migrations](#migrations)). |
 | A Postgres driver | Picked at runtime, no code change: Neon hosts use Neon's HTTP driver, everything else uses node-postgres (`pg`), and a Cloudflare Hyperdrive binding is used when present. Override with `DATABASE_DRIVER`. See [Database driver](#database-driver). |
 | File storage *(document uploads, avatars)* | Cloudflare R2 binding, any S3-compatible bucket, or a local directory. Picked by `STORAGE_DRIVER` — see [File storage](#file-storage). |
-| Env vars | `DATABASE_URL` (optional: `DATABASE_DRIVER`, `DATABASE_POOL_MAX`), `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `FIELD_ENCRYPTION_KEYS`, `RESEND_API_KEY`, `RESEND_FROM` (optional: `TRUSTED_ORIGINS`, `RATE_LIMIT_STORAGE`, `OIDC_ISSUER`, `STORAGE_DRIVER` + its settings). See [`.env.example`](../.env.example). |
+| Env vars | `DATABASE_URL` (optional: `DATABASE_DRIVER`, `DATABASE_POOL_MAX`), `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `FIELD_ENCRYPTION_KEYS`, `RESEND_API_KEY`, `RESEND_FROM` (optional: `OPENROUTER_API_KEY` for the in-app AI assistant, `TRUSTED_ORIGINS`, `RATE_LIMIT_STORAGE`, `OIDC_ISSUER`, `STORAGE_DRIVER` + its settings). See [`.env.example`](../.env.example). |
 | `OIDC_SIGNING_KEY` | Optional. RSA private key (PKCS#8, base64 one line or PEM) used to sign per-organization OIDC JWTs for GCP Workload Identity Federation (keyless GCP billing). Without it, GCP can only be connected with a service account key. |
 | `RESEND_API_KEY` | [Resend](https://resend.com) API key. **Required in production** for public sign-up (`/signup` sends a confirmation link) and forgot-password (`/reset-password` links). Without it those emails are not sent — the pages still say "check your inbox", and the Worker log shows `[auth-email] failed to send …`. In development (`NODE_ENV !== "production"`) a missing key prints each email, link included, to the server console instead. |
 | `RESEND_FROM` | Sender, e.g. `My App <noreply@example.com>`. **Required in production** — there is no built-in default; without it sending fails (logged as `[auth-email] failed to send …`) instead of spoofing someone else's domain. The domain must be verified in Resend. |
@@ -122,6 +122,7 @@ echo "$GOOGLE_CLIENT_ID"   | bunx wrangler secret put GOOGLE_CLIENT_ID
 echo "$FIELD_ENCRYPTION_KEYS" | bunx wrangler secret put FIELD_ENCRYPTION_KEYS
 echo "$OIDC_SIGNING_KEY"     | bunx wrangler secret put OIDC_SIGNING_KEY
 echo "$RESEND_API_KEY"     | bunx wrangler secret put RESEND_API_KEY
+echo "$OPENROUTER_API_KEY" | bunx wrangler secret put OPENROUTER_API_KEY   # optional: in-app AI assistant
 # …and GOOGLE_CLIENT_SECRET, BETTER_AUTH_URL. RESEND_FROM / TRUSTED_ORIGINS / OIDC_ISSUER are
 # plain vars in wrangler.jsonc — change them to your own values.
 ```

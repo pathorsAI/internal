@@ -194,8 +194,18 @@ export function AiChat({ conversationId, initialMessages, initialConversations, 
       const bubbleId = `a${stamp}`;
       targetRef.current = bubbleId;
       separateRef.current = false;
+      // 伺服器收到新問題會把上一題沒按的確認卡當成取消，畫面上同步標示。
       setMessages((ms) => [
-        ...ms,
+        ...ms.map((m) =>
+          m.kind === "assistant" && m.tools.some((x) => x.status === "pending")
+            ? {
+                ...m,
+                tools: m.tools.map((x) =>
+                  x.status === "pending" ? { ...x, status: "cancelled" as const } : x,
+                ),
+              }
+            : m,
+        ),
         { kind: "user", id: `u${stamp}`, text: q },
         { kind: "assistant", id: bubbleId, text: "", tools: [] },
       ]);

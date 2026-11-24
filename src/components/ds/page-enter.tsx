@@ -10,11 +10,19 @@ import { cn } from "@/lib/utils";
  * （globals.css）；過了就拿掉，之後新增或篩選出來的列不再有動畫。
  * class 直接加在 DOM 上而不走 state：它只影響 CSS，不值得為它多 render 一輪。
  */
+/**
+ * 換頁動效的 key。AI 助理開新對話時會用 history.replaceState 把網址換成 /dashboard/ai/<id>，
+ * 那不是換頁 —— 如果照 pathname 重掛，正在串流的對話會整個被清掉。
+ */
+export function enterKey(pathname: string): string {
+  return pathname.startsWith("/dashboard/ai/") ? "/dashboard/ai" : pathname;
+}
+
 export function PageEnter({
   className,
   children,
 }: Readonly<{ className?: string; children: React.ReactNode }>) {
-  const pathname = usePathname();
+  const pathname = enterKey(usePathname());
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
