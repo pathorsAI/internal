@@ -8,7 +8,7 @@
  * - 使用者：users/<userId>/avatar-<毫秒>.<ext>，網址 /api/users/<userId>/avatar?v=<毫秒>
  *
  * 網址寫進 better-auth 既有的 organization.logo / user.image，所以 session、組織清單這些
- * 本來就會帶這兩欄的地方不用改就拿得到；物件 key 另外存在 logo_key / avatar_key（migrations/0038）。
+ * 本來就會帶這兩欄的地方不用改就拿得到；物件 key 另外存在 logo_key / avatar_key（migrations/0039）。
  */
 
 import type { AvatarImageType } from "./party-avatar";
