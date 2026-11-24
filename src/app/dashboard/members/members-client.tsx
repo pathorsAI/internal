@@ -212,9 +212,6 @@ export function MembersClient() {
               <UserPlus className="size-5 text-muted-foreground" />
               {t("invite.title")}
             </CardTitle>
-            <CardDescription>
-              {t("invite.description")}
-            </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={onInvite} className="flex flex-wrap items-end gap-3">
@@ -292,7 +289,6 @@ export function MembersClient() {
         <Card>
           <CardHeader>
             <CardTitle>{t("invitations.title", { count: invitations.length })}</CardTitle>
-            <CardDescription>{t("invitations.description")}</CardDescription>
           </CardHeader>
           <CardContent>
             <ul className="divide-y">

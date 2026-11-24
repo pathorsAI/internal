@@ -3,7 +3,6 @@ import type { Dictionary } from "./dictionary";
 const billing = {
   page: {
     title: { "zh-TW": "請款看板", en: "Billing board" },
-    footerHint: { "zh-TW": "週期性月費的期別由「訂閱 / 月費」自動推算，會直接出現在這裡，不需要另外建立。", en: "Periods for recurring monthly fees are calculated automatically from Subscriptions and appear here directly — no need to create them separately." },
   },
   table: {
     filtered: { "zh-TW": "已篩選", en: "Filtered" },

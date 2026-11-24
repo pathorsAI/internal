@@ -29,10 +29,6 @@ const projects = {
   unassigned: {
     title: { "zh-TW": "未歸類的合約", en: "Contracts without a project" },
     count: { "zh-TW": "{count} 張", en: "{count}" },
-    description: {
-      "zh-TW": "這些合約還沒歸到任何專案，收支不會算進專案損益。逐筆選一個專案，或建立同名專案。",
-      en: "These contracts aren't in any project yet, so their income and expense don't count toward project P&L. Pick a project for each, or create one with the same name.",
-    },
     columns: {
       contract: { "zh-TW": "合約", en: "Contract" },
       customer: { "zh-TW": "客戶", en: "Client" },

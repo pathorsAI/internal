@@ -528,7 +528,6 @@ function ScheduleFields({ form, set, editable, status }: FieldProps & Readonly<{
             </span>
           ) : null}
         </div>
-        <p className="text-xs text-muted-foreground">{t("schedule.help")}</p>
       </div>
       <Field label={t("schedule.schedule")}>
         <Select

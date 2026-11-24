@@ -10,7 +10,6 @@ const members = {
   },
   invite: {
     title: { "zh-TW": "邀請成員", en: "Invite member" },
-    description: { "zh-TW": "用對方的 Google 帳號 email 邀請。對方用同一個 email 登入後即可在進入畫面接受邀請，不需要任何邀請碼。", en: "Invite by their Google account email. After signing in with the same email, they can accept the invitation on the entry screen — no invite code needed." },
     emailLabel: { "zh-TW": "Email", en: "Email" },
     emailPlaceholder: { "zh-TW": "teammate@example.com", en: "teammate@example.com" },
     roleLabel: { "zh-TW": "身分", en: "Role" },
@@ -28,7 +27,6 @@ const members = {
   },
   invitations: {
     title: { "zh-TW": "待接受的邀請（{count}）", en: "Pending invitations ({count})" },
-    description: { "zh-TW": "對方用該 email 登入後即可接受", en: "They can accept after signing in with that email" },
     pending: { "zh-TW": "待接受", en: "Pending" },
     expired: { "zh-TW": "已過期", en: "Expired" },
     expiresAt: { "zh-TW": "到期：{date}", en: "Expires: {date}" },

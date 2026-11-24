@@ -160,9 +160,6 @@ export default async function ProjectsPage() {
           title={t("unassigned.title")}
           action={t("unassigned.count", { count: unassigned.length })}
         >
-          <p className="border-b px-4 py-2.5 text-xs text-muted-foreground">
-            {t("unassigned.description")}
-          </p>
           <Table>
             <TableHeader>
               <TableRow>

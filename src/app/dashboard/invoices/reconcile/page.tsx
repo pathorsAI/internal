@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { PageHeader } from "@/components/page-header";
 import { TableCard } from "@/components/table-card";
@@ -134,11 +134,6 @@ export default async function InvoiceReconcilePage() {
           status: i.status,
         }))}
       />
-
-      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <AlertTriangle className="size-3.5" />
-        {t("footerNote")}
-      </p>
     </>
   );
 }

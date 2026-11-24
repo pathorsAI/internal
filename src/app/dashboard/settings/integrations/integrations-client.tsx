@@ -4,7 +4,7 @@ import { useEffect, useOptimistic, useState, useTransition } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
-import { CalendarClock, Info, Link2, Play, RefreshCw, Unlink } from "lucide-react";
+import { Info, Link2, Play, RefreshCw, Unlink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusTag } from "@/components/ds/status-dot";
 import { Input } from "@/components/ui/input";
@@ -133,7 +133,7 @@ export function IntegrationsList({
           {t("connectLinkOtherOrg", { org: connectLinkOtherOrg })}
         </p>
       ) : null}
-      <AutoSyncBar canRun={canRunAutoSync} />
+      {canRunAutoSync ? <AutoSyncBar /> : null}
       <ul className="divide-y rounded-xl border bg-card shadow-xs">
         {rows.map((row) => (
           <IntegrationRow
@@ -157,8 +157,8 @@ export function IntegrationsList({
   );
 }
 
-/** 自動同步的說明 + owner / admin 的「立即執行自動同步」按鈕。 */
-function AutoSyncBar({ canRun }: Readonly<{ canRun: boolean }>) {
+/** owner / admin 的「立即執行自動同步」按鈕。 */
+function AutoSyncBar() {
   const t = useTranslations("integrations");
   const [pending, start] = useTransition();
 
@@ -180,16 +180,10 @@ function AutoSyncBar({ canRun }: Readonly<{ canRun: boolean }>) {
   }
 
   return (
-    <div className="flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-      <p className="flex items-start gap-2">
-        <CalendarClock className="mt-0.5 size-4 shrink-0" />
-        {t("autoSync.schedule")}
-      </p>
-      {canRun ? (
-        <Button type="button" size="sm" variant="outline" onClick={runNow} disabled={pending} className="shrink-0">
-          <Play className="size-4" /> {pending ? t("autoSync.running") : t("autoSync.runNow")}
-        </Button>
-      ) : null}
+    <div className="flex justify-end">
+      <Button type="button" size="sm" variant="outline" onClick={runNow} disabled={pending} className="shrink-0">
+        <Play className="size-4" /> {pending ? t("autoSync.running") : t("autoSync.runNow")}
+      </Button>
     </div>
   );
 }

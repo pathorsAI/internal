@@ -107,9 +107,7 @@ export function OrgSettingsClient({
           <Building2 className="size-5 text-muted-foreground" />
           {t("org.title")}
         </CardTitle>
-        <CardDescription>
-          {canEdit ? t("org.descriptionEditable") : t("org.descriptionReadOnly")}
-        </CardDescription>
+        {canEdit ? null : <CardDescription>{t("org.descriptionReadOnly")}</CardDescription>}
       </CardHeader>
       <CardContent>
         <form onSubmit={onSubmit} className="max-w-md space-y-4">

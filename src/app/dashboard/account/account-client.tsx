@@ -9,7 +9,7 @@ import { authClient } from "@/lib/auth-client";
 import { GlowButton } from "@/components/ds/glow-button";
 import { PartyAvatar } from "@/components/party-avatar";
 import { AvatarUploadField, avatarFieldLabels, type AvatarMode } from "@/components/avatar-upload-field";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { saveMyAvatar } from "./actions";
 
 export function AccountClient({
@@ -55,7 +55,6 @@ export function AccountClient({
           <UserRound className="size-5 text-muted-foreground" />
           {t("profile.title")}
         </CardTitle>
-        <CardDescription>{t("profile.description")}</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={onSubmit} className="space-y-5">
