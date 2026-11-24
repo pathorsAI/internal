@@ -1,4 +1,4 @@
--- 0037: 組織 logo 與使用者頭像。
+-- 0038: 組織 logo 與使用者頭像。
 --
 -- 存放方式跟交易對象頭像（0030）一樣：圖在瀏覽器裁成正方形、縮到 256×256 再上傳，server 驗 magic bytes
 -- 與大小（≤ 200 KB，PNG / JPEG / WebP，不收 SVG），放在同一個物件儲存（R2 / S3 / 本機檔案）。
@@ -15,7 +15,7 @@
 -- 程式比這支 migration 先上會壞：auth-schema 的 user / organization 會 select 這兩欄，欄位不存在時
 -- 登入與組織清單都會失敗。先跑 migration 再部署。
 --
--- Forward-only，全部 additive（皆可為 NULL）。Run AFTER 0036。
+-- Forward-only，全部 additive（皆可為 NULL）。Run AFTER 0037。
 
 ALTER TABLE organization ADD COLUMN logo_key text;
 ALTER TABLE "user" ADD COLUMN avatar_key text;

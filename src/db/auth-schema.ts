@@ -9,7 +9,7 @@ export const user = pgTable("user", {
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").default(false).notNull(),
   image: text("image"),
-  // 上傳頭像的物件 key（migrations/0037、src/lib/owner-avatar.ts）；image 是給畫面的網址
+  // 上傳頭像的物件 key（migrations/0038、src/lib/owner-avatar.ts）；image 是給畫面的網址
   avatarKey: text("avatar_key"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -61,7 +61,7 @@ export const organization = pgTable("organization", {
   name: text("name").notNull(),
   slug: text("slug").unique(),
   logo: text("logo"),
-  // 上傳 logo 的物件 key（migrations/0037）；logo 是給畫面的網址
+  // 上傳 logo 的物件 key（migrations/0038）；logo 是給畫面的網址
   logoKey: text("logo_key"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   metadata: text("metadata"),
