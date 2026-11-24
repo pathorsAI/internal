@@ -69,8 +69,16 @@ export function pickCloudCategory(rows: readonly { id: number; name: string; kin
   return rows.find((c) => (c.kind === "expense" || c.kind === "cogs") && CLOUD_CATEGORY_RE.test(c.name))?.id ?? null;
 }
 
-/** 支出分類：優先沿用這個帳號已對到的卡費交易的分類，否則找名字像雲端服務的分類。 */
-async function expenseCategoryFor(db: Db, orgId: string, billingAccountRowId: number): Promise<number | null> {
+/**
+ * 支出分類，依序：這個帳號已對到的卡費交易的分類 → 同一個交易對象最近一筆有分類的支出
+ * （例如 Google Cloud 的卡費）→ 名字像雲端服務的分類 → 留空。
+ */
+async function expenseCategoryFor(
+  db: Db,
+  orgId: string,
+  billingAccountRowId: number,
+  partyId: number | null,
+): Promise<number | null> {
   const [matched] = await db
     .select({ categoryId: transactions.categoryId })
     .from(vendorInvoices)
@@ -87,6 +95,23 @@ async function expenseCategoryFor(db: Db, orgId: string, billingAccountRowId: nu
     .orderBy(desc(vendorInvoices.invoiceDate))
     .limit(1);
   if (matched?.categoryId) return matched.categoryId;
+  if (partyId !== null) {
+    const [recent] = await db
+      .select({ categoryId: transactions.categoryId })
+      .from(transactions)
+      .where(
+        and(
+          eq(transactions.organizationId, orgId),
+          eq(transactions.partyId, partyId),
+          eq(transactions.type, "expense"),
+          isNull(transactions.deletedAt),
+          isNotNull(transactions.categoryId),
+        ),
+      )
+      .orderBy(desc(transactions.txnDate))
+      .limit(1);
+    if (recent?.categoryId) return recent.categoryId;
+  }
   const rows = await db
     .select({ id: categories.id, name: categories.name, kind: categories.kind })
     .from(categories)
@@ -159,7 +184,7 @@ export async function bookPromotionCredits(
   if (todo.length === 0) return 0;
 
   const partyId = matchPartiesOf(account)[0] ?? null;
-  const expenseCategoryId = await expenseCategoryFor(db, orgId, billingAccountRowId);
+  const expenseCategoryId = await expenseCategoryFor(db, orgId, billingAccountRowId, partyId);
   const incomeCategoryId = todo.some((p) => p.type === "income") ? await promotionIncomeCategory(db, orgId) : null;
 
   const inserted = await db
