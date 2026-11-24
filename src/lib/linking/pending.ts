@@ -11,7 +11,7 @@ import { reviewMessage } from "./resolve";
  * link_candidates 是 jsonb，讀出來一律重新整理成固定形狀（舊資料或手動改過的欄位不會讓頁面壞掉）。
  */
 
-const KINDS: readonly LinkKind[] = ["billing_item", "subscription", "contract"];
+const KINDS: ReadonlySet<LinkKind> = new Set<LinkKind>(["billing_item", "subscription", "contract"]);
 
 function num(v: unknown): number | null {
   const n = typeof v === "string" ? Number(v) : v;
@@ -30,7 +30,7 @@ export function parseLinkCandidates(json: unknown): LinkCandidate[] {
     const c = raw as Record<string, unknown>;
     const kind = c?.kind as LinkKind;
     const id = num(c?.id);
-    if (!KINDS.includes(kind) || id == null) continue;
+    if (!KINDS.has(kind) || id == null) continue;
     out.push({
       kind,
       id,

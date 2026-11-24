@@ -352,7 +352,13 @@ async function oldestOpenInvoiceDate(
       ),
     );
   const open = rows.filter((r) => !isSettledInvoiceStatus(r.status)).map((r) => r.d);
-  return open.length ? open.reduce((a, b) => (a < b ? a : b)) : null;
+  return open.length ? open.reduce(earlierDate) : null;
+}
+
+/** 兩個 YYYY-MM-DD 字串取較早的（字串比較即日期先後；Math.min 不適用字串）。 */
+function earlierDate(a: string, b: string): string {
+  if (b < a) return b;
+  return a;
 }
 
 const COST_CHUNK = 500;

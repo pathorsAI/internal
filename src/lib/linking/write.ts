@@ -166,6 +166,58 @@ function changed<T extends object>(patch: Partial<T>, existing: T, key: keyof T)
   return key in patch && patch[key] !== undefined && (patch[key] ?? null) !== (existing[key] ?? null);
 }
 
+type LinkedPatch = Partial<TxnInsert> & { pendingParty?: PendingParty | null };
+
+/**
+ * 換了請款項 / 訂閱 / 合約：原本的專案、合約如果是從舊上層繼承來的，就在 merged 裡清掉讓它重新繼承
+ * （patch 有指定的、或人手動填且跟舊上層不同的保留）。
+ */
+async function clearInheritedParents(ctx: LinkContext, existing: TxnRow, patch: LinkedPatch, merged: LinkedPatch) {
+  const fromChild = Boolean(existing.billingItemId || existing.subscriptionId);
+  const old = await resolveLinks(
+    {
+      ...draftOf(existing),
+      projectId: null,
+      contractId: fromChild ? null : existing.contractId,
+    },
+    { ...ctx, autoMatch: false },
+  );
+  if (!("projectId" in patch) && existing.projectId != null && existing.projectId === old.values.projectId) {
+    merged.projectId = null;
+  }
+  if (
+    !("contractId" in patch) &&
+    existing.contractId != null &&
+    fromChild &&
+    existing.contractId === old.values.contractId
+  ) {
+    merged.contractId = null;
+  }
+}
+
+/** 決定最後寫進去的待連結狀態（review_reason / link_candidates）。 */
+function reviewStateOf(
+  resolved: LinkResolution["values"],
+  existing: TxnRow,
+  patch: LinkedPatch,
+  rematch: boolean,
+  explicitLink: boolean,
+): LinkResolution["values"] {
+  const values = { ...resolved };
+  if (!rematch && !explicitLink && !("reviewReason" in patch) && !patch.pendingParty) {
+    // 沒重新比對：原本的待連結狀態原封不動
+    values.reviewReason = existing.reviewReason as typeof values.reviewReason;
+    values.linkCandidates = existing.linkCandidates ?? null;
+  }
+  // 略過（待連結頁「不連」）：明確記成 link_skipped，之後不再自動比對。
+  // patch.reviewReason = null 則代表「舊的狀態作廢」：重新比對有新結果就用新的，沒有就是 null。
+  if (patch.reviewReason === "link_skipped" && !explicitLink) {
+    values.reviewReason = "link_skipped";
+    values.linkCandidates = null;
+  }
+  return values;
+}
+
 /**
  * 更新一筆交易並重新推導連結。patch 裡給了的連結欄位 = given（人選的優先）。
  *
@@ -190,28 +242,9 @@ export async function updateTransactionLinked(
     .limit(1);
   if (!existing) return null;
 
-  const merged: Partial<TxnInsert> & { pendingParty?: PendingParty | null } = { ...existing, ...patch };
-  const parentChanged = PARENT_KEYS.some((k) => changed(patch, existing, k));
-  if (parentChanged) {
-    const old = await resolveLinks(
-      {
-        ...draftOf(existing),
-        projectId: null,
-        contractId: existing.billingItemId || existing.subscriptionId ? null : existing.contractId,
-      },
-      { ...ctx, autoMatch: false },
-    );
-    if (!("projectId" in patch) && existing.projectId != null && existing.projectId === old.values.projectId) {
-      merged.projectId = null;
-    }
-    if (
-      !("contractId" in patch) &&
-      existing.contractId != null &&
-      (existing.billingItemId || existing.subscriptionId) &&
-      existing.contractId === old.values.contractId
-    ) {
-      merged.contractId = null;
-    }
+  const merged: LinkedPatch = { ...existing, ...patch };
+  if (PARENT_KEYS.some((k) => changed(patch, existing, k))) {
+    await clearInheritedParents(ctx, existing, patch, merged);
   }
 
   const explicitLink = PARENT_KEYS.some((k) => patch[k] != null);
@@ -224,18 +257,7 @@ export async function updateTransactionLinked(
     autoMatch: rematch,
     excludeTransactionIds: [id, ...(ctx.excludeTransactionIds ?? [])],
   });
-  const values = { ...res.values };
-  if (!rematch && !explicitLink && !("reviewReason" in patch) && !patch.pendingParty) {
-    // 沒重新比對：原本的待連結狀態原封不動
-    values.reviewReason = existing.reviewReason as typeof values.reviewReason;
-    values.linkCandidates = existing.linkCandidates ?? null;
-  }
-  // 略過（待連結頁「不連」）：明確記成 link_skipped，之後不再自動比對。
-  // patch.reviewReason = null 則代表「舊的狀態作廢」：重新比對有新結果就用新的，沒有就是 null。
-  if (patch.reviewReason === "link_skipped" && !explicitLink) {
-    values.reviewReason = "link_skipped";
-    values.linkCandidates = null;
-  }
+  const values = reviewStateOf(res.values, existing, patch, rematch, explicitLink);
 
   const { pendingParty: _pending, ...plain } = patch;
   const [row] = await db

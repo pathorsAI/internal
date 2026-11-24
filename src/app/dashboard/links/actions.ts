@@ -28,7 +28,7 @@ export type LinkActionState = {
   contractsReady?: string[];
 };
 
-const KINDS: readonly LinkKind[] = ["billing_item", "subscription", "contract"];
+const KINDS: ReadonlySet<string> = new Set<LinkKind>(["billing_item", "subscription", "contract"]);
 
 function revalidateAll() {
   // layout 也要重算：側欄的待連結筆數
@@ -69,13 +69,14 @@ export async function attachLinkCandidate(
   subscriptionPeriod: string | null,
 ): Promise<LinkActionState> {
   const t = await getTranslations("links");
-  if (!KINDS.includes(kind as LinkKind) || !Number.isSafeInteger(candidateId) || candidateId <= 0) {
+  if (!KINDS.has(kind) || !Number.isSafeInteger(candidateId) || candidateId <= 0) {
     return { ok: false, error: t("errors.candidate_not_found") };
   }
+  const periodSuffix = subscriptionPeriod ? ` ${subscriptionPeriod}` : "";
   return run(
     id,
     { kind: "candidate", candidateKind: kind as LinkKind, id: candidateId, subscriptionPeriod },
-    `link ${kind} #${candidateId}${subscriptionPeriod ? ` ${subscriptionPeriod}` : ""}`,
+    `link ${kind} #${candidateId}${periodSuffix}`,
   );
 }
 

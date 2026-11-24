@@ -48,6 +48,8 @@ export async function rescanUnlinkedIncome(db: Db, orgId: string, opts: RescanOp
   const dryRun = single || opts.dryRun !== false;
   const limit = Math.min(Math.max(Math.trunc(opts.limit ?? DEFAULT_LIMIT), 1), MAX_LIMIT);
 
+  // 有指定對象就只掃那個對象的交易
+  const partyFilter = opts.partyId ? eq(transactions.partyId, opts.partyId) : undefined;
   const where = single
     ? and(eq(transactions.organizationId, orgId), eq(transactions.id, opts.transactionId!), isNull(transactions.deletedAt))
     : and(
@@ -59,7 +61,7 @@ export async function rescanUnlinkedIncome(db: Db, orgId: string, opts: RescanOp
         isNull(transactions.subscriptionId),
         isNull(transactions.contractId),
         isNull(transactions.reviewReason),
-        opts.partyId ? eq(transactions.partyId, opts.partyId) : undefined,
+        partyFilter,
       );
 
   const rows = await db

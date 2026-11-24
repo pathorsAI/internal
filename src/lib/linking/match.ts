@@ -48,7 +48,8 @@ export function feeTolerance(expected: number, currency: string): number {
 }
 
 export function amountMatches(amount: number, expected: number, currency: string): boolean {
-  if (!(expected > 0)) return false;
+  // NaN 也要當成沒有應收（跟 !(expected > 0) 同義）
+  if (Number.isNaN(expected) || expected <= 0) return false;
   const gap = expected - amount;
   return gap >= -ROUNDING && gap <= feeTolerance(expected, currency);
 }

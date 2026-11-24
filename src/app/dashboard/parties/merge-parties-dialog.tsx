@@ -41,6 +41,35 @@ const COUNT_KEYS: (keyof MergeCounts)[] = [
   "recurringExpenses",
 ];
 
+/** 預覽結果：會搬過去的資料筆數與會加上的別名。 */
+function MergePreviewSummary({ counts, aliases }: Readonly<{ counts: MergeCounts; aliases?: string[] | null }>) {
+  const t = useTranslations("links");
+  const moved = COUNT_KEYS.filter((k) => counts[k] > 0);
+  return (
+    <div className="flex flex-col gap-2 rounded-md bg-muted/40 px-3 py-2.5 text-sm">
+      <span className="text-xs font-medium text-muted-foreground">{t("merge.willMove")}</span>
+      {moved.length === 0 ? (
+        <span className="text-muted-foreground">{t("merge.nothingToMove")}</span>
+      ) : (
+        <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1">
+          {moved.map((k) => (
+            <div key={k} className="contents">
+              <dt className="text-muted-foreground">{t(`merge.counts.${k}`)}</dt>
+              <dd className="text-right tabular-nums">{counts[k]}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {aliases && aliases.length > 0 ? (
+        <>
+          <span className="pt-1 text-xs font-medium text-muted-foreground">{t("merge.aliases")}</span>
+          <span className="break-words">{aliases.join("、")}</span>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * 合併交易對象：選要保留的目標、勾要併進來的來源 → 預覽會搬多少資料 → 確認。
  * variant "header" 是頁首的「合併」按鈕；"hint" 是列上的「可能重複」捷徑（預先帶好目標與來源）。
@@ -83,7 +112,7 @@ export function MergePartiesDialog({
       (p) => p.id !== target && (!q || p.name.toLowerCase().includes(q) || sourceIds.includes(p.id)),
     );
   }, [parties, query, target, sourceIds]);
-  const ready = target != null && sourceIds.filter((id) => id !== target).length > 0;
+  const ready = target != null && sourceIds.some((id) => id !== target);
 
   function toggle(id: number) {
     setPreview(null);
@@ -115,9 +144,6 @@ export function MergePartiesDialog({
       router.refresh();
     });
   }
-
-  const counts = preview?.counts;
-  const moved = counts ? COUNT_KEYS.filter((k) => counts[k] > 0) : [];
 
   return (
     <Dialog
@@ -193,28 +219,8 @@ export function MergePartiesDialog({
             </div>
           </div>
 
-          {preview?.ok && counts ? (
-            <div className="flex flex-col gap-2 rounded-md bg-muted/40 px-3 py-2.5 text-sm">
-              <span className="text-xs font-medium text-muted-foreground">{t("merge.willMove")}</span>
-              {moved.length === 0 ? (
-                <span className="text-muted-foreground">{t("merge.nothingToMove")}</span>
-              ) : (
-                <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1">
-                  {moved.map((k) => (
-                    <div key={k} className="contents">
-                      <dt className="text-muted-foreground">{t(`merge.counts.${k}`)}</dt>
-                      <dd className="text-right tabular-nums">{counts[k]}</dd>
-                    </div>
-                  ))}
-                </dl>
-              )}
-              {preview.aliases && preview.aliases.length > 0 ? (
-                <>
-                  <span className="pt-1 text-xs font-medium text-muted-foreground">{t("merge.aliases")}</span>
-                  <span className="break-words">{preview.aliases.join("、")}</span>
-                </>
-              ) : null}
-            </div>
+          {preview?.ok && preview.counts ? (
+            <MergePreviewSummary counts={preview.counts} aliases={preview.aliases} />
           ) : null}
         </div>
 

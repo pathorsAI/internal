@@ -443,7 +443,7 @@ export function periodStatuses(
     const base = { windowStart: w.start, windowEnd: w.endExclusive, chargeDate: w.chargeDate, nextChargeDate: next };
     const txnIds = (assigned.get(e.id) ?? []).filter((t) => inWindow(t.txnDate)).map((t) => t.id);
     if (txnIds.length > 0) {
-      out.set(e.id, { ...base, state: "paid", via: "transaction", transactionIds: txnIds.sort((a, b) => a - b) });
+      out.set(e.id, { ...base, state: "paid", via: "transaction", transactionIds: txnIds.toSorted((a, b) => a - b) });
       continue;
     }
     const inv = invoices.filter((i) => i.billingAccountId === e.id && inWindow(i.invoiceDate));
