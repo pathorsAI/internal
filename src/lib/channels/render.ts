@@ -395,7 +395,7 @@ function formatString(key: string, v: string, locale: Locale): string {
 }
 
 function formatArray(key: string, v: readonly unknown[]): string {
-  if (key === "documentIds") return v.map((x) => `#${String(x)}`).join("、");
+  if (key === "documentIds") return v.map((x) => `#${typeof x === "number" || typeof x === "string" ? x : JSON.stringify(x)}`).join("、");
   return v.map((x) => (typeof x === "object" ? JSON.stringify(x) : String(x))).join("、");
 }
 
