@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import { updateContract } from "@/db/mutations";
 import { EditForm } from "@/components/edit-form";
-import { ContractFields, type ContractFormValues, type Option } from "./contract-fields";
+import { ContractFields, type ContractFormValues, type Option, type ProjectOption } from "./contract-fields";
 
 type Contract = ContractFormValues & { id: number };
 
@@ -19,7 +19,7 @@ export function EditContractForm({
 }: Readonly<{
   contract: Contract;
   parties: Option[];
-  projects: Option[];
+  projects: ProjectOption[];
   summary?: { received: number; cost: number; remaining: number | null };
   /** 這張合約已有幾筆請款項目，以及其中已動過（不可重排）的筆數 */
   scheduleCount?: number;

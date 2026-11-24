@@ -4,6 +4,15 @@ import { getDb } from "./index";
 import { nextChargeDate, todayStr } from "@/lib/mcp/shared";
 import { periodRange, type LedgerTransaction } from "@/lib/recurring-expenses";
 import { monthWindow, shiftMonth, yearMonthIn } from "@/lib/spend-trend";
+import { projectChildStatuses } from "@/lib/linking/hints";
+import { deriveProjectStatus } from "@/lib/linking/project-status";
+import {
+  belongsToProject,
+  linkedExpenseTwd,
+  linkedIncomeTwd,
+  projectLinkedTransactions,
+  projectTransactionIds,
+} from "./project-links";
 import {
   transactions,
   categories,
@@ -108,7 +117,8 @@ function txnWhere(orgId: string, filters: TxnFilters) {
           eq(transactions.toAccountId, accountId),
         )
       : undefined,
-    projectId ? eq(transactions.projectId, projectId) : undefined,
+    // 專案篩選跟專案損益同一套歸屬：直接標專案，或經由合約 / 訂閱 / 請款項連到專案都算。
+    projectId ? inArray(transactions.id, projectTransactionIds(orgId, projectId)) : undefined,
     idFilter(transactions.partyId, partyId),
     period ? sql`to_char(${transactions.txnDate}, 'YYYY-MM') = ${period}` : undefined,
     needsReview === undefined ? undefined : eq(transactions.needsReview, needsReview),
@@ -1142,14 +1152,13 @@ export async function listPayslipRecords(orgId: string, limit = 200) {
 
 // ---- 客戶營運（專案 / 訂閱 / 合約）----
 
-// 收支以 TWD 為主（amount_twd 缺值時退回 amount）做單一幣別彙總，報表用。
-const incomeTwd = sql<string>`coalesce(sum(coalesce(${transactions.amountTwd}, ${transactions.amount})) filter (where ${transactions.type} = 'income'), 0)`;
-const expenseTwd = sql<string>`coalesce(sum(coalesce(${transactions.amountTwd}, ${transactions.amount})) filter (where ${transactions.type} in ('expense','advance')), 0)`;
-
-// 專案清單，附帶以 TWD 彙總的收入 / 支出（per-project P&L）。
+// 專案清單，附帶以 TWD 彙總的收入 / 支出（per-project P&L）與推導狀態。
+// 歸屬定義見 src/db/project-links.ts：交易直接標專案，或經由合約 / 訂閱 / 請款項連到專案都算，
+// 同一筆交易對同一個專案只算一次。
 export async function listProjects(orgId: string) {
   const db = getDb();
   const client = aliasedTable(parties, "client_party");
+  const plt = projectLinkedTransactions(orgId);
   const rows = await db
     .select({
       id: projects.id,
@@ -1158,23 +1167,64 @@ export async function listProjects(orgId: string) {
       description: projects.description,
       clientPartyId: projects.clientPartyId,
       clientName: client.name,
-      income: incomeTwd,
-      expense: expenseTwd,
+      income: linkedIncomeTwd(plt),
+      expense: linkedExpenseTwd(plt),
     })
     .from(projects)
     .leftJoin(client, eq(client.id, projects.clientPartyId))
-    .leftJoin(
-      transactions,
-      and(eq(transactions.projectId, projects.id), isNull(transactions.deletedAt)),
-    )
+    .leftJoin(plt, belongsToProject(plt, projects.id))
     .where(and(eq(projects.organizationId, orgId), isNull(projects.deletedAt)))
     .groupBy(projects.id, client.name)
     .orderBy(desc(projects.createdAt));
+  const children = await projectChildStatuses(
+    db,
+    orgId,
+    rows.map((r) => r.id),
+  );
   return rows.map((r) => {
     const income = Number(r.income);
     const expense = Number(r.expense);
-    return { ...r, income, expense, net: income - expense };
+    const ch = children.get(r.id) ?? { contractStatuses: [], subscriptionStatuses: [] };
+    const derivedStatus = deriveProjectStatus({ manualStatus: r.status, ...ch });
+    return {
+      ...r,
+      income,
+      expense,
+      net: income - expense,
+      derivedStatus,
+      /** 合約都結束了、還沒封存 → 提示可以結案 */
+      readyToClose: derivedStatus === "completed",
+      contractCount: ch.contractStatuses.length,
+      subscriptionCount: ch.subscriptionStatuses.length,
+    };
   });
+}
+
+export type ProjectListRow = Awaited<ReturnType<typeof listProjects>>[number];
+
+// 還沒歸到任何專案的合約（專案頁「未歸類的合約」）。不自動指派，由人逐筆決定。
+export async function listUnassignedContracts(orgId: string) {
+  const db = getDb();
+  return db
+    .select({
+      id: contracts.id,
+      title: contracts.title,
+      customerPartyId: contracts.customerPartyId,
+      customerName: parties.name,
+      status: contracts.status,
+      amount: contracts.amount,
+      currency: contracts.currency,
+    })
+    .from(contracts)
+    .leftJoin(parties, eq(parties.id, contracts.customerPartyId))
+    .where(
+      and(
+        eq(contracts.organizationId, orgId),
+        isNull(contracts.projectId),
+        isNull(contracts.deletedAt),
+      ),
+    )
+    .orderBy(desc(contracts.createdAt));
 }
 
 export async function getProject(orgId: string, id: number) {

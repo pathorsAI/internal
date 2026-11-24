@@ -112,7 +112,7 @@ export default async function ContractsPage() {
     listSubscriptionsByContract(orgId),
   ]);
   const partyOptions = parties.map((p) => ({ id: p.id, name: p.name }));
-  const projectOptions = projects.map((p) => ({ id: p.id, name: p.name }));
+  const projectOptions = projects.map((p) => ({ id: p.id, name: p.name, status: p.derivedStatus }));
   const statusLabels: Record<string, string> = {
     draft: t("status.draft"),
     active: t("status.active"),

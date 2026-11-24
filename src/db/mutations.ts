@@ -56,6 +56,7 @@ import {
 } from "@/lib/linking/write";
 import { resolvePartyForWrite } from "@/lib/linking/party";
 import { linkPatchFromForm } from "@/lib/linking/form-links";
+import { createProjectForContract, parseProjectChoice } from "./project-choice";
 
 export type ActionState = { ok: boolean; error?: string };
 
@@ -2445,6 +2446,38 @@ function contractColumns(v: ContractValues, customerPartyId: number, title: stri
   };
 }
 
+/**
+ * 合約表單的「歸屬專案」：把 projectChoice（新專案 / 不歸屬 / 既有專案 id）收斂進 v.projectId。
+ * 欄位沒送（舊呼叫端）就沿用 projectId 欄位。既有專案的歸屬驗證交給呼叫端的 unownedRefError。
+ *
+ * 換專案時，這張合約底下既有的請款項 / 訂閱不跟著改 —— 它們沒有自己的專案時，
+ * 專案損益會經由合約算進來（src/db/project-links.ts）。
+ */
+async function applyProjectChoice(formData: FormData, v: ContractValues): Promise<string | null> {
+  const choice = parseProjectChoice(formData.get("projectChoice"));
+  if (choice === null) return null;
+  if (choice.kind === "invalid") {
+    const t = await getTranslations("errors");
+    return t("notFound.referencedRecord");
+  }
+  v.projectId = choice.kind === "id" ? choice.id : null;
+  return null;
+}
+
+/** 選了「新專案（同合約名）」→ 客戶確定之後才建，名稱用合約名、客戶用合約的客戶。 */
+async function createChosenProject(
+  db: ReturnType<typeof getDb>,
+  orgId: string,
+  formData: FormData,
+  v: ContractValues,
+  contract: { title: string; customerPartyId: number },
+): Promise<boolean> {
+  if (parseProjectChoice(formData.get("projectChoice"))?.kind !== "new") return false;
+  v.projectId = await createProjectForContract(db, orgId, contract);
+  await logWeb(orgId, "create", "project", v.projectId, contract.title);
+  return true;
+}
+
 export async function createContract(
   _prev: ActionState,
   formData: FormData,
@@ -2456,11 +2489,17 @@ export async function createContract(
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
+    const choiceError = await applyProjectChoice(formData, v);
+    if (choiceError) return { ok: false, error: choiceError };
     // projectId 也會被 expandContractSchedule 帶進 billing_items，一定要先驗。
     const refError = await unownedRefError(db, orgId, [[projects, [v.projectId]]]);
     if (refError) return { ok: false, error: refError };
     const customer = await requireCustomer(db, orgId, v.customerPartyName);
     if ("error" in customer) return { ok: false, error: customer.error };
+    await createChosenProject(db, orgId, formData, v, {
+      title: required.title,
+      customerPartyId: customer.id,
+    });
     const [inserted] = await db
       .insert(contracts)
       .values({ organizationId: orgId, ...contractColumns(v, customer.id, required.title) })
@@ -2469,6 +2508,7 @@ export async function createContract(
     // 新合約一定沒有既有排程，直接展開（展不出來就是 0 期，不是錯誤）。
     const created = await expandContractSchedule(db, orgId, inserted.id, customer.id, v, false);
     revalidatePath("/dashboard/contracts");
+    revalidatePath("/dashboard/projects");
     if (customer.created) revalidatePath("/dashboard/parties");
     if (created > 0) {
       revalidatePath("/dashboard/billing");
@@ -2493,10 +2533,16 @@ export async function updateContract(
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
+    const choiceError = await applyProjectChoice(formData, v);
+    if (choiceError) return { ok: false, error: choiceError };
     const refError = await unownedRefError(db, orgId, [[projects, [v.projectId]]]);
     if (refError) return { ok: false, error: refError };
     const customer = await requireCustomer(db, orgId, v.customerPartyName);
     if ("error" in customer) return { ok: false, error: customer.error };
+    await createChosenProject(db, orgId, formData, v, {
+      title: required.title,
+      customerPartyId: customer.id,
+    });
     await db
       .update(contracts)
       .set(contractColumns(v, customer.id, required.title))
@@ -2512,6 +2558,7 @@ export async function updateContract(
       v.regenerateSchedule,
     );
     revalidatePath("/dashboard/contracts");
+    revalidatePath("/dashboard/projects");
     if (customer.created) revalidatePath("/dashboard/parties");
     if (changed > 0) {
       revalidatePath("/dashboard/billing");
@@ -2533,6 +2580,7 @@ export async function deleteContract(id: number): Promise<ActionState> {
       .where(and(eq(contracts.organizationId, orgId), eq(contracts.id, id)));
     await logWeb(orgId, "delete", "contract", id);
     revalidatePath("/dashboard/contracts");
+    revalidatePath("/dashboard/projects");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("failed.delete") };

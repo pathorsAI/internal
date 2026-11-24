@@ -1,12 +1,13 @@
 import { addDays, differenceInCalendarDays, format, parseISO } from "date-fns";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { billingItems, contracts, parties, projects, subscriptions, transactions } from "@/db/schema";
+import { billingItems, contracts, parties, subscriptions, transactions } from "@/db/schema";
 import {
   deleteSubscriptionPeriod,
   getSubscriptionSchedule,
   listActivity,
   listMyOrgs,
+  listProjects,
   upsertSubscriptionPeriod,
 } from "@/db/queries";
 import {
@@ -79,12 +80,40 @@ const CONTRACT_LIST_ROW: JsonSchemaObject = rowSchema({
   remaining: { type: ["number", "null"], description: "未收 = amount − received; null when amount is unset." },
 });
 
+const DERIVED_PROJECT_STATUS = ["active", "completed", "empty", "archived"] as const;
+
 const PROJECT_LIST_ROW: JsonSchemaObject = rowSchema({
   id: { type: "number" },
   name: { type: "string" },
-  status: { type: "string", enum: ["active", "archived"] },
+  status: {
+    type: "string",
+    enum: ["active", "archived"],
+    description:
+      "Stored status. Only `archived` (a manual override) carries meaning; read derivedStatus for what the project actually is.",
+  },
+  derivedStatus: {
+    type: "string",
+    enum: [...DERIVED_PROJECT_STATUS],
+    description:
+      "Derived from the project's contracts and subscriptions: archived = manually archived; active = has a draft/active contract or an active/paused subscription; completed = has contracts/subscriptions and all are completed/cancelled/ended; empty = nothing under it yet.",
+  },
+  hint: {
+    type: ["string", "null"],
+    description:
+      "Set when the project looks ready to close (derivedStatus completed, not archived). Tell the user and ASK before archiving; only call update_project with status archived after they agree.",
+  },
   description: { type: ["string", "null"] },
   client: { type: ["string", "null"], description: "Owning customer party name." },
+  clientPartyId: { type: ["number", "null"] },
+  contractCount: { type: "number" },
+  subscriptionCount: { type: "number" },
+  income: {
+    type: "number",
+    description:
+      "TWD (amount_twd, falling back to amount). Includes transactions tagged with the project AND those linked via its contracts, subscriptions or billing items; each transaction counted once.",
+  },
+  expense: { type: "number", description: "TWD; expense + advance, same membership rule as income." },
+  net: { type: "number", description: "income − expense (TWD)." },
 });
 
 const CUSTOMER_LIST_ROW: JsonSchemaObject = rowSchema({
@@ -618,14 +647,20 @@ const billingTools: Record<string, ToolDef> = {
   },
 
   list_projects: {
-    description: "Client projects with their owning customer and status (active/archived).",
+    description:
+      "Client projects with their customer, derived status and per-project P&L (TWD). A project is made of its contracts and subscriptions: its status is derived from them (see derivedStatus) and its income/expense include every transaction linked to it directly or through its contracts, subscriptions or billing items. When a row has a `hint` (all contracts done), tell the user and ask whether to archive — never archive on your own.",
     inputSchema: {
       type: "object",
       properties: {
         status: {
           type: "string",
           enum: ["active", "archived"],
-          description: "Optional status filter; defaults to all.",
+          description: "Optional filter on the stored manual status; defaults to all.",
+        },
+        derivedStatus: {
+          type: "string",
+          enum: [...DERIVED_PROJECT_STATUS],
+          description: "Optional filter on the derived status.",
         },
         ...ORG_ARG,
       },
@@ -635,27 +670,32 @@ const billingTools: Record<string, ToolDef> = {
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
       const status = optString(args, "status");
-      const db = getDb();
-      const where = status
-        ? and(
-            eq(projects.organizationId, orgId),
-            eq(projects.status, status),
-            isNull(projects.deletedAt),
-          )
-        : and(eq(projects.organizationId, orgId), isNull(projects.deletedAt));
-      const rows = await db
-        .select({
-          id: projects.id,
-          name: projects.name,
-          status: projects.status,
-          description: projects.description,
-          client: parties.name,
-        })
-        .from(projects)
-        .leftJoin(parties, eq(projects.clientPartyId, parties.id))
-        .where(where)
-        .orderBy(asc(projects.name));
-      return listResult(rows);
+      const derived = optString(args, "derivedStatus");
+      const rows = (await listProjects(orgId))
+        .filter((r) => (status ? r.status === status : true))
+        .filter((r) => (derived ? r.derivedStatus === derived : true))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      return listResult(
+        rows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          status: r.status,
+          derivedStatus: r.derivedStatus,
+          // 只提示、不改狀態：封存與否由使用者決定
+          hint: r.readyToClose
+            ? `專案「${r.name}」底下的合約都已完成或取消，也沒有進行中的訂閱，可以結案（封存）。` +
+              '請先詢問使用者；同意後才呼叫 update_project({ id, status: "archived" })。'
+            : null,
+          description: r.description,
+          client: r.clientName,
+          clientPartyId: r.clientPartyId,
+          contractCount: r.contractCount,
+          subscriptionCount: r.subscriptionCount,
+          income: r.income,
+          expense: r.expense,
+          net: r.net,
+        })),
+      );
     },
   },
 

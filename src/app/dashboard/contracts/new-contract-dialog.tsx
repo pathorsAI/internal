@@ -3,14 +3,14 @@
 import { useTranslations } from "next-intl";
 import { createContract } from "@/db/mutations";
 import { CreateDialog } from "@/components/create-dialog";
-import { ContractFields, type Option } from "./contract-fields";
+import { ContractFields, type Option, type ProjectOption } from "./contract-fields";
 
 export function NewContractDialog({
   parties,
   projects,
 }: Readonly<{
   parties: Option[];
-  projects: Option[];
+  projects: ProjectOption[];
 }>) {
   const t = useTranslations("contracts");
 
