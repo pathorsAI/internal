@@ -146,7 +146,9 @@ type ContractRef = {
 };
 
 const OPEN_CONTRACT = ["draft", "active"];
-const CLOSED_BILLING_ITEM = ["paid", "cancelled"];
+// 只排除取消的請款項。人工標「已收」但沒綁交易的也要當候選：還沒收的金額一律以綁定的交易算，
+// 剛好就是要找回那筆沒綁上的收款。
+const CLOSED_BILLING_ITEM = ["cancelled"];
 
 function ids(list: readonly (number | null | undefined)[]): number[] {
   return [...new Set(list.filter((n): n is number => typeof n === "number" && n > 0))];
