@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Building2, KeyRound, MessageCircle, Plug, Puzzle } from "lucide-react";
+import { BookOpenCheck, Building2, KeyRound, MessageCircle, Plug, Puzzle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const sections = [
   { key: "general", href: "/dashboard/settings", icon: Building2 },
+  { key: "accounting", href: "/dashboard/settings/accounting", icon: BookOpenCheck },
   { key: "integrations", href: "/dashboard/settings/integrations", icon: Puzzle },
   { key: "mcp", href: "/dashboard/settings/mcp", icon: Plug },
   { key: "api", href: "/dashboard/settings/api", icon: KeyRound },

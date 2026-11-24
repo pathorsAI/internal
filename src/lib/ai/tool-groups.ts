@@ -12,6 +12,7 @@
 
 export const TOOL_GROUP_IDS = [
   "ledger",
+  "statements",
   "clients",
   "hr",
   "invoices",
@@ -74,6 +75,16 @@ export const TOOL_GROUPS: Record<ToolGroupId, GroupDef> = {
       "分類", "代墊", "報帳", "收據", "發票照片", "先墊", "總覽", "淨額", "現金", "信用卡", "廠商", "前五", "前十",
       "transaction", "expense", "income", "spend", "balance", "account", "category", "advance", "ledger",
       "unlinked", "link",
+    ],
+  },
+  statements: {
+    summary:
+      "Financial statements from the general ledger: balance sheet, income statement, cash flow, equity changes, trial balance (government books vs management books), VAT report, and the ledger review items (data problems to fix).",
+    tools: ["get_financial_statement", "list_ledger_review_items", "get_vat_report", ...LOOKUPS],
+    keywords: [
+      "財務報表", "四大報表", "資產負債表", "損益表", "現金流量表", "權益變動表", "試算表", "總帳", "政府帳", "管理帳", "股東往來",
+      "營業稅", "401", "會計師", "結帳", "待處理",
+      "balance sheet", "income statement", "cash flow", "trial balance", "financial statement", "vat",
     ],
   },
   clients: {
@@ -160,6 +171,7 @@ export const TOOL_GROUPS: Record<ToolGroupId, GroupDef> = {
       "simpany_list_zero_rate_reasons",
       "simpany_list_tax_uploads",
       "simpany_preview_tax_upload",
+      "get_vat_report",
       "list_transactions",
       "list_contracts",
       "list_subscriptions",

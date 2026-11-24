@@ -99,6 +99,7 @@ const reports = {
   nav: {
     overview: { "zh-TW": "總覽", en: "Overview" },
     spend: { "zh-TW": "支出分析", en: "Spend analysis" },
+    statements: { "zh-TW": "財務報表", en: "Financial statements" },
   },
   spendTrend: {
     title: { "zh-TW": "支出分析", en: "Spend analysis" },

@@ -1,15 +1,16 @@
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
-import { BarChart3, ChartColumnStacked } from "lucide-react";
+import { BarChart3, ChartColumnStacked, Landmark } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const ITEMS = [
   { key: "overview", href: "/dashboard/reports", icon: BarChart3 },
   { key: "spend", href: "/dashboard/reports/spend", icon: ChartColumnStacked },
+  { key: "statements", href: "/dashboard/reports/statements", icon: Landmark },
 ] as const;
 
 /**
- * 報表區的頁籤（總覽 / 支出分析）。是導覽連結不是 Tabs 元件（每一頁是獨立路由），
+ * 報表區的頁籤（總覽 / 支出分析 / 財務報表）。是導覽連結不是 Tabs 元件（每一頁是獨立路由），
  * 外觀照 TabsList 的預設樣式，跟頁內的切換長得一樣。
  */
 export async function ReportsNav({ active }: Readonly<{ active: (typeof ITEMS)[number]["key"] }>) {
