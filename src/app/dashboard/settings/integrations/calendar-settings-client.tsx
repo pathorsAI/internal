@@ -103,8 +103,6 @@ export function CalendarSettingsClient({
     start(async () => report(await updateReminderDays(n), t("calendar.toast.reminderUpdated")));
   }
 
-  const intro = <p className="text-sm text-muted-foreground">{t("calendar.intro")}</p>;
-
   // 一般成員：看得到狀態、可以手動重推，但不能改連結與提醒設定。
   if (!canManage) {
     return (
@@ -116,7 +114,6 @@ export function CalendarSettingsClient({
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {intro}
           {connected ? (
             <>
               <p className="text-sm">
@@ -149,8 +146,6 @@ export function CalendarSettingsClient({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        {intro}
-
         {(() => {
           if (connected) {
             return (

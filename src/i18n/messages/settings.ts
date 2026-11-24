@@ -12,7 +12,6 @@ const settings = {
   },
   org: {
     title: { "zh-TW": "基本資料", en: "Basic info" },
-    descriptionEditable: { "zh-TW": "修改組織名稱與 logo", en: "Edit the organization name and logo" },
     descriptionReadOnly: { "zh-TW": "只有擁有者或管理員可以修改組織資料", en: "Only owners or admins can edit organization info" },
     nameLabel: { "zh-TW": "組織名稱", en: "Organization name" },
     logoLabel: { "zh-TW": "組織 logo", en: "Organization logo" },
@@ -27,13 +26,9 @@ const settings = {
   },
   tax: {
     title: { "zh-TW": "營業稅別預設", en: "Default VAT treatment" },
-    descriptionEditable: {
-      "zh-TW": "新合約、沒綁合約的訂閱與請款項目沿用這個設定；合約可以個別改。列表與收款判斷會依此算出含稅應收。",
-      en: "New contracts, and subscriptions or billing items without a contract, use this setting; each contract can override it. Lists and collection status use it to compute the tax-inclusive receivable.",
-    },
     descriptionReadOnly: {
-      "zh-TW": "新合約、沒綁合約的訂閱與請款項目沿用這個設定。只有擁有者或管理員可以修改。",
-      en: "New contracts, and subscriptions or billing items without a contract, use this setting. Only owners or admins can change it.",
+      "zh-TW": "只有擁有者或管理員可以修改營業稅別預設",
+      en: "Only owners or admins can change the default VAT treatment",
     },
     save: { "zh-TW": "儲存稅別", en: "Save VAT settings" },
     saving: { "zh-TW": "儲存中…", en: "Saving…" },
@@ -44,7 +39,6 @@ const settings = {
   },
   calendar: {
     title: { "zh-TW": "Google 日曆", en: "Google Calendar" },
-    intro: { "zh-TW": "把請款、收款與開發票的日期推到一本名為「請款提醒 · 組織名」的專屬子日曆，提醒由 Google 自己發送。已收款、已開發票的項目會自動從日曆移除。一個組織同時只會有一個連結。", en: "Pushes billing, payment, and invoicing dates to a dedicated sub-calendar named \"Billing reminders · org name\"; Google sends the reminders itself. Items that are paid or invoiced are automatically removed from the calendar. An organization can only have one connection at a time." },
     connectedReadOnly: { "zh-TW": "目前由 {owner} 連結，提前 {days} 天提醒。", en: "Currently connected by {owner}, reminding {days} days ahead." },
     syncNow: { "zh-TW": "立即同步", en: "Sync now" },
     notConnected: { "zh-TW": "尚未連結。連結需要組織的擁有者或管理員來設定。", en: "Not connected yet. Connecting requires an organization owner or admin." },
@@ -56,13 +50,13 @@ const settings = {
     reminderDaysLabel: { "zh-TW": "提前幾天提醒", en: "Remind this many days ahead" },
     saveAndResync: { "zh-TW": "儲存並重推", en: "Save and resync" },
     disconnect: { "zh-TW": "中斷連結", en: "Disconnect" },
-    disconnectNote: { "zh-TW": "中斷連結會一併刪除 Google 上那本「請款提醒」日曆與裡面的事件 —— 否則它會留在 {owner} 的帳號裡，不再更新也不再移除，訂閱的人會一直看到早就處理完的提醒。", en: "Disconnecting also deletes the \"Billing reminders\" calendar and its events on Google — otherwise it stays in {owner}'s account, no longer updated or removed, and anyone subscribed keeps seeing reminders that are already resolved." },
+    disconnectNote: { "zh-TW": "中斷連結會一併刪除 {owner} 帳號裡的「請款提醒」日曆與事件。", en: "Disconnecting also deletes the \"Billing reminders\" calendar and its events in {owner}'s account." },
     switchNote: { "zh-TW": " 要改用你的帳號連結，請先中斷再重新連結。", en: " To connect with your own account, disconnect first and reconnect." },
     grant: { "zh-TW": "授權 Google 日曆", en: "Authorize Google Calendar" },
     grantNote: { "zh-TW": "會另外跳一次 Google 同意畫面索取日曆權限；登入用的授權不受影響。", en: "This opens another Google consent screen requesting calendar access; your sign-in authorization is not affected." },
     connect: { "zh-TW": "連結並同步", en: "Connect and sync" },
     connectNote: { "zh-TW": "已取得日曆權限，按下後會用你的帳號建立專屬日曆並推入目前所有待辦。", en: "Calendar access is granted — clicking this creates a dedicated calendar under your account and pushes all current items." },
-    sharingHint: { "zh-TW": "這本日曆建在 {owner} 的 Google 帳號底下，其他成員預設看不到。要讓同事也收到提醒，請 {owner} 到 Google 日曆找到「請款提醒 · 組織名」，用「設定與共用」把日曆分享給他們 —— 這要在 Google 日曆那邊做，本系統不會代為分享。", en: "This calendar is created under {owner}'s Google account, so other members can't see it by default. For teammates to get reminders too, ask {owner} to find \"Billing reminders · org name\" in Google Calendar and share it via \"Settings and sharing\" — this has to be done on the Google Calendar side; this system does not share it for you." },
+    sharingHint: { "zh-TW": "要讓同事也收到提醒，請 {owner} 在 Google 日曆用「設定與共用」分享「請款提醒」日曆。", en: "For teammates to get reminders too, ask {owner} to share the \"Billing reminders\" calendar via \"Settings and sharing\" in Google Calendar." },
     toast: {
       operationFailed: { "zh-TW": "操作失敗", en: "Operation failed" },
       authFailed: { "zh-TW": "授權失敗", en: "Authorization failed" },
@@ -90,11 +84,9 @@ const settings = {
     },
     usage: {
       title: { "zh-TW": "怎麼呼叫", en: "How to call it" },
-      description: {
-        "zh-TW": "每個端點就是一支 MCP 工具：POST /api/v1/tools/<工具名稱>，body 是工具的參數。完整說明見 docs/api.md。",
-        en: "Every endpoint is one MCP tool: POST /api/v1/tools/<tool name> with the tool's input as the body. See docs/api.md.",
-      },
       baseUrl: { "zh-TW": "API 網址", en: "Base URL" },
+      endpoint: { "zh-TW": "端點", en: "Endpoint" },
+      endpointValue: { "zh-TW": "POST /api/v1/tools/<工具名稱>", en: "POST /api/v1/tools/<tool name>" },
       openApi: { "zh-TW": "OpenAPI", en: "OpenAPI" },
       auth: { "zh-TW": "驗證", en: "Authentication" },
       mcp: { "zh-TW": "MCP", en: "MCP" },
@@ -187,17 +179,14 @@ const settings = {
     title: { "zh-TW": "MCP", en: "MCP" },
     connectionInfo: {
       title: { "zh-TW": "連線資訊", en: "Connection info" },
-      description: { "zh-TW": "在 Claude 或 ChatGPT 新增一個 connector，網址填下面這個。第一次連線會跳出 Google 登入授權（跟後台同一個帳號），之後就能用對話查資料。", en: "Add a connector in Claude or ChatGPT and use the URL below. The first connection opens a Google sign-in authorization (same account as this app), and after that you can query data by chatting." },
-      addToClaudeHint: { "zh-TW": "按下去會打開 Claude 的新增 connector 視窗，名稱和網址都已填好，按新增再用同一個帳號登入授權就完成了。也可以照下面的網址手動新增。", en: "Opens Claude's add-connector dialog with the name and URL filled in. Click Add, sign in with this same account to authorize, and you're done. You can also add it manually with the URL below." },
+      addToClaudeHint: { "zh-TW": "會打開 Claude 的新增 connector 視窗並填好名稱與網址。", en: "Opens Claude's add-connector dialog with the name and URL filled in." },
       serverUrlLabel: { "zh-TW": "MCP 伺服器網址", en: "MCP server URL" },
-      serverUrlHint: { "zh-TW": "這個網址不綁定組織。授權綁的是你的帳號，連上之後直接在對話裡問「我有哪些組織」，它會列出你所屬的全部，由你挑；同一個連線隨時可以換組織。", en: "This URL is not tied to an organization. Authorization binds to your account — once connected, just ask which organizations you have and pick one in conversation. The same connection can switch organizations at any time." },
+      serverUrlHint: { "zh-TW": "不綁定組織，連上後可在對話裡切換組織。", en: "Not tied to an organization; switch organizations in conversation once connected." },
       perOrgLabel: { "zh-TW": "固定單一組織的網址（選用）", en: "Pinned single-organization URLs (optional)" },
-      perOrgHint: { "zh-TW": "上面那個網址就夠用了，這一區是選用的。只有當你想「一個連線只看一個組織」時才用（例如在 Claude 裡開兩個分別對應兩間公司的 connector，避免問錯）。", en: "The URL above is all you need — this section is optional. Use it only when you want one connection locked to one organization (for example, two separate connectors in Claude, one per company, so you can't ask the wrong one)." },
+      perOrgHint: { "zh-TW": "只想讓一個連線固定看一個組織時才需要。", en: "Only needed to lock one connection to one organization." },
       discoveryLabel: { "zh-TW": "OAuth 探索端點：", en: "OAuth discovery endpoint: " },
     },
     clients: {
-      hint: { "zh-TW": "這裡列出你個人授權過的 AI 用戶端 —— 不是組織設定，別人授權了什麼你看不到，也看不到你的。", en: "These are the AI clients you personally authorized. This is not an organization setting: you can't see anyone else's connections, and they can't see yours." },
-      hintManage: { "zh-TW": "撤銷會收回你自己的授權，下次連線要重新登入同意；其他人的連線不受影響。", en: " Revoking withdraws your own authorization — you'll be asked to sign in and approve again next time. Other people's connections are unaffected." },
       title: { "zh-TW": "你已連線的用戶端", en: "Your connected clients" },
       count: { "zh-TW": "{count} 筆", en: "{count}" },
       columns: {

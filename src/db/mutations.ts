@@ -2948,6 +2948,89 @@ function allocationInputOfRow(a: typeof paymentAllocations.$inferSelect): Alloca
   return { target, amount: Number(a.amount), fee: Number(a.fee), note: a.note };
 }
 
+type PaymentLinkCtx = { db: ReturnType<typeof getDb>; orgId: string; source: "billing_board" };
+
+/**
+ * linkPaymentToBillingRow 的請款項分支（key `bi:<id>`）。從主函式抽出來降低
+ * cognitive complexity（Sonar S3776），行為不變。
+ */
+async function linkPaymentToBillingItem(
+  ctx: PaymentLinkCtx,
+  rowKey: string,
+  txn: { partyId: number | null },
+  transactionId: number,
+): Promise<ActionState> {
+  const t = await getTranslations("errors");
+  const tRec = await getTranslations("lib");
+  const { db, orgId } = ctx;
+  const itemId = Number(rowKey.slice(3));
+  if (!Number.isFinite(itemId)) return { ok: false, error: t("validation.invalidItemCode") };
+  const [item] = await db
+    .select({ id: billingItems.id, customerPartyId: billingItems.customerPartyId })
+    .from(billingItems)
+    .where(
+      and(
+        eq(billingItems.organizationId, orgId),
+        eq(billingItems.id, itemId),
+        isNull(billingItems.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (!item) return { ok: false, error: t("notFound.billingItem") };
+
+  // 合約、專案由連結層從請款項繼承（交易上已經有值的不覆蓋，人填的優先）；
+  // 請款項的 paid_on 也由連結層補上。對象還空著就用請款項的客戶。
+  await updateTransactionLinked(ctx, transactionId, {
+    billingItemId: itemId,
+    ...(txn.partyId == null ? { partyId: item.customerPartyId } : {}),
+  });
+  await logWeb(orgId, "update", "billing_item", itemId, tRec("activity.paymentMatched", { id: transactionId }));
+  return { ok: true };
+}
+
+/**
+ * linkPaymentToBillingRow 的訂閱期別分支（key `sub:<subscriptionId>:<periodStart>`）。
+ * 同樣是為了 Sonar S3776 抽出來的，行為不變。
+ */
+async function linkPaymentToSubscriptionPeriod(
+  ctx: PaymentLinkCtx,
+  rowKey: string,
+  txn: { partyId: number | null },
+  transactionId: number,
+): Promise<ActionState> {
+  const t = await getTranslations("errors");
+  const tRec = await getTranslations("lib");
+  const { db, orgId } = ctx;
+  const [, rawId, periodStart] = rowKey.split(":");
+  const subscriptionId = Number(rawId);
+  if (!Number.isFinite(subscriptionId) || !periodStart) {
+    return { ok: false, error: t("validation.invalidPeriodCode") };
+  }
+  const [sub] = await db
+    .select({ customerPartyId: subscriptions.customerPartyId })
+    .from(subscriptions)
+    .where(
+      and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, subscriptionId)),
+    )
+    .limit(1);
+  if (!sub) return { ok: false, error: t("notFound.subscription") };
+  // 訂閱的合約與專案由連結層繼承（以前只補專案、漏了合約）。
+  await updateTransactionLinked(ctx, transactionId, {
+    subscriptionId,
+    subscriptionPeriod: periodStart,
+    ...(txn.partyId == null ? { partyId: sub.customerPartyId } : {}),
+  });
+  await logWeb(
+    orgId,
+    "update",
+    "subscription",
+    subscriptionId,
+    tRec("activity.paymentMatchedPeriod", { period: periodStart, id: transactionId }),
+  );
+  revalidatePath("/dashboard/subscriptions");
+  return { ok: true };
+}
+
 /**
  * 把一筆既有交易認列為某一期的收款。
  *
@@ -2959,7 +3042,6 @@ export async function linkPaymentToBillingRow(
   transactionId: number,
 ): Promise<ActionState> {
   const t = await getTranslations("errors");
-  const tRec = await getTranslations("lib");
   try {
     const { orgId } = await requireOrg();
     const db = getDb();
@@ -2982,60 +3064,11 @@ export async function linkPaymentToBillingRow(
     }
     const ctx = { db, orgId, source: "billing_board" as const };
 
-    if (rowKey.startsWith("bi:")) {
-      const itemId = Number(rowKey.slice(3));
-      if (!Number.isFinite(itemId)) return { ok: false, error: t("validation.invalidItemCode") };
-      const [item] = await db
-        .select({ id: billingItems.id, customerPartyId: billingItems.customerPartyId })
-        .from(billingItems)
-        .where(
-          and(
-            eq(billingItems.organizationId, orgId),
-            eq(billingItems.id, itemId),
-            isNull(billingItems.deletedAt),
-          ),
-        )
-        .limit(1);
-      if (!item) return { ok: false, error: t("notFound.billingItem") };
-
-      // 合約、專案由連結層從請款項繼承（交易上已經有值的不覆蓋，人填的優先）；
-      // 請款項的 paid_on 也由連結層補上。對象還空著就用請款項的客戶。
-      await updateTransactionLinked(ctx, transactionId, {
-        billingItemId: itemId,
-        ...(txn.partyId == null ? { partyId: item.customerPartyId } : {}),
-      });
-      await logWeb(orgId, "update", "billing_item", itemId, tRec("activity.paymentMatched", { id: transactionId }));
-    } else if (rowKey.startsWith("sub:")) {
-      const [, rawId, periodStart] = rowKey.split(":");
-      const subscriptionId = Number(rawId);
-      if (!Number.isFinite(subscriptionId) || !periodStart) {
-        return { ok: false, error: t("validation.invalidPeriodCode") };
-      }
-      const [sub] = await db
-        .select({ customerPartyId: subscriptions.customerPartyId })
-        .from(subscriptions)
-        .where(
-          and(eq(subscriptions.organizationId, orgId), eq(subscriptions.id, subscriptionId)),
-        )
-        .limit(1);
-      if (!sub) return { ok: false, error: t("notFound.subscription") };
-      // 訂閱的合約與專案由連結層繼承（以前只補專案、漏了合約）。
-      await updateTransactionLinked(ctx, transactionId, {
-        subscriptionId,
-        subscriptionPeriod: periodStart,
-        ...(txn.partyId == null ? { partyId: sub.customerPartyId } : {}),
-      });
-      await logWeb(
-        orgId,
-        "update",
-        "subscription",
-        subscriptionId,
-        tRec("activity.paymentMatchedPeriod", { period: periodStart, id: transactionId }),
-      );
-      revalidatePath("/dashboard/subscriptions");
-    } else {
-      return { ok: false, error: t("validation.unrecognizedItem") };
-    }
+    let res: ActionState;
+    if (rowKey.startsWith("bi:")) res = await linkPaymentToBillingItem(ctx, rowKey, txn, transactionId);
+    else if (rowKey.startsWith("sub:")) res = await linkPaymentToSubscriptionPeriod(ctx, rowKey, txn, transactionId);
+    else res = { ok: false, error: t("validation.unrecognizedItem") };
+    if (!res.ok) return res;
 
     revalidateBilling();
     revalidatePath("/dashboard/transactions");

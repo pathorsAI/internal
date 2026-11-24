@@ -246,6 +246,93 @@ function idOrNoneParam(v: string | undefined): number | "none" | undefined {
   return v === "none" ? "none" : idParam(v);
 }
 
+/** 解析網址上的篩選參數，得出列表查詢條件與要帶回網址的值。 */
+function parseTransactionFilters(params: {
+  book?: string;
+  category?: string;
+  account?: string;
+  period?: string;
+  page?: string;
+  review?: string;
+  party?: string;
+  ids?: string | string[];
+  link?: string;
+}) {
+  const { book, category, account, period, page: pageParam, review, party, ids: idsParam, link } = params;
+  const active = (["internal", "external", "both"].includes(book ?? "") ? book : undefined) as
+    | Book
+    | undefined;
+  const categoryId = idOrNoneParam(category);
+  const accountId = idParam(account);
+  const partyId = idOrNoneParam(party);
+  const page = Math.max(1, Math.trunc(Number(pageParam)) || 1);
+  const needsReview = review === "1" ? true : undefined;
+  const ids = parseIdsParam(idsParam) ?? undefined;
+  const idsQuery = ids?.join(",");
+  const pendingLink = link === "pending" ? true : undefined;
+  const linkQuery = pendingLink ? "pending" : undefined;
+  const filters = { book: active, categoryId, accountId, partyId, period, needsReview, ids, pendingLink };
+  return { active, partyId, page, needsReview, ids, idsQuery, pendingLink, linkQuery, filters };
+}
+
+/** 網址 query：拿掉 undefined 的鍵（鍵的順序照傳入的物件，覆寫既有鍵不會改變順序）。 */
+function definedQuery(entries: Record<string, string | undefined>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(entries).filter((e): e is [string, string] => e[1] !== undefined),
+  );
+}
+
+const NOTICE_LINK_CLASS = "text-muted-foreground underline-offset-2 hover:underline";
+
+/** 「待確認」提示列：切換只看自動匯入、待確認的列。query 是其餘要保留的篩選。 */
+async function ReviewNotice({
+  reviewCount,
+  needsReview,
+  query,
+}: Readonly<{ reviewCount: number; needsReview: boolean; query: Record<string, string | undefined> }>) {
+  const tr = await getTranslations("transactions");
+  return (
+    <div className="flex items-center gap-2 text-sm">
+      <StatusTag tone="warning">{tr("review.count", { count: reviewCount })}</StatusTag>
+      <Link
+        className={NOTICE_LINK_CLASS}
+        href={{
+          pathname: "/dashboard/transactions",
+          query: definedQuery({ ...query, review: needsReview ? undefined : "1" }),
+        }}
+      >
+        {needsReview ? tr("review.showAll") : tr("review.showOnly")}
+      </Link>
+    </div>
+  );
+}
+
+/** 「待連結」提示列：切換只看待連結的列，另附連到待連結頁。query 是其餘要保留的篩選。 */
+async function PendingLinkNotice({
+  pendingLinkCount,
+  pendingLink,
+  query,
+}: Readonly<{ pendingLinkCount: number; pendingLink: boolean; query: Record<string, string | undefined> }>) {
+  const tl = await getTranslations("links");
+  return (
+    <div className="flex items-center gap-2 text-sm">
+      <StatusTag tone="primary">{tl("count", { count: pendingLinkCount })}</StatusTag>
+      <Link
+        className={NOTICE_LINK_CLASS}
+        href={{
+          pathname: "/dashboard/transactions",
+          query: definedQuery({ ...query, link: pendingLink ? undefined : "pending" }),
+        }}
+      >
+        {pendingLink ? tl("transactions.showAll") : tl("transactions.showOnly")}
+      </Link>
+      <Link className={NOTICE_LINK_CLASS} href="/dashboard/links">
+        {tl("transactions.open")}
+      </Link>
+    </div>
+  );
+}
+
 export default async function TransactionsPage({
   searchParams,
 }: Readonly<{
@@ -286,21 +373,10 @@ export default async function TransactionsPage({
     { label: tr("columns.lastUpdated"), width: "w-32" },
     { label: tr("columns.amount"), width: "w-32", align: "right" },
   ];
-  const { book, category, account, period, page: pageParam, review, party, ids: idsParam, link } =
-    await searchParams;
-  const active = (["internal", "external", "both"].includes(book ?? "") ? book : undefined) as
-    | Book
-    | undefined;
-  const categoryId = idOrNoneParam(category);
-  const accountId = idParam(account);
-  const partyId = idOrNoneParam(party);
-  const page = Math.max(1, Math.trunc(Number(pageParam)) || 1);
-  const needsReview = review === "1" ? true : undefined;
-  const ids = parseIdsParam(idsParam) ?? undefined;
-  const idsQuery = ids?.join(",");
-  const pendingLink = link === "pending" ? true : undefined;
-  const linkQuery = pendingLink ? "pending" : undefined;
-  const filters = { book: active, categoryId, accountId, partyId, period, needsReview, ids, pendingLink };
+  const params = await searchParams;
+  const { book, category, account, period, review, party } = params;
+  const { active, partyId, page, needsReview, ids, idsQuery, pendingLink, linkQuery, filters } =
+    parseTransactionFilters(params);
   const db = getDb();
   const [rows, total, accounts, categories, parties, employees, projects, contracts, months, reviewCount, pendingLinkCount] =
     await Promise.all([
@@ -360,58 +436,19 @@ export default async function TransactionsPage({
       />
 
       {reviewCount > 0 || needsReview ? (
-        <div className="flex items-center gap-2 text-sm">
-          <StatusTag tone="warning">{tr("review.count", { count: reviewCount })}</StatusTag>
-          <Link
-            className="text-muted-foreground underline-offset-2 hover:underline"
-            href={{
-              pathname: "/dashboard/transactions",
-              query: Object.fromEntries(
-                Object.entries({
-                  book,
-                  category,
-                  account,
-                  party,
-                  period,
-                  review: needsReview ? undefined : "1",
-                  ids: idsQuery,
-                  link: linkQuery,
-                }).filter(([, v]) => v !== undefined),
-              ),
-            }}
-          >
-            {needsReview ? tr("review.showAll") : tr("review.showOnly")}
-          </Link>
-        </div>
+        <ReviewNotice
+          reviewCount={reviewCount}
+          needsReview={needsReview === true}
+          query={{ book, category, account, party, period, review: undefined, ids: idsQuery, link: linkQuery }}
+        />
       ) : null}
 
       {pendingLinkCount > 0 || pendingLink ? (
-        <div className="flex items-center gap-2 text-sm">
-          <StatusTag tone="primary">{tl("count", { count: pendingLinkCount })}</StatusTag>
-          <Link
-            className="text-muted-foreground underline-offset-2 hover:underline"
-            href={{
-              pathname: "/dashboard/transactions",
-              query: Object.fromEntries(
-                Object.entries({
-                  book,
-                  category,
-                  account,
-                  party,
-                  period,
-                  review,
-                  ids: idsQuery,
-                  link: pendingLink ? undefined : "pending",
-                }).filter(([, v]) => v !== undefined),
-              ),
-            }}
-          >
-            {pendingLink ? tl("transactions.showAll") : tl("transactions.showOnly")}
-          </Link>
-          <Link className="text-muted-foreground underline-offset-2 hover:underline" href="/dashboard/links">
-            {tl("transactions.open")}
-          </Link>
-        </div>
+        <PendingLinkNotice
+          pendingLinkCount={pendingLinkCount}
+          pendingLink={pendingLink === true}
+          query={{ book, category, account, party, period, review, ids: idsQuery, link: undefined }}
+        />
       ) : null}
 
       {ids ? (

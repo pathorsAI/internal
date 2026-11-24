@@ -40,8 +40,8 @@ describe("cost lines", () => {
 describe("invoice window reaches back to open invoices", () => {
   test("uses the oldest unsettled invoice when older than the normal window", async () => {
     const { invoiceWindowStart, isSettledInvoiceStatus } = await import("./sync-plan");
-    expect(invoiceWindowStart("2026-09-10", "2026-08-09")).toBe("2026-08-09");
-    expect(invoiceWindowStart("2026-09-10", "2026-10-01")).toBe("2026-09-10");
+    expect(invoiceWindowStart("2026-09-10", "2026-09-09")).toBe("2026-07-26");
+    expect(invoiceWindowStart("2026-09-10", "2026-12-01")).toBe("2026-09-10");
     expect(invoiceWindowStart("2026-09-10", null)).toBe("2026-09-10");
     expect(isSettledInvoiceStatus("Paid")).toBe(true);
     expect(isSettledInvoiceStatus("Void")).toBe(true);

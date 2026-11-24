@@ -22,7 +22,6 @@ const reports = {
   },
   projectPnl: {
     title: { "zh-TW": "專案損益 (P&L)", en: "Project P&L" },
-    description: { "zh-TW": "每個專案的收入、支出與淨額（TWD）", en: "Income, expense, and net per project (TWD)" },
     columns: {
       project: { "zh-TW": "專案", en: "Project" },
       client: { "zh-TW": "客戶", en: "Client" },

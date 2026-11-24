@@ -125,10 +125,6 @@ const vendorBilling = {
   },
   schedule: {
     title: { "zh-TW": "固定支出", en: "Recurring expense" },
-    help: {
-      "zh-TW": "設定扣款週期，這個帳號就是一筆固定支出。交易對象只對應到這個帳號的支出會自動連過來；本期有連到的支出或已對帳的帳單，就算已付。",
-      en: "Give the account a charge schedule and it becomes a recurring expense. Expenses whose counterparty belongs to this account only are linked automatically; a linked expense or a matched invoice in the current period counts as paid.",
-    },
     schedule: { "zh-TW": "扣款週期", en: "Charged" },
     fixed: { "zh-TW": "固定日期", en: "Fixed date" },
     usage: { "zh-TW": "用量計費 / 自動儲值", en: "Usage-based / auto top-up" },

@@ -115,10 +115,6 @@ const integrations = {
     label: { "zh-TW": "每日自動同步", en: "Daily auto-sync" },
     offHint: { "zh-TW": "整合關閉時不會同步", en: "No sync while the integration is off" },
     toggleLabel: { "zh-TW": "{name} 每日自動同步", en: "Daily auto-sync for {name}" },
-    schedule: {
-      "zh-TW": "已啟用、狀態正常且沒關掉「每日自動同步」的整合，每天台北時間 06:00 會自動同步一次（Simpany：最近 90 天發票 + 今年薪資申報；Wise：交易，新列標為待確認；Azure / GCP：勾選範圍內的計費帳號、資源與帳單，並和帳本對帳）。",
-      en: "Every day at 06:00 Taipei time, each integration that is switched on, healthy and has auto-sync on is synced once (Simpany: last 90 days of invoices + this year's salary declarations; Wise: transactions, new rows flagged for review; Azure / GCP: billing accounts, resources and invoices within the selected scope, reconciled against the ledger).",
-    },
     last: {
       "zh-TW": "上次自動同步：{date} · {result}",
       en: "Last auto-sync: {date} · {result}",
@@ -222,10 +218,6 @@ const integrations = {
     title: {
       azure: { "zh-TW": "Azure 計費範圍", en: "Azure billing scope" },
       gcp: { "zh-TW": "Google Cloud 計費範圍", en: "Google Cloud billing scope" },
-    },
-    description: {
-      "zh-TW": "勾選屬於這個組織的計費帳號；同步只會讀取勾選的項目。",
-      en: "Tick the billing accounts that belong to this organization; sync only reads the ticked ones.",
     },
     empty: {
       "zh-TW": "沒有勾選任何範圍，同步不會讀取任何計費資料。",

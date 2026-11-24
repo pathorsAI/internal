@@ -150,7 +150,7 @@ function RowActions({ row }: Readonly<{ row: PendingLinkRow }>) {
             <span className="text-xs text-muted-foreground">{t("candidate.none")}</span>
           )}
 
-      {row.reviewReason !== "party_similar" ? (
+      {row.reviewReason === "party_similar" ? null : (
         <div>
           <Button
             type="button"
@@ -164,7 +164,7 @@ function RowActions({ row }: Readonly<{ row: PendingLinkRow }>) {
             {busy === "skip" ? "…" : t("actions.skip")}
           </Button>
         </div>
-      ) : null}
+      )}
     </div>
   );
 }

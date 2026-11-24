@@ -197,7 +197,6 @@ const invoices = {
   reconcile: {
     title: { "zh-TW": "Simpany 對帳", en: "Simpany reconciliation" },
     back: { "zh-TW": "回發票", en: "Back to invoices" },
-    footerNote: { "zh-TW": "Simpany 才是發票的真相來源。本系統只負責「該開什麼」與「開了沒」，兩邊不一致時以 Simpany 為準，回來這裡修正紀錄。", en: "Simpany is the source of truth for invoices. This system only tracks what should be issued and whether it was — when the two disagree, trust Simpany and correct the record here." },
     missing: {
       title: { "zh-TW": "該開未開", en: "Should be issued, isn't" },
       count: { "zh-TW": "{count} 筆", en: "{count, plural, one {# item} other {# items}}" },
@@ -234,7 +233,7 @@ const invoices = {
     upload: {
       title: { "zh-TW": "Simpany 匯出檔比對", en: "Simpany export comparison" },
       chooseFile: { "zh-TW": "選擇匯出檔", en: "Choose export file" },
-      hint: { "zh-TW": "到 Simpany 的收據 / 發票列表選好日期區間後按匯出，把 .xlsx（或另存的 CSV）丟進來。檔案只在瀏覽器裡比對，不會上傳。", en: "In Simpany, go to Receipts / Invoices, pick a date range, and export. Drop the .xlsx (or a CSV export) here." },
+      hint: { "zh-TW": "Simpany 收據 / 發票列表匯出的 .xlsx 或 CSV；只在瀏覽器裡比對，不會上傳。", en: "An .xlsx or CSV exported from Simpany's Receipts / Invoices list; compared in the browser only, never uploaded." },
       readError: { "zh-TW": "檔案讀不開", en: "Couldn't read the file" },
       error: {
         empty: { "zh-TW": "檔案是空的或只有表頭", en: "The file is empty, or has only a header row." },

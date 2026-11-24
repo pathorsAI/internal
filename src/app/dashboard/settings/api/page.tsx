@@ -5,7 +5,7 @@ import { CopyButton } from "@/components/copy-button";
 import { StatusTag } from "@/components/ds/status-dot";
 import { TableCard } from "@/components/table-card";
 import { EmptyRow } from "@/components/empty-state";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { listApiKeys } from "@/lib/api-keys";
 import { formatDate, formatDateTime } from "@/lib/format";
@@ -37,7 +37,6 @@ export default async function ApiSettingsPage() {
         <Card>
           <CardHeader>
             <CardTitle>{t("api.usage.title")}</CardTitle>
-            <CardDescription>{t("api.usage.description")}</CardDescription>
           </CardHeader>
           <CardContent>
             <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-[10rem_1fr]">
@@ -45,6 +44,10 @@ export default async function ApiSettingsPage() {
               <dd className="flex min-w-0 items-center gap-2">
                 <code className="min-w-0 flex-1 truncate rounded-md bg-muted px-3 py-1.5 font-mono text-xs">{baseUrl}</code>
                 <CopyButton value={baseUrl} label="" />
+              </dd>
+              <dt className="text-muted-foreground">{t("api.usage.endpoint")}</dt>
+              <dd>
+                <code className="rounded-sm bg-muted px-1 py-0.5 font-mono text-xs">{t("api.usage.endpointValue")}</code>
               </dd>
               <dt className="text-muted-foreground">{t("api.usage.openApi")}</dt>
               <dd className="flex min-w-0 items-center gap-2">

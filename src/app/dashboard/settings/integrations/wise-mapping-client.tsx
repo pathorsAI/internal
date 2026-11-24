@@ -100,7 +100,6 @@ export function WiseMappingSection({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <p className="max-w-prose text-sm text-muted-foreground">{t("mapping.description")}</p>
         {canManage ? null : (
           <p className="text-xs text-muted-foreground">{t("mapping.readOnly")}</p>
         )}

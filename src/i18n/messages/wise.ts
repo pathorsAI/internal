@@ -7,11 +7,6 @@ import type { Dictionary } from "./dictionary";
 const wise = {
   mapping: {
     title: { "zh-TW": "Wise 帳戶對應", en: "Wise account mapping" },
-    description: {
-      "zh-TW":
-        "把每個 Wise 餘額對應到一個同幣別的帳本帳戶，並設定切換日：切換日以前的 Wise 交易視為已手動入帳，永遠不會同步。沒有對應的餘額不會同步。同步只讀 Wise、只寫本系統的帳本，不會動到任何錢。",
-      en: "Map each Wise balance to a ledger account in the same currency and set a cutover date: Wise transactions before it are treated as already booked by hand and are never synced. Unmapped balances are skipped. Syncing only reads Wise and only writes this ledger — it never moves money.",
-    },
     columns: {
       balance: { "zh-TW": "Wise 餘額", en: "Wise balance" },
       account: { "zh-TW": "帳本帳戶", en: "Ledger account" },

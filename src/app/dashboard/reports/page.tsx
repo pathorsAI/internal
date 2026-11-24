@@ -110,7 +110,7 @@ export default async function ReportsPage() {
           </Table>
         </TableCard>
 
-        <TableCard title={t("projectPnl.title")} action={t("projectPnl.description")}>
+        <TableCard title={t("projectPnl.title")}>
           <Table>
             <TableHeader>
               <TableRow>

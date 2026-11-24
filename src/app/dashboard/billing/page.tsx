@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
-import { CalendarClock } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { TableCard } from "@/components/table-card";
 import { EmptyRow } from "@/components/empty-state";
@@ -407,11 +406,6 @@ export default async function BillingPage({
           </TableBody>
         </Table>
       </TableCard>
-
-      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <CalendarClock className="size-3.5" />
-        {t("page.footerHint")}
-      </p>
     </>
   );
 }
