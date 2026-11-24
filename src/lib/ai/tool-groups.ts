@@ -37,7 +37,7 @@ const LOOKUPS = ["list_parties", "list_categories", "list_bank_accounts"] as con
 export const TOOL_GROUPS: Record<ToolGroupId, GroupDef> = {
   ledger: {
     summary:
-      "Ledger: transactions (income/expense/transfer/advance), categories, bank accounts, counterparties, advances, financial overview and spend breakdown.",
+      "Ledger: transactions (income/expense/transfer/advance), categories, bank accounts, counterparties, advances, financial overview, spend breakdown, and the general-ledger financial statements (government / management books) with their review items.",
     tools: [
       "list_transactions",
       "get_transaction",
@@ -68,12 +68,15 @@ export const TOOL_GROUPS: Record<ToolGroupId, GroupDef> = {
       "list_unlinked_transactions",
       "resolve_transaction_link",
       "rescan_transaction_links",
+      "get_financial_statement",
+      "list_ledger_review_items",
     ],
     keywords: [
       "交易", "記帳", "待連結", "連結", "掛上", "對不上", "記一筆", "支出", "收入", "花了", "花費", "付了", "收到", "轉帳", "帳戶", "銀行", "餘額",
       "分類", "代墊", "報帳", "收據", "發票照片", "先墊", "總覽", "淨額", "現金", "信用卡", "廠商", "前五", "前十",
+      "財務報表", "資產負債表", "損益表", "現金流量表", "權益變動表", "試算表", "總帳", "政府帳", "管理帳", "股東往來",
       "transaction", "expense", "income", "spend", "balance", "account", "category", "advance", "ledger",
-      "unlinked", "link",
+      "unlinked", "link", "balance sheet", "income statement", "cash flow", "trial balance", "financial statement",
     ],
   },
   clients: {
@@ -160,6 +163,7 @@ export const TOOL_GROUPS: Record<ToolGroupId, GroupDef> = {
       "simpany_list_zero_rate_reasons",
       "simpany_list_tax_uploads",
       "simpany_preview_tax_upload",
+      "get_vat_report",
       "list_transactions",
       "list_contracts",
       "list_subscriptions",

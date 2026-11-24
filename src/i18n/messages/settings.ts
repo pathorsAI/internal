@@ -6,6 +6,7 @@ const settings = {
   nav: {
     label: { "zh-TW": "設定分區", en: "Settings sections" },
     general: { "zh-TW": "基本資料", en: "General" },
+    accounting: { "zh-TW": "會計與稅務", en: "Accounting & tax" },
     integrations: { "zh-TW": "整合", en: "Integrations" },
     mcp: { "zh-TW": "MCP", en: "MCP" },
     api: { "zh-TW": "API", en: "API" },

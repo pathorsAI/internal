@@ -1460,6 +1460,8 @@ export const journalLines = pgTable("journal_lines", {
 	fxAmount: numeric("fx_amount", { precision: 18, scale: 2 }),
 	partyId: bigint("party_id", { mode: "number" }),
 	employeeId: bigint("employee_id", { mode: "number" }),
+	// 銀行科目那一行屬於哪個帳戶（快照的對帳與外幣評價要用）
+	bankAccountId: bigint("bank_account_id", { mode: "number" }),
 	memo: text(),
 }, (table) => [
 	index("idx_jl_entry").on(table.entryId),

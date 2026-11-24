@@ -136,6 +136,8 @@ export type StoredLine = {
   partyId: number | null;
   employeeId: number | null;
   memo: string | null;
+  /** 哪個銀行帳戶（快照要靠它對帳、做外幣評價）。沒有時 engine 用「唯一對到這個科目的帳戶」推回去。 */
+  bankAccountId?: number | null;
 };
 
 /** 手動分錄（期初、調整、年結）。ledger = 'both' 兩本帳都有。 */

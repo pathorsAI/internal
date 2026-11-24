@@ -41,6 +41,12 @@ const routeKeys: Record<string, NavItemKey> = {
   "/dashboard/invoices/reconcile": "invoiceReconcile",
   "/dashboard/reports": "reports",
   "/dashboard/reports/spend": "spendAnalysis",
+  "/dashboard/reports/statements": "financialStatements",
+  "/dashboard/reports/statements/print": "statementsPrint",
+  "/dashboard/accounting": "ledger",
+  "/dashboard/accounting/assets": "ledgerAssets",
+  "/dashboard/accounting/periods": "ledgerPeriods",
+  "/dashboard/accounting/fx": "ledgerFx",
   "/dashboard/employees": "employees",
   "/dashboard/payroll": "payroll",
   "/dashboard/activity": "activity",
@@ -50,6 +56,7 @@ const routeKeys: Record<string, NavItemKey> = {
   "/dashboard/settings/api": "api",
   "/dashboard/settings/integrations": "integrations",
   "/dashboard/settings/chat": "chatAccounts",
+  "/dashboard/settings/accounting": "accountingSettings",
 };
 
 export function HeaderBreadcrumb() {

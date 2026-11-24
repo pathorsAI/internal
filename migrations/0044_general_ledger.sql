@@ -117,6 +117,7 @@ CREATE TABLE journal_lines (
   fx_amount numeric(18, 2),
   party_id bigint REFERENCES parties(id) ON DELETE SET NULL,
   employee_id bigint REFERENCES employees(id) ON DELETE SET NULL,
+  bank_account_id bigint REFERENCES bank_accounts(id) ON DELETE SET NULL,
   memo text,
   CONSTRAINT chk_jl_amounts CHECK (debit >= 0 AND credit >= 0 AND NOT (debit > 0 AND credit > 0))
 );
