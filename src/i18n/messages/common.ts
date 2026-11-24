@@ -28,6 +28,7 @@ const common = {
     items: {
       dashboard: { "zh-TW": "總覽", en: "Overview" },
       ai: { "zh-TW": "AI 助理", en: "AI assistant" },
+      account: { "zh-TW": "個人設定", en: "Your profile" },
       billing: { "zh-TW": "請款看板", en: "Billing board" },
       transactions: { "zh-TW": "收支紀錄", en: "Ledger" },
       parties: { "zh-TW": "交易對象", en: "Counterparty" },
@@ -122,6 +123,7 @@ const common = {
     signOut: { "zh-TW": "登出", en: "Sign out" },
     notSignedIn: { "zh-TW": "未登入", en: "Not signed in" },
     currentOrg: { "zh-TW": "組織：{name}", en: "Organization: {name}" },
+    account: { "zh-TW": "個人設定", en: "Your profile" },
     invitations: { "zh-TW": "邀請", en: "Invitations" },
     invitationsTitle: { "zh-TW": "你收到的邀請", en: "Your invitations" },
     invitationsDescription: {

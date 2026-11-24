@@ -8,6 +8,7 @@ import { useTranslations } from "next-intl";
 import { authClient, useListOrganizations } from "@/lib/auth-client";
 import { useRefreshPending } from "@/components/refresh-pending";
 import { Skeleton } from "@/components/ui/skeleton";
+import { PartyAvatar } from "@/components/party-avatar";
 import {
   Select,
   SelectContent,
@@ -21,6 +22,8 @@ export type OrgOption = {
   id: string;
   name: string;
   slug: string;
+  /** organization.logo：上傳過 logo 時是 /api/orgs/<id>/logo?v=…，沒有是 null。 */
+  logo?: string | null;
 };
 
 /**
@@ -74,17 +77,16 @@ export function OrgSwitcher({
   return (
     <Select value={selectedId} onValueChange={onChange} disabled={pending}>
       <SelectTrigger className="w-full" size="default">
-        {pending ? (
-          <Loader2 className="size-4 animate-spin text-muted-foreground" />
-        ) : (
-          <Building2 className="size-4 text-muted-foreground" />
-        )}
+        {/* 選中的組織（logo 或首字＋名稱）由 SelectValue 照選項內容畫；切換中才多一個轉圈 */}
+        {pending ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
+        {selectedId ? null : <Building2 className="size-4 text-muted-foreground" />}
         <SelectValue placeholder={t("orgSwitcher.placeholder")} />
       </SelectTrigger>
       <SelectContent>
         {orgs.map((o) => (
           <SelectItem key={o.id} value={o.id}>
-            {o.name}
+            <PartyAvatar name={o.name} src={o.logo ?? null} size="sm" />
+            <span className="truncate">{o.name}</span>
           </SelectItem>
         ))}
       </SelectContent>

@@ -302,22 +302,30 @@ function IntegrationRow({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:justify-end">
-        {c?.autoSync ? (
-          <AutoSyncSwitch
-            provider={row.id}
-            name={name}
-            on={c.autoSync.on}
-            disabled={!canManage || pending}
-          />
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3 sm:flex-nowrap sm:justify-end">
+        {c ? (
+          <div className="grid grid-cols-[auto_auto] items-center gap-x-3 gap-y-1.5">
+            <label htmlFor={`enabled-${row.id}`} className="text-sm font-medium whitespace-nowrap">
+              {t("actions.enabledLabel")}
+            </label>
+            <Switch
+              id={`enabled-${row.id}`}
+              checked={optimisticEnabled}
+              onCheckedChange={toggle}
+              disabled={!canManage || c.status !== "connected" || pending}
+              aria-label={t("actions.toggleLabel", { name })}
+            />
+            {c.autoSync ? (
+              <AutoSyncSwitch
+                provider={row.id}
+                name={name}
+                on={c.autoSync.on}
+                integrationOn={optimisticEnabled}
+                disabled={!canManage || pending}
+              />
+            ) : null}
+          </div>
         ) : null}
-        <Switch
-          checked={optimisticEnabled}
-          onCheckedChange={toggle}
-          disabled={!canManage || c?.status !== "connected" || pending}
-          aria-label={t("actions.toggleLabel", { name })}
-          className="mr-2"
-        />
         {canManage && !c ? (
           <div className="flex flex-col items-end gap-1">
             <Button
@@ -401,17 +409,29 @@ function LastAutoSyncLine({
   );
 }
 
-/** 列上的「自動同步」小開關（config.autoSync；預設開）。 */
+/**
+ * 列上的「每日自動同步」開關（config.autoSync；預設開），是「啟用整合」底下的附屬設定：
+ * 整合關閉時不能切，並註明關閉時不會同步（autosync.ts 只跑 enabled = true 的列）。
+ * 以兩格放進父層的 grid，標籤跟「啟用整合」對齊。
+ */
 function AutoSyncSwitch({
   provider,
   name,
   on,
+  integrationOn,
   disabled,
-}: Readonly<{ provider: IntegrationProviderId; name: string; on: boolean; disabled: boolean }>) {
+}: Readonly<{
+  provider: IntegrationProviderId;
+  name: string;
+  on: boolean;
+  integrationOn: boolean;
+  disabled: boolean;
+}>) {
   const t = useTranslations("integrations");
   const [pending, start] = useTransition();
   const [optimisticOn, setOptimisticOn] = useOptimistic(on);
   const id = `autosync-${provider}`;
+  const hintId = `${id}-hint`;
 
   function toggle(next: boolean) {
     start(async () => {
@@ -422,18 +442,28 @@ function AutoSyncSwitch({
   }
 
   return (
-    <div className="mr-2 flex items-center gap-2">
-      <label htmlFor={id} className="text-xs whitespace-nowrap text-muted-foreground">
+    <>
+      <label
+        htmlFor={id}
+        className={cn("text-xs whitespace-nowrap text-muted-foreground", !integrationOn && "opacity-60")}
+      >
         {t("autoSync.label")}
       </label>
       <Switch
         id={id}
-        checked={optimisticOn}
+        // 整合關閉時顯示實際效果（不會同步）；存著的偏好在重新開啟後照舊。
+        checked={integrationOn && optimisticOn}
         onCheckedChange={toggle}
-        disabled={disabled || pending}
+        disabled={disabled || pending || !integrationOn}
         aria-label={t("autoSync.toggleLabel", { name })}
+        aria-describedby={integrationOn ? undefined : hintId}
       />
-    </div>
+      {integrationOn ? null : (
+        <p id={hintId} className="col-span-2 text-xs text-muted-foreground">
+          {t("autoSync.offHint")}
+        </p>
+      )}
+    </>
   );
 }
 

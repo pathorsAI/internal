@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronsUpDown, LogOut, MailCheck } from "lucide-react";
+import { ChevronsUpDown, LogOut, MailCheck, UserRound } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { signOut, useActiveOrganization, useSession } from "@/lib/auth-client";
 import {
@@ -31,6 +32,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ThemeMenuItems } from "@/components/theme-switcher";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   SidebarMenu,
   SidebarMenuButton,
@@ -44,20 +46,43 @@ import {
  * DropdownMenu 之後登出變成要先開選單再選，同時多了一個到得了的邀請入口：待處理的
  * 邀請本來只有 /onboarding 看得到，而那頁只有「還沒有任何組織」的人進得去。
  */
-export function UserMenu() {
+/** 由 server layout 傳進來的本人資料，讓第一屏就畫得出使用者列。 */
+export type MenuUser = { name: string; email: string; image: string | null };
+
+export function UserMenu({ initialUser }: Readonly<{ initialUser: MenuUser | null }>) {
   const t = useTranslations("common");
   const router = useRouter();
-  const { data: session } = useSession();
+  const { data: session, isPending } = useSession();
   const { data: activeOrg } = useActiveOrganization();
   const invitations = useUserInvitations();
   const [invitesOpen, setInvitesOpen] = useState(false);
-  const user = session?.user;
+  // client 端的 session 回來前先用 server 給的；換頭像後 $sessionSignal 會讓 session 更新成新的。
+  const user: MenuUser | undefined = session?.user
+    ? { name: session.user.name, email: session.user.email, image: session.user.image ?? null }
+    : (initialUser ?? undefined);
   const pendingCount = invitations.acceptable.length;
 
   async function onSignOut() {
     await signOut();
     router.push("/login");
     router.refresh();
+  }
+
+  // 兩邊都還沒有資料（理論上不會發生，layout 一定有 session）：畫同尺寸的骨架，不顯示「未登入」
+  if (!user && isPending) {
+    return (
+      <SidebarMenu>
+        <SidebarMenuItem>
+          <div className="flex h-12 items-center gap-2 px-2">
+            <Skeleton className="size-8 rounded-lg" />
+            <div className="flex-1 space-y-1.5">
+              <Skeleton className="h-3.5 w-24" />
+              <Skeleton className="h-3 w-32" />
+            </div>
+          </div>
+        </SidebarMenuItem>
+      </SidebarMenu>
+    );
   }
 
   return (
@@ -120,6 +145,12 @@ export function UserMenu() {
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <Link href="/dashboard/account">
+                <UserRound className="size-4" />
+                {t("userMenu.account")}
+              </Link>
+            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setInvitesOpen(true)}>
               <MailCheck className="size-4" />
               <span className="flex-1">{t("userMenu.invitations")}</span>

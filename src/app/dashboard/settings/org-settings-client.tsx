@@ -9,6 +9,9 @@ import { authClient } from "@/lib/auth-client";
 import { GlowButton } from "@/components/ds/glow-button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/form-field";
+import { PartyAvatar } from "@/components/party-avatar";
+import { AvatarUploadField, avatarFieldLabels, type AvatarMode } from "@/components/avatar-upload-field";
+import { saveOrgLogo } from "./actions";
 import {
   Card,
   CardContent,
@@ -36,10 +39,15 @@ import {
 export function OrgSettingsClient({
   orgId,
   orgName,
+  orgLogo,
   canEdit,
-}: Readonly<{ orgId: string; orgName: string; canEdit: boolean }>) {
+}: Readonly<{ orgId: string; orgName: string; orgLogo: string | null; canEdit: boolean }>) {
   const t = useTranslations("settings");
+  const tLogo = useTranslations("settings.org.logo");
   const router = useRouter();
+  // logo 欄位：mode 給「儲存」按鈕判斷有沒有變更；存檔成功換 fieldKey 讓欄位重掛回 keep。
+  const [logoMode, setLogoMode] = useState<AvatarMode>("keep");
+  const [fieldKey, setFieldKey] = useState(0);
 
   // `draft` 在使用者真的打字前都是 null，欄位只是「顯示」server 傳來的名稱。
   // 存檔後清掉 draft，就會自動同步成伺服器回來的值。
@@ -54,20 +62,38 @@ export function OrgSettingsClient({
       toast.error(t("org.toast.nameRequired"));
       return;
     }
-    if (value === orgName) return;
+    const nameChanged = value !== orgName;
+    if (!nameChanged && logoMode === "keep") return;
     setSaving(true);
-    const { error } = await authClient.organization.update({
-      organizationId: orgId,
-      data: { name: value },
-    });
-    setSaving(false);
-    if (error) {
-      toast.error(error.message || t("org.toast.updateFailed"));
-      return;
+    try {
+      if (nameChanged) {
+        const { error } = await authClient.organization.update({
+          organizationId: orgId,
+          data: { name: value },
+        });
+        if (error) {
+          toast.error(error.message || t("org.toast.updateFailed"));
+          return;
+        }
+      }
+      if (logoMode !== "keep") {
+        const res = await saveOrgLogo(new FormData(e.currentTarget));
+        if (!res.ok) {
+          toast.error(res.error ?? t("org.toast.updateFailed"));
+          return;
+        }
+      }
+      toast.success(t("org.toast.updated"));
+      setDraft(null);
+      setLogoMode("keep");
+      setFieldKey((k) => k + 1);
+      // 側欄的組織切換器吃 better-auth 的組織清單，叫它重抓才會換上新 logo
+      authClient.$store.notify("$listOrg");
+      authClient.$store.notify("$activeOrgSignal");
+      router.refresh();
+    } finally {
+      setSaving(false);
     }
-    toast.success(t("org.toast.updated"));
-    setDraft(null);
-    router.refresh();
   }
 
   return (
@@ -82,7 +108,19 @@ export function OrgSettingsClient({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form onSubmit={onSubmit} className="max-w-sm space-y-4">
+        <form onSubmit={onSubmit} className="max-w-md space-y-4">
+          <Field label={t("org.logoLabel")}>
+            <AvatarUploadField
+              key={fieldKey}
+              hasCurrent={Boolean(orgLogo)}
+              disabled={!canEdit || saving}
+              onModeChange={setLogoMode}
+              labels={avatarFieldLabels((k) => tLogo(k as never))}
+              renderAvatar={({ mode, src }) => (
+                <PartyAvatar name={orgName} size="lg" src={src ?? (mode === "keep" ? orgLogo : null)} />
+              )}
+            />
+          </Field>
           <Field label={t("org.nameLabel")} htmlFor="org-name">
             <Input
               id="org-name"
@@ -93,7 +131,7 @@ export function OrgSettingsClient({
             />
           </Field>
           {canEdit && (
-            <GlowButton type="submit" disabled={saving || name.trim() === orgName}>
+            <GlowButton type="submit" disabled={saving || (name.trim() === orgName && logoMode === "keep")}>
               {saving ? t("org.saving") : t("org.save")}
             </GlowButton>
           )}

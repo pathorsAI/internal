@@ -111,14 +111,16 @@ const integrations = {
     reconnect: { "zh-TW": "重新連接", en: "Reconnect" },
     disconnect: { "zh-TW": "中斷連接", en: "Disconnect" },
     manage: { "zh-TW": "管理", en: "Manage" },
-    toggleLabel: { "zh-TW": "開啟 {name}", en: "Enable {name}" },
+    enabledLabel: { "zh-TW": "啟用整合", en: "Enabled" },
+    toggleLabel: { "zh-TW": "啟用 {name}", en: "Enable {name}" },
   },
   notImplemented: { "zh-TW": "尚未開放連接", en: "Not available yet" },
   autoSync: {
-    label: { "zh-TW": "自動同步", en: "Auto-sync" },
+    label: { "zh-TW": "每日自動同步", en: "Daily auto-sync" },
+    offHint: { "zh-TW": "整合關閉時不會同步", en: "No sync while the integration is off" },
     toggleLabel: { "zh-TW": "{name} 每日自動同步", en: "Daily auto-sync for {name}" },
     schedule: {
-      "zh-TW": "已開啟、狀態正常且沒關掉「自動同步」的整合，每天台北時間 06:00 會自動同步一次（Simpany：最近 90 天發票 + 今年薪資申報；Wise：交易，新列標為待確認；Azure / GCP：勾選範圍內的計費帳號、資源與帳單，並和帳本對帳）。",
+      "zh-TW": "已啟用、狀態正常且沒關掉「每日自動同步」的整合，每天台北時間 06:00 會自動同步一次（Simpany：最近 90 天發票 + 今年薪資申報；Wise：交易，新列標為待確認；Azure / GCP：勾選範圍內的計費帳號、資源與帳單，並和帳本對帳）。",
       en: "Every day at 06:00 Taipei time, each integration that is switched on, healthy and has auto-sync on is synced once (Simpany: last 90 days of invoices + this year's salary declarations; Wise: transactions, new rows flagged for review; Azure / GCP: billing accounts, resources and invoices within the selected scope, reconciled against the ledger).",
     },
     last: {
@@ -136,7 +138,7 @@ const integrations = {
       en: "Auto-sync finished: {ok} succeeded, {failed} failed",
     },
     runNothing: {
-      "zh-TW": "沒有可自動同步的整合（需要已開啟、狀態正常且自動同步開著）",
+      "zh-TW": "沒有可自動同步的整合（需要已啟用、狀態正常且每日自動同步開著）",
       en: "Nothing to sync (an integration must be switched on, healthy and have auto-sync on)",
     },
   },

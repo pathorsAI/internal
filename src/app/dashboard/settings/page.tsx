@@ -19,6 +19,7 @@ export default async function SettingsPage() {
   const orgRow = await getDb()
     .select({
       name: organization.name,
+      logo: organization.logo,
       taxTreatment: organization.taxTreatment,
       amountBasis: organization.amountBasis,
     })
@@ -33,6 +34,7 @@ export default async function SettingsPage() {
         <OrgSettingsClient
           orgId={orgId}
           orgName={orgRow[0]?.name ?? ""}
+          orgLogo={orgRow[0]?.logo ?? null}
           canEdit={canManageOrg(role)}
         />
         <OrgTaxSettings

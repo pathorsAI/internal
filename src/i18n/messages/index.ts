@@ -3,6 +3,7 @@ import { localize, type Localized } from "./dictionary";
 import common from "./common";
 import dashboard from "./dashboard";
 import ai from "./ai";
+import account from "./account";
 import transactions from "./transactions";
 import billing from "./billing";
 import contracts from "./contracts";
@@ -36,6 +37,7 @@ const catalogue = {
   common,
   dashboard,
   ai,
+  account,
   transactions,
   billing,
   contracts,
