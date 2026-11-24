@@ -46,7 +46,14 @@ export const ORG_SCOPE_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 /** 刪除以外、但同樣收不回來的寫入：確認卡也標紅。 */
-const IRREVERSIBLE_WRITES = new Set(["merge_parties", "pay_employee_salary"]);
+const IRREVERSIBLE_WRITES = new Set([
+  "merge_parties",
+  "pay_employee_salary",
+  // 刪掉憑證 / 日曆 / 金鑰，要重新在網頁輸入或建立
+  "disconnect_integration",
+  "disconnect_calendar",
+  "revoke_api_key",
+]);
 
 export type ToolLevel = "read" | "write" | "danger";
 

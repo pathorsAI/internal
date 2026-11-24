@@ -90,6 +90,14 @@ If you belong to **multiple orgs**, the server never guesses. Two options:
 
 With a single-org account it just uses that org automatically.
 
+**API keys (headless agents).** `/mcp` also accepts an organization API key
+(`Authorization: Bearer pik_…`, created in 設定 › API) for agents that can't do
+OAuth. The key runs as the member who created it, is pinned to its organization
+(`?org` and `organizationId` can't move it), a read-only key only lists and calls
+`[read]` tools, `list_my_invitations` / `accept_invitation` are unavailable, every
+call (reads included) is logged with channel `api` and the key name, and the same
+per-key rate limit as the REST API applies. See [api.md](./api.md).
+
 ## Tools
 
 Every tool carries, all derived centrally in `src/lib/mcp/handler.ts` (never in
@@ -358,12 +366,59 @@ world; syncing Azure / GCP is `run_integration_sync`):
 | `list_vendor_invoices` | `matchStatus?`, `billingAccountId?`, `limit?` | Azure invoices and GCP monthly totals (BigQuery export) with their reconciliation status. |
 | `resolve_vendor_invoice` | `id`, `action` (`confirm` / `link` / `unlink` / `ignore` / `create`), `transactionId?` | Owner/admin. `link` checks the transaction is in the org; several invoices may share one transaction. `create` books a needs-review expense (management books, `book: internal`) — ask the user first. |
 
-**Not exposed (do in the app):** creating an organization, uploading
-invoice/receipt **files** (R2), multi-currency FX entry, and *connecting* Google
-Calendar (the OAuth consent needs a browser — do it once in 設定 › 整合, after which
-`sync_billing_calendar` works over MCP), and connecting / switching / disconnecting
-integrations (credentials must not pass through an AI conversation). These need
-file handling or extra UI.
+**Settings** (`src/lib/mcp/tools-settings.ts`, `src/lib/mcp/tools-vendor-billing-admin.ts`).
+Everything an owner/admin can click in 設定 › 整合 / 基本資料 / API and on the vendor-billing
+page has a tool, running the **same service code** as the web server actions
+(`src/lib/integrations/settings-service.ts`, `src/lib/wise-sync.ts`,
+`src/lib/google-calendar.ts`, `src/lib/vendor-billing/*`) — the actions only add the session
+and role check and log with channel `web`. Writes are owner/admin; the activity log records
+them under `mcp` (or `api` for an API key). Anything irreversible needs `confirm: true`.
+
+| Tool | Inputs | Notes |
+| --- | --- | --- |
+| `get_integration_connect_link` | `provider` | URL that opens the connect / reconnect sheet directly (`/dashboard/settings/integrations?connect=<provider>&org=<slug>`). Use it whenever a connection needs a secret. The page refuses to open it for a different active organization. Also lists `secretFreeModes`. |
+| `connect_integration` | `provider`, `values` | **Secret-free connections only** — today GCP `authMode: "workload_identity"` (`wifAudience`, `serviceAccountEmail`, optional BigQuery). Tested live with the provider's `testConnection` and saved only when it passes; starts switched off. Any credential field in `values`, or a mode that needs one, is refused before anything runs. |
+| `set_integration_enabled` | `provider`, `enabled` | Switching on needs `status = connected`. |
+| `set_integration_auto_sync` | `provider` (simpany / wise / azure / gcp), `autoSync` | Daily 06:00 Taipei auto-sync switch. |
+| `disconnect_integration` | `provider`, `confirm` | Deletes credentials, token cache and config. Destructive. |
+| `get_cloud_billing_scope` | `provider` (azure / gcp) | Discovered billing profiles / accounts, which are ticked, BigQuery export, GCP auth mode + workload-identity subject and `gcloud` binding command. |
+| `set_cloud_billing_scope` | `provider`, `ids`, `bigQuery?` | Replaces the selection; only discovered ids are kept (`ignoredIds` lists the rest). `bigQuery` (GCP): omit = keep, `null` = clear. |
+| `refresh_cloud_billing_discovery` | `provider` | Re-lists candidates (read-only calls to the platform). Open world. |
+| `get_wise_account_mappings` | — | Wise balances ↔ ledger accounts + cutover dates. |
+| `set_wise_account_mappings` | `mappings[]` (`balanceId`, `bankAccountId`, `syncFrom?`) | Only listed balances change. Same validation as the web table (same currency, one account per balance, YYYY-MM-DD). |
+| `refresh_wise_balances` | — | Read-only GET to Wise. Open world. |
+| `get_calendar_settings` | — | Connected?, by whom, reminder days. Connecting Google Calendar still needs a browser sign-in. |
+| `set_calendar_reminder_days` | `days` (0–60) | Re-pushes events. Open world. |
+| `disconnect_calendar` | `confirm` | Deletes the sub-calendar in Google. Destructive, open world. |
+| `update_organization` | `name` | Renames the org (slug unchanged). |
+| `list_api_keys` | — | Name, prefix, scope, creator, expiry, last use, status. Never the key or its hash. |
+| `revoke_api_key` | `id`, `confirm` | Immediate, irreversible. Creating keys is web-only (it produces a secret). |
+| `verify_vendor_billing_account` | `id` | 確認資料無誤. |
+| `delete_vendor_billing_account` | `id`, `confirm` | Manual accounts only (synced ones come back; narrow the scope instead). |
+| `delete_payment_method` | `id`, `confirm` | Manual payment methods only. |
+| `reconcile_vendor_invoices` | — | 立即對帳 (no external calls). |
+| `sync_vendor_billing` | — | 立即同步 Azure / GCP within the scope, then reconcile. Open world. |
+| `list_vendor_invoice_link_candidates` | `invoiceId` | Candidates for `resolve_vendor_invoice` `link`. |
+
+**Credentials never pass through MCP or the REST API.** Connecting Simpany (password),
+Wise (API token), Azure (client secret), GCP with a JSON key, or Discord (webhook URL) is
+web-only: the tool hands back a deep link to the connect sheet. A provider mode that needs no
+secret may use `connect_integration`; a new provider that adds one gets it for free as long
+as its catalog entry puts every secret in `credentialFields` (`applicableCredentialKeys` decides).
+No tool returns a credential, token or ciphertext.
+
+**Not exposed (do in the app), and why:**
+
+- Creating an organization, uploading invoice/receipt **files** (R2), multi-currency FX
+  entry — need file handling or extra UI.
+- Entering integration secrets, and *connecting* Google Calendar (OAuth consent needs a
+  browser) — see above.
+- **Creating** an API key — it produces a secret.
+- **Members & invitations** (invite, change role, remove, cancel an invitation, delete the
+  org) — these decide who can see the books and send email to outside addresses; they go
+  through better-auth's organization API, which needs the browser session. Kept in
+  成員 (Members) on purpose.
+- Personal MCP OAuth grants (設定 › MCP) — per-user, not org settings.
 Deletes that would break references return a clear error suggesting
 deactivation/archiving instead.
 

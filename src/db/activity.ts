@@ -10,10 +10,12 @@ export type ActivityAction = "create" | "update" | "delete" | "read";
  * web = 登入的成員在網頁操作；mcp = 透過 OAuth MCP；ai = 站內 AI 助理（/dashboard/ai）代成員呼叫工具，
  * actor 是發問並按下確認的那位成員（'ai' 需要 migrations/0036）；system = 沒有人觸發的排程工作
  * （例如整合每日自動同步）。system 沒有操作人 —— actor 欄位一律 NULL，不冒充任何成員。
+ * api = 用組織 API key 呼叫 REST（/api/v1）或 MCP，actor 是金鑰的建立者，summary 開頭帶金鑰名稱
+ * （'api' 需要 migrations/0038）。
  * 'system' 需要 migrations/0028 放寬 chk_activity_channel；還沒跑之前寫入會被 CHECK 擋下，
  * 而 record() 會吞掉錯誤，所以只是少一筆紀錄，不會讓同步失敗。
  */
-export type ActivityChannel = "web" | "mcp" | "ai" | "system";
+export type ActivityChannel = "web" | "mcp" | "ai" | "system" | "api";
 
 type RecordArgs = {
   orgId: string;
@@ -79,7 +81,7 @@ export async function logWeb(
 // which runs the same tools in-process on behalf of the signed-in member. Look
 // up the user's name/email so the log is human-readable without a join.
 async function logToolCall(
-  channel: "mcp" | "ai",
+  channel: "mcp" | "ai" | "api",
   orgId: string,
   userId: string,
   action: ActivityAction,
@@ -136,6 +138,24 @@ export function logAi(
   summary?: string,
 ) {
   return logToolCall("ai", orgId, userId, action, entityType, entityId, summary);
+}
+
+/** 金鑰名稱標在 summary 開頭，操作紀錄一眼就看得出是哪一把。 */
+export function apiKeySummary(keyName: string, summary?: string | null): string {
+  return summary ? `API key「${keyName}」：${summary}` : `API key「${keyName}」`;
+}
+
+/** 用組織 API key 呼叫的工具（REST /api/v1 或 MCP Bearer）：channel = 'api'，actor = 金鑰建立者。 */
+export function logApi(
+  orgId: string,
+  userId: string,
+  keyName: string,
+  action: ActivityAction,
+  entityType: string,
+  entityId: number | null,
+  summary?: string,
+) {
+  return logToolCall("api", orgId, userId, action, entityType, entityId, apiKeySummary(keyName, summary));
 }
 
 // Scheduled / background work with no human actor (e.g. the daily integration

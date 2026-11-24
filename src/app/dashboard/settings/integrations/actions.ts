@@ -4,31 +4,22 @@ import { revalidatePath } from "next/cache";
 import { getTranslations } from "next-intl/server";
 import { canManageOrg, requireOrgWithRole } from "@/lib/session";
 import { logWeb } from "@/db/activity";
-import { EncryptionKeyMissingError } from "@/lib/crypto";
-import { getCatalogEntry } from "@/lib/integrations/catalog";
-import { getProvider } from "@/lib/integrations/registry";
-import {
-  deleteIntegration,
-  getIntegration,
-  saveConnection,
-  setIntegrationEnabled,
-  updateConfig,
-} from "@/lib/integrations/store";
-import { supportsAutoSync } from "@/lib/integrations/autosync-config";
 import { runScheduledSync } from "@/lib/integrations/autosync";
-import { findMissingRequiredField, pickFields } from "@/lib/integrations/fields";
 import {
-  isIntegrationProviderId,
-  type IntegrationConfig,
-  type IntegrationCredentials,
-  type IntegrationProvider,
-  type IntegrationProviderId,
-  type TestConnectionResult,
-} from "@/lib/integrations/types";
+  connectIntegrationForOrg,
+  disconnectIntegrationForOrg,
+  IntegrationSettingsError,
+  setIntegrationAutoSyncForOrg,
+  setIntegrationEnabledForOrg,
+  type SettingsActor,
+} from "@/lib/integrations/settings-service";
 
 /**
  * 設定 › 整合 的 server actions。全部限 owner / admin ——
  * 隱藏按鈕擋得住誤按，擋不住直接呼叫 action，所以每一支都在這裡再檢查一次角色。
+ *
+ * 業務邏輯在 src/lib/integrations/settings-service.ts，MCP／REST 工具共用同一份；
+ * 這裡只負責驗 session、角色，並把操作紀錄記成 channel = web。
  *
  * 回傳值永遠不含憑證：失敗只回錯誤訊息，成功只回 ok。畫面上的狀態靠 revalidatePath
  * 重新渲染 server component 取得（那邊讀的是 IntegrationSummary，型別上就沒有密文）。
@@ -50,91 +41,25 @@ async function requireManager(): Promise<Manager | { error: string }> {
   return { orgId, userId };
 }
 
-type TestOutcome =
-  | { ok: true; result: Extract<TestConnectionResult, { ok: true }> }
-  | { ok: false; error: string };
-
-/** 跑 provider.testConnection，把丟出的例外與 ok:false 都收斂成錯誤字串。 */
-async function runConnectionTest(
-  impl: IntegrationProvider,
-  credentials: IntegrationCredentials,
-  config: IntegrationConfig,
-  orgId: string,
-): Promise<TestOutcome> {
-  let result: TestConnectionResult;
-  try {
-    // orgId 來自 requireManager()（server 端 session），不是 client 傳來的值。
-    result = await impl.testConnection(credentials, config, { orgId });
-  } catch (e) {
-    // provider 自己沒處理好的例外（網路錯之類）。訊息照樣給人看，provider 有責任
-    // 不把憑證放進錯誤訊息裡。
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
-  }
-  if (!result.ok) return { ok: false, error: result.error };
-  return { ok: true, result };
+function webActor(me: Manager): SettingsActor {
+  return {
+    ...me,
+    log: (action, entityType, entityId, summary) => logWeb(me.orgId, action, entityType, entityId, summary),
+  };
 }
 
-async function connectOrReconnect(
-  providerArg: string,
-  values: Record<string, unknown>,
-  mode: "connect" | "reconnect",
-): Promise<IntegrationActionState> {
+/** 跑一支 service 函式：成功 revalidate 並回 ok，失敗收斂成錯誤字串。 */
+async function run(fn: (actor: SettingsActor) => Promise<unknown>): Promise<IntegrationActionState> {
   const t = await getTranslations("integrations");
   // 在 try 外面：未登入時 requireOrg() 會 redirect，那個例外不能被吞掉。
   const me = await requireManager();
   if ("error" in me) return { ok: false, error: me.error };
   try {
-    if (!isIntegrationProviderId(providerArg)) {
-      return { ok: false, error: t("errors.unknownProvider", { provider: String(providerArg) }) };
-    }
-    const provider: IntegrationProviderId = providerArg;
-    const name = t(`providers.${provider}.name`);
-    const impl = getProvider(provider);
-    if (!impl) return { ok: false, error: t("errors.notImplemented", { name }) };
-
-    const entry = getCatalogEntry(provider);
-    // 欄位可能依別的欄位（例如 GCP 的 authMode）決定適不適用：不適用的不檢查、也不存。
-    const allFields = [...entry.credentialFields, ...(entry.configFields ?? [])];
-    const credentials: IntegrationCredentials = pickFields(entry.credentialFields, allFields, values);
-    const configInput: IntegrationConfig = pickFields(entry.configFields, allFields, values);
-    const missing = findMissingRequiredField(allFields, { ...credentials, ...(configInput as Record<string, string>) });
-    if (missing) {
-      return { ok: false, error: t("errors.requiredField", { field: t(`fields.${missing.labelKey}`) }) };
-    }
-
-    // 重新連接時把既有 config 一起給 provider：有些 provider 需要之前發現的 id 才能測。
-    const existing = await getIntegration(me.orgId, provider);
-    const config: IntegrationConfig = { ...existing?.config, ...configInput };
-
-    const outcome = await runConnectionTest(impl, credentials, config, me.orgId);
-    if (!outcome.ok) return { ok: false, error: t("errors.testFailed", { error: outcome.error }) };
-    const { result } = outcome;
-
-    await saveConnection({
-      orgId: me.orgId,
-      provider,
-      userId: me.userId,
-      credentials,
-      config: { ...configInput, ...result.config },
-      tokenCache: result.tokenCache,
-    });
-
-    const isNew = !existing;
-    await logWeb(
-      me.orgId,
-      isNew ? "create" : "update",
-      "integration",
-      null,
-      isNew || mode === "connect"
-        ? t("activity.connected", { name })
-        : t("activity.reconnected", { name }),
-    );
+    await fn(webActor(me));
     revalidatePath(PAGE);
     return { ok: true };
   } catch (e) {
-    if (e instanceof EncryptionKeyMissingError) {
-      return { ok: false, error: t("errors.encryptionKeyMissing") };
-    }
+    if (e instanceof IntegrationSettingsError) return { ok: false, error: e.message };
     return { ok: false, error: e instanceof Error ? e.message : t("toast.failed") };
   }
 }
@@ -147,7 +72,7 @@ export async function connectIntegration(
   provider: string,
   values: Record<string, string>,
 ): Promise<IntegrationActionState> {
-  return connectOrReconnect(provider, values, "connect");
+  return run((actor) => connectIntegrationForOrg(actor, provider, values, { mode: "connect" }));
 }
 
 /** 重新連接：同連接，但保留原本的 enabled，並把狀態恢復為 connected。 */
@@ -155,108 +80,28 @@ export async function reconnectIntegration(
   provider: string,
   values: Record<string, string>,
 ): Promise<IntegrationActionState> {
-  return connectOrReconnect(provider, values, "reconnect");
+  return run((actor) => connectIntegrationForOrg(actor, provider, values, { mode: "reconnect" }));
 }
 
 /** 開 / 關。開啟只允許在 status = connected 時；關閉永遠允許。 */
 export async function setIntegrationEnabledAction(
-  providerArg: string,
+  provider: string,
   enabled: boolean,
 ): Promise<IntegrationActionState> {
-  const t = await getTranslations("integrations");
-  // 在 try 外面：未登入時 requireOrg() 會 redirect，那個例外不能被吞掉。
-  const me = await requireManager();
-  if ("error" in me) return { ok: false, error: me.error };
-  try {
-    if (!isIntegrationProviderId(providerArg)) {
-      return { ok: false, error: t("errors.unknownProvider", { provider: String(providerArg) }) };
-    }
-    const provider: IntegrationProviderId = providerArg;
-    const name = t(`providers.${provider}.name`);
-    const row = await getIntegration(me.orgId, provider);
-    if (!row) return { ok: false, error: t("errors.notConnected", { name }) };
-    if (enabled && row.status !== "connected") {
-      return { ok: false, error: t("errors.cannotEnable", { name }) };
-    }
-    if (row.enabled !== enabled) {
-      await setIntegrationEnabled(me.orgId, provider, enabled);
-      await logWeb(
-        me.orgId,
-        "update",
-        "integration",
-        null,
-        enabled ? t("activity.enabled", { name }) : t("activity.disabled", { name }),
-      );
-    }
-    revalidatePath(PAGE);
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : t("toast.failed") };
-  }
+  return run((actor) => setIntegrationEnabledForOrg(actor, provider, enabled));
 }
 
 /** 中斷連接 = 刪列（連同加密憑證與 token）。 */
-export async function disconnectIntegration(
-  providerArg: string,
-): Promise<IntegrationActionState> {
-  const t = await getTranslations("integrations");
-  // 在 try 外面：未登入時 requireOrg() 會 redirect，那個例外不能被吞掉。
-  const me = await requireManager();
-  if ("error" in me) return { ok: false, error: me.error };
-  try {
-    if (!isIntegrationProviderId(providerArg)) {
-      return { ok: false, error: t("errors.unknownProvider", { provider: String(providerArg) }) };
-    }
-    const provider: IntegrationProviderId = providerArg;
-    const removed = await deleteIntegration(me.orgId, provider);
-    if (removed > 0) {
-      await logWeb(
-        me.orgId,
-        "delete",
-        "integration",
-        null,
-        t("activity.disconnected", { name: t(`providers.${provider}.name`) }),
-      );
-    }
-    revalidatePath(PAGE);
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : t("toast.failed") };
-  }
+export async function disconnectIntegration(provider: string): Promise<IntegrationActionState> {
+  return run((actor) => disconnectIntegrationForOrg(actor, provider));
 }
 
 /** 每日自動同步的開關（config.autoSync）。沒存 = 開；關掉存 false。 */
 export async function setIntegrationAutoSyncAction(
-  providerArg: string,
+  provider: string,
   autoSync: boolean,
 ): Promise<IntegrationActionState> {
-  const t = await getTranslations("integrations");
-  // 在 try 外面：未登入時 requireOrg() 會 redirect，那個例外不能被吞掉。
-  const me = await requireManager();
-  if ("error" in me) return { ok: false, error: me.error };
-  try {
-    if (!isIntegrationProviderId(providerArg) || !supportsAutoSync(providerArg)) {
-      return { ok: false, error: t("errors.unknownProvider", { provider: String(providerArg) }) };
-    }
-    const provider: IntegrationProviderId = providerArg;
-    const name = t(`providers.${provider}.name`);
-    const row = await getIntegration(me.orgId, provider);
-    if (!row) return { ok: false, error: t("errors.notConnected", { name }) };
-    if ((row.config.autoSync !== false) !== autoSync) {
-      await updateConfig(me.orgId, provider, { autoSync });
-      await logWeb(
-        me.orgId,
-        "update",
-        "integration",
-        null,
-        autoSync ? t("activity.autoSyncOn", { name }) : t("activity.autoSyncOff", { name }),
-      );
-    }
-    revalidatePath(PAGE);
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : t("toast.failed") };
-  }
+  return run((actor) => setIntegrationAutoSyncForOrg(actor, provider, autoSync));
 }
 
 export type RunAutoSyncState = IntegrationActionState & {

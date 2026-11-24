@@ -50,6 +50,7 @@ const common = {
       members: { "zh-TW": "成員", en: "Members" },
       activity: { "zh-TW": "操作紀錄", en: "Activity log" },
       mcp: { "zh-TW": "MCP", en: "MCP" },
+      api: { "zh-TW": "API", en: "API" },
       integrations: { "zh-TW": "整合", en: "Integrations" },
       settings: { "zh-TW": "組織設定", en: "Organization settings" },
     },

@@ -1,5 +1,5 @@
 import { getTranslations } from "next-intl/server";
-import { logMcp, type ActivityAction } from "@/db/activity";
+import { logApi, logMcp, type ActivityAction } from "@/db/activity";
 import { canManageOrg, getOrgRole } from "@/lib/session";
 import { runScheduledSync } from "@/lib/integrations/autosync";
 import {
@@ -30,7 +30,9 @@ import {
 //
 // 這裡有「看狀態」的 list_integrations，與「立即跑一次每日自動同步」的
 // run_integration_sync（owner / admin、只跑目前組織，與 cron 同一條程式碼路徑）。
-// 連接 / 開關 / 中斷一律在 web 的 設定 › 整合 做：要輸入憑證，而憑證不該經過 AI 對話。
+// 開關、自動同步、中斷、計費範圍等設定工具在 tools-settings.ts（與網頁共用
+// src/lib/integrations/settings-service.ts）。需要秘密的連接一律在 web 的 設定 › 整合 做：
+// 憑證不經過 MCP / API；get_integration_connect_link 給出直接打開連接視窗的網址。
 //
 // 各 provider 的業務工具（開發票、抓 Wise 交易…）放在各自的 tools-<provider>.ts，
 // 並遵守同一套規則：
@@ -73,7 +75,34 @@ export async function auditIntegrationCall(
   action: ActivityAction,
   detail: string,
 ): Promise<void> {
-  await logMcp(orgId, ctx.userId, action, "integration", null, `${provider}: ${detail}`);
+  const summary = `${provider}: ${detail}`;
+  if (ctx.apiKey) {
+    await logApi(orgId, ctx.userId, ctx.apiKey.name, action, "integration", null, summary);
+    return;
+  }
+  await logMcp(orgId, ctx.userId, action, "integration", null, summary);
+}
+
+/**
+ * 工具版的操作紀錄：依呼叫來源記成 mcp 或 api（API key 時 summary 帶金鑰名稱）。
+ * 給共用 service（例如 src/lib/integrations/settings-service.ts 的 SettingsActor.log）用。
+ */
+export function toolAuditLog(ctx: ToolContext, orgId: string) {
+  return async (action: ActivityAction, entityType: string, entityId: number | null, summary: string) => {
+    if (ctx.apiKey) {
+      await logApi(orgId, ctx.userId, ctx.apiKey.name, action, entityType, entityId, summary);
+      return;
+    }
+    await logMcp(orgId, ctx.userId, action, entityType, entityId, summary);
+  };
+}
+
+/** owner / admin 才能改組織層級設定；工具裡統一用這個擋（訊息給人看）。 */
+export async function assertToolManager(orgId: string, ctx: ToolContext, what = "變更整合設定"): Promise<void> {
+  const role = await getOrgRole(orgId, ctx.userId);
+  if (!canManageOrg(role)) {
+    throw new Error(`只有組織的擁有者或管理員可以${what}，請找 owner 或 admin 操作。`);
+  }
 }
 
 const INTEGRATION_ROW = rowSchema({
@@ -143,7 +172,7 @@ const AUTO_SYNC_ITEM = rowSchema({
 export const integrationTools: Record<string, ToolDef> = {
   list_integrations: {
     description:
-      "List this organization's external integrations (e.g. Simpany e-invoice, Wise) and whether each is connected, switched on and healthy. Never returns credentials. Connecting, switching on/off and disconnecting are done by an owner/admin in the web app under 設定 › 整合 (Settings › Integrations) — credentials are never entered over MCP.",
+      "List this organization's external integrations (e.g. Simpany e-invoice, Wise) and whether each is connected, switched on and healthy. Never returns credentials. Owners/admins can switch an integration on/off (set_integration_enabled), toggle its daily auto-sync (set_integration_auto_sync) and disconnect it (disconnect_integration) over MCP. Connecting with a secret (password, token, key) is web-only — get_integration_connect_link returns the URL that opens the connect sheet; secret-free connections (GCP workload identity) can use connect_integration.",
     inputSchema: {
       type: "object",
       properties: { ...ORG_ARG },

@@ -4,7 +4,20 @@ import { getDb } from "@/db";
 import { contracts, transactions } from "@/db/schema";
 import { resolveOrgId } from "./org";
 
-export type ToolContext = { userId: string; orgHint?: string };
+/** 用 API key 呼叫時才有：金鑰綁定的組織與權限範圍（src/lib/api-keys.ts）。 */
+export type ToolApiKey = {
+  id: number;
+  name: string;
+  organizationId: string;
+  scope: "read" | "write";
+};
+
+/**
+ * 工具執行時的身分。OAuth MCP / 站內 AI：userId = 登入的成員。API key：userId = 金鑰建立者，
+ * apiKey 帶著金鑰本身 —— 組織被鎖在金鑰的組織（resolveOrg），scope = read 只能跑 [read] 工具
+ * （handler 的 runToolWithAudit）。
+ */
+export type ToolContext = { userId: string; orgHint?: string; apiKey?: ToolApiKey };
 
 export type ToolAnnotations = {
   title?: string;
@@ -215,11 +228,22 @@ export const ORG_ARG = {
   },
 } as const;
 
-/** Resolve the target org from the tool args (organizationId) or the connection's ?org hint. */
-export function resolveOrg(
+/**
+ * Resolve the target org from the tool args (organizationId) or the connection's ?org hint.
+ * An API key is bound to one organization: the arg may name it (id or slug) but never another.
+ */
+export async function resolveOrg(
   args: Record<string, unknown>,
   ctx: ToolContext,
 ): Promise<string> {
+  if (ctx.apiKey) {
+    const requested = optString(args, "organizationId");
+    const orgId = await resolveOrgId(ctx.userId, requested ?? ctx.apiKey.organizationId);
+    if (orgId !== ctx.apiKey.organizationId) {
+      throw new Error("This API key belongs to a different organization. Create a key in that organization instead.");
+    }
+    return orgId;
+  }
   return resolveOrgId(ctx.userId, optString(args, "organizationId") ?? ctx.orgHint);
 }
 

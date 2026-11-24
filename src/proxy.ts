@@ -40,6 +40,9 @@ export function proxy(request: NextRequest) {
 // session cookie）。網址裡 256-bit 的 token 就是憑證：30 分鐘、只能 PUT 一次，route 自己驗，
 // 無效一律 404。見 src/lib/simpany-tax-upload.ts。
 //
+// /api/v1 是 REST API（src/app/api/v1）：用組織 API key（Authorization: Bearer pik_…）驗證，
+// 不吃 session cookie；route 自己驗，沒金鑰一律 401 JSON（不是導去 /login）。見 docs/api.md。
+//
 // /flags 是 public/flags 那套國旗圖示（幣別與語系切換器都吃它）。正式環境其實碰不到
 // 這裡 —— Cloudflare 的 assets binding 會在 Worker 之前就把 public/ 的檔案送出去 ——
 // 但 `next dev` 沒有那一層，於是同一張圖在本機會被導去 /login，公開頁面的語系切換器
@@ -53,6 +56,6 @@ export function proxy(request: NextRequest) {
 // 那頁要的是真的去查 session 與 credential account。
 export const config = {
   matcher: [
-    "/((?!login|signup|forgot-password|reset-password|landing|privacy|terms|flags|api/auth|api/cron|api/simpany-tax-uploads|mcp|.well-known|_next/static|_next/image|favicon.ico).*)",
+    "/((?!login|signup|forgot-password|reset-password|landing|privacy|terms|flags|api/auth|api/cron|api/simpany-tax-uploads|api/v1|mcp|.well-known|_next/static|_next/image|favicon.ico).*)",
   ],
 };

@@ -11,7 +11,15 @@
 // plugin) and hands us the resolved session. Unauthenticated requests get a 401
 // with a WWW-Authenticate header pointing at the OAuth protected-resource
 // metadata, which kicks off the login + consent flow in the client.
+//
+// Headless agents without OAuth can instead send an organization API key
+// (`Authorization: Bearer pik_…`, created under 設定 › API). It runs as the key's
+// creator, is pinned to the key's organization, a read-only key only sees and
+// calls [read] tools, every call is logged under channel 'api', and it shares
+// the REST API's per-key rate limit. See docs/api.md.
 import { withMcpAuth } from "better-auth/plugins";
+import { extractApiKey } from "@/lib/api-keys";
+import { authenticateApiKey } from "@/lib/api/rest";
 import { auth } from "@/lib/auth";
 import {
   corsHeaders,
@@ -25,6 +33,20 @@ const authed = withMcpAuth(auth, (req, session) =>
 );
 
 export async function POST(req: Request): Promise<Response> {
+  if (extractApiKey(req)) {
+    const key = await authenticateApiKey(req);
+    if (!key.ok) {
+      if (key.status === 401) return unauthorizedResponse(req, key.message);
+      return withCors(
+        Response.json(
+          { jsonrpc: "2.0", id: null, error: { code: -32029, message: key.message } },
+          { status: 429, headers: key.headers },
+        ),
+        req,
+      );
+    }
+    return handleMcpRequest(req, { userId: key.ctx.userId, apiKey: key.ctx.apiKey });
+  }
   const res = await authed(req);
   // better-auth's own 401 points at `<baseURL>/api/auth/.well-known/...` and
   // carries no `scope`/`error`. Replace it with the canonical RFC 9728

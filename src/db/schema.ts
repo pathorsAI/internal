@@ -650,7 +650,7 @@ export const activityLog = pgTable("activity_log", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	index("idx_activity_org_time").using("btree", table.organizationId.asc().nullsLast(), table.createdAt.desc()),
-	check("chk_activity_channel", sql`channel = ANY (ARRAY['web'::text, 'mcp'::text, 'system'::text, 'ai'::text])`),
+	check("chk_activity_channel", sql`channel = ANY (ARRAY['web'::text, 'mcp'::text, 'system'::text, 'ai'::text, 'api'::text])`),
 	check("chk_activity_action", sql`action = ANY (ARRAY['create'::text, 'update'::text, 'delete'::text, 'read'::text])`),
 ]);
 
@@ -1090,4 +1090,23 @@ export const aiMessages = pgTable("ai_messages", {
 		}).onDelete("cascade"),
 	check("chk_ai_messages_role", sql`role = ANY (ARRAY['user'::text, 'assistant'::text, 'tool'::text])`),
 	check("chk_ai_messages_status", sql`(status IS NULL) OR (status = ANY (ARRAY['ok'::text, 'error'::text, 'pending'::text, 'cancelled'::text]))`),
+]);
+
+// ---- 組織層級的 API key（migrations/0038，src/lib/api-keys.ts）。只存 SHA-256，明文只顯示一次。----
+export const apiKeys = pgTable("api_keys", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "api_keys_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id").notNull(),
+	createdByUserId: text("created_by_user_id").notNull(),
+	name: text().notNull(),
+	prefix: text().notNull(),
+	keyHash: text("key_hash").notNull().unique(),
+	scope: text().default('read').notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	expiresAt: timestamp("expires_at", { withTimezone: true, mode: 'string' }),
+	lastUsedAt: timestamp("last_used_at", { withTimezone: true, mode: 'string' }),
+	revokedAt: timestamp("revoked_at", { withTimezone: true, mode: 'string' }),
+	revokedByUserId: text("revoked_by_user_id"),
+}, (table) => [
+	index("idx_api_keys_org").using("btree", table.organizationId.asc().nullsLast(), table.createdAt.desc()),
+	check("chk_api_keys_scope", sql`scope = ANY (ARRAY['read'::text, 'write'::text])`),
 ]);

@@ -17,6 +17,7 @@ export const TOOL_GROUP_IDS = [
   "invoices",
   "review",
   "integrations",
+  "settings",
 ] as const;
 
 export type ToolGroupId = (typeof TOOL_GROUP_IDS)[number];
@@ -208,6 +209,44 @@ export const TOOL_GROUPS: Record<ToolGroupId, GroupDef> = {
     keywords: [
       "整合", "同步", "wise", "azure", "gcp", "雲端", "固定支出", "定期", "月費", "年費", "扣款", "卡", "discord",
       "integration", "sync", "recurring", "vendor", "cloud", "payment method",
+    ],
+  },
+  settings: {
+    summary:
+      "Settings (owner/admin): switch integrations on/off, daily auto-sync, disconnect, connect links, Azure/GCP billing scope, Wise balance mappings, Google Calendar reminders, organization name, API keys, and vendor-billing admin (verify/delete accounts and payment methods, reconcile, sync now).",
+    tools: [
+      // 設定 › 整合 / 日曆 / 基本資料 / API（tools-settings.ts）
+      "get_integration_connect_link",
+      "connect_integration",
+      "set_integration_enabled",
+      "set_integration_auto_sync",
+      "disconnect_integration",
+      "get_cloud_billing_scope",
+      "set_cloud_billing_scope",
+      "refresh_cloud_billing_discovery",
+      "get_wise_account_mappings",
+      "set_wise_account_mappings",
+      "refresh_wise_balances",
+      "get_calendar_settings",
+      "set_calendar_reminder_days",
+      "disconnect_calendar",
+      "update_organization",
+      "list_api_keys",
+      "revoke_api_key",
+      // 廠商計費頁的管理動作（tools-vendor-billing-admin.ts）
+      "verify_vendor_billing_account",
+      "delete_vendor_billing_account",
+      "delete_payment_method",
+      "reconcile_vendor_invoices",
+      "sync_vendor_billing",
+      "list_vendor_invoice_link_candidates",
+      "list_integrations",
+      "list_vendor_billing_accounts",
+      "list_bank_accounts",
+    ],
+    keywords: [
+      "設定", "開關", "開啟", "關閉", "連接", "中斷", "計費範圍", "對應", "日曆", "提醒", "組織名稱", "改名", "金鑰", "對帳",
+      "settings", "enable", "disable", "connect", "disconnect", "scope", "mapping", "api key", "calendar", "reconcile",
     ],
   },
 };

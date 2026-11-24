@@ -1,4 +1,7 @@
+import { eq } from "drizzle-orm";
 import { getTranslations } from "next-intl/server";
+import { getDb } from "@/db";
+import { organization } from "@/db/auth-schema";
 import { PageHeader } from "@/components/page-header";
 import { canManageOrg, requireOrgWithRole } from "@/lib/session";
 import {
@@ -10,7 +13,11 @@ import { formatDate, formatDateTime } from "@/lib/format";
 import { INTEGRATION_CATALOG, INTEGRATION_ORDER } from "@/lib/integrations/catalog";
 import { getProvider } from "@/lib/integrations/registry";
 import { listIntegrations } from "@/lib/integrations/store";
-import type { IntegrationConfig, IntegrationProviderId } from "@/lib/integrations/types";
+import {
+  isIntegrationProviderId,
+  type IntegrationConfig,
+  type IntegrationProviderId,
+} from "@/lib/integrations/types";
 import {
   isAutoSyncOn,
   parseLastAutoSync,
@@ -63,10 +70,34 @@ function autoSyncView(
   };
 }
 
-export default async function IntegrationsPage() {
+/**
+ * `?connect=<provider>`（MCP 的 get_integration_connect_link 產生）：直接打開那個整合的連接視窗。
+ * 連結帶的 `org` 跟目前組織不同時不打開 —— 憑證不能輸入到別的組織 —— 改顯示提示請使用者先切換。
+ */
+async function resolveConnectParam(
+  orgId: string,
+  canManage: boolean,
+  params: Record<string, string | string[] | undefined>,
+): Promise<{ connect: IntegrationProviderId | null; otherOrg: string | null }> {
+  const connect = typeof params.connect === "string" ? params.connect : null;
+  if (!connect || !isIntegrationProviderId(connect) || !canManage) return { connect: null, otherOrg: null };
+  const org = typeof params.org === "string" ? params.org : null;
+  if (!org || org === orgId) return { connect, otherOrg: null };
+  const [row] = await getDb()
+    .select({ slug: organization.slug })
+    .from(organization)
+    .where(eq(organization.id, orgId))
+    .limit(1);
+  return row?.slug === org ? { connect, otherOrg: null } : { connect: null, otherOrg: org };
+}
+
+export default async function IntegrationsPage({
+  searchParams,
+}: Readonly<{ searchParams: Promise<Record<string, string | string[] | undefined>> }>) {
   const t = await getTranslations("integrations");
   const { orgId, userId, role } = await requireOrgWithRole();
   const canManage = canManageOrg(role);
+  const deepLink = await resolveConnectParam(orgId, canManage, await searchParams);
   const [summaries, calendar, granted, calendarOwner] = await Promise.all([
     listIntegrations(orgId),
     getCalendarSettings(orgId),
@@ -116,6 +147,8 @@ export default async function IntegrationsPage() {
           canRunAutoSync={canManage && rows.some((r) => r.connection?.autoSync)}
           canManage={canManage}
           calendar={{ connected: calendarConnected, ownerLabel: calendarOwner }}
+          initialConnect={deepLink.connect}
+          connectLinkOtherOrg={deepLink.otherOrg}
         />
         {wiseView ? (
           <section id="wise" className="scroll-mt-20">

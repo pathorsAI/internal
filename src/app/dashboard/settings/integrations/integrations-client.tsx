@@ -1,6 +1,6 @@
 "use client";
 
-import { useOptimistic, useState, useTransition } from "react";
+import { useEffect, useOptimistic, useState, useTransition } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
@@ -84,16 +84,34 @@ export function IntegrationsList({
   canManage,
   canRunAutoSync,
   calendar,
+  initialConnect = null,
+  connectLinkOtherOrg = null,
 }: Readonly<{
   rows: IntegrationRowData[];
   canManage: boolean;
   /** owner / admin 且至少有一個整合支援自動同步時，顯示「立即執行自動同步」。 */
   canRunAutoSync: boolean;
   calendar: { connected: boolean; ownerLabel: string | null };
+  /** `?connect=<provider>`：一進頁面就打開這個整合的連接（已連接則重新連接）視窗。 */
+  initialConnect?: IntegrationProviderId | null;
+  /** 連結是給另一個組織的：不自動打開，提示先切換組織。 */
+  connectLinkOtherOrg?: string | null;
 }>) {
   const t = useTranslations("integrations");
-  const [target, setTarget] = useState<SheetTarget | null>(null);
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [target, setTarget] = useState<SheetTarget | null>(() => {
+    const row = initialConnect ? rows.find((r) => r.id === initialConnect && r.implemented) : undefined;
+    return row ? { row, mode: row.connection ? "reconnect" : "connect", nonce: 1 } : null;
+  });
+  const [sheetOpen, setSheetOpen] = useState(() => target !== null);
+
+  // 打開過就把 ?connect 拿掉，重新整理或按上一頁不會再跳出來。
+  useEffect(() => {
+    if (!initialConnect) return;
+    const url = new URL(globalThis.location.href);
+    url.searchParams.delete("connect");
+    url.searchParams.delete("org");
+    globalThis.history.replaceState(null, "", url.toString());
+  }, [initialConnect]);
 
   function openSheet(row: IntegrationRowData, mode: SheetTarget["mode"]) {
     // nonce 當 key：每次打開都是一張乾淨的表單，關閉時元件留著讓收合動畫跑完。
@@ -109,6 +127,12 @@ export function IntegrationsList({
           {t("readOnlyNote")}
         </p>
       )}
+      {connectLinkOtherOrg ? (
+        <p className="flex items-center gap-2 text-sm text-warning">
+          <Info className="size-4 shrink-0" />
+          {t("connectLinkOtherOrg", { org: connectLinkOtherOrg })}
+        </p>
+      ) : null}
       <AutoSyncBar canRun={canRunAutoSync} />
       <ul className="divide-y rounded-xl border bg-card shadow-xs">
         {rows.map((row) => (
