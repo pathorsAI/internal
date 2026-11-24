@@ -1357,7 +1357,7 @@ export const transactionTools: Record<string, ToolDef> = {
           existing.toAccountId,
         ]);
       }
-      // 收款分配（0041）：分配列若只是舊綁定的鏡像（剛好整筆分給同一個目標），先拿掉，這次改的綁定／金額才會生效。
+      // 收款分配（0042）：分配列若只是舊綁定的鏡像（剛好整筆分給同一個目標），先拿掉，這次改的綁定／金額才會生效。
       if (existing.type === "income") await releaseLegacyMirror(db, orgId, id);
       // 經連結層：換了請款項 / 訂閱 / 合約會重新繼承專案與合約；改了金額、日期會重新比對候選。
       const updated = await updateTransactionLinked({ db, orgId, source: "mcp" }, id, patch);

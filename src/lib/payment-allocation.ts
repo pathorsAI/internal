@@ -1,5 +1,5 @@
 /**
- * 收款分配（migrations/0041）：一筆入帳分給多個應收，並記下吸收的手續費／匯差。
+ * 收款分配（migrations/0042）：一筆入帳分給多個應收，並記下吸收的手續費／匯差。
  *
  * 規則（讀取路徑一律照這裡，SQL 版本在 src/db/allocations.ts 的 effective CTE）：
  *   - 交易有任何分配列 → 只看分配列，忽略它舊的單一綁定欄位；
@@ -164,7 +164,7 @@ export function effectiveAllocations(
 
 /**
  * 分配列是不是「舊單一綁定的鏡像」：只有一列、手續費 0、金額等於整筆、目標就是舊綁定。
- * （0041 不搬舊資料，這種列只會在有人把整筆分給它原本綁的目標時出現。）改交易的綁定或金額之前先把鏡像拿掉，讓讀取退回新的綁定欄位，
+ * （0042 不搬舊資料，這種列只會在有人把整筆分給它原本綁的目標時出現。）改交易的綁定或金額之前先把鏡像拿掉，讓讀取退回新的綁定欄位，
  * 不然舊表單／update_transaction 的改綁就會被這列蓋掉、看起來沒生效。真正拆分過的不動。
  */
 export function isLegacyMirror(txn: LegacyBinding, rows: readonly AllocationInput[]): boolean {

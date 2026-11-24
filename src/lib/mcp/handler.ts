@@ -42,7 +42,7 @@ const AUDIT_BY_NAME: Record<string, Pick<McpAudit, "action" | "entityType">> = {
   merge_parties: { action: "update", entityType: "party" },
   // 待連結：掛上候選 / 略過 / 指定對象，都記在交易上
   resolve_transaction_link: { action: "update", entityType: "transaction" },
-  // 收款分配（0041）：記在交易上（結果的 id 就是 transactionId），與網頁端 logWeb 一致。
+  // 收款分配（0042）：記在交易上（結果的 id 就是 transactionId），與網頁端 logWeb 一致。
   set_payment_allocations: { action: "update", entityType: "transaction" },
 };
 

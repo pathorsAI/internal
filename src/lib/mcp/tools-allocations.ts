@@ -1,5 +1,5 @@
 /**
- * 收款分配（migrations/0041）的 MCP 工具：set_payment_allocations（整組替換）與
+ * 收款分配（migrations/0042）的 MCP 工具：set_payment_allocations（整組替換）與
  * list_payment_allocations（依交易／目標／期間列出）。規則見 src/lib/payment-allocation.ts，
  * 檢查與寫入跟網頁的「分配收款」Sheet 共用 src/db/allocations.ts。
  */

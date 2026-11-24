@@ -651,7 +651,7 @@ export const billingItems = pgTable("billing_items", {
 	check("chk_billing_item_status", sql`status = ANY (ARRAY['scheduled'::text, 'billed'::text, 'paid'::text, 'cancelled'::text])`),
 ]);
 
-// ---- 收款分配（migrations/0041）：一筆入帳分給多個應收，並記下吸收的手續費／匯差。
+// ---- 收款分配（migrations/0042）：一筆入帳分給多個應收，並記下吸收的手續費／匯差。
 // 一列 = 這筆入帳分給某一個應收（訂閱期別／請款項目／合約）的金額；fee 不是錢，是「同意少收」。
 // 有分配列的交易只看分配列，沒有的退回舊的單一綁定欄位（規則見 src/lib/payment-allocation.ts）。
 // organization / user 的 FK 在 DB 端，這裡不宣告（auth-schema 另檔，避免循環 import）。
