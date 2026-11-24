@@ -1,6 +1,6 @@
 import { tools } from "@/lib/mcp/tools";
 import type { ChatTool } from "./openrouter";
-import { baseToolLevel, canOffer, type OrgRole } from "./tool-policy";
+import { baseToolLevel, canOffer, type OrgRole, type PolicyChannel } from "./tool-policy";
 import { loadToolGroupsTool, toolsForGroups, type ToolGroupId } from "./tool-groups";
 import { CONFIRM_SUMMARY_ARG } from "./types";
 
@@ -45,12 +45,16 @@ function tag(name: string): string {
   return level === "danger" ? "[delete]" : "[write]";
 }
 
-/** 這些組、這個角色能用的工具，轉成 OpenAI function 格式，最後加上 load_tool_groups。 */
-export function buildToolSpecs(groups: readonly ToolGroupId[], role: OrgRole): ChatTool[] {
+/** 這些組、這個角色、這個入口能用的工具，轉成 OpenAI function 格式，最後加上 load_tool_groups。 */
+export function buildToolSpecs(
+  groups: readonly ToolGroupId[],
+  role: OrgRole,
+  channel: PolicyChannel = "web",
+): ChatTool[] {
   const specs: ChatTool[] = [];
   for (const name of toolsForGroups(groups)) {
     const def = tools[name];
-    if (!def || !canOffer(name, role)) continue;
+    if (!def || !canOffer(name, role, channel)) continue;
     specs.push({
       type: "function",
       function: {

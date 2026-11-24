@@ -1,4 +1,4 @@
-import { pgTable, check, bigint, text, boolean, char, numeric, timestamp, date, unique, integer, foreignKey, index, uniqueIndex, jsonb, smallint } from "drizzle-orm/pg-core"
+import { pgTable, check, bigint, text, boolean, char, numeric, timestamp, date, unique, integer, foreignKey, index, uniqueIndex, jsonb, smallint, primaryKey } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 
@@ -442,6 +442,10 @@ export const documents = pgTable("documents", {
 	// 其他發票主動通知會計師的時間（null = 尚未通知）
 	accountantNotifiedAt: timestamp("accountant_notified_at", { withTimezone: true, mode: 'string' }),
 	uploadedAt: timestamp("uploaded_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	// 誰、從哪個入口上傳（migrations/0040）。聊天收到的檔案先是 transaction_id／invoice_id 都 NULL 的
+	// 「收件匣」列，按確認才掛上交易（src/db/chat.ts attachInboxDocuments）。FK 在 DB 端。
+	uploadedBy: text("uploaded_by"),
+	source: text(),
 }, (table) => [
 	index("idx_doc_txn").using("btree", table.transactionId.asc().nullsLast().op("int8_ops")),
 	index("idx_doc_invoice").using("btree", table.invoiceId.asc().nullsLast().op("int8_ops")),
@@ -458,6 +462,8 @@ export const documents = pgTable("documents", {
 	unique("documents_r2_key_key").on(table.r2Key),
 	check("chk_doc_type", sql`doc_type = ANY (ARRAY['receipt'::text, 'invoice'::text, 'vat_return_401'::text, 'withholding'::text, 'payroll'::text, 'contract'::text, 'other'::text])`),
 	check("chk_doc_invoice_kind", sql`invoice_kind IS NULL OR invoice_kind = ANY (ARRAY['electronic'::text, 'paper'::text])`),
+	check("chk_doc_source", sql`source IS NULL OR source = ANY (ARRAY['web'::text, 'line'::text, 'whatsapp'::text, 'mcp'::text])`),
+	index("idx_doc_inbox").on(table.organizationId, table.uploadedAt).where(sql`transaction_id IS NULL AND invoice_id IS NULL AND deleted_at IS NULL`),
 ]);
 
 // ---- 客戶營運（專案 / 訂閱 / 合約）----
@@ -667,7 +673,7 @@ export const activityLog = pgTable("activity_log", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	index("idx_activity_org_time").using("btree", table.organizationId.asc().nullsLast(), table.createdAt.desc()),
-	check("chk_activity_channel", sql`channel = ANY (ARRAY['web'::text, 'mcp'::text, 'system'::text, 'ai'::text, 'api'::text])`),
+	check("chk_activity_channel", sql`channel = ANY (ARRAY['web'::text, 'mcp'::text, 'system'::text, 'ai'::text, 'api'::text, 'line'::text, 'whatsapp'::text])`),
 	check("chk_activity_action", sql`action = ANY (ARRAY['create'::text, 'update'::text, 'delete'::text, 'read'::text])`),
 ]);
 
@@ -1097,10 +1103,13 @@ export const aiConversations = pgTable("ai_conversations", {
 	title: text().default('').notNull(),
 	// 這段對話已載入的工具組（src/lib/ai/tool-groups.ts）
 	toolGroups: text("tool_groups").array().default(sql`'{}'::text[]`).notNull(),
+	// 從哪個入口開的對話（migrations/0040）：web | line | whatsapp
+	channel: text().default('web').notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	index("idx_ai_conversations_owner").using("btree", table.organizationId.asc().nullsLast(), table.userId.asc().nullsLast(), table.updatedAt.desc()),
+	check("chk_ai_conversations_channel", sql`channel = ANY (ARRAY['web'::text, 'line'::text, 'whatsapp'::text])`),
 ]);
 
 export const aiMessages = pgTable("ai_messages", {
@@ -1115,6 +1124,8 @@ export const aiMessages = pgTable("ai_messages", {
 	status: text(),
 	inputTokens: integer("input_tokens"),
 	outputTokens: integer("output_tokens"),
+	// user 訊息附的檔案（migrations/0040）：[{ documentId, fileName, contentType }]
+	attachments: jsonb(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	index("idx_ai_messages_conversation").using("btree", table.conversationId.asc().nullsLast(), table.id.asc().nullsLast()),
@@ -1144,4 +1155,174 @@ export const apiKeys = pgTable("api_keys", {
 }, (table) => [
 	index("idx_api_keys_org").using("btree", table.organizationId.asc().nullsLast(), table.createdAt.desc()),
 	check("chk_api_keys_scope", sql`scope = ANY (ARRAY['read'::text, 'write'::text])`),
+]);
+
+// ---- LINE／WhatsApp bot（migrations/0040，src/db/chat.ts）。"user" / organization 的 FK 在 DB 端
+// （better-auth 的表在 auth-schema.ts，這裡不跨檔宣告）。----
+
+// 聊天平台帳號 ↔ internal 使用者。busy_until 是「同一人同時只跑一題」的鎖。
+export const chatIdentities = pgTable("chat_identities", {
+	id: text().primaryKey(),
+	provider: text().notNull(),
+	externalId: text("external_id").notNull(),
+	userId: text("user_id").notNull(),
+	activeOrgId: text("active_org_id"),
+	displayName: text("display_name"),
+	busyUntil: timestamp("busy_until", { withTimezone: true, mode: 'string' }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	lastSeenAt: timestamp("last_seen_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	unique("uq_chat_identities_external").on(table.provider, table.externalId),
+	unique("uq_chat_identities_user").on(table.provider, table.userId),
+	check("chk_chat_identities_provider", sql`provider = ANY (ARRAY['line'::text, 'whatsapp'::text])`),
+]);
+
+// 網頁產生的綁定碼：只存 sha256(code)，10 分鐘過期、用一次。
+export const chatLinkCodes = pgTable("chat_link_codes", {
+	codeHash: text("code_hash").primaryKey(),
+	userId: text("user_id").notNull(),
+	orgId: text("org_id").notNull(),
+	provider: text().notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	expiresAt: timestamp("expires_at", { withTimezone: true, mode: 'string' }).notNull(),
+	usedAt: timestamp("used_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+	index("idx_chat_link_codes_user").on(table.userId, table.provider),
+	check("chk_chat_link_codes_provider", sql`provider = ANY (ARRAY['line'::text, 'whatsapp'::text])`),
+]);
+
+// webhook 去重，保留 7 天。
+export const chatInboundEvents = pgTable("chat_inbound_events", {
+	provider: text().notNull(),
+	eventId: text("event_id").notNull(),
+	receivedAt: timestamp("received_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	primaryKey({ columns: [table.provider, table.eventId], name: "chat_inbound_events_pkey" }),
+	index("idx_chat_inbound_events_received").on(table.receivedAt),
+]);
+
+// 送到聊天裡的確認卡；按鈕 payload 只帶 c:<id>:<action>。
+export const chatCards = pgTable("chat_cards", {
+	id: text().primaryKey(),
+	identityId: text("identity_id").notNull(),
+	conversationId: text("conversation_id").notNull(),
+	toolCallIds: text("tool_call_ids").array().notNull(),
+	status: text().default('open').notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	expiresAt: timestamp("expires_at", { withTimezone: true, mode: 'string' }).notNull(),
+}, (table) => [
+	index("idx_chat_cards_open").on(table.identityId, table.status, table.expiresAt),
+	foreignKey({
+			columns: [table.identityId],
+			foreignColumns: [chatIdentities.id],
+			name: "chat_cards_identity_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.conversationId],
+			foreignColumns: [aiConversations.id],
+			name: "chat_cards_conversation_id_fkey"
+		}).onDelete("cascade"),
+	check("chk_chat_cards_status", sql`status = ANY (ARRAY['open'::text, 'done'::text, 'expired'::text])`),
+]);
+
+// 訊息暫存：安靜幾秒才把這些合成一題送給 AI。
+export const chatBuffer = pgTable("chat_buffer", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "chat_buffer_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	identityId: text("identity_id").notNull(),
+	provider: text().notNull(),
+	externalMessageId: text("external_message_id"),
+	kind: text().notNull(),
+	text: text(),
+	documentId: bigint("document_id", { mode: "number" }),
+	quotedExternalId: text("quoted_external_id"),
+	receivedAt: timestamp("received_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	consumedAt: timestamp("consumed_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+	index("idx_chat_buffer_pending").on(table.identityId, table.receivedAt).where(sql`consumed_at IS NULL`),
+	foreignKey({
+			columns: [table.identityId],
+			foreignColumns: [chatIdentities.id],
+			name: "chat_buffer_identity_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.documentId],
+			foreignColumns: [documents.id],
+			name: "chat_buffer_document_id_fkey"
+		}).onDelete("set null"),
+	check("chk_chat_buffer_provider", sql`provider = ANY (ARRAY['line'::text, 'whatsapp'::text])`),
+	check("chk_chat_buffer_kind", sql`kind = ANY (ARRAY['text'::text, 'media'::text, 'button'::text])`),
+]);
+
+// 平台訊息 id ↔ 對話／訊息／檔案／確認卡，解析「回覆某一則」用。保留 90 天。
+export const chatMessageRefs = pgTable("chat_message_refs", {
+	provider: text().notNull(),
+	externalMessageId: text("external_message_id").notNull(),
+	identityId: text("identity_id").notNull(),
+	conversationId: text("conversation_id"),
+	direction: text().notNull(),
+	aiMessageId: bigint("ai_message_id", { mode: "number" }),
+	documentId: bigint("document_id", { mode: "number" }),
+	cardId: text("card_id"),
+	snippet: text(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	primaryKey({ columns: [table.provider, table.externalMessageId], name: "chat_message_refs_pkey" }),
+	index("idx_chat_message_refs_created").on(table.createdAt),
+	foreignKey({
+			columns: [table.identityId],
+			foreignColumns: [chatIdentities.id],
+			name: "chat_message_refs_identity_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.conversationId],
+			foreignColumns: [aiConversations.id],
+			name: "chat_message_refs_conversation_id_fkey"
+		}).onDelete("set null"),
+	foreignKey({
+			columns: [table.aiMessageId],
+			foreignColumns: [aiMessages.id],
+			name: "chat_message_refs_ai_message_id_fkey"
+		}).onDelete("set null"),
+	foreignKey({
+			columns: [table.documentId],
+			foreignColumns: [documents.id],
+			name: "chat_message_refs_document_id_fkey"
+		}).onDelete("set null"),
+	foreignKey({
+			columns: [table.cardId],
+			foreignColumns: [chatCards.id],
+			name: "chat_message_refs_card_id_fkey"
+		}).onDelete("set null"),
+	check("chk_chat_message_refs_provider", sql`provider = ANY (ARRAY['line'::text, 'whatsapp'::text])`),
+	check("chk_chat_message_refs_direction", sql`direction = ANY (ARRAY['in'::text, 'out'::text])`),
+]);
+
+// ---- AI 規則（migrations/0040，src/db/ai-rules.ts、src/lib/ai/rules.ts）----
+export const aiRules = pgTable("ai_rules", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "ai_rules_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id").notNull(),
+	// org = 全組織套用；user = 只套在 userId 本人
+	scope: text().notNull(),
+	userId: text("user_id"),
+	// category = 對到就建議分類；advance_default = 個人預設（例如「我傳的收據都是我先墊的」）；note = 一段放進 prompt 的話
+	kind: text().notNull(),
+	// { partyContains?, taxId?, keyword? }
+	match: jsonb().$type<Record<string, unknown>>().default({}).notNull(),
+	// { categoryId?, categoryName?, ... }
+	action: jsonb().$type<Record<string, unknown>>().default({}).notNull(),
+	// 使用者的原話
+	text: text().notNull(),
+	createdBy: text("created_by"),
+	source: text().default('web').notNull(),
+	applyCount: integer("apply_count").default(0).notNull(),
+	lastAppliedAt: timestamp("last_applied_at", { withTimezone: true, mode: 'string' }),
+	disabledAt: timestamp("disabled_at", { withTimezone: true, mode: 'string' }),
+	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_ai_rules_org").on(table.organizationId).where(sql`deleted_at IS NULL`),
+	check("chk_ai_rules_scope", sql`scope = ANY (ARRAY['org'::text, 'user'::text])`),
+	check("chk_ai_rules_scope_user", sql`(scope = 'org'::text) OR (user_id IS NOT NULL)`),
+	check("chk_ai_rules_kind", sql`kind = ANY (ARRAY['category'::text, 'advance_default'::text, 'note'::text])`),
+	check("chk_ai_rules_source", sql`source = ANY (ARRAY['web'::text, 'line'::text, 'whatsapp'::text, 'mcp'::text])`),
 ]);
