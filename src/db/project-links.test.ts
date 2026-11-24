@@ -25,8 +25,8 @@ describe("projectTransactionIds", () => {
       expect(sql).toContain(`left join "${table}" "${alias}"`);
       expect(sql).toContain(`"${alias}"."deleted_at" is null`);
     }
-    // 六個候選放在同一個 in (...) 裡：同一筆交易對同一個專案只會配對一次
-    const cols = ["p_txn", "p_contract", "p_sub", "p_sub_contract", "p_item", "p_item_contract"];
-    expect(sql).toContain(`in (${cols.map((c) => `"${c}"`).join(", ")})`);
+    // 依優先順序只歸一個專案：交易自己 > 請款項 > 訂閱 > 合約
+    const cols = ["p_txn", "p_item", "p_item_contract", "p_sub", "p_sub_contract", "p_contract"];
+    expect(sql).toContain(`= coalesce(${cols.map((c) => `"${c}"`).join(", ")})`);
   });
 });

@@ -132,6 +132,9 @@ describe.skipIf(!url)("getDb() on node-postgres", () => {
         values (${ORG}, '2026-02-04', 'expense', 30, 'TWD', ${ids.bB})`);
       await txn(sql`insert into transactions (organization_id, txn_date, type, amount, currency, contract_id)
         values (${ORG}, '2026-02-05', 'income', 200, 'TWD', ${ids.cB})`);
+      // 交易自己標 A、合約卻在 B：只歸 A（優先順序：交易自己的專案優先），B 不重複算
+      await txn(sql`insert into transactions (organization_id, txn_date, type, amount, currency, project_id, contract_id)
+        values (${ORG}, '2026-02-07', 'income', 7, 'TWD', ${ids.A}, ${ids.cB})`);
       // 已刪除的交易不算
       await txn(sql`insert into transactions (organization_id, txn_date, type, amount, currency, project_id, deleted_at)
         values (${ORG}, '2026-02-06', 'income', 999, 'TWD', ${ids.A}, now())`);
@@ -142,7 +145,7 @@ describe.skipIf(!url)("getDb() on node-postgres", () => {
     test("listProjects sums every linked path once, in TWD", async () => {
       const rows = await listProjects(ORG);
       const by = Object.fromEntries(rows.map((r) => [r.name, r]));
-      expect(by.A.income).toBe(450);
+      expect(by.A.income).toBe(457);
       expect(by.A.expense).toBe(0);
       expect(by.B.income).toBe(200);
       expect(by.B.expense).toBe(30);
@@ -155,7 +158,7 @@ describe.skipIf(!url)("getDb() on node-postgres", () => {
 
     test("filtering transactions by project uses the same membership", async () => {
       const rows = await listTransactions(ORG, { projectId: ids.A }, 50);
-      expect(rows.map((r) => Number(r.amount)).sort((a, b) => a - b)).toEqual([10, 50, 100]);
+      expect(rows.map((r) => Number(r.amount)).sort((a, b) => a - b)).toEqual([7, 10, 50, 100]);
     });
 
     test("listUnassignedContracts only returns contracts without a project", async () => {

@@ -6,7 +6,7 @@ import { billingItems, contracts, subscriptions, transactions } from "./schema";
 /**
  * 專案損益的歸屬定義（docs/data-links.md 方案 C）：一筆交易屬於專案 P，只要下列任一條成立
  *
- *   1. transactions.project_id = P
+ *   1. transactions.project_id = P（優先順序見 attributedProject）
  *   2. 交易的合約（contract_id）屬於 P
  *   3. 交易的訂閱（subscription_id）屬於 P —— 訂閱自己的 project_id，或訂閱所屬合約的專案
  *   4. 交易的請款項（billing_item_id）屬於 P —— 請款項自己的 project_id，或請款項所屬合約的專案
@@ -14,8 +14,8 @@ import { billingItems, contracts, subscriptions, transactions } from "./schema";
  * 交易的 project_id 只在寫入當下從請款項 / 訂閱 / 合約繼承；之後才把合約歸到專案的話，
  * 舊交易的 project_id 還是空的。這裡在讀取時把整條鏈攤開，舊資料也算得進去。
  *
- * 去重：每筆交易攤成一列（帶 6 個候選專案 id），跟專案只用一個 `P in (...)` 條件 join，
- * 所以同一筆交易對同一個專案最多配對一次 —— 好幾條路徑同時命中也不會重複計算。
+ * 去重：每筆交易攤成一列（帶 6 個候選專案 id），依優先順序只歸一個專案（attributedProject），
+ * 好幾條路徑同時命中、甚至指到不同專案，也只算一次。
  * 已軟刪除的合約 / 訂閱 / 請款項不算路徑（使用者眼中它已經不存在）。
  */
 
@@ -54,9 +54,18 @@ export function projectLinkedTransactions(orgId: string) {
 
 export type ProjectLinkedTransactions = ReturnType<typeof projectLinkedTransactions>;
 
-/** `P in (6 個候選)`：P 可以是欄位（per-project 彙總）或常數（單一專案篩選）。 */
+/**
+ * 每筆交易只歸**一個**專案，依優先順序取第一個有值的：交易自己的專案 > 請款項（自己的、所屬合約的）
+ * > 訂閱（自己的、所屬合約的）> 合約。這樣各專案加總不會大於實際收支 —— 交易自己標了 A、
+ * 它的合約後來換到 B 時，算 A（人明確填的優先，跟連結層的繼承規則一致）。
+ * P 可以是欄位（per-project 彙總）或常數（單一專案篩選）。
+ */
+export function attributedProject(plt: ProjectLinkedTransactions): SQL {
+  return sql`coalesce(${plt.viaTxn}, ${plt.viaBillingItem}, ${plt.viaBillingItemContract}, ${plt.viaSubscription}, ${plt.viaSubscriptionContract}, ${plt.viaContract})`;
+}
+
 export function belongsToProject(plt: ProjectLinkedTransactions, project: AnyPgColumn | number): SQL {
-  return sql`${project} in (${plt.viaTxn}, ${plt.viaContract}, ${plt.viaSubscription}, ${plt.viaSubscriptionContract}, ${plt.viaBillingItem}, ${plt.viaBillingItemContract})`;
+  return sql`${project} = ${attributedProject(plt)}`;
 }
 
 /** 以 TWD 彙總（amount_twd 缺值時退回 amount），與 queries.ts 其他報表同一套幣別語意。 */
