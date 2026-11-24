@@ -29,7 +29,7 @@ import {
 } from "./shared";
 
 /**
- * AI 規則工具（ai_rules，migrations/0040）：使用者教 AI 的話，例如「以後 Google Workspace 都歸軟體工具」。
+ * AI 規則工具（ai_rules，migrations/0042）：使用者教 AI 的話，例如「以後 Google Workspace 都歸軟體工具」。
  * 站內 AI、聊天 bot、外部 MCP agent 都用這四支，所以角色檢查寫在工具裡：
  * - 組織規則（scope = org）只有 owner / admin 能建、改、停用、刪。
  * - 個人規則（scope = user）任何成員都能建，只有本人看得到、改得到、刪得掉。

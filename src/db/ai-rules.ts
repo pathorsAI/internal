@@ -5,7 +5,7 @@ import { user } from "./auth-schema";
 import { aiRules, categories } from "./schema";
 
 /**
- * AI 規則（ai_rules，migrations/0040）。每個查詢都過濾 organization_id；個人規則（scope = user）
+ * AI 規則（ai_rules，migrations/0042）。每個查詢都過濾 organization_id；個人規則（scope = user）
  * 只有本人看得到。比對邏輯在 src/lib/ai/rules.ts，這裡只管存取。
  *
  * 角色檢查（組織規則只有 owner/admin 能建、改、刪）**不在這裡**，在工具裡

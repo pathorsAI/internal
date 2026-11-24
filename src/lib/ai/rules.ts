@@ -1,5 +1,5 @@
 /**
- * AI 規則（ai_rules，migrations/0040）的純函式：比對分類規則、把規則寫成 system prompt 裡的一行。
+ * AI 規則（ai_rules，migrations/0042）的純函式：比對分類規則、把規則寫成 system prompt 裡的一行。
  * 不碰 DB，網頁 AI、聊天 bot、Wise／卡費匯入都用同一份比對邏輯（教一次兩邊都變快）。
  *
  * 規則的形狀：

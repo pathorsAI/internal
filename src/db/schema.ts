@@ -442,7 +442,7 @@ export const documents = pgTable("documents", {
 	// 其他發票主動通知會計師的時間（null = 尚未通知）
 	accountantNotifiedAt: timestamp("accountant_notified_at", { withTimezone: true, mode: 'string' }),
 	uploadedAt: timestamp("uploaded_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-	// 誰、從哪個入口上傳（migrations/0040）。聊天收到的檔案先是 transaction_id／invoice_id 都 NULL 的
+	// 誰、從哪個入口上傳（migrations/0042）。聊天收到的檔案先是 transaction_id／invoice_id 都 NULL 的
 	// 「收件匣」列，按確認才掛上交易（src/db/chat.ts attachInboxDocuments）。FK 在 DB 端。
 	uploadedBy: text("uploaded_by"),
 	source: text(),
@@ -1103,7 +1103,7 @@ export const aiConversations = pgTable("ai_conversations", {
 	title: text().default('').notNull(),
 	// 這段對話已載入的工具組（src/lib/ai/tool-groups.ts）
 	toolGroups: text("tool_groups").array().default(sql`'{}'::text[]`).notNull(),
-	// 從哪個入口開的對話（migrations/0040）：web | line | whatsapp
+	// 從哪個入口開的對話（migrations/0042）：web | line | whatsapp
 	channel: text().default('web').notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
@@ -1124,7 +1124,7 @@ export const aiMessages = pgTable("ai_messages", {
 	status: text(),
 	inputTokens: integer("input_tokens"),
 	outputTokens: integer("output_tokens"),
-	// user 訊息附的檔案（migrations/0040）：[{ documentId, fileName, contentType }]
+	// user 訊息附的檔案（migrations/0042）：[{ documentId, fileName, contentType }]
 	attachments: jsonb(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [

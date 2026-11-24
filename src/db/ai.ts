@@ -18,7 +18,7 @@ export type AiMessageRow = {
   toolCallId: string | null;
   toolName: string | null;
   status: "ok" | "error" | "pending" | "cancelled" | null;
-  /** user 訊息附的檔案（migrations/0040）；沒有就是 null（舊測試的假資料可以不帶）。 */
+  /** user 訊息附的檔案（migrations/0042）；沒有就是 null（舊測試的假資料可以不帶）。 */
   attachments?: AttachmentRef[] | null;
   createdAt: string;
 };
@@ -27,7 +27,7 @@ export type AiConversationRow = {
   id: string;
   title: string;
   toolGroups: string[];
-  /** 從哪個入口開的（migrations/0040）。 */
+  /** 從哪個入口開的（migrations/0042）。 */
   channel: ChatChannel;
   updatedAt: string;
 };

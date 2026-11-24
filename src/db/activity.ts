@@ -19,7 +19,7 @@ export type ActivityChannel = "web" | "mcp" | "ai" | "system" | "api" | "line" |
 
 /**
  * 工具呼叫的來源：mcp = 外部 agent；ai = 站內網頁 AI；line／whatsapp = 聊天 bot 代成員呼叫
- * （actor 是綁定那個聊天帳號的成員，'line'／'whatsapp' 需要 migrations/0040）。
+ * （actor 是綁定那個聊天帳號的成員，'line'／'whatsapp' 需要 migrations/0042）。
  */
 export type ToolCallChannel = "mcp" | "ai" | "line" | "whatsapp";
 
