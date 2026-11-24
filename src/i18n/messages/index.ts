@@ -20,6 +20,8 @@ import accountantNotices from "./accountantNotices";
 import reconciliation from "./reconciliation";
 import invoices from "./invoices";
 import reports from "./reports";
+import statements from "./statements";
+import accounting from "./accounting";
 import employees from "./employees";
 import payroll from "./payroll";
 import members from "./members";
@@ -55,6 +57,8 @@ const catalogue = {
   reconciliation,
   invoices,
   reports,
+  statements,
+  accounting,
   employees,
   payroll,
   members,

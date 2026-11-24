@@ -11,6 +11,8 @@ export const categories = pgTable("categories", {
 	name: text().notNull(),
 	kind: text().notNull(),
 	isActive: boolean("is_active").default(true).notNull(),
+	// 總帳科目（migrations/0044）。NULL = 用國家模組的預設對應（src/lib/ledger/jurisdictions）。
+	glAccountId: bigint("gl_account_id", { mode: "number" }),
 }, () => [
 	check("chk_category_kind", sql`kind = ANY (ARRAY['income'::text, 'cogs'::text, 'expense'::text, 'non_operating'::text, 'transfer'::text, 'equity'::text])`),
 ]);
@@ -26,6 +28,10 @@ export const bankAccounts = pgTable("bank_accounts", {
 	openingBalance: numeric("opening_balance", { precision: 18, scale:  2 }).default('0').notNull(),
 	isActive: boolean("is_active").default(true).notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	// 總帳（migrations/0044）。glAccountId NULL = 模組預設對應；ledgerScope = 'management' 的帳戶
+	// 只進管理帳，政府帳上這側一律沖股東往來（docs/general-ledger.md）。
+	glAccountId: bigint("gl_account_id", { mode: "number" }),
+	ledgerScope: text("ledger_scope").default('government').notNull(),
 });
 
 export const invoices = pgTable("invoices", {
@@ -1374,3 +1380,116 @@ export const aiRules = pgTable("ai_rules", {
 	check("chk_ai_rules_kind", sql`kind = ANY (ARRAY['category'::text, 'advance_default'::text, 'note'::text])`),
 	check("chk_ai_rules_source", sql`source = ANY (ARRAY['web'::text, 'line'::text, 'whatsapp'::text, 'mcp'::text])`),
 ]);
+
+// ---- 總帳與財務報表（migrations/0044、docs/general-ledger.md）----
+// 交易與發票是輸入；src/lib/ledger 即時把它們轉成分錄。這裡只存人寫的東西（設定、科目表、
+// 手動分錄、匯率、財產）和結帳快照。FK 在 DB 端建立。
+
+export const orgAccountingSettings = pgTable("org_accounting_settings", {
+	organizationId: text("organization_id").primaryKey(),
+	jurisdiction: text().default('TW').notNull(),
+	framework: text().default('TW-EAS').notNull(),
+	vatRegime: text("vat_regime").default('general').notNull(),
+	fiscalYearStartMonth: smallint("fiscal_year_start_month").default(1).notNull(),
+	functionalCurrency: char("functional_currency", { length: 3 }).default('TWD').notNull(),
+	booksStartDate: date("books_start_date"),
+	openingEquityAccountId: bigint("opening_equity_account_id", { mode: "number" }),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, () => [
+	check("chk_oas_vat_regime", sql`vat_regime = ANY (ARRAY['general', 'small_scale', 'none'])`),
+	check("chk_oas_fy_month", sql`fiscal_year_start_month BETWEEN 1 AND 12`),
+]);
+
+export const glAccounts = pgTable("gl_accounts", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "gl_accounts_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id").notNull(),
+	code: text().notNull(),
+	name: text().notNull(),
+	nameEn: text("name_en"),
+	type: text().notNull(),
+	section: text().notNull(),
+	cashFlow: text("cash_flow").default('operating').notNull(),
+	systemKey: text("system_key"),
+	isActive: boolean("is_active").default(true).notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	unique("uq_gl_code").on(table.organizationId, table.code),
+	uniqueIndex("uq_gl_system_key").on(table.organizationId, table.systemKey).where(sql`system_key IS NOT NULL`),
+	check("chk_gl_type", sql`type = ANY (ARRAY['asset', 'liability', 'equity', 'revenue', 'expense'])`),
+	check("chk_gl_cash_flow", sql`cash_flow = ANY (ARRAY['cash', 'operating', 'investing', 'financing', 'none'])`),
+]);
+
+export const fxRates = pgTable("fx_rates", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "fx_rates_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id").notNull(),
+	currency: char({ length: 3 }).notNull(),
+	rateDate: date("rate_date").notNull(),
+	rate: numeric({ precision: 14, scale: 6 }).notNull(),
+	source: text().default('manual').notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	unique("uq_fx_rate").on(table.organizationId, table.currency, table.rateDate),
+]);
+
+export const journalEntries = pgTable("journal_entries", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "journal_entries_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id").notNull(),
+	ledger: text().default('both').notNull(),
+	kind: text().default('manual').notNull(),
+	entryDate: date("entry_date").notNull(),
+	memo: text(),
+	snapshotYear: smallint("snapshot_year"),
+	snapshotMonth: smallint("snapshot_month"),
+	sourceType: text("source_type"),
+	sourceId: bigint("source_id", { mode: "number" }),
+	createdBy: text("created_by"),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
+}, () => [
+	check("chk_je_ledger", sql`ledger = ANY (ARRAY['both', 'government', 'management'])`),
+	check("chk_je_kind", sql`kind = ANY (ARRAY['manual', 'opening', 'adjustment', 'snapshot'])`),
+]);
+
+export const journalLines = pgTable("journal_lines", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "journal_lines_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	entryId: bigint("entry_id", { mode: "number" }).notNull(),
+	glAccountId: bigint("gl_account_id", { mode: "number" }).notNull(),
+	debit: numeric({ precision: 18, scale: 2 }).default('0').notNull(),
+	credit: numeric({ precision: 18, scale: 2 }).default('0').notNull(),
+	currency: char({ length: 3 }),
+	fxAmount: numeric("fx_amount", { precision: 18, scale: 2 }),
+	partyId: bigint("party_id", { mode: "number" }),
+	employeeId: bigint("employee_id", { mode: "number" }),
+	memo: text(),
+}, (table) => [
+	index("idx_jl_entry").on(table.entryId),
+	index("idx_jl_account").on(table.glAccountId),
+	check("chk_jl_amounts", sql`debit >= 0 AND credit >= 0 AND NOT (debit > 0 AND credit > 0)`),
+]);
+
+export const fiscalPeriods = pgTable("fiscal_periods", {
+	organizationId: text("organization_id").notNull(),
+	year: smallint().notNull(),
+	month: smallint().notNull(),
+	status: text().default('open').notNull(),
+	closedAt: timestamp("closed_at", { withTimezone: true, mode: 'string' }),
+	closedBy: text("closed_by"),
+}, () => [
+	check("chk_fp_status", sql`status = ANY (ARRAY['open', 'closed'])`),
+]);
+
+export const fixedAssets = pgTable("fixed_assets", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "fixed_assets_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id").notNull(),
+	name: text().notNull(),
+	acquiredOn: date("acquired_on").notNull(),
+	cost: numeric({ precision: 18, scale: 2 }).notNull(),
+	salvageValue: numeric("salvage_value", { precision: 18, scale: 2 }).default('0').notNull(),
+	usefulLifeMonths: integer("useful_life_months").notNull(),
+	assetAccountId: bigint("asset_account_id", { mode: "number" }),
+	sourceTransactionId: bigint("source_transaction_id", { mode: "number" }),
+	disposedOn: date("disposed_on"),
+	note: text(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
+});
