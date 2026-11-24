@@ -204,6 +204,7 @@ export default async function ContractsPage() {
                           // 入帳是含稅的錢，跟含稅應收比（未稅金額會讓應稅合約提早誤報收齊）
                           amount: c.gross,
                           received: c.received,
+                          currency: c.currency,
                         }) ? (
                           <ReadyToClose contractId={c.id} />
                         ) : null}
