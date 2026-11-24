@@ -1,4 +1,4 @@
--- 0039: 資料聯動（docs/data-links.md）。
+-- 0040: 資料聯動（docs/data-links.md）。
 --
 -- 1. transactions 加「待連結」：
 --    - review_reason     為什麼要人看（跟 needs_review 分開：needs_review 是「分類還沒確認」，
@@ -19,7 +19,7 @@
 -- 3. 既有交易補繼承：請款項 / 訂閱 → 合約、請款項 / 訂閱 / 合約 → 專案（只補空的，不覆蓋）。
 --    沒有專案的合約不自動建專案（專案頁列出來讓人歸類）。
 --
--- Forward-only，全部 additive。Run AFTER 0038_api_keys.sql。
+-- Forward-only，全部 additive。Run AFTER 0039_org_user_avatars.sql。
 
 -- ---- 1. 待連結 ----
 ALTER TABLE transactions ADD COLUMN review_reason text;

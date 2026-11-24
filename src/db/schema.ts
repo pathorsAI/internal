@@ -338,11 +338,11 @@ export const transactions = pgTable("transactions", {
 	externalRef: text("external_ref"),
 	externalMeta: jsonb("external_meta").$type<Record<string, unknown>>(),
 	needsReview: boolean("needs_review").default(false).notNull(),
-	// 待連結（migrations/0039，src/lib/linking）：跟 needsReview（分類待確認）分開。
+	// 待連結（migrations/0040，src/lib/linking）：跟 needsReview（分類待確認）分開。
 	// link_suggested / link_ambiguous / link_amount_mismatch / party_similar / link_skipped；NULL = 不用人看。
 	reviewReason: text("review_reason"),
 	linkCandidates: jsonb("link_candidates").$type<Record<string, unknown>>(),
-	// 這筆支出屬於哪個廠商計費帳戶（固定支出）。FK 在 DB 端（migrations/0039）。
+	// 這筆支出屬於哪個廠商計費帳戶（固定支出）。FK 在 DB 端（migrations/0040）。
 	vendorBillingAccountId: bigint("vendor_billing_account_id", { mode: "number" }),
 }, (table) => [
 	uniqueIndex("uq_txn_external_ref").on(table.organizationId, table.externalSource, table.externalRef).where(sql`external_ref IS NOT NULL`),
@@ -891,7 +891,7 @@ export const vendorBillingAccounts = pgTable("vendor_billing_accounts", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
-	// 固定支出（migrations/0039，原本的 recurring_expenses）：一個廠商計費帳戶就是一筆固定支出。
+	// 固定支出（migrations/0040，原本的 recurring_expenses）：一個廠商計費帳戶就是一筆固定支出。
 	// schedule NULL = 不提醒；fixed = 依 anchorDate 每 intervalMonths 個月；usage = 用量計費每月扣。
 	schedule: text(),
 	anchorDate: date("anchor_date"),

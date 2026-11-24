@@ -96,7 +96,7 @@ MCP／站內 AI／REST 的寫入工具（`create_transaction`、`bulk_create_tra
 一個廠商計費帳戶就是一筆固定支出（`vendor_billing_accounts` 的 `schedule`、`anchor_date`、
 `interval_months`、`expected_amount`、`currency`、`billing_url`）。沒有 API 整合的廠商是
 `provider = other`、`source = manual` 的「手動」帳戶。「付了沒」看交易的 `vendor_billing_account_id`
-或該期帳單的對帳結果，不再用字串比對。原本的 `recurring_expenses` 資料在 migration 0039 搬過去，
+或該期帳單的對帳結果，不再用字串比對。原本的 `recurring_expenses` 資料在 migration 0040 搬過去，
 MCP 的 recurring 工具保留為相容入口，轉呼叫廠商計費帳戶。
 
 ## 狀態提示
