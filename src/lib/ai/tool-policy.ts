@@ -1,7 +1,7 @@
 /**
  * 站內 AI 助理能用哪些工具、哪些要先確認。
  *
- * 讀寫分類**不靠** ToolDef 的 readOnlyHint：111 支裡只有少數幾支有標，其他都沒寫。
+ * 讀寫分類**不靠** ToolDef 的 readOnlyHint：116 支裡只有少數幾支有標，其他都沒寫。
  * 這裡用名稱前綴另外維護一份清單，預設值是「寫入」——新加的工具名稱沒對到只讀前綴，
  * 就一律先出確認卡，寧可多問一次也不要讓模型自己寫進帳本。
  * src/lib/ai/tool-policy.test.ts 會把 tools 裡的每一支都過一遍，新工具一定會被看到。
@@ -84,18 +84,44 @@ export function isAssistantTool(name: string): boolean {
 
 export type OrgRole = string | null;
 
-/** owner / admin 可以用全部（寫入仍要確認）；一般成員只開只讀。 */
+/** 呼叫從哪個入口來。web = /dashboard/ai；line／whatsapp = 聊天 bot。 */
+export type PolicyChannel = "web" | "line" | "whatsapp";
+
+/** owner / admin 可以用全部（寫入仍要確認）；一般成員只開只讀＋MEMBER_WRITES。 */
 export function canUseWrites(role: OrgRole): boolean {
   return role === "owner" || role === "admin";
 }
 
 /**
- * 工具能不能「出現在」這個角色的工具清單裡。只讀工具任何成員都能用；
+ * 一般成員也能用的寫入（仍要按確認卡）。只放「只動得到自己」的工具：
+ * - submit_advance：提交自己的代墊（代墊人固定是本人，記成 needs_review）。
+ * - 規則工具：成員只能建／改／刪自己的個人規則；組織規則的角色檢查寫在工具裡（MCP 也會用到）。
+ */
+export const MEMBER_WRITES: ReadonlySet<string> = new Set([
+  "submit_advance",
+  "create_ai_rule",
+  "update_ai_rule",
+  "remove_ai_rule",
+]);
+
+/**
+ * 聊天裡不開放紅色等級（刪除、合併對象、發薪）：手機上誤按的代價太高，請使用者回網頁做。
+ * 網頁 AI 不受影響。
+ */
+function blockedInChannel(name: string, args: Record<string, unknown> | null, channel: PolicyChannel): boolean {
+  if (channel === "web") return false;
+  return (args ? toolLevel(name, args) : baseToolLevel(name)) === "danger";
+}
+
+/**
+ * 工具能不能「出現在」這個角色、這個入口的工具清單裡。只讀工具任何成員都能用；
  * 參數決定讀寫的那兩支，一般成員也看得到（只能用只讀的參數，見 canRun）。
  */
-export function canOffer(name: string, role: OrgRole): boolean {
+export function canOffer(name: string, role: OrgRole, channel: PolicyChannel = "web"): boolean {
   if (!isAssistantTool(name)) return false;
+  if (blockedInChannel(name, null, channel)) return false;
   if (canUseWrites(role)) return true;
+  if (role && MEMBER_WRITES.has(name)) return true;
   return (
     baseToolLevel(name) === "read" ||
     name === "preview_billing_notifications" ||
@@ -105,7 +131,24 @@ export function canOffer(name: string, role: OrgRole): boolean {
 }
 
 /** 這次呼叫（含參數）能不能跑。執行前一律再檢查一次，不信任模型給的工具清單。 */
-export function canRun(name: string, args: Record<string, unknown>, role: OrgRole): boolean {
+export function canRun(
+  name: string,
+  args: Record<string, unknown>,
+  role: OrgRole,
+  channel: PolicyChannel = "web",
+): boolean {
   if (!isAssistantTool(name)) return false;
-  return toolLevel(name, args) === "read" || canUseWrites(role);
+  if (blockedInChannel(name, args, channel)) return false;
+  if (toolLevel(name, args) === "read") return true;
+  if (canUseWrites(role)) return true;
+  return Boolean(role) && MEMBER_WRITES.has(name);
+}
+
+/** canRun 不過時給模型看的理由（英文，跟工具說明同語言）。 */
+export function refusalReason(name: string, args: Record<string, unknown> | null, channel: PolicyChannel): string {
+  if (!isAssistantTool(name)) return "This tool is not available in the in-app assistant.";
+  if (blockedInChannel(name, args, channel)) {
+    return "Deleting, merging counterparties and paying salaries are not available in chat. Tell the user to do it on the web app and include a link to the page.";
+  }
+  return "This member has read-only access; writes need an owner or admin (members can only submit their own advances with submit_advance and manage their own rules).";
 }

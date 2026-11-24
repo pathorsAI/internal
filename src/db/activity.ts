@@ -15,7 +15,13 @@ export type ActivityAction = "create" | "update" | "delete" | "read";
  * 'system' 需要 migrations/0028 放寬 chk_activity_channel；還沒跑之前寫入會被 CHECK 擋下，
  * 而 record() 會吞掉錯誤，所以只是少一筆紀錄，不會讓同步失敗。
  */
-export type ActivityChannel = "web" | "mcp" | "ai" | "system" | "api";
+export type ActivityChannel = "web" | "mcp" | "ai" | "system" | "api" | "line" | "whatsapp";
+
+/**
+ * 工具呼叫的來源：mcp = 外部 agent；ai = 站內網頁 AI；line／whatsapp = 聊天 bot 代成員呼叫
+ * （actor 是綁定那個聊天帳號的成員，'line'／'whatsapp' 需要 migrations/0042）。
+ */
+export type ToolCallChannel = "mcp" | "ai" | "line" | "whatsapp";
 
 type RecordArgs = {
   orgId: string;
@@ -81,7 +87,7 @@ export async function logWeb(
 // which runs the same tools in-process on behalf of the signed-in member. Look
 // up the user's name/email so the log is human-readable without a join.
 async function logToolCall(
-  channel: "mcp" | "ai" | "api",
+  channel: ToolCallChannel | "api",
   orgId: string,
   userId: string,
   action: ActivityAction,
@@ -156,6 +162,19 @@ export function logApi(
   summary?: string,
 ) {
   return logToolCall("api", orgId, userId, action, entityType, entityId, apiKeySummary(keyName, summary));
+}
+
+/** LINE／WhatsApp bot 代成員呼叫的工具：channel = 'line' | 'whatsapp'。 */
+export function logChat(
+  channel: "line" | "whatsapp",
+  orgId: string,
+  userId: string,
+  action: ActivityAction,
+  entityType: string,
+  entityId: number | null,
+  summary?: string,
+) {
+  return logToolCall(channel, orgId, userId, action, entityType, entityId, summary);
 }
 
 // Scheduled / background work with no human actor (e.g. the daily integration

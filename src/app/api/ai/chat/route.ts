@@ -1,18 +1,11 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { createAiConversation, getAiConversation, listAiMessages } from "@/db/ai";
+import { getAiConversation } from "@/db/ai";
 import { organization } from "@/db/auth-schema";
 import { getUserLocale } from "@/i18n/locale";
 import { MAX_USER_MESSAGE_CHARS, openRouterApiKey } from "@/lib/ai/config";
-import {
-  cancelStalePending,
-  defaultDeps,
-  resolveConfirmation,
-  runModelLoop,
-  type TurnContext,
-} from "@/lib/ai/engine";
 import { ModelError } from "@/lib/ai/openrouter";
-import { sanitizePage, systemPrompt } from "@/lib/ai/prompt";
+import { defaultTurnDeps, runTurn, TurnNotFoundError } from "@/lib/ai/turn";
 import type { ChatEvent, ChatRequest } from "@/lib/ai/types";
 import { requestOrigin } from "@/lib/request-origin";
 import { getOrgRole, requireOrg } from "@/lib/session";
@@ -85,14 +78,9 @@ function parseBody(raw: unknown): ChatRequest | null {
   return out;
 }
 
-function titleFrom(message: string): string {
-  const oneLine = message.replaceAll(/\s+/g, " ").trim();
-  return oneLine.length > 60 ? `${oneLine.slice(0, 59)}…` : oneLine;
-}
-
 export async function POST(req: Request): Promise<Response> {
   if (!sameOrigin(req)) return json(403, { t: "error", code: "bad_request" });
-  const { orgId, userId } = await requireOrg();
+  const { orgId, userId, session } = await requireOrg();
   const owner = { orgId, userId };
 
   let body: ChatRequest | null = null;
@@ -118,18 +106,11 @@ export async function POST(req: Request): Promise<Response> {
   // requireOrg 已確認登入，但成員可能剛被移出這個組織。
   if (!role) return json(403, { t: "error", code: "bad_request" });
 
-  let conversation = body.conversationId
-    ? await getAiConversation(owner, body.conversationId)
-    : null;
-  if (body.conversationId && !conversation) return json(404, { t: "error", code: "not_found" });
-
-  const isNew = !conversation;
-  conversation ??= await createAiConversation(owner, titleFrom(body.message ?? ""));
-  const conversationId = conversation.id;
-  const toolGroups = conversation.toolGroups;
-  const title = conversation.title;
-  const page = isNew ? sanitizePage(body.page) : null;
-  const deps = defaultDeps(apiKey);
+  // 指定的對話不存在（或不是本人的）就在開串流之前回 404；runTurn 之後會再查一次。
+  if (body.conversationId && !(await getAiConversation(owner, body.conversationId))) {
+    return json(404, { t: "error", code: "not_found" });
+  }
+  const deps = defaultTurnDeps(apiKey);
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
@@ -159,39 +140,35 @@ export async function POST(req: Request): Promise<Response> {
         flushText();
         write(e);
       };
-      const ctx: TurnContext = {
-        owner,
-        role,
-        conversationId,
-        toolGroups,
-        systemPrompt: systemPrompt({
-          orgName: orgRow[0]?.name ?? "",
-          locale,
-          role,
-          page,
-        }),
-        emit,
-        signal: req.signal,
-        deps,
-      };
       try {
-        if (isNew) emit({ t: "conv", id: conversationId, title });
-        if (body.message) {
-          const history = await listAiMessages(conversationId);
-          await cancelStalePending(deps, conversationId, history);
-          await deps.db.insertAiMessage(conversationId, { role: "user", content: body.message });
-          await runModelLoop(ctx, body.message);
-        } else if (body.confirm) {
-          await resolveConfirmation(ctx, body.confirm.toolCallId, body.confirm.approve);
-        }
+        await runTurn({
+          owner,
+          role,
+          channel: "web",
+          quickReplies: true,
+          conversationId: body.conversationId ?? null,
+          message: body.message,
+          confirm: body.confirm,
+          page: body.page ?? null,
+          locale,
+          orgName: orgRow[0]?.name ?? "",
+          userName: session.user.name ?? "",
+          emit,
+          signal: req.signal,
+          deps,
+        });
         emit({ t: "done" });
       } catch (err) {
         if (!req.signal.aborted) {
           console.error("[ai/chat]", err);
-          emit({
-            t: "error",
-            code: err instanceof ModelError ? "model_failed" : "internal",
-          });
+          if (err instanceof TurnNotFoundError) {
+            emit({ t: "error", code: "not_found" });
+          } else {
+            emit({
+              t: "error",
+              code: err instanceof ModelError ? "model_failed" : "internal",
+            });
+          }
         }
       } finally {
         flushText();

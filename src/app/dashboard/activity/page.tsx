@@ -92,7 +92,12 @@ export default async function ActivityPage() {
                     />
                   </TableCell>
                   <TableCell>
-                    {r.channel === "mcp" || r.channel === "ai" || r.channel === "system" || r.channel === "api" ? (
+                    {r.channel === "mcp" ||
+                    r.channel === "ai" ||
+                    r.channel === "api" ||
+                    r.channel === "line" ||
+                    r.channel === "whatsapp" ||
+                    r.channel === "system" ? (
                       <StatusTag tone={r.channel === "system" ? "neutral" : "primary"}>
                         {t(`source.${r.channel}`)}
                       </StatusTag>

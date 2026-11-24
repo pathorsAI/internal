@@ -53,6 +53,8 @@ const common = {
       mcp: { "zh-TW": "MCP", en: "MCP" },
       api: { "zh-TW": "API", en: "API" },
       integrations: { "zh-TW": "整合", en: "Integrations" },
+      chatAccounts: { "zh-TW": "聊天帳號", en: "Chat accounts" },
+      aiRules: { "zh-TW": "規則", en: "Rules" },
       settings: { "zh-TW": "組織設定", en: "Organization settings" },
     },
   },

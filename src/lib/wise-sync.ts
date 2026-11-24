@@ -14,6 +14,7 @@ import {
   type WiseProfileSummary,
   type WiseStatementTransaction,
 } from "@/lib/integrations/wise";
+import { applyImportCategoryRules, recordImportRuleApplications } from "@/lib/ai/import-rules";
 
 /**
  * Wise 對帳單 → 本組織帳本（transactions）的同步。
@@ -843,6 +844,7 @@ function toInsertRow(
   orgId: string,
   p: PlannedRow,
   parties: Map<string, PartyResolution>,
+  categoryId: number | null = null,
 ): LinkedInsert {
   const party = p.partyName ? parties.get(p.partyName) : undefined;
   return {
@@ -850,7 +852,8 @@ function toInsertRow(
     type: p.type,
     txnDate: p.txnDate,
     description: p.description,
-    categoryId: null,
+    // 組織的 AI 分類規則對到才有值（applyImportCategoryRules）；needs_review 照樣保留。
+    categoryId,
     partyId: party?.partyId ?? null,
     // 名稱跟既有對象很像、沒自動新建 → 連結層把這筆標成 party_similar，等人在待連結頁選。
     pendingParty: p.partyName ? pendingPartyOf(p.partyName, partyLabelOf(p), party) : null,
@@ -879,13 +882,22 @@ async function insertPlanned(db: Db, orgId: string, toCreate: PlannedRow[]): Pro
     if (p.partyName && !labelByName.has(p.partyName)) labelByName.set(p.partyName, partyLabelOf(p));
   }
   const parties = await resolvePartiesForWrite(db, orgId, labelByName, "hold");
+  // 待確認的收入／支出先套組織的 AI 分類規則（只填分類，needs_review 保留）。
+  const ruled = await applyImportCategoryRules(
+    orgId,
+    toCreate.map((p) => ({ type: p.type, categoryId: null, needsReview: p.needsReview, partyName: p.partyName, description: p.description })),
+  );
   const inserted = await insertTransactions(
     { db, orgId, source: "wise" },
-    toCreate.map((p) => toInsertRow(orgId, p, parties)),
+    toCreate.map((p, i) => toInsertRow(orgId, p, parties, ruled.rows[i].categoryId)),
     { onConflictDoNothing: true, chunkSize: INSERT_CHUNK },
   );
   const createdRefs = new Set<string>();
   for (const r of inserted) if (r.row.externalRef) createdRefs.add(r.row.externalRef);
+  // 只算真的寫進去的（被去重擋下的不算套用）。
+  await recordImportRuleApplications(
+    toCreate.map((p, i) => (createdRefs.has(p.externalRef) ? ruled.ruleIds[i] : null)),
+  );
   return createdRefs;
 }
 

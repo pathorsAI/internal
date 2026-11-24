@@ -1,9 +1,20 @@
 import { AI_MODEL, MAX_OUTPUT_TOKENS, OPENROUTER_CHAT_URL } from "./config";
 
+/**
+ * user 訊息的多段內容（OpenRouter 的多模態格式）：
+ * - 文字：{ type: "text", text }
+ * - 圖片：{ type: "image_url", image_url: { url: "data:<mime>;base64,..." } }
+ * - PDF：{ type: "file", file: { filename, file_data: "data:application/pdf;base64,..." } }
+ */
+export type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } }
+  | { type: "file"; file: { filename: string; file_data: string } };
+
 /** OpenAI 相容的 chat 訊息（OpenRouter 照收）。 */
 export type ChatMessage =
   | { role: "system"; content: string }
-  | { role: "user"; content: string }
+  | { role: "user"; content: string | ContentPart[] }
   | {
       role: "assistant";
       content: string | null;

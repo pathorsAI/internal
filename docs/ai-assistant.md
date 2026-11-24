@@ -40,13 +40,74 @@ homepage box / ⌘K ──► /dashboard/ai ──► POST /api/ai/chat (NDJSON 
   `simpany_send_payslips`, `simpany_upload_tax_files`, `simpany_create_tax_upload_slots`,
   `simpany_apply_salary_filing`, `simpany_settle_salary_filing` (they act outside the books and
   can't be taken back), plus the org-switching tools. They stay available over MCP.
-- **Roles:** owner / admin get everything above (writes still confirmed); members get reads only.
-  Checked again when a card is confirmed, not just when tools are offered.
+- **Roles:** owner / admin get everything above (writes still confirmed); members get reads, plus
+  `submit_advance` for their own advances and personal rules (see below). Checked again when a
+  card is confirmed, not just when tools are offered.
 - **Org:** fixed to the signed-in org. `organizationId` is removed from every schema shown to the
   model and overwritten on every call.
-- **Audit:** writes land in `activity_log` with `channel = 'ai'` and the member who confirmed as
-  the actor; the summary is the line the confirmation card showed.
+- **Audit:** writes land in `activity_log` with `channel = 'ai'` (web) or `'line'` / `'whatsapp'`
+  (chat) and the member who confirmed as the actor; the summary is the line the confirmation card
+  showed. The activity log page labels all four.
 - **Conversations** are private to the user and scoped to the org they were started in.
+
+## Chat entry: LINE and WhatsApp
+
+The same assistant answers in LINE and WhatsApp. Both the web route and the chat bots call
+`runTurn()` (`src/lib/ai/turn.ts`), so prompt, tools, rules and confirmations are shared; the
+channel only changes the prompt section (short plain text, at most one question) and what is
+offered. Architecture, platform setup (LINE Developers, Meta), secrets, the queue and limits are in
+[chat-channels.md](chat-channels.md).
+
+- **Linking** is personal: 設定 › 聊天帳號 (`/dashboard/settings/chat`, every member) issues a
+  6-digit code valid for 10 minutes, with an "Open LINE / WhatsApp" link and a QR code that open the
+  bot with `綁定 123456` filled in. The page polls and closes itself once the bot has linked the
+  account; it also shows the linked name, the org the bot works in, and Unlink. A platform whose
+  secrets are not set shows "Not available".
+- **Chats show up in `/dashboard/ai`** with a LINE / WhatsApp tag. One open chat per person, org
+  and platform; after 6 idle hours (or `新對話`) the bot starts a new one.
+- **Files** sent in chat land in an inbox (`documents` with no transaction or invoice,
+  `source = line | whatsapp`, `uploaded_by`) and are attached when a card is confirmed. The
+  transaction detail shows "由 <name> 透過 LINE 上傳". Inbox files nobody attached are deleted
+  after 30 days by the daily cron (`src/lib/chat-cleanup.ts`, run from
+  `/api/cron/integrations-autosync`, which also purges webhook dedupe rows after 7 days, the
+  message buffer after 7 days, reply references after 90 days and expires open cards).
+- **Red tools** (`delete_*`, `merge_parties`, `pay_employee_salary`) are not offered in chat; the
+  bot links to the web page instead. The web assistant is unchanged.
+- **Quick replies:** when the model asks a question with a few obvious answers it ends with
+  `[[選項：A|B|C]]` (`src/lib/ai/options.ts`). Chat turns it into LINE quick replies / WhatsApp
+  buttons; the web turns it into chips under the last reply that send that text, and strips the
+  marker from older messages (`src/app/dashboard/ai/split-options.ts`).
+
+## Rules
+
+Users teach the assistant in plain words ("以後 Google Workspace 都歸軟體工具"). Rules live in
+`ai_rules` (`src/db/ai-rules.ts`); matching is one pure function, `matchCategoryRule`
+(`src/lib/ai/rules.ts`), used everywhere.
+
+- **Scope:** `org` rules apply to everyone; only owner / admin can create, turn off or delete
+  them. `user` rules belong to one person, are visible only to them and anyone can make their own.
+  The role check is inside the tools (`src/lib/mcp/tools-ai-rules.ts`) and again in the rules
+  page's server actions.
+- **In the assistant:** org rules plus the person's own rules (up to 60) are in the system prompt.
+  When a `create_transaction` / `submit_advance` card's category differs from what a rule says, the
+  card shows the hint ("依規則：Google Workspace → 軟體工具"), on the web and in chat.
+- **On imports:** the Wise sync and the cloud-billing "create unmatched" ledger rows run
+  `applyImportCategoryRules` (`src/lib/ai/import-rules.ts`): only **org** category rules, only rows
+  that are needs-review income / expense with no category, and only when the category still exists
+  and fits the type. It fills the category and **keeps needs_review** — someone still looks once.
+  `apply_count` goes up by the number of rows actually inserted. A failure reading rules never
+  fails the import.
+- **Page:** `/dashboard/ai/rules` (linked from the chat list) lists what was said, when → then,
+  scope, who taught it, from where, times applied, last applied, with turn off / delete for the
+  rules you may change.
+
+## Advances submitted by members
+
+Any member can record money they paid themselves with `submit_advance` (web, chat or MCP). The
+payer is always the caller's own employee record (`employees.user_id`); without one the tool tells
+them an owner or admin has to link their account on the Employees page. The entry is an `advance`
+with `needs_review = true`, attached to the receipt photos they sent, and an owner or admin repays
+it later as usual.
 
 ## Connecting an external agent
 
@@ -61,4 +122,5 @@ details stay on the MCP settings page.
 
 Set `OPENROUTER_API_KEY` (`wrangler secret put OPENROUTER_API_KEY` in production, `.env.local`
 locally). Without it the page loads and answers that the assistant isn't set up.
-Run `migrations/0036_ai_assistant.sql` before deploying the code.
+Run `migrations/0036_ai_assistant.sql` before deploying the code; the chat bots, rules and
+inbox need `migrations/0042_chat_channels.sql`.

@@ -3,6 +3,7 @@
 // Runtime types generated with workerd@1.20260526.1 2025-08-01 global_fetch_strictly_public,nodejs_compat
 interface __BaseEnv_CloudflareEnv {
 	STORAGE: R2Bucket;
+	CHAT_QUEUE: Queue;
 	ASSETS: Fetcher;
 	NEXT_PUBLIC_APP_NAME: "Pathors Internal";
 	TRUSTED_ORIGINS: string;

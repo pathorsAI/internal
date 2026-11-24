@@ -20,7 +20,16 @@ export type ToolApiKey = {
  * apiKey 帶著金鑰本身 —— 組織被鎖在金鑰的組織（resolveOrg），scope = read 只能跑 [read] 工具
  * （handler 的 runToolWithAudit）。
  */
-export type ToolContext = { userId: string; orgHint?: string; apiKey?: ToolApiKey };
+export type ToolContext = {
+  userId: string;
+  orgHint?: string;
+  apiKey?: ToolApiKey;
+  /**
+   * 呼叫從哪個入口來（站內 AI 的 engine 會帶；MCP 不帶＝mcp）。只拿來記「這筆資料從哪裡建的」
+   * （例如 ai_rules.source），權限判斷不看它。
+   */
+  channel?: "mcp" | "ai" | "line" | "whatsapp";
+};
 
 export type ToolAnnotations = {
   title?: string;
