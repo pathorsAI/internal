@@ -14,6 +14,7 @@ const activity = {
   empty: { "zh-TW": "尚無操作紀錄", en: "No activity yet" },
   source: {
     mcp: { "zh-TW": "MCP", en: "MCP" },
+    ai: { "zh-TW": "AI 助理", en: "AI assistant" },
     web: { "zh-TW": "網頁", en: "Web" },
     system: { "zh-TW": "系統排程", en: "Scheduled" },
   },

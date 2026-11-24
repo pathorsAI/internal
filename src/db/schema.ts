@@ -650,7 +650,7 @@ export const activityLog = pgTable("activity_log", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	index("idx_activity_org_time").using("btree", table.organizationId.asc().nullsLast(), table.createdAt.desc()),
-	check("chk_activity_channel", sql`channel = ANY (ARRAY['web'::text, 'mcp'::text, 'system'::text])`),
+	check("chk_activity_channel", sql`channel = ANY (ARRAY['web'::text, 'mcp'::text, 'system'::text, 'ai'::text])`),
 	check("chk_activity_action", sql`action = ANY (ARRAY['create'::text, 'update'::text, 'delete'::text, 'read'::text])`),
 ]);
 
@@ -1052,4 +1052,42 @@ export const notificationDeliveries = pgTable("notification_deliveries", {
 	sentAt: timestamp("sent_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	unique("uq_notification_delivery").on(table.organizationId, table.channel, table.dedupeKey),
+]);
+
+// ---- 站內 AI 助理的對話（migrations/0036，src/db/ai.ts）。綁組織 + 使用者，只有本人看得到。----
+export const aiConversations = pgTable("ai_conversations", {
+	id: text().primaryKey(),
+	organizationId: text("organization_id").notNull(),
+	userId: text("user_id").notNull(),
+	title: text().default('').notNull(),
+	// 這段對話已載入的工具組（src/lib/ai/tool-groups.ts）
+	toolGroups: text("tool_groups").array().default(sql`'{}'::text[]`).notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_ai_conversations_owner").using("btree", table.organizationId.asc().nullsLast(), table.userId.asc().nullsLast(), table.updatedAt.desc()),
+]);
+
+export const aiMessages = pgTable("ai_messages", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "ai_messages_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	conversationId: text("conversation_id").notNull(),
+	role: text().notNull(),
+	content: text(),
+	// assistant 列：[{ id, name, arguments }]
+	toolCalls: jsonb("tool_calls"),
+	toolCallId: text("tool_call_id"),
+	toolName: text("tool_name"),
+	status: text(),
+	inputTokens: integer("input_tokens"),
+	outputTokens: integer("output_tokens"),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_ai_messages_conversation").using("btree", table.conversationId.asc().nullsLast(), table.id.asc().nullsLast()),
+	foreignKey({
+			columns: [table.conversationId],
+			foreignColumns: [aiConversations.id],
+			name: "ai_messages_conversation_id_fkey"
+		}).onDelete("cascade"),
+	check("chk_ai_messages_role", sql`role = ANY (ARRAY['user'::text, 'assistant'::text, 'tool'::text])`),
+	check("chk_ai_messages_status", sql`(status IS NULL) OR (status = ANY (ARRAY['ok'::text, 'error'::text, 'pending'::text, 'cancelled'::text]))`),
 ]);

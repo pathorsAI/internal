@@ -1,6 +1,6 @@
 import { type ToolContext, tools } from "./tools";
 import { type ToolAnnotations, type ToolDef, resolveOrg } from "./shared";
-import { logMcp, type ActivityAction } from "@/db/activity";
+import { logAi, logMcp, type ActivityAction } from "@/db/activity";
 import { publicBaseUrl, trustedOrigins } from "@/lib/base-url";
 import { MCP_SERVER_ICONS } from "./mcp-icons";
 
@@ -54,7 +54,7 @@ function auditEntityId(out: unknown): number | null {
 // Derive an audit-log entry from a tool name + its result. Returns null for
 // most read-only tools (list_/get_/...) so only writes get logged. Entity
 // types match the web side.
-function deriveMcpAudit(name: string, out: unknown): McpAudit | null {
+export function deriveMcpAudit(name: string, out: unknown): McpAudit | null {
   const entityId = auditEntityId(out);
   const byPrefix = AUDIT_VERB_PREFIXES.find(([prefix]) => name.startsWith(prefix));
   if (byPrefix) {
@@ -82,7 +82,7 @@ function deriveMcpAudit(name: string, out: unknown): McpAudit | null {
 
 /** Bump on every published change to tools, schemas or instructions. Clients
  *  (and OpenAI's plugin "Scan Tools") key their cached snapshot off this. */
-export const SERVER_VERSION = "1.13.0";
+export const SERVER_VERSION = "1.13.1";
 
 /** Public base URL of this deployment; doubles as the OAuth issuer.
  *  Keep in sync with the `resource` passed to `mcp()` in src/lib/auth.ts. */
@@ -390,7 +390,7 @@ const TITLE_OVERRIDES: Record<string, string> = {
   unmark_accountant_notified: "Unmark as sent to the accountant",
 };
 
-function humanTitle(name: string): string {
+export function humanTitle(name: string): string {
   const override = TITLE_OVERRIDES[name];
   if (override) return override;
   const words = name.replaceAll("_", " ");
@@ -442,6 +442,48 @@ function describeTool(name: string, t: ToolDef) {
 // Method handlers
 // ---------------------------------------------------------------------------
 
+export type ToolRunResult =
+  | { ok: true; out: unknown }
+  | { ok: false; error: string };
+
+/**
+ * Run one tool and write its best-effort audit entry. Shared by the MCP
+ * endpoint (channel "mcp") and the in-app AI assistant (channel "ai",
+ * src/lib/ai/run-tool.ts), so both resolve the org and log writes the same way.
+ * `summary` overrides the activity-log summary (default: the tool name).
+ */
+export async function runToolWithAudit(
+  name: string,
+  args: Record<string, unknown>,
+  ctx: ToolContext,
+  channel: "mcp" | "ai" = "mcp",
+  summary?: string,
+): Promise<ToolRunResult> {
+  const tool = tools[name];
+  if (!tool) return { ok: false, error: `Unknown tool: ${name}` };
+  let out: unknown;
+  try {
+    out = await tool.execute(args, ctx);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+  // Best-effort audit log for writes (never affects the response).
+  const audit = deriveMcpAudit(name, out);
+  if (audit) {
+    try {
+      const orgId = await resolveOrg(
+        audit.organizationId ? { organizationId: audit.organizationId } : args,
+        ctx,
+      );
+      const log = channel === "ai" ? logAi : logMcp;
+      await log(orgId, ctx.userId, audit.action, audit.entityType, audit.entityId, summary ?? name);
+    } catch {
+      // ignore audit failures
+    }
+  }
+  return { ok: true, out };
+}
+
 async function handleToolCall(
   id: JsonRpcId,
   params: Record<string, unknown> | undefined,
@@ -450,49 +492,31 @@ async function handleToolCall(
   const name = params?.name as string | undefined;
   const args = (params?.arguments as Record<string, unknown>) ?? {};
   const tool = name ? tools[name] : undefined;
-  if (!tool) {
+  if (!name || !tool) {
     return ok(id, {
       content: [{ type: "text", text: `Unknown tool: ${name}` }],
       isError: true,
     });
   }
-  try {
-    const out = await tool.execute(args, ctx);
-    // Best-effort audit log for MCP writes (never affects the response).
-    const audit = name ? deriveMcpAudit(name, out) : null;
-    if (audit) {
-      try {
-        const orgId = await resolveOrg(
-          audit.organizationId ? { organizationId: audit.organizationId } : args,
-          ctx,
-        );
-        await logMcp(orgId, ctx.userId, audit.action, audit.entityType, audit.entityId, name);
-      } catch {
-        // ignore audit failures
-      }
-    }
-    // A declared outputSchema is a promise that `structuredContent` matches it,
-    // so only emit it for tools that opted in with an object-shaped schema. The
-    // JSON text block stays either way (MCP's recommended back-compat shape).
-    const structured =
-      tool.outputSchema && out && typeof out === "object" && !Array.isArray(out)
-        ? { structuredContent: out as Record<string, unknown> }
-        : {};
+  const result = await runToolWithAudit(name, args, ctx, "mcp");
+  if (!result.ok) {
     return ok(id, {
-      ...structured,
-      content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
-    });
-  } catch (err) {
-    return ok(id, {
-      content: [
-        {
-          type: "text",
-          text: `Error: ${err instanceof Error ? err.message : String(err)}`,
-        },
-      ],
+      content: [{ type: "text", text: `Error: ${result.error}` }],
       isError: true,
     });
   }
+  const out = result.out;
+  // A declared outputSchema is a promise that `structuredContent` matches it,
+  // so only emit it for tools that opted in with an object-shaped schema. The
+  // JSON text block stays either way (MCP's recommended back-compat shape).
+  const structured =
+    tool.outputSchema && out && typeof out === "object" && !Array.isArray(out)
+      ? { structuredContent: out as Record<string, unknown> }
+      : {};
+  return ok(id, {
+    ...structured,
+    content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
+  });
 }
 
 async function handleMessage(
