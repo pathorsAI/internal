@@ -36,7 +36,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ProviderMark, type ProviderMarkId } from "@/components/integrations/provider-logos";
 import { cn } from "@/lib/utils";
 import type {
   IntegrationCatalogEntry,
@@ -195,10 +194,17 @@ function AutoSyncBar({ canRun }: Readonly<{ canRun: boolean }>) {
   );
 }
 
-function LogoTile({ mark, className }: Readonly<{ mark: ProviderMarkId; className: string }>) {
+function LogoTile({ src, className }: Readonly<{ src: string; className?: string }>) {
   return (
-    <div aria-hidden className={cn("flex size-10 shrink-0 items-center justify-center rounded-md", className)}>
-      <ProviderMark id={mark} className="size-[55%]" />
+    <div
+      aria-hidden
+      className={cn(
+        "flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-white",
+        className,
+      )}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element -- 靜態小圖示，不需要 next/image 最佳化 */}
+      <img src={src} alt="" className="size-[65%] object-contain" />
     </div>
   );
 }
@@ -282,7 +288,7 @@ function IntegrationRow({
   return (
     <li className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
       <div className="flex min-w-0 flex-1 items-start gap-3">
-        <LogoTile mark={row.id} className={row.logo.className} />
+        <LogoTile src={row.logo.src} />
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-start gap-2">
             <p className="font-medium">{name}</p>
@@ -474,7 +480,7 @@ function CalendarRow({
   return (
     <li className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
       <div className="flex min-w-0 flex-1 items-start gap-3">
-        <LogoTile mark="googleCalendar" className="bg-[#1A73E8] text-white" />
+        <LogoTile src="/integrations/google-calendar.svg" />
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-start gap-2">
             <p className="font-medium">{t("providers.googleCalendar.name")}</p>
@@ -558,7 +564,7 @@ function ConnectSheet({
         <SheetContent className="sm:max-w-md">
           <SheetHeader className="shrink-0">
             <SheetTitle className="flex items-center gap-2">
-              <LogoTile mark={row.id} className={cn("size-7", row.logo.className)} />
+              <LogoTile src={row.logo.src} className="size-7" />
               {mode === "connect" ? t("sheet.connectTitle", { name }) : t("sheet.reconnectTitle", { name })}
             </SheetTitle>
             <SheetDescription>
