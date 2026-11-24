@@ -13,7 +13,7 @@ import type { IntegrationCatalogEntry, IntegrationProviderId } from "./types";
 export const INTEGRATION_CATALOG: Record<IntegrationProviderId, IntegrationCatalogEntry> = {
   simpany: {
     id: "simpany",
-    logo: { letter: "S", className: "bg-emerald-600 text-white" },
+    logo: { letter: "S", className: "bg-[#FF7B4A] text-white" },
     credentialFields: [
       { key: "account", labelKey: "account", type: "email", required: true, autoComplete: "username" },
       { key: "password", labelKey: "password", type: "password", required: true, autoComplete: "current-password" },
@@ -26,7 +26,7 @@ export const INTEGRATION_CATALOG: Record<IntegrationProviderId, IntegrationCatal
   },
   wise: {
     id: "wise",
-    logo: { letter: "W", className: "bg-lime-400 text-emerald-950" },
+    logo: { letter: "W", className: "bg-[#9FE870] text-[#163300]" },
     credentialFields: [
       { key: "apiToken", labelKey: "apiToken", type: "token", required: true, autoComplete: "off" },
     ],
@@ -35,7 +35,7 @@ export const INTEGRATION_CATALOG: Record<IntegrationProviderId, IntegrationCatal
   // 要同步哪些 billing profile 由設定頁的「計費範圍」勾選（config.billingProfileIds）。
   azure: {
     id: "azure",
-    logo: { letter: "A", className: "bg-sky-600 text-white" },
+    logo: { letter: "A", className: "bg-[#0078D4] text-white" },
     credentialFields: [
       { key: "tenantId", labelKey: "tenantId", type: "text", required: true, autoComplete: "off" },
       { key: "clientId", labelKey: "clientId", type: "text", required: true, autoComplete: "off" },
@@ -52,7 +52,7 @@ export const INTEGRATION_CATALOG: Record<IntegrationProviderId, IntegrationCatal
   // 要同步哪些 billing account 由設定頁的「計費範圍」勾選（config.billingAccountIds）。
   gcp: {
     id: "gcp",
-    logo: { letter: "G", className: "bg-amber-400 text-amber-950" },
+    logo: { letter: "G", className: "bg-[#4285F4] text-white" },
     // 兩種驗證方式（config.authMode）：
     //   key               貼 service account JSON key（加密存放）
     //   workload_identity 不存任何金鑰：平台用 OIDC_SIGNING_KEY 簽「這個組織」的 JWT，
@@ -102,7 +102,7 @@ export const INTEGRATION_CATALOG: Record<IntegrationProviderId, IntegrationCatal
   },
   discord: {
     id: "discord",
-    logo: { letter: "D", className: "bg-indigo-500 text-white" },
+    logo: { letter: "D", className: "bg-[#5865F2] text-white" },
     // webhook 網址本身就是憑證（含 token），所以放 credentialFields 加密存放。
     credentialFields: [
       { key: "webhookUrl", labelKey: "webhookUrl", type: "token", required: true, autoComplete: "off" },

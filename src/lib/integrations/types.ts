@@ -57,7 +57,7 @@ export type IntegrationConfig = Record<string, unknown>;
 /** 靜態目錄的一筆：UI 要畫出這個整合所需的一切，不含任何實作。 */
 export type IntegrationCatalogEntry = {
   id: IntegrationProviderId;
-  /** 清單上的 logo 方塊：一個字 + Tailwind 底色 / 字色 class。 */
+  /** 清單上的 logo 方塊：品牌底色 / 標誌色 class（標誌本身見 components/integrations/provider-logos.tsx）；letter 是沒有標誌時的備用字。 */
   logo: { letter: string; className: string };
   /** 連接時要輸入的機密欄位（加密存放）。 */
   credentialFields: readonly IntegrationField[];
