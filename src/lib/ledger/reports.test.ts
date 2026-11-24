@@ -162,7 +162,11 @@ describe("資產負債表與損益表", () => {
     const bs = balanceSheet(mixed(), "government", "2026-06-15", null);
     // 貸方為正（公司欠股東）：Wise 收 USD 1000 報收入（股東替公司收，−30000）、Wise 付要報的 800（+800）、
     // 永豐付 internal 300（股東取用，−300）、Wise 轉入永豐 5000（+5000）
-    expect(bs.rows.find((r) => r.glAccountId === gl("2295"))!.amount).toBe(-30000 + 800 - 300 + 5000);
+    // 淨額是借方（股東欠公司）→ 依台灣表達列在流動資產、金額為正
+    const row = bs.rows.find((r) => r.glAccountId === gl("2295"))!;
+    expect(row.amount).toBe(-(-30000 + 800 - 300 + 5000));
+    const assetsTotal = bs.rows.findIndex((r) => r.key === "totals.assets");
+    expect(bs.rows.indexOf(row)).toBeLessThan(assetsTotal);
   });
 
   test("外幣評價只到 asOf；月底評價有沖回", () => {
