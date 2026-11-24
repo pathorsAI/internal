@@ -11,7 +11,7 @@
 -- 訂閱與請款項目有綁合約就跟著合約，沒綁就看自己，NULL 沿用組織預設（src/lib/tax-treatment.ts）。
 -- 既有資料全部留 NULL，也就是沿用組織預設。
 --
--- 兩個既有組織的預設：派斯（org_pathors）應稅＋未稅；東蜂（org-1780675700917）不加收
+-- 兩個既有組織的預設：派斯（id org_pathors）應稅＋未稅；東蜂（slug org-1780675700917，id 是隨機字串，所以用 slug 比對）不加收
 -- （威澄入帳剛好是未稅金額，也沒開過發票，推測是小規模營業人）。在沒有這兩個組織的資料庫上 UPDATE 不會動到任何列。
 --
 -- 程式比這支 migration 先上會壞（auth-schema 的 organization 與三張表都會 select 新欄位）。先跑 migration 再部署。
@@ -47,4 +47,4 @@ ALTER TABLE billing_items ADD CONSTRAINT chk_billing_item_amount_basis
   CHECK (amount_basis IS NULL OR amount_basis = ANY (ARRAY['net', 'gross']));
 
 UPDATE organization SET tax_treatment = 'taxable', amount_basis = 'net' WHERE id = 'org_pathors';
-UPDATE organization SET tax_treatment = 'none', amount_basis = 'net' WHERE id = 'org-1780675700917';
+UPDATE organization SET tax_treatment = 'none', amount_basis = 'net' WHERE slug = 'org-1780675700917';
