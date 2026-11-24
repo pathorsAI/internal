@@ -4,11 +4,13 @@ import {
   buildServiceAccountJwt,
   fetchGcpToken,
   GcpBindingMissingError,
+  buildCostQuery,
   monthlyInvoicesFromCosts,
   parseCostRows,
   parseGcpBillingAccount,
   parseServiceAccountJson,
   parseWifAudience,
+  promotionMonthsFromCosts,
   workloadIdentityBindingCommand,
 } from "./gcp";
 
@@ -141,9 +143,9 @@ describe("billing parsing", () => {
 
   test("monthly invoices only for closed months", () => {
     const rows = parseCostRows([
-      { invoice_month: "202608", project_id: "buzz-445414", project_name: "pathors", service: "Compute Engine", currency: "TWD", amount: "1000.5" },
-      { invoice_month: "202608", project_id: "", project_name: null, service: "Support", currency: "TWD", amount: "-0.5" },
-      { invoice_month: "202610", project_id: "buzz-445414", project_name: "pathors", service: "Compute Engine", currency: "TWD", amount: "80" },
+      { invoice_month: "202608", project_id: "buzz-445414", project_name: "pathors", service: "Compute Engine", currency: "TWD", gross_amount: "1000.5", promotion_credit: "0" },
+      { invoice_month: "202608", project_id: "", project_name: null, service: "Support", currency: "TWD", gross_amount: "-0.5", promotion_credit: "0" },
+      { invoice_month: "202610", project_id: "buzz-445414", project_name: "pathors", service: "Compute Engine", currency: "TWD", gross_amount: "80", promotion_credit: "0" },
     ]);
     expect(monthlyInvoicesFromCosts("01CBC3-343D16-C6AE22", rows, "2026-10-01")).toEqual([
       {
@@ -154,6 +156,50 @@ describe("billing parsing", () => {
         amount: 1000,
         currency: "TWD",
       },
+    ]);
+  });
+});
+
+describe("promotion credits", () => {
+  test("query splits PROMOTION credits from discounts", () => {
+    const sql = buildCostQuery("buzz-445414", "billing_export", "gcp_billing_export_resource_v1_01CBC3_343D16_C6AE22");
+    expect(sql).toContain("SUM(cost) + SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c WHERE IFNULL(c.type, '') <> 'PROMOTION'), 0)) AS gross_amount");
+    expect(sql).toContain("SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c WHERE c.type = 'PROMOTION'), 0)) AS promotion_credit");
+    expect(sql).toContain("`buzz-445414.billing_export.gcp_billing_export_resource_v1_01CBC3_343D16_C6AE22`");
+  });
+
+  test("parseCostRows keeps net = gross + promotion", () => {
+    const [r] = parseCostRows([
+      { invoice_month: "202610", project_id: "buzz-445414", project_name: "buzz", service: "Vertex AI", currency: "usd", gross_amount: "5682.42", promotion_credit: "-5670.32" },
+    ]);
+    expect(r).toEqual({
+      month: "2026-10-01",
+      projectId: "buzz-445414",
+      projectName: "buzz",
+      service: "Vertex AI",
+      amount: 12.1,
+      grossAmount: 5682.42,
+      promotionCredit: -5670.32,
+      currency: "USD",
+    });
+  });
+
+  test("promotion months: closed months only, skip zero and mixed currencies", () => {
+    const rows = parseCostRows([
+      { invoice_month: "202608", project_id: "a", project_name: null, service: "Compute", currency: "USD", gross_amount: "700", promotion_credit: "-700.25" },
+      { invoice_month: "202608", project_id: "b", project_name: null, service: "BigQuery", currency: "USD", gross_amount: "46.88", promotion_credit: "-35.3" },
+      { invoice_month: "202609", project_id: "a", project_name: null, service: "Compute", currency: "USD", gross_amount: "10", promotion_credit: "0" },
+      { invoice_month: "202610", project_id: "a", project_name: null, service: "Compute", currency: "USD", gross_amount: "5", promotion_credit: "-1" },
+      { invoice_month: "202610", project_id: "b", project_name: null, service: "Compute", currency: "TWD", gross_amount: "5", promotion_credit: "-1" },
+      { invoice_month: "202611", project_id: "a", project_name: null, service: "Compute", currency: "USD", gross_amount: "3647.64", promotion_credit: "-3639.53" },
+    ]);
+    expect(promotionMonthsFromCosts("01CBC3-343D16-C6AE22", rows, "2026-11-01")).toEqual([
+      { billingAccountId: "01CBC3-343D16-C6AE22", month: "2026-08-01", periodEnd: "2026-08-31", amount: 735.55, currency: "USD" },
+    ]);
+    // 月帳單仍是淨額
+    expect(monthlyInvoicesFromCosts("01CBC3-343D16-C6AE22", rows, "2026-11-01").map((i) => [i.periodStart, i.amount])).toEqual([
+      ["2026-08-01", 11.33],
+      ["2026-09-01", 10],
     ]);
   });
 });

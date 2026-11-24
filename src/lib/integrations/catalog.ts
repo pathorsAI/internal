@@ -48,7 +48,7 @@ export const INTEGRATION_CATALOG: Record<IntegrationProviderId, IntegrationCatal
     website: "https://portal.azure.com",
   },
   // 唯讀：billing account、底下專案；費用要另外開 BigQuery billing export（選填，填專案 + dataset，
-  // 資料表 gcp_billing_export_v1_<帳號> 自動偵測）。
+  // 資料表 gcp_billing_export_v1_<帳號>，沒有就用明細表 gcp_billing_export_resource_v1_<帳號>，自動偵測）。
   // 要同步哪些 billing account 由設定頁的「計費範圍」勾選（config.billingAccountIds）。
   gcp: {
     id: "gcp",

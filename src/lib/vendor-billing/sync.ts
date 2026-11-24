@@ -22,6 +22,7 @@ import {
   GcpApiError,
   GcpAuthError,
   monthlyInvoicesFromCosts,
+  promotionMonthsFromCosts,
   withGcpClient,
   type GcpClient,
   type GcpMonthlyInvoice,
@@ -30,6 +31,7 @@ import {
 } from "@/lib/integrations/gcp";
 import { updateConfig } from "@/lib/integrations/store";
 import { planCardSync, type ExistingPaymentMethod } from "./card-dedupe";
+import { bookPromotionCredits } from "./promotion-ledger";
 import { reconcileVendorInvoices, type ReconcileResult } from "./reconcile";
 import {
   filterAllowlisted,
@@ -62,7 +64,9 @@ import {
  *   資料相同的手動卡（card-dedupe.ts）。帳號的付款方式只在「沒設」或「原本就是同步來的」時才改，
  *   不覆寫人工指定的。
  * - 發票以 (org, source, external_ref) upsert，只更新金額 / 狀態 / 日期，不動對帳欄位。
- * - 費用明細以 (帳號, 月, 資源, 服務, source) upsert，覆寫金額。純分析，不進帳本。
+ * - 費用明細以 (帳號, 月, 資源, 服務, source) upsert，覆寫金額（淨額 + 用量 + 抵用點數）。純分析，不進帳本。
+ * - GCP 抵用點數：已結束月份抵用不為 0 → 管理帳（book internal）建用量支出 + 抵用收入兩筆
+ *   （promotion-ledger.ts；帳號可關閉，冪等，刪掉的不長回來）。
  * 外部錯誤：憑證被拒 → 整合標 needs_reauth（由 withAzureClient / withGcpClient 處理）並往外丟；
  * 單一步驟的其他錯誤（例如費用查詢 429）記在 warnings，其他步驟照跑。
  */
@@ -79,6 +83,8 @@ export type CloudSyncResult = {
   paymentMethods: number;
   invoices: { synced: number; created: number };
   costLines: number;
+  /** GCP：這次新記進管理帳的抵用點數交易筆數（每個月份兩筆）。 */
+  promotionTransactions: number;
   reconcile: ReconcileResult | null;
   warnings: string[];
 };
@@ -92,6 +98,7 @@ function emptyResult(provider: Provider): CloudSyncResult {
     paymentMethods: 0,
     invoices: { synced: 0, created: 0 },
     costLines: 0,
+    promotionTransactions: 0,
     reconcile: null,
     warnings: [],
   };
@@ -121,6 +128,7 @@ export function summarizeCloudSync(r: CloudSyncResult): string {
   if (r.provider === "azure") parts.push(`付款卡 ${r.paymentMethods}`);
   parts.push(countWithNew("帳單", r.invoices.synced, r.invoices.created));
   if (r.costLines > 0) parts.push(`費用明細 ${r.costLines} 列`);
+  if (r.promotionTransactions > 0) parts.push(`管理帳抵用點數交易 ${r.promotionTransactions} 筆`);
   if (r.reconcile) parts.push(reconcileSummary(r.reconcile));
   if (r.warnings.length > 0) parts.push(`警告：${r.warnings.join("；")}`);
   return parts.join("、");
@@ -346,6 +354,8 @@ async function upsertCostLines(
           resourceName: r.resourceName,
           service: r.service,
           amount: r.amount.toFixed(4),
+          grossAmount: r.grossAmount.toFixed(4),
+          promotionCredit: r.promotionCredit.toFixed(4),
           currency: r.currency,
           source,
         })),
@@ -360,6 +370,8 @@ async function upsertCostLines(
         ],
         set: {
           amount: sql`excluded.amount`,
+          grossAmount: sql`excluded.gross_amount`,
+          promotionCredit: sql`excluded.promotion_credit`,
           currency: sql`excluded.currency`,
           resourceName: sql`excluded.resource_name`,
           updatedAt: sql`now()`,
@@ -582,7 +594,15 @@ export async function syncAzureBilling(orgId: string, now: Date = new Date()): P
         );
         for (const c of rows ?? []) {
           const res2 = azureCostResource(c.subscriptionName, c.subscriptionId, subs);
-          lines.push({ month: c.month, ...res2, service: c.service, amount: c.amount, currency: c.currency });
+          lines.push({
+            month: c.month,
+            ...res2,
+            service: c.service,
+            amount: c.amount,
+            grossAmount: c.amount,
+            promotionCredit: 0,
+            currency: c.currency,
+          });
         }
       }
       r.costLines += await upsertCostLines(db, orgId, acct.id, "azure_cost", lines);
@@ -693,6 +713,8 @@ async function syncGcpAccountCosts(run: GcpRun, bq: BigQueryExport, table: strin
       resourceName: c.projectName,
       service: c.service,
       amount: c.amount,
+      grossAmount: c.grossAmount,
+      promotionCredit: c.promotionCredit,
       currency: c.currency,
     })),
   );
@@ -705,6 +727,12 @@ async function syncGcpAccountCosts(run: GcpRun, bq: BigQueryExport, table: strin
   );
   run.r.invoices.synced += up.synced;
   run.r.invoices.created += up.created;
+  run.r.promotionTransactions += await bookPromotionCredits(
+    run.db,
+    run.orgId,
+    a.accountRowId,
+    promotionMonthsFromCosts(a.id, rows, run.currentMonth),
+  );
 }
 
 /** 費用（選填）：每個勾選的帳號找自己的 export 表。 */

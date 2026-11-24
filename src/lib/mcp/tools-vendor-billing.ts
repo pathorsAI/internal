@@ -99,6 +99,11 @@ const ACCOUNT_ROW = rowSchema({
     enum: [...LEDGER_MODES],
     description: "match_only = only reconcile, never write the ledger (default). create_unmatched = create a needs-review expense for invoices still unmatched 45 days after their date.",
   },
+  bookPromotionCredits: {
+    type: "boolean",
+    description:
+      "GCP only (default on): for each closed month, book the cost covered by Google promotion credits into the management books (book = internal) as an expense (usage covered by credits) plus an equal income (category 抵用點數), so management books show the full cloud cost while the tax books are untouched. Turning it off only stops creating new ones.",
+  },
   partyId: { type: ["number", "null"] },
   partyName: NULLABLE_STRING,
   matchPartyIds: { type: "array", items: { type: "number" }, description: "Extra ledger parties also matched against (e.g. both 'Azure' and 'Microsoft')." },
@@ -219,6 +224,7 @@ function accountOut(a: BillingAccountRow, attention: AttentionItem[], today: str
     source: a.source,
     status: a.status,
     ledgerMode: a.ledgerMode,
+    bookPromotionCredits: a.bookPromotionCredits,
     partyId: a.partyId,
     partyName: a.partyName,
     matchPartyIds: a.matchPartyIds,
@@ -318,7 +324,7 @@ export const vendorBillingTools: Record<string, ToolDef> = {
 
   get_vendor_billing_account: {
     description:
-      "One vendor billing account with its payment method, resources (Azure subscriptions / GCP projects), recent invoices with their reconciliation status and linked/suggested ledger transactions, and monthly cost totals (analytics only, never booked).",
+      "One vendor billing account with its payment method, resources (Azure subscriptions / GCP projects), recent invoices with their reconciliation status and linked/suggested ledger transactions, and monthly cost totals per currency: usage (grossAmount), GCP promotion credits (promotionCredit) and actually paid (amount). Costs are analytics only, except that when bookPromotionCredits is on the credit-covered part of each closed GCP month is booked to the management books (book = internal).",
     inputSchema: {
       type: "object",
       properties: { ...ORG_ARG, id: { type: "number", description: "From list_vendor_billing_accounts." } },
@@ -333,7 +339,13 @@ export const vendorBillingTools: Record<string, ToolDef> = {
         invoices: { type: "array", items: INVOICE_ROW },
         costs: {
           type: "array",
-          items: rowSchema({ month: { type: "string" }, currency: { type: "string" }, amount: { type: "number" } }),
+          items: rowSchema({
+            month: { type: "string" },
+            currency: { type: "string" },
+            grossAmount: { type: "number", description: "Usage before promotion credits (cost + discount-type credits such as free tier / sustained use)." },
+            promotionCredit: { type: "number", description: "GCP promotion credits applied (negative, 0 if none; always 0 for Azure)." },
+            amount: { type: "number", description: "Actually paid = grossAmount + promotionCredit." },
+          }),
         },
       },
       required: ["account", "resources", "invoices", "costs"],
@@ -356,7 +368,7 @@ export const vendorBillingTools: Record<string, ToolDef> = {
 
   upsert_vendor_billing_account: {
     description:
-      "Create (omit id) or update a vendor billing account (owner/admin only). Creating is for platforms without an integration (e.g. Cloudflare, AWS): provider + displayName required. For accounts synced from Azure/GCP only partyId, matchPartyIds, paymentMethodId, ownerUserId, ledgerMode and note can be changed. Look ids up first: partyId/matchPartyIds via list_parties, paymentMethodId via list_payment_methods, ownerUserId via list_org_members. Omitted fields are left unchanged; pass null to clear. Keep ledgerMode = match_only unless the user explicitly wants missing invoices booked automatically.",
+      "Create (omit id) or update a vendor billing account (owner/admin only). Creating is for platforms without an integration (e.g. Cloudflare, AWS): provider + displayName required. For accounts synced from Azure/GCP only partyId, matchPartyIds, paymentMethodId, ownerUserId, ledgerMode, bookPromotionCredits (GCP) and note can be changed. Look ids up first: partyId/matchPartyIds via list_parties, paymentMethodId via list_payment_methods, ownerUserId via list_org_members. Omitted fields are left unchanged; pass null to clear. Keep ledgerMode = match_only unless the user explicitly wants missing invoices booked automatically.",
     inputSchema: {
       type: "object",
       properties: {
@@ -370,6 +382,7 @@ export const vendorBillingTools: Record<string, ToolDef> = {
         paymentMethodId: { type: ["number", "null"] },
         ownerUserId: { type: ["string", "null"], description: "Member responsible for this account." },
         ledgerMode: { type: "string", enum: [...LEDGER_MODES] },
+        bookPromotionCredits: { type: "boolean", description: "GCP: book promotion-credit-covered cost into the management books (default true). false stops creating new ones; existing ones stay." },
         status: { type: "string", enum: ["active", "closed"], description: "Manual accounts only." },
         note: { type: ["string", "null"] },
       },
@@ -381,7 +394,7 @@ export const vendorBillingTools: Record<string, ToolDef> = {
       const orgId = await resolveOrg(args, ctx);
       await assertCanManage(orgId, ctx.userId);
       const patch = normalizeBillingAccountInput(
-        present(args, ["id", "provider", "externalId", "displayName", "partyId", "matchPartyIds", "paymentMethodId", "ownerUserId", "ledgerMode", "status", "note"]),
+        present(args, ["id", "provider", "externalId", "displayName", "partyId", "matchPartyIds", "paymentMethodId", "ownerUserId", "ledgerMode", "bookPromotionCredits", "status", "note"]),
       );
       const r = await upsertBillingAccount(orgId, patch);
       const today = taipeiToday();

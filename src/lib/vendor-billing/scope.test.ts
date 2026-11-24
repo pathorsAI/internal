@@ -79,4 +79,15 @@ describe("GCP scope", () => {
     );
     expect([...m.entries()]).toEqual([["01CBC3-343D16-C6AE22", "gcp_billing_export_v1_01CBC3_343D16_C6AE22"]]);
   });
+
+  test("falls back to the resource-level export table when there is no standard one", () => {
+    const m = matchExportTables(
+      ["gcp_billing_export_resource_v1_01CBC3_343D16_C6AE22", "gcp_billing_export_v1_0169B6_2E38CC_45314F"],
+      ["01CBC3-343D16-C6AE22", "0169B6-2E38CC-45314F", "000000-000000-000000"],
+    );
+    expect(Object.fromEntries(m)).toEqual({
+      "01CBC3-343D16-C6AE22": "gcp_billing_export_resource_v1_01CBC3_343D16_C6AE22",
+      "0169B6-2E38CC-45314F": "gcp_billing_export_v1_0169B6_2E38CC_45314F",
+    });
+  });
 });

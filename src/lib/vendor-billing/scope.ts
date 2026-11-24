@@ -14,7 +14,8 @@ import type { IntegrationConfig } from "@/lib/integrations/types";
 //   GCP    config.billingAccountIds: string[]   ← 勾選（billing account id，例如 01CBC3-343D16-C6AE22）
 //          config.discovered: GcpDiscoveredAccount[]
 //          config.bigQueryExport: { projectId, dataset } | 沒有 ← 選填，有才讀費用；資料表
-//          `gcp_billing_export_v1_<帳號 id，- 換成 _>` 自動偵測（一個 billing account 一張表）
+//          `gcp_billing_export_v1_<帳號 id，- 換成 _>`（標準）或 `gcp_billing_export_resource_v1_<…>`
+//          （明細）自動偵測（一個 billing account 一張表；兩張都在時用標準表）
 
 export type AzureDiscoveredProfile = {
   /** Billing account name（例如 `8369e875-…:09d0934e-…_2019-05-31`）。 */
@@ -76,6 +77,7 @@ const BQ_PROJECT_RE = /^[a-z][a-z0-9.:-]{4,61}[a-z0-9]$/;
 const BQ_DATASET_RE = /^\w{1,1024}$/;
 const BQ_TABLE_RE = /^[\w$-]{1,1024}$/;
 const EXPORT_TABLE_PREFIX = "gcp_billing_export_v1_";
+const RESOURCE_EXPORT_TABLE_PREFIX = "gcp_billing_export_resource_v1_";
 
 export function isValidBigQueryExport(v: Partial<BigQueryExport> | null | undefined): v is BigQueryExport {
   return Boolean(
@@ -96,16 +98,22 @@ export function exportTableName(billingAccountId: string): string {
   return `${EXPORT_TABLE_PREFIX}${billingAccountId.replaceAll("-", "_")}`;
 }
 
+/** 明細（resource-level）用量費用 export 的資料表名：`gcp_billing_export_resource_v1_01CBC3_343D16_C6AE22`。 */
+export function resourceExportTableName(billingAccountId: string): string {
+  return `${RESOURCE_EXPORT_TABLE_PREFIX}${billingAccountId.replaceAll("-", "_")}`;
+}
+
 /**
- * 從 dataset 的資料表清單挑出每個 billing account 的標準 export 表（不含 resource 明細表）。
+ * 從 dataset 的資料表清單挑出每個 billing account 的 export 表：先找標準表，沒有再找明細表
+ * （兩種表的 cost / credits / invoice.month / project / service / currency 欄位一樣）。
  * 回傳 billing account id → 資料表名。
  */
 export function matchExportTables(tableNames: readonly string[], billingAccountIds: readonly string[]): Map<string, string> {
-  const have = new Set(tableNames.filter((t) => t.startsWith(EXPORT_TABLE_PREFIX)));
+  const have = new Set(tableNames);
   const out = new Map<string, string>();
   for (const id of billingAccountIds) {
-    const name = exportTableName(id);
-    if (have.has(name)) out.set(id, name);
+    const name = [exportTableName(id), resourceExportTableName(id)].find((n) => have.has(n));
+    if (name) out.set(id, name);
   }
   return out;
 }
