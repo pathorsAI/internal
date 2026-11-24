@@ -177,6 +177,8 @@ const transactions = {
     attachedDocs: { "zh-TW": "已附憑證", en: "Attached documents" },
     needsNotifyAccountant: { "zh-TW": "需通知會計師", en: "Notify accountant" },
     viewFile: { "zh-TW": "檢視檔案", en: "View file" },
+    uploadedVia: { "zh-TW": "由 {name} 透過 {channel} 上傳", en: "Sent by {name} via {channel}" },
+    uploadedViaAnon: { "zh-TW": "透過 {channel} 上傳", en: "Sent via {channel}" },
   },
   combobox: {
     category: {

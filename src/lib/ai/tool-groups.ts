@@ -1,5 +1,5 @@
 /**
- * 工具分組：每題不帶全部 111 支（工具說明就要 3–4 萬 token，模型也容易選錯），
+ * 工具分組：每題不帶全部 116 支（工具說明就要 3–4 萬 token，模型也容易選錯），
  * 先依問題選組，每組 10–30 支。同一支工具可以在好幾組（例如 list_parties），合併時去重。
  *
  * 選組分兩段：
@@ -18,6 +18,7 @@ export const TOOL_GROUP_IDS = [
   "review",
   "integrations",
   "settings",
+  "rules",
 ] as const;
 
 export type ToolGroupId = (typeof TOOL_GROUP_IDS)[number];
@@ -44,9 +45,8 @@ export const TOOL_GROUPS: Record<ToolGroupId, GroupDef> = {
       "bulk_create_transactions",
       "update_transaction",
       "delete_transaction",
-      "set_payment_allocations",
-      "list_payment_allocations",
       "create_reimbursement",
+      "submit_advance",
       "list_outstanding_advances",
       "get_financial_overview",
       "monthly_spend_breakdown",
@@ -71,7 +71,7 @@ export const TOOL_GROUPS: Record<ToolGroupId, GroupDef> = {
     ],
     keywords: [
       "交易", "記帳", "待連結", "連結", "掛上", "對不上", "記一筆", "支出", "收入", "花了", "花費", "付了", "收到", "轉帳", "帳戶", "銀行", "餘額",
-      "分類", "代墊", "報帳", "總覽", "淨額", "現金", "信用卡", "廠商", "前五", "前十",
+      "分類", "代墊", "報帳", "收據", "發票照片", "先墊", "總覽", "淨額", "現金", "信用卡", "廠商", "前五", "前十",
       "transaction", "expense", "income", "spend", "balance", "account", "category", "advance", "ledger",
       "unlinked", "link",
     ],
@@ -173,8 +173,10 @@ export const TOOL_GROUPS: Record<ToolGroupId, GroupDef> = {
   },
   review: {
     summary:
-      "Review & audit: bank reconciliations, notices for the accountant (mark / unmark as sent), and the activity log of who changed what.",
+      "Review & audit: bank reconciliations, splitting one payment across receivables and absorbing bank fees (payment allocations), notices for the accountant (mark / unmark as sent), and the activity log of who changed what.",
     tools: [
+      "set_payment_allocations",
+      "list_payment_allocations",
       "list_reconciliations",
       "create_reconciliation",
       "update_reconciliation",
@@ -255,6 +257,21 @@ export const TOOL_GROUPS: Record<ToolGroupId, GroupDef> = {
     keywords: [
       "設定", "開關", "開啟", "關閉", "連接", "中斷", "計費範圍", "對應", "日曆", "提醒", "組織名稱", "改名", "金鑰", "對帳",
       "settings", "enable", "disable", "connect", "disconnect", "scope", "mapping", "api key", "calendar", "reconcile",
+    ],
+  },
+  rules: {
+    summary:
+      "Rules: what users taught the assistant (e.g. counterparty X always goes to category Y, I paid my receipts myself) — list, save, change, disable and remove them.",
+    tools: [
+      "list_ai_rules",
+      "create_ai_rule",
+      "update_ai_rule",
+      "remove_ai_rule",
+      "list_categories",
+      "list_parties",
+    ],
+    keywords: [
+      "以後", "規則", "記住", "都歸", "預設", "always", "remember", "rule",
     ],
   },
 };

@@ -257,6 +257,9 @@ export function EditTransactionForm({
   );
 }
 
+/** 從聊天收進來的憑證要標出是誰從哪個 app 傳的。 */
+const CHANNEL_NAME: Record<"line" | "whatsapp", string> = { line: "LINE", whatsapp: "WhatsApp" };
+
 function AttachedDocs({ docs }: Readonly<{ docs: TxnDocument[] }>) {
   const t = useTranslations("transactions");
   if (docs.length === 0) return null;
@@ -281,6 +284,13 @@ function AttachedDocs({ docs }: Readonly<{ docs: TxnDocument[] }>) {
             >
               {d.fileName ?? t("form.viewFile")}
             </a>
+            {d.source === "line" || d.source === "whatsapp" ? (
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {d.uploadedByName
+                  ? t("form.uploadedVia", { name: d.uploadedByName, channel: CHANNEL_NAME[d.source] })
+                  : t("form.uploadedViaAnon", { channel: CHANNEL_NAME[d.source] })}
+              </span>
+            ) : null}
             <span className="ml-auto">
               <DeleteButton action={deleteTransactionDocument} id={d.id} />
             </span>

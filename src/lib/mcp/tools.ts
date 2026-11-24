@@ -52,6 +52,7 @@ import { settingsTools } from "./tools-settings";
 import { vendorBillingAdminTools } from "./tools-vendor-billing-admin";
 import { linkTools } from "./tools-links";
 import { allocationTools } from "./tools-allocations";
+import { aiRuleTools } from "./tools-ai-rules";
 
 export type { ToolContext, ToolDef } from "./shared";
 
@@ -902,4 +903,5 @@ export const tools: Record<string, ToolDef> = {
   ...settingsTools,
   ...vendorBillingAdminTools,
   ...linkTools,
+  ...aiRuleTools,
 };

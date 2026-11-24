@@ -134,8 +134,8 @@ the `tools-*.ts` modules):
 - `_meta["openai/toolInvocation/invoking" | "invoked"]`, the status line ChatGPT
   shows while a call is in flight.
 
-**Output schemas.** Every tool declares an `outputSchema` — all 111 of them, as of
-server version 1.13.0 (the Simpany tools whose result shape comes from Simpany's
+**Output schemas.** Every tool declares an `outputSchema` — all 116 of them, as of
+server version 1.14.0 (the Simpany tools whose result shape comes from Simpany's
 unofficial API declare an open object schema). When a tool declares one the handler additionally returns
 the result as MCP `structuredContent` (the JSON text block stays, per MCP's
 back-compat recommendation), which is what ChatGPT and Codex prefer over parsing

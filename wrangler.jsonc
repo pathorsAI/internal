@@ -46,6 +46,21 @@
       "enabled": false
     }
   },
+  // LINE／WhatsApp bot 的佇列：webhook 收到事件先送進來（立刻回 200），「安靜幾秒才合成一題」
+  // 的 flush 也用 delaySeconds 排在這裡。consumer 是 worker.ts 的 queue()。
+  // 第一次部署前要先建：`wrangler queues create pathors-internal-chat`（見 docs/chat-channels.md）。
+  // max_batch_size 1：一則一則處理，一則失敗只重送那一則；max_batch_timeout 0 不要攢批次。
+  "queues": {
+    "producers": [{ "binding": "CHAT_QUEUE", "queue": "pathors-internal-chat" }],
+    "consumers": [
+      {
+        "queue": "pathors-internal-chat",
+        "max_batch_size": 1,
+        "max_batch_timeout": 0,
+        "max_retries": 2
+      }
+    ]
+  },
   // 整合每日自動同步：22:00 UTC = 台北 06:00（Cron Trigger 一律以 UTC 計）。
   // scheduled() 在 worker.ts；同步內容見 docs/integrations.md「每日自動同步」。
   "triggers": { "crons": ["0 22 * * *"] },

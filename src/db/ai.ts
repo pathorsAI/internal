@@ -1,4 +1,5 @@
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
+import type { AttachmentRef, ChatChannel } from "@/lib/ai/types";
 import { getDb } from "./index";
 import { aiConversations, aiMessages } from "./schema";
 
@@ -17,6 +18,8 @@ export type AiMessageRow = {
   toolCallId: string | null;
   toolName: string | null;
   status: "ok" | "error" | "pending" | "cancelled" | null;
+  /** user 訊息附的檔案（migrations/0042）；沒有就是 null（舊測試的假資料可以不帶）。 */
+  attachments?: AttachmentRef[] | null;
   createdAt: string;
 };
 
@@ -24,6 +27,8 @@ export type AiConversationRow = {
   id: string;
   title: string;
   toolGroups: string[];
+  /** 從哪個入口開的（migrations/0042）。 */
+  channel: ChatChannel;
   updatedAt: string;
 };
 
@@ -42,12 +47,13 @@ export async function listAiConversations(owner: Owner, limit = 50): Promise<AiC
       id: aiConversations.id,
       title: aiConversations.title,
       toolGroups: aiConversations.toolGroups,
+      channel: aiConversations.channel,
       updatedAt: aiConversations.updatedAt,
     })
     .from(aiConversations)
     .where(ownedBy(owner))
     .orderBy(desc(aiConversations.updatedAt))
-    .limit(limit);
+    .limit(limit) as Promise<AiConversationRow[]>;
 }
 
 export async function getAiConversation(
@@ -59,26 +65,62 @@ export async function getAiConversation(
       id: aiConversations.id,
       title: aiConversations.title,
       toolGroups: aiConversations.toolGroups,
+      channel: aiConversations.channel,
       updatedAt: aiConversations.updatedAt,
     })
     .from(aiConversations)
     .where(and(ownedBy(owner), eq(aiConversations.id, id)))
     .limit(1);
-  return row ?? null;
+  return (row as AiConversationRow | undefined) ?? null;
 }
 
-export async function createAiConversation(owner: Owner, title: string): Promise<AiConversationRow> {
+/**
+ * 聊天入口用：這個人在這個組織、這個平台最近一段「還在進行中」的對話（updated_at 在 since 之後）。
+ * 閒置超過時間就回 null，呼叫端開新的。
+ */
+export async function findRecentAiConversation(
+  owner: Owner,
+  channel: ChatChannel,
+  since: Date,
+): Promise<AiConversationRow | null> {
+  const [row] = await getDb()
+    .select({
+      id: aiConversations.id,
+      title: aiConversations.title,
+      toolGroups: aiConversations.toolGroups,
+      channel: aiConversations.channel,
+      updatedAt: aiConversations.updatedAt,
+    })
+    .from(aiConversations)
+    .where(
+      and(
+        ownedBy(owner),
+        eq(aiConversations.channel, channel),
+        gt(aiConversations.updatedAt, since.toISOString()),
+      ),
+    )
+    .orderBy(desc(aiConversations.updatedAt))
+    .limit(1);
+  return (row as AiConversationRow | undefined) ?? null;
+}
+
+export async function createAiConversation(
+  owner: Owner,
+  title: string,
+  channel: ChatChannel = "web",
+): Promise<AiConversationRow> {
   const id = crypto.randomUUID();
   const [row] = await getDb()
     .insert(aiConversations)
-    .values({ id, organizationId: owner.orgId, userId: owner.userId, title })
+    .values({ id, organizationId: owner.orgId, userId: owner.userId, title, channel })
     .returning({
       id: aiConversations.id,
       title: aiConversations.title,
       toolGroups: aiConversations.toolGroups,
+      channel: aiConversations.channel,
       updatedAt: aiConversations.updatedAt,
     });
-  return row;
+  return row as AiConversationRow;
 }
 
 /** 碰一下 updated_at（排在列表最上面），順便更新已載入的工具組。 */
@@ -115,6 +157,7 @@ export async function listAiMessages(conversationId: string): Promise<AiMessageR
       toolCallId: aiMessages.toolCallId,
       toolName: aiMessages.toolName,
       status: aiMessages.status,
+      attachments: aiMessages.attachments,
       createdAt: aiMessages.createdAt,
     })
     .from(aiMessages)
@@ -134,6 +177,8 @@ export async function insertAiMessage(
     status?: AiMessageRow["status"];
     inputTokens?: number | null;
     outputTokens?: number | null;
+    /** 只有 user 訊息會帶。 */
+    attachments?: AttachmentRef[] | null;
   },
 ): Promise<number> {
   const [row] = await getDb()
@@ -148,6 +193,7 @@ export async function insertAiMessage(
       status: m.status ?? null,
       inputTokens: m.inputTokens ?? null,
       outputTokens: m.outputTokens ?? null,
+      attachments: m.attachments && m.attachments.length > 0 ? m.attachments : null,
     })
     .returning({ id: aiMessages.id });
   return row.id;

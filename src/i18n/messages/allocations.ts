@@ -1,6 +1,6 @@
 import type { Dictionary } from "./dictionary";
 
-/** 收款分配（migrations/0042）：「分配收款」Sheet 與寫入錯誤。 */
+/** 收款分配（migrations/0043）：「分配收款」Sheet 與寫入錯誤。 */
 const allocations = {
   trigger: { "zh-TW": "分配收款", en: "Allocate payment" },
   triggerShort: { "zh-TW": "分配", en: "Allocate" },

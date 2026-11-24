@@ -1393,7 +1393,7 @@ export async function updateTransaction(
     ]);
     if (currencyError) return { ok: false, error: currencyError };
 
-    // 收款分配（0042）：分配列若只是舊綁定的鏡像，先拿掉，讓這次改的合約／金額直接生效；
+    // 收款分配（0043）：分配列若只是舊綁定的鏡像，先拿掉，讓這次改的合約／金額直接生效；
     // 真正拆分過的分配不動（收齊判斷照分配列，跟這裡的合約欄位無關）。
     if (owned.type === "income") await releaseLegacyMirror(db, orgId, id);
 
@@ -2813,7 +2813,7 @@ export type PaymentCandidate = {
   partyName: string | null;
   /** 與該期應收金額差多少（0 = 完全吻合）；已經分配過一部分的交易拿「還沒分配的」去比 */
   gap: number;
-  /** 這筆已經分配出去的金額（收款分配，0042）；0 = 還沒分配 */
+  /** 這筆已經分配出去的金額（收款分配，0043）；0 = 還沒分配 */
   allocated: number;
   /** 已經拆分給多個應收：不能再用「就是這筆」整筆綁，要走「分配收款」 */
   split: boolean;
@@ -3057,7 +3057,7 @@ export async function linkPaymentToBillingRow(
       )
       .limit(1);
     if (!txn) return { ok: false, error: t("notFound.transaction") };
-    // 收款分配（0042）：舊綁定的鏡像先拿掉，下面寫的綁定欄位才會生效；真的拆分過的就不能整筆綁。
+    // 收款分配（0043）：舊綁定的鏡像先拿掉，下面寫的綁定欄位才會生效；真的拆分過的就不能整筆綁。
     if ((await releaseLegacyMirror(db, orgId, transactionId)) > 0) {
       const tA = await getTranslations("allocations");
       return { ok: false, error: tA("error.splitTransaction") };
@@ -3079,7 +3079,7 @@ export async function linkPaymentToBillingRow(
   }
 }
 
-// ---- 收款分配（migrations/0042）：一筆入帳分給多個應收、吸收手續費 ----
+// ---- 收款分配（migrations/0043）：一筆入帳分給多個應收、吸收手續費 ----
 
 /** Sheet 上一列分配（目標用 targetKey：`sub:<id>:<period>`／`bi:<id>`／`c:<id>`）。 */
 export type AllocationLineInput = { key: string; amount: number; fee: number; note?: string | null };

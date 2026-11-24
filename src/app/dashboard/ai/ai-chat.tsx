@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { ArrowUp, History, Plus, Sparkles, Square, Trash2 } from "lucide-react";
+import { ArrowUp, BookMarked, History, Plus, Sparkles, Square, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -327,7 +327,7 @@ export function AiChat({ conversationId, initialMessages, initialConversations, 
             ) : (
               messages.map((m, i) =>
                 m.kind === "user" ? (
-                  <UserMessage key={m.id} text={m.text} user={user} />
+                  <UserMessage key={m.id} text={m.text} user={user} attachments={m.attachments} />
                 ) : (
                   <AssistantMessage
                     key={m.id}
@@ -335,6 +335,7 @@ export function AiChat({ conversationId, initialMessages, initialConversations, 
                     streaming={busy && i === messages.length - 1}
                     disabled={busy}
                     onConfirm={confirm}
+                    onOption={i === messages.length - 1 ? send : undefined}
                   />
                 ),
               )
@@ -422,12 +423,20 @@ function ConversationList({
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between gap-2 px-3 pt-3 pb-2">
         <span className="text-sm font-medium text-muted-foreground">{t("title")}</span>
-        <Button asChild variant="outline" size="sm" className="h-7 px-2 text-xs">
-          <Link href="/dashboard/ai">
-            <Plus className="size-3.5" />
-            {t("new")}
-          </Link>
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button asChild variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground">
+            <Link href="/dashboard/ai/rules">
+              <BookMarked className="size-3.5" />
+              {t("rules")}
+            </Link>
+          </Button>
+          <Button asChild variant="outline" size="sm" className="h-7 px-2 text-xs">
+            <Link href="/dashboard/ai">
+              <Plus className="size-3.5" />
+              {t("new")}
+            </Link>
+          </Button>
+        </div>
       </div>
       <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
         {conversations.length === 0 ? (
@@ -445,6 +454,11 @@ function ConversationList({
                   )}
                 >
                   <span className="min-w-0 flex-1 truncate">{c.title || t("untitled")}</span>
+                  {c.channel === "line" || c.channel === "whatsapp" ? (
+                    <span className="shrink-0 rounded-sm bg-muted px-1.5 py-px text-[11px] leading-4 text-muted-foreground">
+                      {t(`channel.${c.channel}`)}
+                    </span>
+                  ) : null}
                   <span className="shrink-0 text-xs text-muted-foreground tabular-nums group-hover:invisible">
                     {shortDate(c.updatedAt)}
                   </span>

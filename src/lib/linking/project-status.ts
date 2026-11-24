@@ -1,3 +1,5 @@
+import { feeTolerance } from "./match";
+
 /**
  * 專案狀態由底下的合約與訂閱推導（純函式）。projects.status 只剩「手動封存」這個 override。
  *
@@ -33,6 +35,14 @@ export function projectReadyToClose(input: Parameters<typeof deriveProjectStatus
 }
 
 /** 合約已收 ≥ 含稅應收（gross）、但還在草稿 / 進行中 → 該提示結案。amount 請傳含稅應收。 */
-export function contractReadyToClose(c: { status: string; amount: number | null; received: number }): boolean {
-  return OPEN_CONTRACT.has(c.status) && c.amount !== null && c.amount > 0 && c.received >= c.amount;
+export function contractReadyToClose(c: {
+  status: string;
+  amount: number | null;
+  received: number;
+  /** 給了就容許匯款手續費的差額（跟連結層「視同收齊」同一條規則）；不給就要收滿 */
+  currency?: string;
+}): boolean {
+  if (!OPEN_CONTRACT.has(c.status) || c.amount === null || c.amount <= 0) return false;
+  const tolerance = c.currency ? feeTolerance(c.amount, c.currency) : 0;
+  return c.received >= c.amount - tolerance;
 }

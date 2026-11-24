@@ -17,6 +17,8 @@ const activity = {
     web: { "zh-TW": "網頁", en: "Web" },
     system: { "zh-TW": "系統排程", en: "Scheduled" },
     api: { "zh-TW": "API key", en: "API key" },
+    line: { "zh-TW": "LINE", en: "LINE" },
+    whatsapp: { "zh-TW": "WhatsApp", en: "WhatsApp" },
   },
   systemActor: { "zh-TW": "系統", en: "System" },
   action: {

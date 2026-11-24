@@ -36,6 +36,10 @@ export function proxy(request: NextRequest) {
 // isolate 裡直接呼叫，沒有 session cookie）；它自己用一次性 token 驗證，外部請求一律 404。
 // 見 src/lib/cron-token.ts。
 //
+// /api/channels 是 LINE／WhatsApp bot：兩個 webhook 由平台直接打（沒有 session cookie，自己驗簽），
+// /api/channels/process 只給 worker.ts 的 queue() 用一次性 token 呼叫，外部請求一律 404。
+// 見 src/lib/channels/ 與 docs/chat-channels.md。
+//
 // /api/simpany-tax-uploads/<token> 是 MCP 開的一次性上傳網址（本機 `curl -T` 傳檔，沒有
 // session cookie）。網址裡 256-bit 的 token 就是憑證：30 分鐘、只能 PUT 一次，route 自己驗，
 // 無效一律 404。見 src/lib/simpany-tax-upload.ts。
@@ -56,6 +60,6 @@ export function proxy(request: NextRequest) {
 // 那頁要的是真的去查 session 與 credential account。
 export const config = {
   matcher: [
-    "/((?!login|signup|forgot-password|reset-password|landing|privacy|terms|flags|api/auth|api/cron|api/simpany-tax-uploads|api/v1|mcp|.well-known|_next/static|_next/image|favicon.ico).*)",
+    "/((?!login|signup|forgot-password|reset-password|landing|privacy|terms|flags|api/auth|api/cron|api/channels|api/simpany-tax-uploads|api/v1|mcp|.well-known|_next/static|_next/image|favicon.ico).*)",
   ],
 };

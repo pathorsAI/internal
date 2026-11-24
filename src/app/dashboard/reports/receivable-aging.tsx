@@ -33,7 +33,7 @@ export async function ReceivableAging({
   absorbedFees,
 }: Readonly<{
   rows: AgingRow[];
-  /** 管理帳今年至今吸收的匯款手續費（收款分配的 fee，0042），依幣別；不給就不顯示那一行 */
+  /** 管理帳今年至今吸收的匯款手續費（收款分配的 fee，0043），依幣別；不給就不顯示那一行 */
   absorbedFees?: { year: string; totals: { currency: string; total: number }[] };
 }>) {
   const t = await getTranslations("reports");

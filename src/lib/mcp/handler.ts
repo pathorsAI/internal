@@ -1,6 +1,6 @@
 import { type ToolContext, tools } from "./tools";
 import { type ToolAnnotations, type ToolDef, resolveOrg } from "./shared";
-import { logAi, logApi, logMcp, type ActivityAction } from "@/db/activity";
+import { logAi, logApi, logChat, logMcp, type ActivityAction, type ToolCallChannel } from "@/db/activity";
 import { publicBaseUrl, trustedOrigins } from "@/lib/base-url";
 import { MCP_SERVER_ICONS } from "./mcp-icons";
 
@@ -42,8 +42,12 @@ const AUDIT_BY_NAME: Record<string, Pick<McpAudit, "action" | "entityType">> = {
   merge_parties: { action: "update", entityType: "party" },
   // 待連結：掛上候選 / 略過 / 指定對象，都記在交易上
   resolve_transaction_link: { action: "update", entityType: "transaction" },
-  // 收款分配（0042）：記在交易上（結果的 id 就是 transactionId），與網頁端 logWeb 一致。
+  // 收款分配（0043）：記在交易上（結果的 id 就是 transactionId），與網頁端 logWeb 一致。
   set_payment_allocations: { action: "update", entityType: "transaction" },
+  // 成員提交自己的代墊（tools-transactions.ts）：建一筆 advance 交易。
+  submit_advance: { action: "create", entityType: "transaction" },
+  // AI 規則（tools-ai-rules.ts）：remove_ 是軟刪。
+  remove_ai_rule: { action: "delete", entityType: "ai_rule" },
 };
 
 /** The numeric entity id a tool result names, if any (`id`, else first of `ids`). */
@@ -527,7 +531,7 @@ export async function runToolWithAudit(
   name: string,
   args: Record<string, unknown>,
   ctx: ToolContext,
-  channel: "mcp" | "ai" = "mcp",
+  channel: ToolCallChannel = "mcp",
   summary?: string,
 ): Promise<ToolRunResult> {
   const tool = tools[name];
@@ -566,7 +570,7 @@ async function auditToolWrite(
   name: string,
   args: Record<string, unknown>,
   ctx: ToolContext,
-  channel: "mcp" | "ai",
+  channel: ToolCallChannel,
   out: unknown,
   summary?: string,
 ): Promise<void> {
@@ -577,8 +581,13 @@ async function auditToolWrite(
       audit.organizationId ? { organizationId: audit.organizationId } : args,
       ctx,
     );
-    const log = channel === "ai" ? logAi : logMcp;
-    await log(orgId, ctx.userId, audit.action, audit.entityType, audit.entityId, summary ?? name);
+    const label = summary ?? name;
+    if (channel === "line" || channel === "whatsapp") {
+      await logChat(channel, orgId, ctx.userId, audit.action, audit.entityType, audit.entityId, label);
+    } else {
+      const log = channel === "ai" ? logAi : logMcp;
+      await log(orgId, ctx.userId, audit.action, audit.entityType, audit.entityId, label);
+    }
   } catch {
     // ignore audit failures
   }

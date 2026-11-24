@@ -42,6 +42,14 @@ import {
 } from "./shared";
 import { resolvePayoutAccount } from "@/db/employee-accounts";
 import { releaseLegacyMirror } from "@/db/allocations";
+import {
+  assertInboxDocuments,
+  attachInboxDocuments,
+  DOC_KINDS,
+  findLinkedEmployee,
+  parseDocKind,
+  parseDocumentIds,
+} from "@/db/chat";
 import { summarizeSpendTrend } from "@/lib/spend-trend";
 import { PAYOUT_ACCOUNT_SCHEMA, payoutAccountOutput } from "./tools-employee-accounts";
 import { externalSingleLegSide } from "@/lib/external-transfer";
@@ -301,6 +309,12 @@ function linkOutput(report: LinkReport, similar: readonly SimilarParty[] = []) {
 const LINKING_NOTE =
   " Linking: the system links income automatically — it inherits contract/project from billingItemId / subscriptionId / contractId, and when none is given it matches open billing items, subscription periods and contracts of that customer by amount. When `unlinked` comes back with candidates, ask the user ONCE which candidate applies (or skip) — never guess — then call update_transaction with the chosen billingItemId, subscriptionId+subscriptionPeriod, or contractId. When `partySimilar` is non-empty, ask once whether it is the same party (merge_parties). When `hints` is non-empty, tell the user and ask before changing any contract/project status.";
 
+const ATTACHED_DOCS_SCHEMA = {
+  type: "array",
+  items: { type: "number" },
+  description: "Documents attached by this call; only present when documentIds was supplied.",
+};
+
 // list_transactions 回的是 db/queries.ts listTransactions 的投影（不是整列）：
 // 交易本身的欄位加上 join 出來的分類 / 帳戶 / 對象 / 員工 / 專案名稱。
 const TXN_LIST_ROW = rowSchema({
@@ -472,6 +486,7 @@ async function resolveTxnFields(
   orgId: string,
   type: string,
   args: Record<string, unknown>,
+  settleEmployeeId?: number,
 ): Promise<TxnFields> {
   const blank: TxnFields = {
     fromAccountId: null,
@@ -511,11 +526,10 @@ async function resolveTxnFields(
       categoryId,
       partyId: party.id,
       partySimilar: party.similar,
-      settleEmployeeId: await getOrCreateEmployee(
-        db,
-        orgId,
-        requireString(args, "settleEmployeeName"),
-      ),
+      // submit_advance 直接給本人的員工 id；create_transaction 照名字找（找不到就建）。
+      settleEmployeeId:
+        settleEmployeeId ??
+        (await getOrCreateEmployee(db, orgId, requireString(args, "settleEmployeeName"))),
     };
   }
   if (type === "transfer") {
@@ -805,6 +819,134 @@ function applyTxnAmountPatch(
   }
 }
 
+// ---- 附件（聊天收件匣的 documents）----
+
+const DOCUMENT_ARGS = {
+  documentIds: {
+    type: "array",
+    items: { type: "number" },
+    description:
+      "Optional: ids of files the user sent in chat (shown in the conversation as [附件 document #<id>：<name>]) to attach to this transaction. Each must belong to this organization and not be attached to anything yet.",
+  },
+  docKind: {
+    type: "string",
+    enum: [...DOC_KINDS],
+    description:
+      "What the attached files are: e_invoice (電子發票), paper_invoice (三聯式／其他發票, the accountant must be notified), receipt (收據), other. Default other.",
+  },
+} as const;
+
+/** 交易建好（或改好）之後把附件掛上，回傳掛上的 document id（沒有就不帶 key）。 */
+async function attachDocumentsTo(
+  orgId: string,
+  transactionId: number,
+  documentIds: number[],
+  args: Record<string, unknown>,
+): Promise<{ attachedDocumentIds?: number[] }> {
+  if (documentIds.length === 0) return {};
+  const attached = await attachInboxDocuments(orgId, documentIds, transactionId, parseDocKind(args.docKind) ?? "other");
+  return { attachedDocumentIds: attached };
+}
+
+/**
+ * create_transaction 與 submit_advance 共用的寫入：驗證、建一筆交易、掛附件。
+ * extra.settleEmployeeId 給了就不看 settleEmployeeName（代墊人固定是本人）；
+ * extra.needsReview = true 時記成待確認。
+ */
+/**
+ * create_transaction 與 submit_advance 共用：參數轉成交易、經連結層寫入、掛上聊天收件匣的附件。
+ * submit_advance 會帶 settleEmployeeId（本人的員工紀錄）與 needsReview。
+ */
+async function createTransactionFromArgs(
+  args: Record<string, unknown>,
+  ctx: { userId: string; orgHint?: string },
+  extra: { settleEmployeeId?: number; needsReview?: boolean } = {},
+) {
+  const type = requireString(args, "type");
+  if (!TXN_TYPES.includes(type as (typeof TXN_TYPES)[number])) {
+    throw new Error(`"type" must be one of: ${TXN_TYPES.join(", ")}.`);
+  }
+  const orgId = await resolveOrg(args, ctx);
+  const db = getDb();
+  const documentIds = parseDocumentIds(args.documentIds);
+  parseDocKind(args.docKind); // 先驗格式，交易建了才發現就太晚
+  await assertInboxDocuments(orgId, documentIds);
+  const f = await resolveTxnFields(db, orgId, type, args, extra.settleEmployeeId);
+  const projectId = await optProjectId(db, args, orgId);
+  const contractId = await optContractId(db, args, orgId);
+  const subscriptionId = await optSubscriptionId(db, args, orgId);
+  const subscriptionPeriod = optDate(args, "subscriptionPeriod");
+  if (subscriptionId !== undefined && subscriptionPeriod === undefined) {
+    throw new Error(
+      '"subscriptionPeriod" (YYYY-MM-DD) is required when "subscriptionId" is set.',
+    );
+  }
+  const billingItemId = await optBillingItemId(db, args, orgId);
+  const amount = requireDecimal(args, "amount");
+  const currency = normalizeCurrency(args, "currency");
+  // 每一腳（expense/income 的單一帳戶、transfer 的 from + to）都要跟自己的帳戶同幣別。
+  await assertAccountCurrency(db, orgId, currency, [f.fromAccountId, f.toAccountId]);
+  const reported = type === "transfer" || optBoolean(args, "reported") === true;
+  const { row, report } = await insertTransaction(
+    { db, orgId, source: "mcp" },
+    {
+      organizationId: orgId,
+      type,
+      txnDate: requireDate(args, "txnDate"),
+      description: optString(args, "description") ?? null,
+      categoryId: f.categoryId,
+      partyId: f.partyId,
+      settleEmployeeId: f.settleEmployeeId,
+      projectId: projectId ?? null,
+      contractId: contractId ?? null,
+      subscriptionId: subscriptionId ?? null,
+      subscriptionPeriod: subscriptionPeriod ?? null,
+      billingItemId: billingItemId ?? null,
+      amount,
+      currency,
+      amountTwd: currency === "TWD" ? amount : null,
+      fromAccountId: f.fromAccountId,
+      toAccountId: f.toAccountId,
+      book: reported ? "both" : "internal",
+      billedToCompanyTaxId: optBoolean(args, "billedToCompanyTaxId") ?? false,
+      needsReview: extra.needsReview ?? false,
+    },
+  );
+  const attached = await attachDocumentsTo(orgId, row.id, documentIds, args);
+  const out = { ...row, ...linkOutput(report, f.partySimilar), ...attached };
+  // 合約可能是給的，也可能是從請款項 / 訂閱繼承或比對到的 —— 以實際寫進去的為準。
+  if (row.contractId == null) return out;
+  const [progress] = await getContractProgress(db, orgId, [row.contractId]);
+  return { ...out, contractProgress: progress ?? null };
+}
+
+/** submit_advance 的參數檢查（純函式，方便測）：回傳轉成 create_transaction 形狀的參數。 */
+export function submitAdvanceArgs(args: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    type: "advance",
+    txnDate: requireDate(args, "date"),
+    amount: requireNumber(args, "amount"),
+    partyName: requireString(args, "partyName"),
+    description: requireString(args, "description"),
+  };
+  if ((out.amount as number) <= 0) throw new Error('"amount" must be greater than 0.');
+  const currency = optString(args, "currency");
+  if (currency !== undefined) out.currency = currency;
+  const categoryId = optNumber(args, "categoryId");
+  if (categoryId !== undefined) out.categoryId = categoryId;
+  if (args.documentIds !== undefined) out.documentIds = parseDocumentIds(args.documentIds);
+  const docKind = parseDocKind(args.docKind);
+  if (docKind !== undefined) out.docKind = docKind;
+  if (optBoolean(args, "billedToCompanyTaxId") !== undefined) {
+    out.billedToCompanyTaxId = optBoolean(args, "billedToCompanyTaxId");
+  }
+  if (args.organizationId !== undefined) out.organizationId = args.organizationId;
+  return out;
+}
+
+export const NO_EMPLOYEE_RECORD_ERROR =
+  "你在這個組織還沒有員工資料，請管理者到員工頁連結帳號。 (You have no employee record in this organization yet; ask an owner or admin to link your account on the Employees page.)";
+
 export const transactionTools: Record<string, ToolDef> = {
   list_transactions: {
     description:
@@ -1000,6 +1142,7 @@ export const transactionTools: Record<string, ToolDef> = {
           type: "boolean",
           description: "有報公司統編（進項可扣抵）。Default false.",
         },
+        ...DOCUMENT_ARGS,
         ...ORG_ARG,
       },
       required: ["type", "txnDate", "amount"],
@@ -1017,62 +1160,11 @@ export const transactionTools: Record<string, ToolDef> = {
           anyOf: [CONTRACT_PROGRESS_SCHEMA, { type: "null" }],
           description: "Only present when the transaction ended up linked to a contract.",
         },
+        attachedDocumentIds: ATTACHED_DOCS_SCHEMA,
       },
       required: [...TXN_ROW_REQUIRED, ...LINK_REPORT_REQUIRED],
     },
-    execute: async (args, ctx) => {
-      const type = requireString(args, "type");
-      if (!TXN_TYPES.includes(type as (typeof TXN_TYPES)[number])) {
-        throw new Error(`"type" must be one of: ${TXN_TYPES.join(", ")}.`);
-      }
-      const orgId = await resolveOrg(args, ctx);
-      const db = getDb();
-      const f = await resolveTxnFields(db, orgId, type, args);
-      const projectId = await optProjectId(db, args, orgId);
-      const contractId = await optContractId(db, args, orgId);
-      const subscriptionId = await optSubscriptionId(db, args, orgId);
-      const subscriptionPeriod = optDate(args, "subscriptionPeriod");
-      if (subscriptionId !== undefined && subscriptionPeriod === undefined) {
-        throw new Error(
-          '"subscriptionPeriod" (YYYY-MM-DD) is required when "subscriptionId" is set.',
-        );
-      }
-      const billingItemId = await optBillingItemId(db, args, orgId);
-      const amount = requireDecimal(args, "amount");
-      const currency = normalizeCurrency(args, "currency");
-      // 每一腳（expense/income 的單一帳戶、transfer 的 from + to）都要跟自己的帳戶同幣別。
-      await assertAccountCurrency(db, orgId, currency, [f.fromAccountId, f.toAccountId]);
-      const reported = type === "transfer" || optBoolean(args, "reported") === true;
-      const { row, report } = await insertTransaction(
-        { db, orgId, source: "mcp" },
-        {
-          organizationId: orgId,
-          type,
-          txnDate: requireDate(args, "txnDate"),
-          description: optString(args, "description") ?? null,
-          categoryId: f.categoryId,
-          partyId: f.partyId,
-          settleEmployeeId: f.settleEmployeeId,
-          projectId: projectId ?? null,
-          contractId: contractId ?? null,
-          subscriptionId: subscriptionId ?? null,
-          subscriptionPeriod: subscriptionPeriod ?? null,
-          billingItemId: billingItemId ?? null,
-          amount,
-          currency,
-          amountTwd: currency === "TWD" ? amount : null,
-          fromAccountId: f.fromAccountId,
-          toAccountId: f.toAccountId,
-          book: reported ? "both" : "internal",
-          billedToCompanyTaxId: optBoolean(args, "billedToCompanyTaxId") ?? false,
-        },
-      );
-      const out = { ...row, ...linkOutput(report, f.partySimilar) };
-      // 合約可能是給的，也可能是從請款項 / 訂閱繼承或比對到的 —— 以實際寫進去的為準。
-      if (row.contractId == null) return out;
-      const [progress] = await getContractProgress(db, orgId, [row.contractId]);
-      return { ...out, contractProgress: progress ?? null };
-    },
+    execute: (args, ctx) => createTransactionFromArgs(args, ctx),
   },
 
   bulk_create_transactions: {
@@ -1248,9 +1340,52 @@ export const transactionTools: Record<string, ToolDef> = {
     },
   },
 
+  submit_advance: {
+    description:
+      "Submit an advance (代墊) the signed-in user paid out of their own pocket for the organization, to be repaid later. Any member can use it, but only for themselves: the payer is always the caller's own employee record (employees linked to their login), never someone else. The entry is saved as type 'advance' with needsReview = true, so an owner or admin reviews it before it is repaid (create_reimbursement). Attach the receipt photos the user sent with documentIds. Fails when the caller has no employee record in this organization.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        date: { type: "string", description: "YYYY-MM-DD, the date on the receipt." },
+        amount: { type: "number", description: "Amount paid, > 0." },
+        currency: { type: "string", description: "3-letter; default TWD." },
+        partyName: { type: "string", description: "Shop / vendor paid; created if new." },
+        description: { type: "string", description: "What it was for (put the invoice number here when there is one)." },
+        categoryId: { type: "number", description: "Optional; omit to leave it 未分類. Look it up with list_categories." },
+        billedToCompanyTaxId: {
+          type: "boolean",
+          description: "有報公司統編: true when the buyer tax ID on the invoice is the organization's.",
+        },
+        ...DOCUMENT_ARGS,
+        ...ORG_ARG,
+      },
+      required: ["date", "amount", "partyName", "description"],
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: "object",
+      properties: {
+        ...TXN_ROW_PROPS,
+        attachedDocumentIds: ATTACHED_DOCS_SCHEMA,
+      },
+      required: TXN_ROW_REQUIRED,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    execute: async (args, ctx) => {
+      const txnArgs = submitAdvanceArgs(args);
+      const orgId = await resolveOrg(args, ctx);
+      const employee = await findLinkedEmployee(orgId, ctx.userId);
+      if (!employee) throw new Error(NO_EMPLOYEE_RECORD_ERROR);
+      return createTransactionFromArgs({ ...txnArgs, organizationId: orgId }, ctx, {
+        settleEmployeeId: employee.id,
+        needsReview: true,
+      });
+    },
+  },
+
   update_transaction: {
     description:
-      "Edit a transaction's date, amount, currency, description, category (categoryId 0 clears it → 未分類; setting a category also clears needsReview on imported rows), needsReview (待確認 flag on rows imported by e.g. the Wise sync; pass false to confirm a row without choosing a category; a synced Wise currency conversion is a transfer with only one account set — that is expected and it can be edited like any other row), project, contract, subscription, subscription period, billing item (billingItemId; 0 clears it), reported flag, or billedToCompanyTaxId (有報公司統編) — only provided fields change. To change the account or counterparty, delete and recreate, or use the app. If the edit touches a contract-linked transaction, the result carries `contractProgress` for the contracts involved — when an entry is `fullyCollected` while the contract is still draft/active, tell the user and ask whether to set that contract to completed (已完成) via update_contract; never flip the status without asking. Linking a billingItemId / subscriptionId / contractId re-derives the inherited contract and project (values you set yourself are kept)." +
+      "Edit a transaction's date, amount, currency, description, category (categoryId 0 clears it → 未分類; setting a category also clears needsReview on imported rows), needsReview (待確認 flag on rows imported by e.g. the Wise sync; pass false to confirm a row without choosing a category; a synced Wise currency conversion is a transfer with only one account set — that is expected and it can be edited like any other row), project, contract, subscription, subscription period, billing item (billingItemId; 0 clears it), reported flag, or billedToCompanyTaxId (有報公司統編), or attach files the user sent in chat (documentIds + docKind) — only provided fields change. To change the account or counterparty, delete and recreate, or use the app. If the edit touches a contract-linked transaction, the result carries `contractProgress` for the contracts involved — when an entry is `fullyCollected` while the contract is still draft/active, tell the user and ask whether to set that contract to completed (已完成) via update_contract; never flip the status without asking. Linking a billingItemId / subscriptionId / contractId re-derives the inherited contract and project (values you set yourself are kept)." +
       LINKING_NOTE,
     inputSchema: {
       type: "object",
@@ -1278,6 +1413,7 @@ export const transactionTools: Record<string, ToolDef> = {
           type: "boolean",
           description: "待確認 flag of imported rows. false = mark as reviewed. Setting a non-zero categoryId clears it automatically.",
         },
+        ...DOCUMENT_ARGS,
         ...ORG_ARG,
       },
       required: ["id"],
@@ -1295,6 +1431,7 @@ export const transactionTools: Record<string, ToolDef> = {
           items: CONTRACT_PROGRESS_SCHEMA,
           description: "The contracts whose progress this edit touched; omitted when none.",
         },
+        attachedDocumentIds: ATTACHED_DOCS_SCHEMA,
       },
       required: [...TXN_ROW_REQUIRED, ...LINK_REPORT_REQUIRED],
     },
@@ -1318,6 +1455,9 @@ export const transactionTools: Record<string, ToolDef> = {
         .limit(1);
       if (!existing) throw new Error(`Transaction ${id} not found in your organization.`);
       const singleLeg = externalSingleLegSide(existing) !== null;
+      const documentIds = parseDocumentIds(args.documentIds);
+      parseDocKind(args.docKind);
+      await assertInboxDocuments(orgId, documentIds);
 
       const patch: TxnPatch = {};
       if (optDate(args, "txnDate") !== undefined) patch.txnDate = optDate(args, "txnDate");
@@ -1340,7 +1480,7 @@ export const transactionTools: Record<string, ToolDef> = {
           existing.toAccountId,
         ]);
       }
-      // 收款分配（0042）：分配列若只是舊綁定的鏡像（剛好整筆分給同一個目標），先拿掉，這次改的綁定／金額才會生效。
+      // 收款分配（0043）：分配列若只是舊綁定的鏡像（剛好整筆分給同一個目標），先拿掉，這次改的綁定／金額才會生效。
       if (existing.type === "income") await releaseLegacyMirror(db, orgId, id);
       // 經連結層：換了請款項 / 訂閱 / 合約會重新繼承專案與合約；改了金額、日期會重新比對候選。
       const updated = await updateTransactionLinked({ db, orgId, source: "mcp" }, id, patch);
@@ -1364,7 +1504,8 @@ export const transactionTools: Record<string, ToolDef> = {
         ...itemContracts.map((r) => r.contractId),
       ].filter((cid): cid is number => cid != null);
       const contractProgress = await getContractProgress(db, orgId, touchedContractIds);
-      return contractProgress.length ? { ...out, contractProgress } : out;
+      const attached = await attachDocumentsTo(orgId, id, documentIds, args);
+      return contractProgress.length ? { ...out, ...attached, contractProgress } : { ...out, ...attached };
     },
   },
 

@@ -1,6 +1,7 @@
 import { consumeCronToken, CRON_TOKEN_HEADER } from "@/lib/cron-token";
 import { runScheduledSync } from "@/lib/integrations/autosync";
 import { runBillingNotifications } from "@/lib/billing-notify";
+import { runChatCleanup, type ChatCleanupResult } from "@/lib/chat-cleanup";
 
 export const dynamic = "force-dynamic";
 
@@ -16,18 +17,38 @@ export const dynamic = "force-dynamic";
  * 同步完再發固定支出的 Discord 通知（src/lib/billing-notify.ts）：回顧要用到剛同步進來的
  * Wise 交易。通知整個失敗（例如 DB 不通）也不能讓同步的結果跟著遺失，所以分開接住；
  * 這時回 500 讓 Cloudflare 把這次 cron 標成失敗。
+ *
+ * 最後做聊天 bot 的清理（src/lib/chat-cleanup.ts：收件匣 30 天、去重 7 天、暫存 7 天、
+ * 引用對照 90 天、過期卡片）。清理在同步與通知之後、自己接住所有錯誤，失敗只寫進回應，
+ * 不影響同步結果，也不改變回應的狀態碼。
  */
 export async function POST(request: Request): Promise<Response> {
   if (!consumeCronToken(request.headers.get(CRON_TOKEN_HEADER))) {
     return new Response("Not Found", { status: 404 });
   }
   const result = await runScheduledSync(new Date(), { trigger: "cron" });
+  let notifications: Awaited<ReturnType<typeof runBillingNotifications>> | null = null;
+  let notificationsError: string | null = null;
   try {
-    const notifications = await runBillingNotifications(new Date());
-    return Response.json({ ...result, notifications });
+    notifications = await runBillingNotifications(new Date());
   } catch (e) {
-    const notificationsError = e instanceof Error ? e.message : String(e);
+    notificationsError = e instanceof Error ? e.message : String(e);
     console.error(`[cron] billing notifications failed: ${notificationsError}`);
-    return Response.json({ ...result, notifications: null, notificationsError }, { status: 500 });
+  }
+  const chatCleanup = await safeChatCleanup();
+  if (notificationsError !== null) {
+    return Response.json({ ...result, notifications: null, notificationsError, chatCleanup }, { status: 500 });
+  }
+  return Response.json({ ...result, notifications, chatCleanup });
+}
+
+/** runChatCleanup 本身已逐項接住錯誤；這裡再包一層，連 import 階段的意外都不外漏。 */
+async function safeChatCleanup(): Promise<ChatCleanupResult | { error: string }> {
+  try {
+    return await runChatCleanup();
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    console.error(`[cron] chat cleanup failed: ${error}`);
+    return { error };
   }
 }

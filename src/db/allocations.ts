@@ -1,5 +1,5 @@
 /**
- * 收款分配（migrations/0042）的資料庫端：有效分配的 CTE、各種「已收」的分組查詢、整組替換寫入。
+ * 收款分配（migrations/0043）的資料庫端：有效分配的 CTE、各種「已收」的分組查詢、整組替換寫入。
  *
  * 規則在 src/lib/payment-allocation.ts（純函式）；這裡的 `effective` CTE 是同一條規則的 SQL 版：
  *   - 有分配列的交易 → 只取分配列；

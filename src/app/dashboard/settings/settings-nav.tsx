@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Building2, KeyRound, Plug, Puzzle } from "lucide-react";
+import { Building2, KeyRound, MessageCircle, Plug, Puzzle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const sections = [
@@ -11,6 +11,7 @@ const sections = [
   { key: "integrations", href: "/dashboard/settings/integrations", icon: Puzzle },
   { key: "mcp", href: "/dashboard/settings/mcp", icon: Plug },
   { key: "api", href: "/dashboard/settings/api", icon: KeyRound },
+  { key: "chat", href: "/dashboard/settings/chat", icon: MessageCircle },
 ] as const;
 
 export function SettingsNav() {

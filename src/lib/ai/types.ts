@@ -18,13 +18,31 @@ export type UiToolCall = {
   args?: Record<string, unknown>;
   /** 失敗時的錯誤訊息。 */
   error?: string;
+  /**
+   * 建交易／提交代墊的待確認卡：組織或個人規則對到的分類跟模型填的不同（或沒填）時，
+   * 給使用者看的一句提示，例如「依規則：Google Workspace → 軟體工具」。網頁與聊天卡片都顯示。
+   */
+  ruleHint?: string;
 };
 
+/** 對話從哪個入口來：網頁 /dashboard/ai、LINE、WhatsApp。 */
+export type ChatChannel = "web" | "line" | "whatsapp";
+
+export const CHAT_CHANNELS: readonly ChatChannel[] = ["web", "line", "whatsapp"];
+
+/** 聊天 channel（不是網頁）。 */
+export function isChatChannel(c: ChatChannel): c is "line" | "whatsapp" {
+  return c === "line" || c === "whatsapp";
+}
+
+/** user 訊息附的一個檔案（存在 ai_messages.attachments，檔案本身是一列 documents）。 */
+export type AttachmentRef = { documentId: number; fileName: string | null; contentType: string | null };
+
 export type UiMessage =
-  | { kind: "user"; id: string; text: string }
+  | { kind: "user"; id: string; text: string; attachments?: AttachmentRef[] }
   | { kind: "assistant"; id: string; text: string; tools: UiToolCall[] };
 
-export type UiConversation = { id: string; title: string; updatedAt: string };
+export type UiConversation = { id: string; title: string; updatedAt: string; channel?: ChatChannel };
 
 /** /api/ai/chat 回應是一行一個 JSON（NDJSON）的這些事件。 */
 export type ChatEvent =

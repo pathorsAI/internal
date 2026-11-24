@@ -1,4 +1,4 @@
--- 0042: 收款分配 —— 一筆入帳分給多個應收，並記下吸收的手續費／匯差。
+-- 0043: 收款分配 —— 一筆入帳分給多個應收，並記下吸收的手續費／匯差。
 --
 -- 問題：一筆入帳只能綁一個目標（transactions.contract_id／subscription_id＋subscription_period／
 -- billing_item_id）。客戶常把整張請款單（月費＋用量＋建置分期）一次匯過來，又被扣掉匯款手續費，
@@ -20,7 +20,7 @@
 --
 -- 合約的已收 = 直接分配給合約 + 分配給它底下請款項目 + 分配給它底下訂閱期別（綁了 contract_id 的）。
 --
--- Forward-only，additive。Run AFTER 0041。
+-- Forward-only，additive。Run AFTER 0042。
 
 CREATE TABLE payment_allocations (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
