@@ -136,80 +136,83 @@ export function activityToUsage(
 
 const STATUS_ORDER: Record<UsageStatus, number> = { never: 0, idle: 1, active: 2 };
 
+type Acc = {
+  lastAt: string | null;
+  last30: number;
+  total: number;
+  users30: Set<string>;
+  channels: Map<UsageChannel, number>;
+};
+
+const keyOf = (kind: FeatureKind, feature: string) => `${kind}:${feature}`;
+
+function emptyAcc(): Acc {
+  return { lastAt: null, last30: 0, total: 0, users30: new Set(), channels: new Map() };
+}
+
+function addRow(a: Acc, r: UsageAggregateRow): void {
+  a.total += r.total;
+  a.last30 += r.last30;
+  if (r.last30 > 0 && r.userId) a.users30.add(r.userId);
+  if (!a.lastAt || Date.parse(r.lastAt) > Date.parse(a.lastAt)) a.lastAt = r.lastAt;
+  a.channels.set(r.channel, (a.channels.get(r.channel) ?? 0) + r.total);
+}
+
+function primaryChannelOf(channels: Map<UsageChannel, number>): UsageChannel | null {
+  let primary: UsageChannel | null = null;
+  let best = 0;
+  for (const [channel, n] of channels) {
+    if (n > best) {
+      best = n;
+      primary = channel;
+    }
+  }
+  return primary;
+}
+
+function statusOf(a: Acc): UsageStatus {
+  if (!a.lastAt) return "never";
+  return a.last30 === 0 ? "idle" : "active";
+}
+
+function toFeature(key: string, a: Acc): FeatureUsage {
+  const sep = key.indexOf(":");
+  return {
+    kind: key.slice(0, sep) as FeatureKind,
+    feature: key.slice(sep + 1),
+    lastAt: a.lastAt,
+    last30: a.last30,
+    users30: a.users30.size,
+    total: a.total,
+    primaryChannel: primaryChannelOf(a.channels),
+    status: statusOf(a),
+  };
+}
+
+function compareFeatures(x: FeatureUsage, y: FeatureUsage): number {
+  const s = STATUS_ORDER[x.status] - STATUS_ORDER[y.status];
+  if (s !== 0) return s;
+  if (x.status === "idle") return Date.parse(x.lastAt ?? "") - Date.parse(y.lastAt ?? "");
+  if (x.status === "active" && x.last30 !== y.last30) return x.last30 - y.last30;
+  if (x.kind !== y.kind) return x.kind === "page" ? -1 : 1;
+  return x.feature.localeCompare(y.feature);
+}
+
 /**
  * 每個功能（dashboard 每一頁 + 每一支工具）一列；沒有紀錄的也列出來（從未使用）。
  * 排序：從未使用 → 30 天沒人用 → 有在用（次數多的在後面，少的在前面，方便找快沒人用的）。
+ * 已經刪掉的頁面或工具不列（usage_events 裡最多留 180 天的舊名字）。
  */
 export function buildFeatureUsage(
   rows: readonly UsageAggregateRow[],
   toolNames: readonly string[],
 ): FeatureUsage[] {
-  type Acc = {
-    lastAt: string | null;
-    last30: number;
-    total: number;
-    users30: Set<string>;
-    channels: Map<UsageChannel, number>;
-  };
   const acc = new Map<string, Acc>();
-  const keyOf = (kind: FeatureKind, feature: string) => `${kind}:${feature}`;
-  const ensure = (kind: FeatureKind, feature: string): Acc => {
-    const key = keyOf(kind, feature);
-    let a = acc.get(key);
-    if (!a) {
-      a = { lastAt: null, last30: 0, total: 0, users30: new Set(), channels: new Map() };
-      acc.set(key, a);
-    }
-    return a;
-  };
-  for (const route of DASHBOARD_ROUTES) ensure("page", route);
-  for (const name of toolNames) ensure("tool", name);
-
-  const known = new Set(acc.keys());
+  for (const route of DASHBOARD_ROUTES) acc.set(keyOf("page", route), emptyAcc());
+  for (const name of toolNames) acc.set(keyOf("tool", name), emptyAcc());
   for (const r of rows) {
-    // 已經刪掉的頁面或工具不列（usage_events 裡最多留 180 天的舊名字）。
-    if (!known.has(keyOf(r.kind, r.feature))) continue;
-    const a = ensure(r.kind, r.feature);
-    a.total += r.total;
-    a.last30 += r.last30;
-    if (r.last30 > 0 && r.userId) a.users30.add(r.userId);
-    if (!a.lastAt || Date.parse(r.lastAt) > Date.parse(a.lastAt)) a.lastAt = r.lastAt;
-    a.channels.set(r.channel, (a.channels.get(r.channel) ?? 0) + r.total);
+    const a = acc.get(keyOf(r.kind, r.feature));
+    if (a) addRow(a, r);
   }
-
-  const out: FeatureUsage[] = [];
-  for (const [key, a] of acc) {
-    const sep = key.indexOf(":");
-    const kind = key.slice(0, sep) as FeatureKind;
-    const feature = key.slice(sep + 1);
-    let primaryChannel: UsageChannel | null = null;
-    let best = 0;
-    for (const [channel, n] of a.channels) {
-      if (n > best) {
-        best = n;
-        primaryChannel = channel;
-      }
-    }
-    let status: UsageStatus = "active";
-    if (!a.lastAt) status = "never";
-    else if (a.last30 === 0) status = "idle";
-    out.push({
-      kind,
-      feature,
-      lastAt: a.lastAt,
-      last30: a.last30,
-      users30: a.users30.size,
-      total: a.total,
-      primaryChannel,
-      status,
-    });
-  }
-  return out.sort((x, y) => {
-    const s = STATUS_ORDER[x.status] - STATUS_ORDER[y.status];
-    if (s !== 0) return s;
-    if (x.status === "idle") return Date.parse(x.lastAt ?? "") - Date.parse(y.lastAt ?? "");
-    if (x.status === "active" && x.last30 !== y.last30) return x.last30 - y.last30;
-    if (x.kind !== y.kind) return x.kind === "page" ? -1 : 1;
-    return x.feature.localeCompare(y.feature);
-  });
+  return [...acc].map(([key, a]) => toFeature(key, a)).sort(compareFeatures);
 }

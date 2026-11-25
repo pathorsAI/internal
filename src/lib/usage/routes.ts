@@ -73,6 +73,23 @@ function isDynamicSegment(segment: string): boolean {
 const SPLIT_ROUTES = DASHBOARD_ROUTES.map((route) => ({ route, segments: route.split("/").slice(1) }));
 
 /**
+ * 這個 pattern 對不對得上 parts；對得上回動態段落的個數（越少越精確），對不上回 null。
+ */
+function matchSegments(segments: readonly string[], parts: readonly string[]): number | null {
+  if (segments.length !== parts.length) return null;
+  let dynamicCount = 0;
+  for (let i = 0; i < segments.length; i++) {
+    if (isDynamicSegment(segments[i])) {
+      if (parts[i] === "") return null;
+      dynamicCount++;
+    } else if (segments[i] !== parts[i]) {
+      return null;
+    }
+  }
+  return dynamicCount;
+}
+
+/**
  * pathname → 路由 pattern；對不上回 null。靜態段落優先於動態段落
  * （`/dashboard/ai/rules` 是 rules 頁，不是 id = "rules" 的對話）。
  */
@@ -82,19 +99,8 @@ export function normalizeDashboardPath(pathname: string): DashboardRoute | null 
   const parts = trimmed.split("/").slice(1);
   let best: { route: DashboardRoute; dynamicCount: number } | null = null;
   for (const { route, segments } of SPLIT_ROUTES) {
-    if (segments.length !== parts.length) continue;
-    let dynamicCount = 0;
-    let matches = true;
-    for (let i = 0; i < segments.length; i++) {
-      if (isDynamicSegment(segments[i])) {
-        if (parts[i] === "") matches = false;
-        dynamicCount++;
-      } else if (segments[i] !== parts[i]) {
-        matches = false;
-      }
-      if (!matches) break;
-    }
-    if (matches && (!best || dynamicCount < best.dynamicCount)) best = { route, dynamicCount };
+    const dynamicCount = matchSegments(segments, parts);
+    if (dynamicCount !== null && (!best || dynamicCount < best.dynamicCount)) best = { route, dynamicCount };
   }
   return best?.route ?? null;
 }

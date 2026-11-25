@@ -22,7 +22,7 @@ export type UsageReport = {
 
 function rowsOf<T>(res: unknown): T[] {
   if (Array.isArray(res)) return res as T[];
-  return ((res as { rows?: T[] }).rows ?? []) as T[];
+  return (res as { rows?: T[] }).rows ?? [];
 }
 
 /**
