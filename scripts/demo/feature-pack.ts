@@ -126,7 +126,8 @@ export async function seedFeaturePack(opts: FeaturePackOptions): Promise<Feature
   /** 第 k 個月第 d 天，但不晚於今天（已付的錢不能是未來日期）。 */
   const pastMonthDay = (k: number, d: number) => {
     const t = monthDay(k, d);
-    return t > todayIso ? todayIso : t;
+    if (t > todayIso) return todayIso;
+    return t;
   };
   const ym = (k: number) => monthStart(k).slice(0, 7);
   const dec = (n: number) => n.toFixed(2);
@@ -609,7 +610,7 @@ export async function seedFeaturePack(opts: FeaturePackOptions): Promise<Feature
     ]);
   });
 
-  const allocTxn = await section("payment allocation", async () => {
+  await section("payment allocation", async () => {
     const amount = gross(300_000) + gross(20_000) - 30;
     const [res] = await write(
       "web",
@@ -627,7 +628,6 @@ export async function seedFeaturePack(opts: FeaturePackOptions): Promise<Feature
       db,
     );
     count("payment_allocations", 2);
-    return res.row.id;
   });
 
   await section("transactions: pending links", async () => {
@@ -657,8 +657,10 @@ export async function seedFeaturePack(opts: FeaturePackOptions): Promise<Feature
     // 固定支出：租金、記帳士。對象只有一個開著的廠商計費帳戶 → 連結層自動掛上（「付了沒」看這個）。
     // 本月的刻意不付，固定支出頁會看到本期待付。
     for (const k of [-5, -4, -3, -2, -1]) {
-      rows.push(row({ type: "expense", date: monthDay(k, 5), amount: gross(35_000), currency: "TWD", description: `${ym(k)} 辦公室租金`, category: "辦公室租金", party: party.beichen, from: twdAcct, vat: true }));
-      rows.push(row({ type: "expense", date: monthDay(k, 10), amount: gross(8_000), currency: "TWD", description: `${ym(k)} 記帳士月費`, category: "專業服務費", party: party.anhe, from: twdAcct, vat: true }));
+      rows.push(
+        row({ type: "expense", date: monthDay(k, 5), amount: gross(35_000), currency: "TWD", description: `${ym(k)} 辦公室租金`, category: "辦公室租金", party: party.beichen, from: twdAcct, vat: true }),
+        row({ type: "expense", date: monthDay(k, 10), amount: gross(8_000), currency: "TWD", description: `${ym(k)} 記帳士月費`, category: "專業服務費", party: party.anhe, from: twdAcct, vat: true }),
+      );
     }
     rows.push(row({ type: "expense", date: monthDay(-8, 15), amount: 540, currency: "USD", description: "Figma 團隊方案年費", category: "軟體訂閱", party: party.figma, from: wiseAcct }));
     // 雲端：GCP 每月卡費（淨額，Wise 卡）、Azure 每月卡費（公司信用卡）。最後一個月的 Azure 還沒扣款 → 帳單待對帳。
@@ -760,11 +762,11 @@ export async function seedFeaturePack(opts: FeaturePackOptions): Promise<Feature
       c === "USD" ? usdRate(d) : Math.round(BASE_RATES[c] * (usdRate(d) / 32.1) * 1_000_000) / 1_000_000;
     const startIso = [earliest?.d ? iso(addDays(new Date(`${earliest.d}T00:00:00`), -10)) : null, iso(addMonths(TODAY, -9))]
       .filter((d): d is string => d !== null)
-      .sort()[0];
+      .sort((a, b) => a.localeCompare(b))[0];
     const rates: { organizationId: string; currency: string; rateDate: string; rate: string; source: string }[] = [];
     const dates: string[] = [];
     for (let cursor = new Date(`${startIso}T00:00:00`); iso(cursor) <= todayIso; cursor = addDays(cursor, 5)) dates.push(iso(cursor));
-    if (dates[dates.length - 1] !== todayIso) dates.push(todayIso);
+    if (dates.at(-1) !== todayIso) dates.push(todayIso);
     for (const c of currencies) {
       for (const d of dates) rates.push({ organizationId: ORG, currency: c, rateDate: d, rate: rateFor(c, d).toFixed(6), source: "manual" });
     }
@@ -935,6 +937,5 @@ export async function seedFeaturePack(opts: FeaturePackOptions): Promise<Feature
     count("undoable_activity", 4);
   });
 
-  void allocTxn;
   return summary;
 }

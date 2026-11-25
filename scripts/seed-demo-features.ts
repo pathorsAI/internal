@@ -94,7 +94,8 @@ for (const o of orgs) {
   const owner = ownerEmail ? owners.find((u) => u.email.toLowerCase() === ownerEmail) : owners[0];
   const label = `${o.name} (${o.slug}, ${o.id})`;
   if (!owner) {
-    console.error(`✗ ${label}: no owner${ownerEmail ? ` with email ${ownerEmail}` : ""}`);
+    const which = ownerEmail ? ` with email ${ownerEmail}` : "";
+    console.error(`✗ ${label}: no owner${which}`);
     failed++;
     continue;
   }
