@@ -194,6 +194,26 @@ export function pendingRuleHint(content: string | null): string | undefined {
   }
 }
 
+/**
+ * 寫入成功的工具結果：把操作紀錄 id 放在最前面（{"activityId": 123, …}），
+ * 結果太長被截斷也還讀得出來（activityIdOf 用前綴比對）。結果不是物件就包一層。
+ */
+export function withActivityId(out: unknown, activityId: number): Record<string, unknown> {
+  if (out && typeof out === "object" && !Array.isArray(out)) {
+    const rest = { ...(out as Record<string, unknown>) };
+    delete rest.activityId;
+    return { activityId, ...rest };
+  }
+  return { activityId, result: out ?? null };
+}
+
+/** 工具結果 content 開頭的操作紀錄 id（engine 用 withActivityId 存的）。 */
+export function activityIdOf(content: string | null): number | undefined {
+  if (!content) return undefined;
+  const m = /^\{"activityId":(\d+)/.exec(content);
+  return m ? Number(m[1]) : undefined;
+}
+
 function errorText(content: string | null): string | undefined {
   if (!content) return undefined;
   try {
@@ -210,6 +230,7 @@ export function uiToolCall(
   status: UiToolCall["status"],
   error?: string,
   ruleHint?: string,
+  activityId?: number,
 ): UiToolCall {
   const args = parseArgs(call.arguments);
   const level = call.name === LOAD_TOOL_GROUPS ? "read" : toolLevel(call.name, args);
@@ -224,6 +245,9 @@ export function uiToolCall(
     ...(level === "read" ? {} : { args: displayArgs(args) }),
     ...(error ? { error } : {}),
     ...(ruleHint ? { ruleHint } : {}),
+    ...(activityId === undefined ? {} : { activityId }),
+    // 模型指定的組織（沒帶 = 目前的組織）：確認卡顯示組織、只讀工具在別的組織時加小標籤。
+    ...(typeof args.organizationId === "string" && args.organizationId ? { organizationId: args.organizationId } : {}),
   };
 }
 
@@ -278,6 +302,7 @@ function appendAssistant(
         status,
         status === "error" ? errorText(content) : undefined,
         status === "pending" ? pendingRuleHint(content) : undefined,
+        status === "ok" ? activityIdOf(content) : undefined,
       ),
     );
   }

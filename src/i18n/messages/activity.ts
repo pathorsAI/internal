@@ -46,6 +46,171 @@ const activity = {
     api_key: { "zh-TW": "API key", en: "API key" },
     tool: { "zh-TW": "工具呼叫", en: "Tool call" },
     organization: { "zh-TW": "組織", en: "Organization" },
+    employee_bank_account: { "zh-TW": "員工收款帳戶", en: "Employee bank account" },
+    subscription_period: { "zh-TW": "訂閱期別", en: "Subscription period" },
+    vendor_billing_account: { "zh-TW": "廠商計費帳戶", en: "Vendor billing account" },
+    payment_method: { "zh-TW": "付款方式", en: "Payment method" },
+    vendor_invoice: { "zh-TW": "雲端帳單", en: "Cloud invoice" },
+    recurring_expense: { "zh-TW": "固定支出", en: "Recurring expense" },
+    ai_rule: { "zh-TW": "AI 規則", en: "AI rule" },
+    calendar: { "zh-TW": "日曆", en: "Calendar" },
+    member: { "zh-TW": "成員", en: "Member" },
+    journal_entry: { "zh-TW": "分錄", en: "Journal entry" },
+    fixed_asset: { "zh-TW": "財產", en: "Fixed asset" },
+    gl_account: { "zh-TW": "會計科目", en: "GL account" },
+    fx_rate: { "zh-TW": "匯率", en: "FX rate" },
+    fiscal_period: { "zh-TW": "結帳期間", en: "Fiscal period" },
+  },
+  // 復原（migrations/0045、src/lib/undo.ts）
+  undo: {
+    undoOf: { "zh-TW": "已復原 #{id}", en: "Undid #{id}" },
+    undoneBy: { "zh-TW": "已被復原", en: "Undone" },
+    undoneByLink: { "zh-TW": "已被 #{id} 復原", en: "Undone by #{id}" },
+    sheetTitle: { "zh-TW": "操作紀錄 #{id}", en: "Activity #{id}" },
+    changes: { "zh-TW": "變動內容", en: "Changes" },
+    noChanges: { "zh-TW": "這筆紀錄沒有記下資料變動。", en: "No data change was recorded for this entry." },
+    field: { "zh-TW": "欄位", en: "Field" },
+    before: { "zh-TW": "之前", en: "Before" },
+    after: { "zh-TW": "之後", en: "After" },
+    button: { "zh-TW": "復原", en: "Undo" },
+    confirmTitle: { "zh-TW": "復原這筆操作？", en: "Undo this change?" },
+    confirmCancel: { "zh-TW": "取消", en: "Cancel" },
+    confirming: { "zh-TW": "復原中…", en: "Undoing…" },
+    toastSuccess: { "zh-TW": "已復原（操作紀錄 #{id}）", en: "Undone (activity #{id})" },
+    toastFailed: { "zh-TW": "復原失敗", en: "Undo failed" },
+    // 復原會做什麼（確認視窗的說明）
+    kind: {
+      softDelete: {
+        "zh-TW": "會把這筆新增的資料刪除（移到已刪除，之後還能再復原）。",
+        en: "The record that was added will be deleted (soft delete; you can undo this again).",
+      },
+      delete: { "zh-TW": "會把這筆新增的資料刪除。", en: "The record that was added will be deleted." },
+      restore: {
+        "zh-TW": "會把改過的欄位改回修改前的值。",
+        en: "The changed fields will be set back to their previous values.",
+      },
+      undelete: { "zh-TW": "會把這筆刪除的資料救回來。", en: "The deleted record will be restored." },
+      reinsert: {
+        "zh-TW": "會用刪除前的資料把這筆重新建回來。",
+        en: "The deleted record will be recreated from its last saved data.",
+      },
+    },
+    // 寫進操作紀錄的說明：「復原 #123：…」
+    summary: { "zh-TW": "復原 #{id}：{summary}", en: "Undo #{id}: {summary}" },
+    // 不能復原的理由（網頁、MCP、站內 AI 共用，src/lib/undo-rules.ts 直接讀這份）
+    reasons: {
+      not_found: { "zh-TW": "找不到這筆操作紀錄。", en: "Activity entry not found." },
+      read_action: { "zh-TW": "這是讀取紀錄，沒有東西可以復原。", en: "This entry is a read; there is nothing to undo." },
+      e_invoice: {
+        "zh-TW": "電子發票已經送到財政部（開立／作廢），無法從這裡復原。開錯請作廢發票，作廢錯請重新開立。",
+        en: "The e-invoice was already issued or voided at the Ministry of Finance and cannot be undone here. Void the invoice instead (or issue a new one).",
+      },
+      salary_filing: {
+        "zh-TW": "薪資申報或報稅上傳已經送到 Simpany，無法從這裡復原。請到 Simpany 修改或撤回。",
+        en: "The salary filing / tax upload was already sent to Simpany and cannot be undone here. Change or withdraw it in Simpany.",
+      },
+      notification: {
+        "zh-TW": "通知已經送出（Discord 摘要、薪資單 Email），收不回來。需要的話再發一則更正。",
+        en: "The notification (Discord recap, payslip email) was already sent and cannot be recalled. Send a correction if needed.",
+      },
+      calendar: {
+        "zh-TW": "日曆同步不需要復原：資料改回來之後，下次同步會自動更新 Google 日曆。",
+        en: "Calendar syncs are not undone; fix the data and the next sync updates Google Calendar.",
+      },
+      integration: {
+        "zh-TW": "整合、金鑰與組織設定的操作無法復原，請到設定頁調整。",
+        en: "Integration, API key and organization-setting actions cannot be undone; change them in Settings.",
+      },
+      bulk_create_transactions: {
+        "zh-TW": "批次建立一次動到很多筆交易，無法整批復原。請把不要的那幾筆交易刪掉（delete_transaction）。",
+        en: "Bulk-created transactions cannot be undone as a batch. Delete the unwanted transactions one by one (delete_transaction).",
+      },
+      merge_parties: {
+        "zh-TW": "合併交易對象會把所有紀錄改指到目標並刪掉來源，無法自動拆回。請重建來源對象，再把相關紀錄改回去。",
+        en: "Merging counterparties repoints every record and deletes the sources; it cannot be split back automatically. Recreate the source party and move the records back.",
+      },
+      pay_employee_salary: {
+        "zh-TW": "發薪會同時建薪資單與薪資支出交易，無法一鍵復原。請刪除那張薪資單與對應的交易。",
+        en: "Recording a salary creates both a payslip and the salary-expense transaction; it cannot be undone in one step. Delete the payslip and its transaction.",
+      },
+      set_payment_allocations: {
+        "zh-TW": "收款分配一次動到多筆分配列，無法一鍵復原。請重新設定這筆交易的分配。",
+        en: "Payment allocations change several rows at once and cannot be undone in one step. Set the transaction's allocations again.",
+      },
+      multi_row: {
+        "zh-TW": "這個操作一次動到多筆資料，無法一鍵復原。",
+        en: "This action changed several records at once and cannot be undone in one step.",
+      },
+      unsupported_entity: {
+        "zh-TW": "這類資料（{entity}）還不支援復原。",
+        en: "Undo is not supported for this kind of record ({entity}).",
+      },
+      no_snapshot: {
+        "zh-TW": "這筆紀錄沒有可復原的資料（復原功能上線前的紀錄，或沒有對到資料變動）。",
+        en: "This entry has no saved data to restore (it predates undo, or no data change was matched).",
+      },
+      already_undone: {
+        "zh-TW": "這筆已經被復原過了（#{id}）。要重做，請復原那一筆。",
+        en: "This entry was already undone (#{id}). To redo it, undo that entry.",
+      },
+      conflict: {
+        "zh-TW": "這筆資料之後在 {when} 被 {who} 改過，直接復原會蓋掉後面的修改。請先復原較新的那一筆{ref}。",
+        en: "The record was changed again at {when} by {who}; undoing now would overwrite that. Undo the newer entry first{ref}.",
+      },
+      forbidden: {
+        "zh-TW": "只有做這筆操作的人，或組織的 owner／admin 能復原。",
+        en: "Only the member who made this change, or an owner / admin, can undo it.",
+      },
+      row_missing: {
+        "zh-TW": "這筆資料已經不在了（可能已被永久刪除），無法復原。",
+        en: "The record no longer exists (it may have been permanently deleted).",
+      },
+      nothing_to_do: {
+        "zh-TW": "資料已經是復原後的樣子，不需要再復原。",
+        en: "The record is already in the restored state; nothing to undo.",
+      },
+      failed: { "zh-TW": "復原失敗：{error}", en: "Undo failed: {error}" },
+      period_closed: {
+        "zh-TW": "這筆落在已結帳的 {month}，要先在財務報表重開該期間才能復原。",
+        en: "This falls in the closed period {month}; reopen that period in Financial statements before undoing.",
+      },
+      period_close: {
+        "zh-TW": "結帳／重新開帳不能從這裡復原，請到財務報表重新開帳或再結一次。",
+        en: "Closing / reopening a period cannot be undone here; reopen or close it again in Financial statements.",
+      },
+      system_generated: {
+        "zh-TW": "這是結帳時系統自動產生的分錄，會跟著結帳／重新開帳更新，不能單獨復原。",
+        en: "This journal entry was generated when the period was closed; it follows close / reopen and cannot be undone on its own.",
+      },
+    },
+    someone: { "zh-TW": "其他人", en: "someone else" },
+    // 欄位名稱：看得懂的就翻，其他顯示原始欄位名
+    fields: {
+      name: { "zh-TW": "名稱", en: "Name" },
+      title: { "zh-TW": "標題", en: "Title" },
+      description: { "zh-TW": "說明", en: "Description" },
+      amount: { "zh-TW": "金額", en: "Amount" },
+      currency: { "zh-TW": "幣別", en: "Currency" },
+      type: { "zh-TW": "類型", en: "Type" },
+      kind: { "zh-TW": "類型", en: "Kind" },
+      status: { "zh-TW": "狀態", en: "Status" },
+      note: { "zh-TW": "備註", en: "Note" },
+      category_id: { "zh-TW": "分類", en: "Category" },
+      party_id: { "zh-TW": "交易對象", en: "Counterparty" },
+      account_id: { "zh-TW": "帳戶", en: "Account" },
+      project_id: { "zh-TW": "專案", en: "Project" },
+      contract_id: { "zh-TW": "合約", en: "Contract" },
+      subscription_id: { "zh-TW": "訂閱", en: "Subscription" },
+      due_date: { "zh-TW": "到期日", en: "Due date" },
+      start_date: { "zh-TW": "開始日", en: "Start date" },
+      end_date: { "zh-TW": "結束日", en: "End date" },
+      is_active: { "zh-TW": "啟用", en: "Active" },
+      deleted_at: { "zh-TW": "刪除時間", en: "Deleted at" },
+      tax_id: { "zh-TW": "統編", en: "Tax ID" },
+      label: { "zh-TW": "標籤", en: "Label" },
+      national_id_enc: { "zh-TW": "身分證字號", en: "National ID" },
+      account_number_enc: { "zh-TW": "帳號", en: "Account number" },
+    },
   },
 } satisfies Dictionary;
 

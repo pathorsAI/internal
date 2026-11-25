@@ -2,7 +2,9 @@ import { eq } from "drizzle-orm";
 import { getDb } from "./index";
 import { activityLog } from "./schema";
 import { user } from "./auth-schema";
+import { captureChangeGroup } from "./undo";
 import { getSession } from "@/lib/session";
+import { ENTITY_TABLES, maskSnapshot } from "@/lib/undo-rules";
 
 export type ActivityAction = "create" | "update" | "delete" | "read";
 
@@ -33,27 +35,74 @@ type RecordArgs = {
   entityType: string;
   entityId: number | null;
   summary?: string | null;
+} & ActivityExtra;
+
+/** 復原（migrations/0045）用的附加欄位。 */
+export type ActivityExtra = {
+  /** MCP／站內 AI／聊天呼叫的工具名稱（批次、合併這類不能復原的工具靠它說明理由）。 */
+  toolName?: string | null;
+  /** 這筆是復原哪一筆操作紀錄。 */
+  undoOf?: number | null;
 };
 
-// Low-level insert. Logging must NEVER break the underlying operation, so every
-// path here swallows its own errors.
-async function record(args: RecordArgs) {
+/**
+ * 這筆操作動到的資料列變動（entity_changes，trigger 寫的）：對得到就帶上 change_id 與
+ * 遮罩過的前後快照，之後才能復原。對不到（舊的 entity type、表還沒掛 trigger、
+ * migration 0045 還沒跑）就是 null —— 只是這筆不能復原，絕不影響寫入。
+ */
+async function snapshotFor(args: RecordArgs) {
+  const table = ENTITY_TABLES[args.entityType];
+  if (!table || args.entityId == null || args.action === "read") return null;
   try {
-    await getDb()
+    const group = await captureChangeGroup(args.orgId, table, args.entityId, args.action);
+    if (!group) return null;
+    return {
+      changeId: group.last.id,
+      firstChangeId: group.first.id,
+      before: maskSnapshot(group.first.before),
+      after: maskSnapshot(group.last.after),
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Low-level insert. Logging must NEVER break the underlying operation, so every
+// path here swallows its own errors. Returns the new activity_log id (null when
+// logging failed).
+async function record(args: RecordArgs): Promise<number | null> {
+  const base = {
+    organizationId: args.orgId,
+    actorUserId: args.actorUserId,
+    actorEmail: args.actorEmail,
+    actorName: args.actorName,
+    channel: args.channel,
+    action: args.action,
+    entityType: args.entityType,
+    entityId: args.entityId ?? null,
+    summary: args.summary ?? null,
+  };
+  try {
+    const snapshot = await snapshotFor(args);
+    const [row] = await getDb()
       .insert(activityLog)
       .values({
-        organizationId: args.orgId,
-        actorUserId: args.actorUserId,
-        actorEmail: args.actorEmail,
-        actorName: args.actorName,
-        channel: args.channel,
-        action: args.action,
-        entityType: args.entityType,
-        entityId: args.entityId ?? null,
-        summary: args.summary ?? null,
-      });
+        ...base,
+        ...snapshot,
+        toolName: args.toolName ?? null,
+        undoOf: args.undoOf ?? null,
+      })
+      .returning({ id: activityLog.id });
+    return row?.id ?? null;
+  } catch {
+    // migration 0045 還沒跑（新欄位不存在）時退回舊的寫法，紀錄照樣留下。
+  }
+  try {
+    const [row] = await getDb().insert(activityLog).values(base).returning({ id: activityLog.id });
+    return row?.id ?? null;
   } catch {
     // ignore — never let auditing fail a write
+    return null;
   }
 }
 
@@ -64,10 +113,11 @@ export async function logWeb(
   entityType: string,
   entityId: number | null,
   summary?: string,
-) {
+  extra: ActivityExtra = {},
+): Promise<number | null> {
   try {
     const session = await getSession();
-    await record({
+    return await record({
       orgId,
       channel: "web",
       actorUserId: session?.user?.id ?? null,
@@ -77,9 +127,11 @@ export async function logWeb(
       entityType,
       entityId,
       summary,
+      ...extra,
     });
   } catch {
     // ignore
+    return null;
   }
 }
 
@@ -94,7 +146,8 @@ async function logToolCall(
   entityType: string,
   entityId: number | null,
   summary?: string,
-) {
+  extra: ActivityExtra = {},
+): Promise<number | null> {
   try {
     let email: string | null = null;
     let name: string | null = null;
@@ -107,7 +160,7 @@ async function logToolCall(
       email = u.email;
       name = u.name;
     }
-    await record({
+    return await record({
       orgId,
       channel,
       actorUserId: userId,
@@ -117,10 +170,33 @@ async function logToolCall(
       entityType,
       entityId,
       summary,
+      ...extra,
     });
   } catch {
     // ignore
+    return null;
   }
+}
+
+/**
+ * 工具呼叫的操作紀錄（任何入口）：channel = mcp／ai／line／whatsapp，或 api（帶金鑰名稱）。
+ * 給自己寫操作紀錄的工具用（例如 undo_activity），回傳新紀錄的 id。
+ */
+export function logToolActivity(opts: {
+  channel: ToolCallChannel | { apiKeyName: string };
+  orgId: string;
+  userId: string;
+  action: ActivityAction;
+  entityType: string;
+  entityId: number | null;
+  summary?: string;
+  extra?: ActivityExtra;
+}): Promise<number | null> {
+  const { channel, orgId, userId, action, entityType, entityId, summary, extra = {} } = opts;
+  if (typeof channel === "object") {
+    return logToolCall("api", orgId, userId, action, entityType, entityId, apiKeySummary(channel.apiKeyName, summary), extra);
+  }
+  return logToolCall(channel, orgId, userId, action, entityType, entityId, summary, extra);
 }
 
 export function logMcp(
@@ -130,8 +206,9 @@ export function logMcp(
   entityType: string,
   entityId: number | null,
   summary?: string,
+  extra: ActivityExtra = {},
 ) {
-  return logToolCall("mcp", orgId, userId, action, entityType, entityId, summary);
+  return logToolCall("mcp", orgId, userId, action, entityType, entityId, summary, extra);
 }
 
 /** 站內 AI 助理呼叫的工具（src/lib/ai/run-tool.ts）：channel = 'ai'。 */
@@ -142,8 +219,9 @@ export function logAi(
   entityType: string,
   entityId: number | null,
   summary?: string,
+  extra: ActivityExtra = {},
 ) {
-  return logToolCall("ai", orgId, userId, action, entityType, entityId, summary);
+  return logToolCall("ai", orgId, userId, action, entityType, entityId, summary, extra);
 }
 
 /** 金鑰名稱標在 summary 開頭，操作紀錄一眼就看得出是哪一把。 */
@@ -160,8 +238,9 @@ export function logApi(
   entityType: string,
   entityId: number | null,
   summary?: string,
+  extra: ActivityExtra = {},
 ) {
-  return logToolCall("api", orgId, userId, action, entityType, entityId, apiKeySummary(keyName, summary));
+  return logToolCall("api", orgId, userId, action, entityType, entityId, apiKeySummary(keyName, summary), extra);
 }
 
 /** LINE／WhatsApp bot 代成員呼叫的工具：channel = 'line' | 'whatsapp'。 */
@@ -173,8 +252,9 @@ export function logChat(
   entityType: string,
   entityId: number | null,
   summary?: string,
+  extra: ActivityExtra = {},
 ) {
-  return logToolCall(channel, orgId, userId, action, entityType, entityId, summary);
+  return logToolCall(channel, orgId, userId, action, entityType, entityId, summary, extra);
 }
 
 // Scheduled / background work with no human actor (e.g. the daily integration
@@ -187,7 +267,7 @@ export async function logSystem(
   entityId: number | null,
   summary?: string,
 ) {
-  await record({
+  return record({
     orgId,
     channel: "system",
     actorUserId: null,

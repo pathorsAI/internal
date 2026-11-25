@@ -14,6 +14,7 @@ import { openRouterApiKey } from "@/lib/ai/config";
 import { ModelError } from "@/lib/ai/openrouter";
 import { defaultTurnDeps, runTurn, TurnNotFoundError } from "@/lib/ai/turn";
 import { getOrgRole } from "@/lib/session";
+import { getCurrentOrgId, setCurrentOrgId } from "@/db/current-org";
 import { putObject } from "@/lib/storage";
 import { appBaseUrl, lineConfig, whatsappConfig } from "./config";
 import * as directory from "./directory";
@@ -94,6 +95,8 @@ export function dispatcherDeps(): DispatcherDeps {
     db: chatDb,
     directory,
     getOrgRole,
+    currentOrgId: getCurrentOrgId,
+    setCurrentOrgId,
     putObject,
     runTurn: turnDeps ? (p) => runTurn({ ...p, deps: turnDeps }) : null,
     schedule: scheduleJob,

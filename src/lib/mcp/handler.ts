@@ -3,6 +3,7 @@ import { type ToolAnnotations, type ToolDef, resolveOrg } from "./shared";
 import { logAi, logApi, logChat, logMcp, type ActivityAction, type ToolCallChannel } from "@/db/activity";
 import { publicBaseUrl, trustedOrigins } from "@/lib/base-url";
 import { MCP_SERVER_ICONS } from "./mcp-icons";
+import { getOrgSummary, type OrgSummary } from "./org";
 
 type McpAudit = {
   action: ActivityAction;
@@ -91,7 +92,7 @@ export function deriveMcpAudit(name: string, out: unknown): McpAudit | null {
 
 /** Bump on every published change to tools, schemas or instructions. Clients
  *  (and OpenAI's plugin "Scan Tools") key their cached snapshot off this. */
-export const SERVER_VERSION = "1.16.0";
+export const SERVER_VERSION = "1.18.0";
 
 /** Public base URL of this deployment; doubles as the OAuth issuer.
  *  Keep in sync with the `resource` passed to `mcp()` in src/lib/auth.ts. */
@@ -126,17 +127,15 @@ const SERVER_INFO = {
 const SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0];
 
-// Returned to the client at initialize. Steers the model to confirm the org
-// before doing org-scoped work — important because the signed-in account may
-// belong to multiple organizations and we never guess.
+// Returned to the client at initialize. 組織預設是使用者「目前的組織」（網頁切換器選的那個，
+// migrations/0046），不再要模型每段對話先問一次；每個 tools/call 結果都帶它實際跑在哪個組織
+// （_meta["pathors/organization"] 與一行 "Organization: <name>"）。
 const INSTRUCTIONS = [
   "This server is the operational surface for one organization's bookkeeping: ledger transactions (management & tax books), parties, categories, bank accounts, invoices, projects, subscriptions, contracts, employees, payroll records, and reconciliations.",
   "It is a bookkeeping system and nothing else. Every write creates or edits a record in this organization's own books. No tool moves money: none of them initiates, authorizes or executes a payment, transfer, payout or trade, and the server cannot instruct any bank, card or payment provider — the only bank link is an optional, read-only Wise integration (wise_* tools) that reads balances and statements and can import them into the ledger. The Azure / GCP billing integrations are read-only too: they record which platform account is paid by which card or invoice and reconcile cloud invoices against existing ledger rows (vendor billing tools). Words like pay, payment, transfer, salary, reimbursement and advance always describe an entry being recorded, never money being sent.",
-  "The signed-in account may belong to multiple organizations.",
-  "At the start of each session, before calling any org-scoped tool, call list_organizations and ask the user which organization to work in.",
+  "The signed-in account may belong to multiple organizations. Tools act on the user's current organization (the one selected in the web app) unless you pass organizationId; every tool result says which organization it ran in. Do not ask the user which organization to use.",
+  "Pass organizationId (id or slug from list_organizations) only to act on another organization. When something the user names (a party, contract or project) is not found in the current organization, look for it in their other organizations (list_organizations, then retry with organizationId) and tell the user which organization the answer comes from.",
   "If list_organizations is empty, or the user says they were invited to an organization, call list_my_invitations and offer to accept the right one with accept_invitation after the user confirms — invitations are sent from the web app, and this is the only way to join an organization over MCP.",
-  "Then pass that value as organizationId on every subsequent tool call. Never guess the organization.",
-  "If a tool reports that the organization is ambiguous, stop and ask the user, then retry with organizationId.",
   "Before creating or editing a record that references another entity (categoryId, accountId, partyName/Id, projectId, contractId, subscriptionId), look the id up first with the relevant list_* tool (list_categories, list_bank_accounts, list_parties, list_projects, …) — never invent ids. Valid values for fixed fields are listed as enums in each tool's input schema.",
 ].join(" ");
 
@@ -454,7 +453,8 @@ export function describeTool(name: string, t: ToolDef) {
 // ---------------------------------------------------------------------------
 
 export type ToolRunResult =
-  | { ok: true; out: unknown }
+  /** activityId：這次呼叫寫進 activity_log 的那一筆（有寫才有；站內 AI 的確認卡拿它做「復原」）。 */
+  | { ok: true; out: unknown; activityId?: number }
   | { ok: false; error: string; code?: ToolRunErrorCode };
 
 /** Why a call never reached `execute` (REST maps these to HTTP status codes). */
@@ -500,6 +500,8 @@ async function auditApiKeyCall(
   out: unknown,
   error: string | null,
 ): Promise<void> {
+  // undo_activity 自己寫操作紀錄（帶 undo_of），成功時不再多記一筆
+  if (error === null && SELF_LOGGING_TOOLS.has(name)) return;
   try {
     const audit = error === null ? deriveMcpAudit(name, out) : null;
     const orgId = await resolveOrg(args, ctx).catch(() => ctx.apiKey.organizationId);
@@ -513,10 +515,21 @@ async function auditApiKeyCall(
       audit?.entityType ?? "tool",
       audit?.entityId ?? null,
       summary,
+      { toolName: name },
     );
   } catch {
     // ignore audit failures
   }
+}
+
+/** 自己在 execute 裡寫操作紀錄的工具：handler 不再替它記，避免重複。 */
+const SELF_LOGGING_TOOLS: ReadonlySet<string> = new Set(["undo_activity"]);
+
+/** 自己寫操作紀錄的工具把新紀錄的 id 放在結果的 activityId。 */
+function selfLoggedActivityId(name: string, out: unknown): number | undefined {
+  if (!SELF_LOGGING_TOOLS.has(name) || !out || typeof out !== "object") return undefined;
+  const id = (out as { activityId?: unknown }).activityId;
+  return typeof id === "number" ? id : undefined;
 }
 
 /**
@@ -554,9 +567,10 @@ export async function runToolWithAudit(
     await auditKey(undefined, message);
     return { ok: false, error: message };
   }
+  let activityId: number | null | undefined = selfLoggedActivityId(name, out);
   if (apiKey) await auditKey(out, null);
-  else await auditToolWrite(name, args, ctx, channel, out, summary);
-  return { ok: true, out };
+  else activityId ??= await auditToolWrite(name, args, ctx, channel, out, summary);
+  return typeof activityId === "number" ? { ok: true, out, activityId } : { ok: true, out };
 }
 
 function refusalReason(name: string): string {
@@ -565,7 +579,7 @@ function refusalReason(name: string): string {
     : `${name} is not a [read] tool; this API key is read-only. Create a read-write key to call it.`;
 }
 
-/** Best-effort audit log for writes over OAuth MCP / the in-app AI (never affects the response). */
+/** Best-effort audit log for writes over OAuth MCP / the in-app AI (never affects the response). Returns the activity id. */
 async function auditToolWrite(
   name: string,
   args: Record<string, unknown>,
@@ -573,30 +587,73 @@ async function auditToolWrite(
   channel: ToolCallChannel,
   out: unknown,
   summary?: string,
-): Promise<void> {
+): Promise<number | null> {
   const audit = deriveMcpAudit(name, out);
-  if (!audit) return;
+  if (!audit) return null;
   try {
     const orgId = await resolveOrg(
       audit.organizationId ? { organizationId: audit.organizationId } : args,
       ctx,
     );
     const label = summary ?? name;
+    const extra = { toolName: name };
     if (channel === "line" || channel === "whatsapp") {
-      await logChat(channel, orgId, ctx.userId, audit.action, audit.entityType, audit.entityId, label);
-    } else {
-      const log = channel === "ai" ? logAi : logMcp;
-      await log(orgId, ctx.userId, audit.action, audit.entityType, audit.entityId, label);
+      return await logChat(channel, orgId, ctx.userId, audit.action, audit.entityType, audit.entityId, label, extra);
     }
+    const log = channel === "ai" ? logAi : logMcp;
+    return await log(orgId, ctx.userId, audit.action, audit.entityType, audit.entityId, label, extra);
   } catch {
     // ignore audit failures
+    return null;
   }
+}
+
+/** 每個 tools/call 結果帶的組織（_meta["pathors/organization"]）。 */
+export type ToolCallOrg = OrgSummary;
+
+/** 依這次呼叫的參數找出它跑在哪個組織；不屬於任何組織（例如 list_organizations 時還沒加入）回 null。 */
+export type ToolCallOrgResolver = (args: Record<string, unknown>, ctx: ToolContext) => Promise<ToolCallOrg | null>;
+
+/** 正式版：跟工具本身一樣用 resolveOrg（args.organizationId → ?org → 目前的組織）。 */
+async function defaultToolCallOrg(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolCallOrg | null> {
+  return getOrgSummary(await resolveOrg(args, ctx));
+}
+
+/**
+ * 同一個 request（含 batch）裡同一個 organizationId 只查一次。查失敗（沒組織、不是成員）回 null：
+ * 工具本身會回它自己的錯誤，_meta 不該讓整個結果失敗。
+ */
+function cachedOrgResolver(resolve: ToolCallOrgResolver): ToolCallOrgResolver {
+  const cache = new Map<string, Promise<ToolCallOrg | null>>();
+  return (args, ctx) => {
+    const requested = typeof args.organizationId === "string" ? args.organizationId : "";
+    let hit = cache.get(requested);
+    if (!hit) {
+      hit = resolve(args, ctx).catch(() => null);
+      cache.set(requested, hit);
+    }
+    return hit;
+  };
+}
+
+/** 把組織附到 tools/call 結果：_meta 一份給 client，最後一個 text 給模型看（structuredContent 不動）。 */
+export function withOrgMeta<T extends { content: { type: string; text: string }[]; _meta?: Record<string, unknown> }>(
+  result: T,
+  org: ToolCallOrg | null,
+): T {
+  if (!org) return result;
+  return {
+    ...result,
+    content: [...result.content, { type: "text", text: `Organization: ${org.name}` }],
+    _meta: { ...result._meta, "pathors/organization": { id: org.id, name: org.name, slug: org.slug } },
+  };
 }
 
 async function handleToolCall(
   id: JsonRpcId,
   params: Record<string, unknown> | undefined,
   ctx: ToolContext,
+  orgOf: ToolCallOrgResolver,
 ): Promise<object> {
   const name = params?.name as string | undefined;
   const args = (params?.arguments as Record<string, unknown>) ?? {};
@@ -614,6 +671,8 @@ async function handleToolCall(
       isError: true,
     });
   }
+  // 跑完才查組織：accept_invitation 這類呼叫之前還沒有組織。
+  const org = await orgOf(args, ctx);
   const out = result.out;
   // A declared outputSchema is a promise that `structuredContent` matches it,
   // so only emit it for tools that opted in with an object-shaped schema. The
@@ -622,15 +681,22 @@ async function handleToolCall(
     tool.outputSchema && out && typeof out === "object" && !Array.isArray(out)
       ? { structuredContent: out as Record<string, unknown> }
       : {};
-  return ok(id, {
-    ...structured,
-    content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
-  });
+  return ok(
+    id,
+    withOrgMeta(
+      {
+        ...structured,
+        content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
+      },
+      org,
+    ),
+  );
 }
 
 async function handleMessage(
   msg: JsonRpcMessage,
   ctx: ToolContext,
+  orgOf: ToolCallOrgResolver,
 ): Promise<object | null> {
   const id = msg.id ?? null;
   const isNotification = msg.id === undefined || msg.id === null;
@@ -667,7 +733,7 @@ async function handleMessage(
       });
 
     case "tools/call":
-      return handleToolCall(id, msg.params, ctx);
+      return handleToolCall(id, msg.params, ctx, orgOf);
 
     default:
       if (isNotification) return null;
@@ -682,6 +748,8 @@ async function handleMessage(
 export async function handleMcpRequest(
   req: Request,
   session: { userId: string; apiKey?: ToolContext["apiKey"] },
+  /** 測試用：換掉「這次呼叫跑在哪個組織」的查詢（正式版查 DB）。 */
+  opts: { toolCallOrg?: ToolCallOrgResolver } = {},
 ): Promise<Response> {
   const cors = corsHeaders(req);
 
@@ -737,15 +805,17 @@ export async function handleMcpRequest(
     ? { userId: session.userId, apiKey: session.apiKey }
     : { userId: session.userId, orgHint };
 
+  const orgOf = cachedOrgResolver(opts.toolCallOrg ?? defaultToolCallOrg);
+
   if (Array.isArray(body)) {
     const responses = (
-      await Promise.all(body.map((m) => handleMessage(m as JsonRpcMessage, ctx)))
+      await Promise.all(body.map((m) => handleMessage(m as JsonRpcMessage, ctx, orgOf)))
     ).filter((r): r is object => r !== null);
     if (responses.length === 0) return new Response(null, { status: 202, headers: cors });
     return Response.json(responses, { headers: cors });
   }
 
-  const res = await handleMessage(body as JsonRpcMessage, ctx);
+  const res = await handleMessage(body as JsonRpcMessage, ctx, orgOf);
   if (!res) return new Response(null, { status: 202, headers: cors });
   return Response.json(res, { headers: cors });
 }

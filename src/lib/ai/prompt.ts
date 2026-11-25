@@ -92,8 +92,38 @@ function chatSection(channel: "line" | "whatsapp", quickReplies: boolean): strin
   return lines.join("\n\n");
 }
 
+/** 本人所屬的組織（給 prompt 看的部分）。 */
+export type PromptOrg = { id: string; name: string; slug: string | null; role: OrgRole };
+
+/**
+ * 組織段落。只有一個組織時一句話帶過；好幾個時列出全部（名稱、organizationId、角色）、
+ * 標出目前的，並教模型：讀預設目前組織、找不到就直接查別的組織並標出組織名稱，不要停下來問；
+ * 寫入從目標紀錄推組織。
+ */
+function orgSection(orgName: string, orgs: readonly PromptOrg[] | undefined, currentOrgId: string | undefined): string {
+  if (!orgs || orgs.length <= 1) {
+    return `The organization is "${orgName}". You do not need to pass organizationId.`;
+  }
+  const list = orgs
+    .map((o) => {
+      const role = o.role ? `, role: ${o.role}` : "";
+      const current = o.id === currentOrgId ? " — current" : "";
+      return `- ${o.name} (organizationId: ${o.slug ?? o.id}${role})${current}`;
+    })
+    .join("\n");
+  return [
+    `The user belongs to these organizations:\n${list}`,
+    "Reads default to the current organization: omit organizationId. If a party, contract or project the user names is not found there, query the other organization directly (pass its organizationId) instead of stopping to ask, and say which organization the answer comes from (e.g. 「（東蜂）」). When an answer mixes organizations, label each part.",
+    "Writes: infer the organization from the record being created or changed — e.g. a contract or payment with a customer that only exists in another organization belongs to that organization, so look it up there and pass that organizationId. Otherwise use the current organization. Writes need owner or admin in the target organization. The confirmation card shows the organization and lets the user switch it before confirming.",
+  ].join("\n");
+}
+
 export function systemPrompt(opts: {
   orgName: string;
+  /** 本人所屬的全部組織；兩個以上時才列出來、教模型跨組織查。 */
+  orgs?: readonly PromptOrg[];
+  /** 目前的組織 id（orgs 裡標 current 的那個）。 */
+  currentOrgId?: string;
   locale: Locale;
   role: OrgRole;
   page: string | null;
@@ -115,9 +145,9 @@ export function systemPrompt(opts: {
   const language = opts.locale === "en" ? "English" : "Traditional Chinese as used in Taiwan (繁體中文)";
   const pageList = PAGES.map(([p, w]) => `${p} (${w})`).join(", ");
   const lines = [
-    `You are the AI assistant inside Pathors Internal, the bookkeeping system of the organization "${opts.orgName}". Today is ${taipeiToday(opts.now ?? new Date())} (Asia/Taipei). Amounts are TWD unless stated.`,
+    `You are the AI assistant inside Pathors Internal, the bookkeeping system of the user's organizations (current: "${opts.orgName}"). Today is ${taipeiToday(opts.now ?? new Date())} (Asia/Taipei). Amounts are TWD unless stated.`,
     `Reply in ${language}. Be brief: lead with the answer, then at most a few bullets or a small Markdown table. Never use emoji.`,
-    "The organization is fixed to the one the user is signed in to. Never ask which organization and never pass organizationId.",
+    orgSection(opts.orgName, opts.orgs, opts.currentOrgId),
     "Use the tools to look things up; never invent numbers, ids or names. Before creating or editing a record that references another entity (categoryId, accountId, partyName/Id, projectId, contractId, subscriptionId), look it up first with the matching list_* tool.",
     "No tool moves money: pay, payment, transfer and salary always mean recording an entry in the books.",
     `Not available here: issuing or voiding e-invoices, emailing payslips, uploading tax files, writing or settling salary filings. For those, tell the user to use the Simpany pages in the app or an external agent connected over MCP.`,
@@ -128,7 +158,8 @@ export function systemPrompt(opts: {
     const who = opts.userName ? `Current user: ${opts.userName}.` : "";
     lines.push(`${who}${employeeLine(opts.hasEmployee)}`.trim());
   }
-  if (canUseWrites(opts.role)) {
+  // 只要在任何一個組織是 owner／admin 就教寫入流程（每次呼叫再用目標組織的角色檢查）。
+  if (canUseWrites(opts.role) || (opts.orgs ?? []).some((o) => canUseWrites(o.role))) {
     lines.push(
       `Writes ([write] / [delete] tools): when the user asks for a change, call the tool directly with complete arguments and a ${CONFIRM_SUMMARY_ARG}. The app shows the user a confirmation card and runs the call only after they press Confirm, so do not ask "shall I?" in text first, and never say it is done until you have seen the tool result. If something required is missing or ambiguous (amount, date, account), ask one short question instead of guessing.`,
     );

@@ -44,7 +44,9 @@ async function requireManager(): Promise<Manager | { error: string }> {
 function webActor(me: Manager): SettingsActor {
   return {
     ...me,
-    log: (action, entityType, entityId, summary) => logWeb(me.orgId, action, entityType, entityId, summary),
+    log: async (action, entityType, entityId, summary) => {
+      await logWeb(me.orgId, action, entityType, entityId, summary);
+    },
   };
 }
 

@@ -11,6 +11,8 @@ import {
   upsertSubscriptionPeriod,
 } from "@/db/queries";
 import { getOrgTaxSetting } from "@/db/org-tax";
+import { getOrgRole } from "@/lib/session";
+import { executeUndo, planUndoMany, type UndoChannel } from "@/lib/undo";
 import { contractCollected } from "@/db/allocations";
 import {
   collectionProgress,
@@ -156,7 +158,7 @@ const ACTIVITY_ROW: JsonSchemaObject = rowSchema({
   actorEmail: { type: ["string", "null"] },
   channel: {
     type: "string",
-    enum: ["web", "mcp", "ai", "system", "api"],
+    enum: ["web", "mcp", "ai", "system", "api", "line", "whatsapp"],
     description: "ai = the in-app AI assistant acting for the signed-in member; api = a call made with an organization API key (REST /api/v1 or MCP), actor = the member who created the key, summary starts with the key name; system = scheduled work with no human actor (e.g. the daily integration auto-sync); actor fields are null.",
   },
   action: { type: "string", enum: ["create", "update", "delete", "read"] },
@@ -164,14 +166,45 @@ const ACTIVITY_ROW: JsonSchemaObject = rowSchema({
   entityId: { type: ["number", "null"] },
   summary: { type: ["string", "null"] },
   createdAt: { type: "string", description: "ISO 8601 timestamp." },
+  undoable: {
+    type: "boolean",
+    description: "Whether undo_activity can undo this entry for the caller right now.",
+  },
+  undoBlockedReason: {
+    type: ["string", "null"],
+    description: "Why it cannot be undone (and what to do instead); null when undoable.",
+  },
 });
+
+const UNDO_RESULT: JsonSchemaObject = rowSchema({
+  activityId: {
+    type: ["number", "null"],
+    description: "The new activity entry written for this undo (undo it again to redo).",
+  },
+  undoneActivityId: { type: "number" },
+  kind: {
+    type: "string",
+    enum: ["softDelete", "delete", "restore", "undelete", "reinsert"],
+    description: "softDelete/delete = removed what was created; restore = changed fields set back; undelete/reinsert = deleted record brought back.",
+  },
+  entityType: { type: "string" },
+  entityId: { type: "number" },
+  restoredFields: { type: "array", items: { type: "string" }, description: "restore only: the columns set back." },
+  summary: { type: "string" },
+});
+
+/** 工具呼叫的操作紀錄入口：API key → api（帶金鑰名稱），其餘照 ctx.channel（預設 mcp）。 */
+function undoChannel(ctx: Parameters<ToolDef["execute"]>[1]): UndoChannel {
+  if (ctx.apiKey) return { apiKeyName: ctx.apiKey.name };
+  return ctx.channel ?? "mcp";
+}
 
 // Discovery + the recurring-billing tools. Domain CRUD lives in the tools-*.ts
 // modules and is merged into `tools` at the bottom.
 const billingTools: Record<string, ToolDef> = {
   list_organizations: {
     description:
-      "List the organizations the signed-in user can access. Call this first in a session, show the user the options, and ask which organization to work in — then pass the chosen value as `organizationId` to every other tool. Required when the account belongs to more than one organization.",
+      "List the organizations the signed-in user can access. Other tools default to the user's current organization (named in `hint`), so you do not need to call this first or ask which organization to use. Use it to act on another organization (pass its `organizationId`), or to look for a party, contract or project that is not in the current organization.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -210,6 +243,16 @@ const billingTools: Record<string, ToolDef> = {
       const all = await listMyOrgs(ctx.userId);
       // An API key only ever sees the one organization it was created in.
       const orgs = ctx.apiKey ? all.filter((o) => o.id === ctx.apiKey?.organizationId) : all;
+      // 沒帶 organizationId 時工具會用哪個組織（連線釘了 ?org 就是那個，否則是使用者目前的組織）。
+      const currentId = orgs.length > 1 ? await resolveOrg({}, ctx).catch(() => null) : null;
+      const current = orgs.find((o) => o.id === currentId);
+      const actsOn = current
+        ? `"${current.name}" (organizationId: ${current.slug ?? current.id})`
+        : "the user's current organization";
+      const hint =
+        orgs.length > 1
+          ? `Tools act on ${actsOn} when organizationId is omitted. Pass another organizationId only to act on that organization, and tell the user which organization an answer comes from.`
+          : "Single organization — you can call the other tools directly.";
       return {
         organizations: orgs.map((o) => ({
           name: o.name,
@@ -217,10 +260,7 @@ const billingTools: Record<string, ToolDef> = {
           id: o.id,
           slug: o.slug,
         })),
-        hint:
-          orgs.length > 1
-            ? "Ask the user which organization to use, then pass its organizationId to the other tools."
-            : "Single organization — you can call the other tools directly.",
+        hint,
       };
     },
   },
@@ -860,7 +900,7 @@ const billingTools: Record<string, ToolDef> = {
 
   list_activity: {
     description:
-      "Org activity / audit log: who (web or MCP) did create/update/delete on which entity, newest first — plus 'read' entries for employee-PII reads via MCP. Use to investigate mis-recorded or wrongly-deleted data. Filter by entityType (transaction, party, category, bank_account, employee, invoice, reconciliation, project, subscription, contract, document, payroll_run, payslip) and/or action (create|update|delete|read).",
+      "Org activity / audit log: who (web or MCP) did create/update/delete on which entity, newest first — plus 'read' entries for employee-PII reads via MCP. Use to investigate mis-recorded or wrongly-deleted data. Filter by entityType (transaction, party, category, bank_account, employee, invoice, reconciliation, project, subscription, contract, document, payroll_run, payslip) and/or action (create|update|delete|read). Each row says whether it can be undone right now (undoable) and, if not, why (undoBlockedReason); undo with undo_activity.",
     inputSchema: {
       type: "object",
       properties: {
@@ -874,13 +914,60 @@ const billingTools: Record<string, ToolDef> = {
     outputSchema: listSchema(ACTIVITY_ROW),
     execute: async (args, ctx) => {
       const orgId = await resolveOrg(args, ctx);
+      const rows = await listActivity(orgId, {
+        entityType: optString(args, "entityType"),
+        action: optString(args, "action"),
+        limit: optNumber(args, "limit"),
+      });
+      const caller = { userId: ctx.userId, role: await getOrgRole(orgId, ctx.userId) };
+      const plans = await planUndoMany(
+        orgId,
+        rows.map((r) => r.id),
+        caller,
+        "en",
+      );
       return listResult(
-        await listActivity(orgId, {
-          entityType: optString(args, "entityType"),
-          action: optString(args, "action"),
-          limit: optNumber(args, "limit"),
+        rows.map((r) => {
+          const plan = plans.get(r.id);
+          return {
+            ...r,
+            undoable: plan?.ok === true,
+            undoBlockedReason: plan && !plan.ok ? plan.reason : null,
+          };
         }),
       );
+    },
+  },
+
+  undo_activity: {
+    description:
+      "Undo one activity-log entry: a create is deleted again (soft delete where the table has one), an update has its changed fields set back, a delete is brought back. To undo something the user just did in this conversation, find the activity with list_activity (filter by entityType / newest first, actor = the user) and call undo_activity; the app shows a confirmation card. The undo is itself logged and can be undone again (redo). Refused — with the reason and what to do instead — for reads, entries without saved data (older than this feature), external effects (Simpany e-invoices issued/voided: void the invoice instead; salary filings / tax uploads; sent notifications; calendar sync) and multi-row operations (bulk_create_transactions, merge_parties, pay_employee_salary, set_payment_allocations), or when the record was changed again afterwards. Only the member who made the change, or an owner/admin, may undo it.",
+    annotations: { destructiveHint: true, idempotentHint: false },
+    inputSchema: {
+      type: "object",
+      properties: {
+        activityId: { type: "number", description: "Activity entry id from list_activity." },
+        ...ORG_ARG,
+      },
+      required: ["activityId"],
+      additionalProperties: false,
+    },
+    outputSchema: UNDO_RESULT,
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      const activityId = requireNumber(args, "activityId");
+      const caller = { userId: ctx.userId, role: await getOrgRole(orgId, ctx.userId) };
+      const res = await executeUndo({ orgId, activityId, caller, channel: undoChannel(ctx), locale: "en" });
+      if (!res.ok) throw new Error(res.reason);
+      return {
+        activityId: res.activityId,
+        undoneActivityId: res.undoneActivityId,
+        kind: res.kind,
+        entityType: res.entityType,
+        entityId: res.rowId,
+        restoredFields: res.restoredFields,
+        summary: res.summary,
+      };
     },
   },
 

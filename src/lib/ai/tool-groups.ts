@@ -185,7 +185,7 @@ export const TOOL_GROUPS: Record<ToolGroupId, GroupDef> = {
   },
   review: {
     summary:
-      "Review & audit: bank reconciliations, splitting one payment across receivables and absorbing bank fees (payment allocations), notices for the accountant (mark / unmark as sent), and the activity log of who changed what.",
+      "Review & audit: bank reconciliations, splitting one payment across receivables and absorbing bank fees (payment allocations), notices for the accountant (mark / unmark as sent), the activity log of who changed what, and undoing a change (undo_activity).",
     tools: [
       "set_payment_allocations",
       "list_payment_allocations",
@@ -197,12 +197,14 @@ export const TOOL_GROUPS: Record<ToolGroupId, GroupDef> = {
       "mark_accountant_notified",
       "unmark_accountant_notified",
       "list_activity",
+      // 復原：先用 list_activity 找到那筆，再 undo_activity（確認卡）
+      "undo_activity",
       "list_transactions",
       "list_bank_accounts",
     ],
     keywords: [
-      "對帳", "會計", "通知會計", "記帳士", "操作紀錄", "誰改", "誰刪", "紀錄", "稽核",
-      "reconcil", "accountant", "activity", "audit", "who changed", "who deleted",
+      "對帳", "會計", "通知會計", "記帳士", "操作紀錄", "誰改", "誰刪", "紀錄", "稽核", "復原", "還原", "撤銷", "取消剛剛",
+      "reconcil", "accountant", "activity", "audit", "who changed", "who deleted", "undo", "revert",
     ],
   },
   integrations: {

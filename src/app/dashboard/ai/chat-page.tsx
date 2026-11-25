@@ -2,7 +2,8 @@ import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { getAiConversation, listAiConversations, listAiMessages } from "@/db/ai";
 import { toUiMessages } from "@/lib/ai/history";
-import { canUseWrites } from "@/lib/ai/tool-policy";
+import { listUserOrgsWithRoles } from "@/db/current-org";
+import { bestRole, canUseWrites } from "@/lib/ai/tool-policy";
 import type { UiMessage } from "@/lib/ai/types";
 import { requireOrgWithRole } from "@/lib/session";
 import { AiChat } from "./ai-chat";
@@ -12,9 +13,11 @@ export async function AiChatPage({ conversationId }: Readonly<{ conversationId?:
   const t = await getTranslations("ai");
   const { orgId, userId, role, session } = await requireOrgWithRole();
   const owner = { orgId, userId };
-  const [conversations, current] = await Promise.all([
+  // 對話列的是本人在所有組織的對話；組織清單給確認卡顯示組織、一鍵換組織用。
+  const [conversations, current, orgs] = await Promise.all([
     listAiConversations(owner),
     conversationId ? getAiConversation(owner, conversationId) : Promise.resolve(null),
+    listUserOrgsWithRoles(userId),
   ]);
   if (conversationId && !current) notFound();
   const messages: UiMessage[] = current ? toUiMessages(await listAiMessages(current.id)) : [];
@@ -33,8 +36,12 @@ export async function AiChatPage({ conversationId }: Readonly<{ conversationId?:
           updatedAt: c.updatedAt,
           channel: c.channel,
         }))}
-        canWrite={canUseWrites(role)}
+        canWrite={canUseWrites(role) || canUseWrites(bestRole(orgs.map((o) => o.role)))}
         user={{ name: session.user.name, image: session.user.image ?? null }}
+        orgScope={{
+          currentOrgId: orgId,
+          orgs: orgs.map((o) => ({ id: o.id, name: o.name, slug: o.slug, logo: o.logo })),
+        }}
       />
     </>
   );
