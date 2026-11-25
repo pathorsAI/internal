@@ -77,7 +77,15 @@ export async function auditIntegrationCall(
 ): Promise<void> {
   const summary = `${provider}: ${detail}`;
   if (ctx.apiKey) {
-    await logApi(orgId, ctx.userId, ctx.apiKey.name, action, "integration", null, summary);
+    await logApi({
+      orgId,
+      userId: ctx.userId,
+      keyName: ctx.apiKey.name,
+      action,
+      entityType: "integration",
+      entityId: null,
+      summary,
+    });
     return;
   }
   await logMcp(orgId, ctx.userId, action, "integration", null, summary);
@@ -90,7 +98,7 @@ export async function auditIntegrationCall(
 export function toolAuditLog(ctx: ToolContext, orgId: string) {
   return async (action: ActivityAction, entityType: string, entityId: number | null, summary: string) => {
     if (ctx.apiKey) {
-      await logApi(orgId, ctx.userId, ctx.apiKey.name, action, entityType, entityId, summary);
+      await logApi({ orgId, userId: ctx.userId, keyName: ctx.apiKey.name, action, entityType, entityId, summary });
       return;
     }
     await logMcp(orgId, ctx.userId, action, entityType, entityId, summary);

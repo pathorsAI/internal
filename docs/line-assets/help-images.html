@@ -1,26 +1,25 @@
 <!doctype html>
 <html lang="zh-Hant"><head><meta charset="utf-8">
+<title>LINE 說明卡圖片</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { width: 1040px; height: 676px; background: #FFFFFF; overflow: hidden;
     font-family: "PingFang TC", "Noto Sans TC", "Helvetica Neue", sans-serif; color: #1A1A1A; }
   .page { display: none; width: 1040px; height: 676px; background: #EEF5FD; justify-content: center; align-items: flex-start; padding-top: 36px; overflow: hidden; }
-  .copy { display: none !important; }
-  .phone { transform: scale(1.45); transform-origin: top center; width: 600px; height: 640px; border-radius: 28px; }
   .phone .card { width: 72%; }
   .phone .photo { width: 78px; height: 92px; padding: 10px; gap: 5px; }
   .phone .card dl { gap: 3px 14px; padding: 8px 14px; }
   .phone .note { display: none; }
   .phone .me, .phone .bot { max-width: 64%; }
   .page.on { display: flex; }
-  .copy { flex: 1 1 0; display: flex; flex-direction: column; gap: 20px; }
+  .copy { flex: 1 1 0; display: none !important; flex-direction: column; gap: 20px; }
   .step { font: 600 18px/1 "Helvetica Neue", sans-serif; color: #1469D4; letter-spacing: .04em; }
   h1 { font-size: 46px; line-height: 1.2; font-weight: 700; letter-spacing: -.01em; }
   .copy p { font-size: 22px; line-height: 1.6; color: #4A4A4A; }
   .flow { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
   .flow div { display: flex; align-items: center; gap: 12px; font-size: 19px; color: #3A3A3A; }
   .flow b { width: 30px; height: 30px; border-radius: 50%; background: #EEF5FD; color: #1469D4; font: 700 15px/30px "Helvetica Neue", sans-serif; text-align: center; flex: none; }
-  .phone { width: 380px; height: 564px; flex: none; border-radius: 36px; background: #F4F5F7; border: 1px solid #E3E5E8;
+  .phone { transform: scale(1.45); transform-origin: top center; width: 380px; height: 564px; flex: none; border-radius: 36px; background: #F4F5F7; border: 1px solid #E3E5E8;
     padding: 22px 18px; display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
   .bar { display: flex; align-items: center; gap: 10px; padding-bottom: 10px; border-bottom: 1px solid #E3E5E8; }
   .av { width: 34px; height: 34px; border-radius: 50%; background: #1469D4; position: relative; flex: none; }

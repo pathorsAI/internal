@@ -138,16 +138,18 @@ export async function logWeb(
 // MCP tool calls (OAuth bearer token -> userId) and the in-app AI assistant,
 // which runs the same tools in-process on behalf of the signed-in member. Look
 // up the user's name/email so the log is human-readable without a join.
-async function logToolCall(
-  channel: ToolCallChannel | "api",
-  orgId: string,
-  userId: string,
-  action: ActivityAction,
-  entityType: string,
-  entityId: number | null,
-  summary?: string,
-  extra: ActivityExtra = {},
-): Promise<number | null> {
+type ToolCallEntry = {
+  orgId: string;
+  userId: string;
+  action: ActivityAction;
+  entityType: string;
+  entityId: number | null;
+  summary?: string;
+  extra?: ActivityExtra;
+};
+
+async function logToolCall(channel: ToolCallChannel | "api", entry: ToolCallEntry): Promise<number | null> {
+  const { orgId, userId, action, entityType, entityId, summary, extra = {} } = entry;
   try {
     let email: string | null = null;
     let name: string | null = null;
@@ -192,11 +194,11 @@ export function logToolActivity(opts: {
   summary?: string;
   extra?: ActivityExtra;
 }): Promise<number | null> {
-  const { channel, orgId, userId, action, entityType, entityId, summary, extra = {} } = opts;
+  const { channel, ...entry } = opts;
   if (typeof channel === "object") {
-    return logToolCall("api", orgId, userId, action, entityType, entityId, apiKeySummary(channel.apiKeyName, summary), extra);
+    return logToolCall("api", { ...entry, summary: apiKeySummary(channel.apiKeyName, entry.summary) });
   }
-  return logToolCall(channel, orgId, userId, action, entityType, entityId, summary, extra);
+  return logToolCall(channel, entry);
 }
 
 export function logMcp(
@@ -208,7 +210,7 @@ export function logMcp(
   summary?: string,
   extra: ActivityExtra = {},
 ) {
-  return logToolCall("mcp", orgId, userId, action, entityType, entityId, summary, extra);
+  return logToolCall("mcp", { orgId, userId, action, entityType, entityId, summary, extra });
 }
 
 /** 站內 AI 助理呼叫的工具（src/lib/ai/run-tool.ts）：channel = 'ai'。 */
@@ -221,7 +223,7 @@ export function logAi(
   summary?: string,
   extra: ActivityExtra = {},
 ) {
-  return logToolCall("ai", orgId, userId, action, entityType, entityId, summary, extra);
+  return logToolCall("ai", { orgId, userId, action, entityType, entityId, summary, extra });
 }
 
 /** 金鑰名稱標在 summary 開頭，操作紀錄一眼就看得出是哪一把。 */
@@ -230,31 +232,15 @@ export function apiKeySummary(keyName: string, summary?: string | null): string 
 }
 
 /** 用組織 API key 呼叫的工具（REST /api/v1 或 MCP Bearer）：channel = 'api'，actor = 金鑰建立者。 */
-export function logApi(
-  orgId: string,
-  userId: string,
-  keyName: string,
-  action: ActivityAction,
-  entityType: string,
-  entityId: number | null,
-  summary?: string,
-  extra: ActivityExtra = {},
-) {
-  return logToolCall("api", orgId, userId, action, entityType, entityId, apiKeySummary(keyName, summary), extra);
+export function logApi(opts: ToolCallEntry & { keyName: string }) {
+  const { keyName, ...entry } = opts;
+  return logToolCall("api", { ...entry, summary: apiKeySummary(keyName, entry.summary) });
 }
 
 /** LINE／WhatsApp bot 代成員呼叫的工具：channel = 'line' | 'whatsapp'。 */
-export function logChat(
-  channel: "line" | "whatsapp",
-  orgId: string,
-  userId: string,
-  action: ActivityAction,
-  entityType: string,
-  entityId: number | null,
-  summary?: string,
-  extra: ActivityExtra = {},
-) {
-  return logToolCall(channel, orgId, userId, action, entityType, entityId, summary, extra);
+export function logChat(opts: ToolCallEntry & { channel: "line" | "whatsapp" }) {
+  const { channel, ...entry } = opts;
+  return logToolCall(channel, entry);
 }
 
 // Scheduled / background work with no human actor (e.g. the daily integration

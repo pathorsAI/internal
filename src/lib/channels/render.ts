@@ -305,7 +305,7 @@ function takeTableTitle(buf: string[]): string | undefined {
   while (k >= 0 && !buf[k].trim()) k -= 1;
   if (k < 0) return undefined;
   const line = buf[k].trim();
-  const heading = /^#{1,6}\s+(.+)$/.exec(line);
+  const heading = /^#{1,6}\s+(\S.*)$/.exec(line);
   const bold = /^\*\*([^*]+)\*\*[:：]?$/.exec(line);
   const title = (heading?.[1] ?? bold?.[1])?.trim();
   if (!title) return undefined;
@@ -367,9 +367,10 @@ export function splitReply(md: string, baseUrl: string): { parts: ReplyPart[]; l
 
 /** 表格的純文字版（WhatsApp、記 chat_message_refs 的摘要）：「欄：值」，列之間空一行。 */
 export function tableToText(table: ChatTable): string {
+  const label = (k: number) => table.headers[k] || `#${k + 1}`;
   const rows = table.rows.map((r) =>
     r
-      .map((c, k) => (c ? `${table.headers[k] || `#${k + 1}`}：${c}` : ""))
+      .map((c, k) => (c ? `${label(k)}：${c}` : ""))
       .filter(Boolean)
       .join("\n"),
   );
@@ -529,6 +530,16 @@ export type TurnOutput = {
   conversationId?: string;
 };
 
+type ToolDoneEvent = Extract<ChatEvent, { t: "tool_done" }>;
+
+/** tool_done 事件 → 確認卡結果（只在有值時帶 error／done）。 */
+function toolResult(e: ToolDoneEvent): TurnOutput["results"][number] {
+  const result: TurnOutput["results"][number] = { id: e.id, status: e.status };
+  if (e.error) result.error = e.error;
+  if (e.done) result.done = e.done;
+  return result;
+}
+
 /** 收集一題的事件（emit 進來的順序）。 */
 export function collectTurn(events: readonly ChatEvent[]): TurnOutput {
   const segments: string[] = [];
@@ -558,12 +569,7 @@ export function collectTurn(events: readonly ChatEvent[]): TurnOutput {
       case "tool_done":
         if (e.status !== "running") {
           pending.delete(e.id);
-          results.push({
-            id: e.id,
-            status: e.status,
-            ...(e.error ? { error: e.error } : {}),
-            ...(e.done ? { done: e.done } : {}),
-          });
+          results.push(toolResult(e));
         }
         break;
       case "error":
