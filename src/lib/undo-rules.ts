@@ -178,11 +178,11 @@ export function changedKeys(before: Snapshot | null, after: Snapshot | null): st
   const keys = new Set([...Object.keys(before ?? {}), ...Object.keys(after ?? {})]);
   return [...keys]
     .filter((k) => {
-      const b = before ? before[k] : undefined;
-      const a = after ? after[k] : undefined;
-      if (!before) return a !== null && a !== undefined; // 新增：只列有值的欄位
-      if (!after) return b !== null && b !== undefined; // 刪除：同上
-      return !sameValue(b, a);
+      const prev = before ? before[k] : undefined;
+      const next = after ? after[k] : undefined;
+      if (!before) return next !== null && next !== undefined; // 新增：只列有值的欄位
+      if (!after) return prev !== null && prev !== undefined; // 刪除：同上
+      return !sameValue(prev, next);
     })
     .sort((a, b) => a.localeCompare(b));
 }
@@ -394,12 +394,24 @@ export function decideUndo(f: UndoFacts): UndoDecision {
   return month ? refuse("period_closed", { month }) : d;
 }
 
+/** 丟出來的不是 Error 時轉成字串：基本型別照 String()，物件用 JSON（失敗才退回 String()）。 */
+function describeThrown(v: unknown): string {
+  if (typeof v === "object" && v !== null) {
+    try {
+      return JSON.stringify(v) ?? Object.prototype.toString.call(v);
+    } catch {
+      return Object.prototype.toString.call(v);
+    }
+  }
+  return String(v as string | number | boolean | bigint | symbol | undefined);
+}
+
 /** 執行時撞到的資料庫錯誤 → 看得懂的理由（PERIOD_CLOSED 來自 0044 的 trigger）。 */
 export function undoErrorRefusal(err: unknown): UndoRefusal {
   const parts: string[] = [];
   let cur: unknown = err;
   for (let i = 0; i < 4 && cur; i++) {
-    parts.push(cur instanceof Error ? cur.message : String(cur));
+    parts.push(cur instanceof Error ? cur.message : describeThrown(cur));
     cur = cur instanceof Error ? (cur as Error & { cause?: unknown }).cause : null;
   }
   const text = parts.join(" | ");

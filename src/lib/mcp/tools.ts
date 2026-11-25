@@ -246,6 +246,13 @@ const billingTools: Record<string, ToolDef> = {
       // 沒帶 organizationId 時工具會用哪個組織（連線釘了 ?org 就是那個，否則是使用者目前的組織）。
       const currentId = orgs.length > 1 ? await resolveOrg({}, ctx).catch(() => null) : null;
       const current = orgs.find((o) => o.id === currentId);
+      const actsOn = current
+        ? `"${current.name}" (organizationId: ${current.slug ?? current.id})`
+        : "the user's current organization";
+      const hint =
+        orgs.length > 1
+          ? `Tools act on ${actsOn} when organizationId is omitted. Pass another organizationId only to act on that organization, and tell the user which organization an answer comes from.`
+          : "Single organization — you can call the other tools directly.";
       return {
         organizations: orgs.map((o) => ({
           name: o.name,
@@ -253,10 +260,7 @@ const billingTools: Record<string, ToolDef> = {
           id: o.id,
           slug: o.slug,
         })),
-        hint:
-          orgs.length > 1
-            ? `Tools act on ${current ? `"${current.name}" (organizationId: ${current.slug ?? current.id})` : "the user's current organization"} when organizationId is omitted. Pass another organizationId only to act on that organization, and tell the user which organization an answer comes from.`
-            : "Single organization — you can call the other tools directly.",
+        hint,
       };
     },
   },

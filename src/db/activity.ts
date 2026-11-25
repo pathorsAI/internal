@@ -182,16 +182,17 @@ async function logToolCall(
  * 工具呼叫的操作紀錄（任何入口）：channel = mcp／ai／line／whatsapp，或 api（帶金鑰名稱）。
  * 給自己寫操作紀錄的工具用（例如 undo_activity），回傳新紀錄的 id。
  */
-export function logToolActivity(
-  channel: ToolCallChannel | { apiKeyName: string },
-  orgId: string,
-  userId: string,
-  action: ActivityAction,
-  entityType: string,
-  entityId: number | null,
-  summary?: string,
-  extra: ActivityExtra = {},
-): Promise<number | null> {
+export function logToolActivity(opts: {
+  channel: ToolCallChannel | { apiKeyName: string };
+  orgId: string;
+  userId: string;
+  action: ActivityAction;
+  entityType: string;
+  entityId: number | null;
+  summary?: string;
+  extra?: ActivityExtra;
+}): Promise<number | null> {
+  const { channel, orgId, userId, action, entityType, entityId, summary, extra = {} } = opts;
   if (typeof channel === "object") {
     return logToolCall("api", orgId, userId, action, entityType, entityId, apiKeySummary(channel.apiKeyName, summary), extra);
   }

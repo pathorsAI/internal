@@ -221,13 +221,7 @@ export async function loadUndoFacts(
   const activities = await loadActivities(orgId, ids, db);
   const withChange = activities.filter((a) => a.changeId !== null && a.entityId !== null && ENTITY_TABLES[a.entityType]);
   const changeIds = withChange.flatMap((a) => [a.changeId as number, a.firstChangeId ?? (a.changeId as number)]);
-  const byTable = new Map<string, number[]>();
-  for (const a of withChange) {
-    const table = ENTITY_TABLES[a.entityType];
-    const list = byTable.get(table) ?? [];
-    list.push(a.entityId as number);
-    byTable.set(table, list);
-  }
+  const byTable = rowIdsByTable(withChange);
   const [changes, undoneBy, current, latest, closedPeriods] = await Promise.all([
     loadChanges([...new Set(changeIds)], db),
     loadUndoneBy(orgId, ids, db),
@@ -244,7 +238,6 @@ export async function loadUndoFacts(
     const key = table && a.entityId !== null ? `${table}:${a.entityId}` : null;
     const last = a.changeId === null ? null : (changes.get(a.changeId) ?? null);
     const first = a.firstChangeId === null ? last : (changes.get(a.firstChangeId) ?? last);
-    const newest = key ? latest.get(key) : undefined;
     out.set(a.id, {
       activity: a,
       caller,
@@ -253,13 +246,32 @@ export async function loadUndoFacts(
       lastChange: last,
       current: key ? (current.get(key) ?? null) : null,
       closedPeriods,
-      newer:
-        newest && a.changeId !== null && newest.id > a.changeId
-          ? { changedAt: newest.changedAt, activityId: newest.activityId, actorName: newest.actorName }
-          : null,
+      newer: newerChange(key ? latest.get(key) : undefined, a.changeId),
     });
   }
   return out;
+}
+
+/** 有變動的操作紀錄 → 每張表要查現況的列 id。 */
+function rowIdsByTable(withChange: readonly { entityType: string; entityId: number | null }[]): Map<string, number[]> {
+  const byTable = new Map<string, number[]>();
+  for (const a of withChange) {
+    const table = ENTITY_TABLES[a.entityType];
+    const list = byTable.get(table) ?? [];
+    list.push(a.entityId as number);
+    byTable.set(table, list);
+  }
+  return byTable;
+}
+
+/** 這一列在這筆紀錄之後還有沒有更新的變動（有的話復原會蓋掉別人後來的修改）。 */
+function newerChange(
+  newest: ({ id: number } & Newer) | undefined,
+  changeId: number | null,
+): UndoFacts["newer"] {
+  return newest && changeId !== null && newest.id > changeId
+    ? { changedAt: newest.changedAt, activityId: newest.activityId, actorName: newest.actorName }
+    : null;
 }
 
 /** 這張表現在有、而且可以寫的欄位（不含 generated column）。 */

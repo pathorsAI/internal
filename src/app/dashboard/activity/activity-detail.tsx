@@ -95,7 +95,7 @@ function ActivitySheet({
   const t = useTranslations("activity.undo");
   // 載入結果連同它是哪一筆一起存：id 換了、結果還是舊的就當成載入中，不必在 effect 裡同步 setState。
   const [loaded, setLoaded] = useState<{ id: number; detail: ActivityDetail | null } | null>(null);
-  const detail = loaded && loaded.id === id ? loaded.detail : null;
+  const detail = loaded?.id === id ? loaded.detail : null;
   const loading = id !== null && loaded?.id !== id;
 
   useEffect(() => {

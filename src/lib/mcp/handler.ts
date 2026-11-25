@@ -569,7 +569,7 @@ export async function runToolWithAudit(
   }
   let activityId: number | null | undefined = selfLoggedActivityId(name, out);
   if (apiKey) await auditKey(out, null);
-  else if (activityId === undefined) activityId = await auditToolWrite(name, args, ctx, channel, out, summary);
+  else activityId ??= await auditToolWrite(name, args, ctx, channel, out, summary);
   return typeof activityId === "number" ? { ok: true, out, activityId } : { ok: true, out };
 }
 

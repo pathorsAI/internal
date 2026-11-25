@@ -118,13 +118,7 @@ export function ConfirmCard({
   /** 按「換到 …」：把這張待確認的卡改到另一個組織（確認時才真的送出）。 */
   onRetarget: (call: UiToolCall, orgId: string) => void;
 }>) {
-  const t = useTranslations("ai.confirm");
   const danger = call.level === "danger";
-  const args = Object.entries(call.args ?? {});
-  const resolved = call.status !== "pending";
-  // 寫入成功後可以直接復原（呼叫跟操作紀錄頁同一支 server action）；復原過就換成「已復原」。
-  const [undone, setUndone] = useState(false);
-  const canUndo = call.status === "ok" && call.activityId !== undefined && !undone;
   const multiOrg = orgScope.orgs.length > 1;
   const org = targetOrg(orgScope, call.organizationId);
 
@@ -135,51 +129,10 @@ export function ConfirmCard({
         danger && "border-destructive/40",
       )}
     >
-      <div className="flex items-center justify-between gap-2">
-        <span
-          className={cn(
-            "inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground",
-            danger && "text-destructive",
-          )}
-        >
-          {danger ? <AlertTriangle className="size-3.5" /> : <PencilLine className="size-3.5" />}
-          {danger ? t("danger") : t("write")}
-        </span>
-        <span className="inline-flex items-center gap-2">
-          {resolved ? <ResolvedTag status={call.status} /> : null}
-          {undone ? <StatusTag tone="neutral">{t("undone")}</StatusTag> : null}
-          {canUndo ? (
-            <UndoButton id={call.activityId as number} size="xs" onDone={() => setUndone(true)} />
-          ) : null}
-        </span>
-      </div>
+      <ConfirmHeader call={call} danger={danger} />
       {/* 本人在好幾個組織時：寫進哪個組織要一眼看得到，按錯了可以一鍵換過去再確認 */}
       {multiOrg && org ? (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <span className="inline-flex min-w-0 items-center gap-2">
-            <PartyAvatar name={org.name} src={org.logo} size="md" />
-            <span className="truncate text-sm font-semibold">{org.name}</span>
-            <span className="sr-only">{t("orgLabel")}</span>
-          </span>
-          {call.status === "pending"
-            ? orgScope.orgs
-                .filter((o) => o.id !== org.id)
-                .map((o) => (
-                  <Button
-                    key={o.id}
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-                    disabled={disabled}
-                    onClick={() => onRetarget(call, o.id)}
-                  >
-                    <ArrowLeftRight className="size-3.5" aria-hidden />
-                    {t("switchOrg", { name: o.name })}
-                  </Button>
-                ))
-            : null}
-        </div>
+        <ConfirmOrgRow call={call} org={org} orgScope={orgScope} disabled={disabled} onRetarget={onRetarget} />
       ) : null}
       <div className="space-y-1">
         <p className="text-sm font-medium">{call.summary ?? call.name}</p>
@@ -191,39 +144,139 @@ export function ConfirmCard({
           {call.ruleHint}
         </p>
       ) : null}
-      {args.length > 0 ? (
-        <details className="group text-xs" open={!call.summary}>
-          <summary className="cursor-pointer text-muted-foreground select-none hover:text-foreground">
-            {t("details")}
-          </summary>
-          <dl className="mt-2 grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-4 gap-y-1">
-            {args.map(([k, v]) => (
-              <div key={k} className="contents">
-                <dt className="font-mono text-muted-foreground">{k}</dt>
-                <dd className="break-words tabular-nums">{formatValue(v)}</dd>
-              </div>
-            ))}
-          </dl>
-        </details>
-      ) : null}
+      <ConfirmArgs call={call} />
       {call.status === "error" && call.error ? (
         <p className="text-xs text-destructive">{call.error}</p>
       ) : null}
       {call.status === "pending" ? (
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" size="sm" disabled={disabled} onClick={() => onConfirm(call, false)}>
-            {t("cancel")}
-          </Button>
-          <Button
-            size="sm"
-            variant={danger ? "destructive" : "default"}
-            disabled={disabled}
-            onClick={() => onConfirm(call, true)}
-          >
-            {danger ? t("approveDanger") : t("approve")}
-          </Button>
-        </div>
+        <ConfirmActions call={call} danger={danger} disabled={disabled} onConfirm={onConfirm} />
       ) : null}
+    </div>
+  );
+}
+
+/** 確認卡標頭：寫入／危險標籤，右邊是結果狀態與「復原」。 */
+function ConfirmHeader({ call, danger }: Readonly<{ call: UiToolCall; danger: boolean }>) {
+  const t = useTranslations("ai.confirm");
+  const resolved = call.status !== "pending";
+  // 寫入成功後可以直接復原（呼叫跟操作紀錄頁同一支 server action）；復原過就換成「已復原」。
+  const [undone, setUndone] = useState(false);
+  const canUndo = call.status === "ok" && call.activityId !== undefined && !undone;
+
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span
+        className={cn(
+          "inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground",
+          danger && "text-destructive",
+        )}
+      >
+        {danger ? <AlertTriangle className="size-3.5" /> : <PencilLine className="size-3.5" />}
+        {danger ? t("danger") : t("write")}
+      </span>
+      <span className="inline-flex items-center gap-2">
+        {resolved ? <ResolvedTag status={call.status} /> : null}
+        {undone ? <StatusTag tone="neutral">{t("undone")}</StatusTag> : null}
+        {canUndo ? (
+          <UndoButton id={call.activityId as number} size="xs" onDone={() => setUndone(true)} />
+        ) : null}
+      </span>
+    </div>
+  );
+}
+
+/** 寫進哪個組織；還沒確認時可以換到其他組織。 */
+function ConfirmOrgRow({
+  call,
+  org,
+  orgScope,
+  disabled,
+  onRetarget,
+}: Readonly<{
+  call: UiToolCall;
+  org: ChatOrg;
+  orgScope: ChatOrgs;
+  disabled: boolean;
+  onRetarget: (call: UiToolCall, orgId: string) => void;
+}>) {
+  const t = useTranslations("ai.confirm");
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      <span className="inline-flex min-w-0 items-center gap-2">
+        <PartyAvatar name={org.name} src={org.logo} size="md" />
+        <span className="truncate text-sm font-semibold">{org.name}</span>
+        <span className="sr-only">{t("orgLabel")}</span>
+      </span>
+      {call.status === "pending"
+        ? orgScope.orgs
+            .filter((o) => o.id !== org.id)
+            .map((o) => (
+              <Button
+                key={o.id}
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                disabled={disabled}
+                onClick={() => onRetarget(call, o.id)}
+              >
+                <ArrowLeftRight className="size-3.5" aria-hidden />
+                {t("switchOrg", { name: o.name })}
+              </Button>
+            ))
+        : null}
+    </div>
+  );
+}
+
+/** 參數明細（有摘要時預設收起）。 */
+function ConfirmArgs({ call }: Readonly<{ call: UiToolCall }>) {
+  const t = useTranslations("ai.confirm");
+  const args = Object.entries(call.args ?? {});
+  if (args.length === 0) return null;
+  return (
+    <details className="group text-xs" open={!call.summary}>
+      <summary className="cursor-pointer text-muted-foreground select-none hover:text-foreground">
+        {t("details")}
+      </summary>
+      <dl className="mt-2 grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-4 gap-y-1">
+        {args.map(([k, v]) => (
+          <div key={k} className="contents">
+            <dt className="font-mono text-muted-foreground">{k}</dt>
+            <dd className="break-words tabular-nums">{formatValue(v)}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
+  );
+}
+
+/** 待確認：取消／確認按鈕。 */
+function ConfirmActions({
+  call,
+  danger,
+  disabled,
+  onConfirm,
+}: Readonly<{
+  call: UiToolCall;
+  danger: boolean;
+  disabled: boolean;
+  onConfirm: (call: UiToolCall, approve: boolean) => void;
+}>) {
+  const t = useTranslations("ai.confirm");
+  return (
+    <div className="flex justify-end gap-2">
+      <Button variant="outline" size="sm" disabled={disabled} onClick={() => onConfirm(call, false)}>
+        {t("cancel")}
+      </Button>
+      <Button
+        size="sm"
+        variant={danger ? "destructive" : "default"}
+        disabled={disabled}
+        onClick={() => onConfirm(call, true)}
+      >
+        {danger ? t("approveDanger") : t("approve")}
+      </Button>
     </div>
   );
 }

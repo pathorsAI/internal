@@ -152,9 +152,15 @@ export async function executeUndo(opts: {
     newId =
       opts.channel === "web"
         ? await logWeb(opts.orgId, action, entityType, decision.rowId, summary, { undoOf: opts.activityId })
-        : await logToolActivity(opts.channel, opts.orgId, opts.caller.userId, action, entityType, decision.rowId, summary, {
-            toolName: "undo_activity",
-            undoOf: opts.activityId,
+        : await logToolActivity({
+            channel: opts.channel,
+            orgId: opts.orgId,
+            userId: opts.caller.userId,
+            action,
+            entityType,
+            entityId: decision.rowId,
+            summary,
+            extra: { toolName: "undo_activity", undoOf: opts.activityId },
           });
   }
   return {

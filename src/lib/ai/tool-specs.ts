@@ -31,10 +31,11 @@ function orgKey(o: AssistantOrg): string {
 function orgParam(scope: OrgScope): Record<string, unknown> {
   const current = scope.orgs.find((o) => o.id === scope.currentOrgId);
   const options = scope.orgs.map((o) => `${orgKey(o)} = ${o.name}`).join("; ");
+  const currentName = current ? ` (${current.name})` : "";
   return {
     type: "string",
     enum: scope.orgs.map(orgKey),
-    description: `Organization to run this call in. Omit for the current organization${current ? ` (${current.name})` : ""}. Pass another one only when the record or the question belongs to it. Options: ${options}.`,
+    description: `Organization to run this call in. Omit for the current organization${currentName}. Pass another one only when the record or the question belongs to it. Options: ${options}.`,
   };
 }
 
@@ -93,6 +94,13 @@ export function buildToolSpecs(
   return specs;
 }
 
+/** 錯誤訊息裡的組織參數：字串原樣、其他基本型別用 String()，物件用 JSON。 */
+function describeRequested(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (typeof v === "object" && v !== null) return JSON.stringify(v) ?? "";
+  return String(v as number | boolean | bigint | symbol | undefined);
+}
+
 /**
  * 模型（或確認卡的「換到 …」）指定的組織 → 組織 id。id 或 slug 都收，但只收本人所屬的組織；
  * 沒指定就是目前的組織。不是成員就丟錯（呼叫端回成工具錯誤，模型看得到可以選哪些）。
@@ -104,7 +112,7 @@ export function resolveTargetOrg(scope: OrgScope, requested: unknown): string {
   if (!found) {
     const options = scope.orgs.map((o) => `${orgKey(o)} (${o.name})`).join(", ");
     throw new Error(
-      `You are not a member of organization "${String(requested)}". organizationId must be one of: ${options || scope.currentOrgId}.`,
+      `You are not a member of organization "${describeRequested(requested)}". organizationId must be one of: ${options || scope.currentOrgId}.`,
     );
   }
   return found.id;
