@@ -80,7 +80,7 @@ export const TOOL_GROUPS: Record<ToolGroupId, GroupDef> = {
   statements: {
     summary:
       "Financial statements from the general ledger: balance sheet, income statement, cash flow, equity changes, trial balance (government books vs management books), VAT report, and the ledger review items (data problems to fix).",
-    tools: ["get_financial_statement", "list_ledger_review_items", "get_vat_report", ...LOOKUPS],
+    tools: ["get_financial_statement", "list_ledger_review_items", "get_vat_report", "create_journal_entry", ...LOOKUPS],
     keywords: [
       "財務報表", "四大報表", "資產負債表", "損益表", "現金流量表", "權益變動表", "試算表", "總帳", "政府帳", "管理帳", "股東往來",
       "營業稅", "401", "會計師", "結帳", "待處理",
@@ -141,6 +141,7 @@ export const TOOL_GROUPS: Record<ToolGroupId, GroupDef> = {
       "list_payslips",
       "list_salary_status",
       "pay_employee_salary",
+      "unlink_payslip_payment",
       "salary_arrears",
       "list_employee_bank_accounts",
       "create_employee_bank_account",

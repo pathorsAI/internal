@@ -30,6 +30,7 @@ const AUDIT_VERB_PREFIXES: ReadonlyArray<[prefix: string, action: ActivityAction
 const AUDIT_BY_NAME: Record<string, Pick<McpAudit, "action" | "entityType">> = {
   bulk_create_transactions: { action: "create", entityType: "transaction" },
   pay_employee_salary: { action: "create", entityType: "payslip" },
+  unlink_payslip_payment: { action: "update", entityType: "payslip" },
   mark_accountant_notified: { action: "update", entityType: "transaction" },
   unmark_accountant_notified: { action: "update", entityType: "transaction" },
   list_employees: { action: "read", entityType: "employee" },

@@ -1,5 +1,6 @@
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { getDb } from "@/db";
+import { unlinkPayslipPayment } from "@/db/ledger-journal";
 import { insertTransaction } from "@/lib/linking/write";
 import {
   accountReconciliations,
@@ -989,6 +990,42 @@ export const hrTools: Record<string, ToolDef> = {
   },
 
   // ---- bank reconciliations ----
+  unlink_payslip_payment: {
+    description:
+      "Detach a payslip from the salary-expense transaction it was marked as paid by, turning the payslip back to unpaid. Use when that transaction actually paid a different month (e.g. the July payslip was linked to what was really the September transfer). The transaction itself is not changed or deleted. Bookkeeping only. To show the unpaid amount as 應付薪資 in the general ledger, also record an accrual with create_journal_entry.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        payslipId: { type: "number", description: "See list_payslips." },
+        ...ORG_ARG,
+      },
+      required: ["payslipId"],
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: "object",
+      properties: {
+        payslipId: { type: "number" },
+        unlinkedTransactionId: { type: "number" },
+        periodYear: { type: "number" },
+        periodMonth: { type: "number" },
+      },
+      required: ["payslipId", "unlinkedTransactionId", "periodYear", "periodMonth"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      const payslipId = requireNumber(args, "payslipId");
+      const res = await unlinkPayslipPayment(orgId, payslipId);
+      if (!res) throw new Error(`Payslip ${payslipId} was not found in your organization, or it is not marked as paid.`);
+      return {
+        payslipId: res.payslipId,
+        unlinkedTransactionId: res.transactionId,
+        periodYear: res.periodYear,
+        periodMonth: res.periodMonth,
+      };
+    },
+  },
   list_reconciliations: {
     description: "List account reconciliations (statement balance vs. computed book balance per date).",
     inputSchema: {
