@@ -4,6 +4,7 @@ import { logAi, logApi, logChat, logMcp, type ActivityAction, type ToolCallChann
 import { publicBaseUrl, trustedOrigins } from "@/lib/base-url";
 import { MCP_SERVER_ICONS } from "./mcp-icons";
 import { getOrgSummary, type OrgSummary } from "./org";
+import { recordToolCall } from "@/lib/usage/record";
 
 type McpAudit = {
   action: ActivityAction;
@@ -545,6 +546,30 @@ export async function runToolWithAudit(
   args: Record<string, unknown>,
   ctx: ToolContext,
   channel: ToolCallChannel = "mcp",
+  summary?: string,
+): Promise<ToolRunResult> {
+  const started = Date.now();
+  const result = await runToolAndAudit(name, args, ctx, channel, summary);
+  // 功能使用紀錄（src/lib/usage/record.ts）：每次呼叫都記，讀取也算；只記名稱、成敗、耗時。
+  // 寫入排在回應之後，不影響這次呼叫。不存在的工具名稱不記（避免任意字串灌進統計）。
+  if (tools[name]) {
+    recordToolCall({
+      name,
+      userId: ctx.userId,
+      channel: ctx.apiKey ? "api" : channel,
+      ok: result.ok,
+      durationMs: Date.now() - started,
+      resolveOrg: () => resolveOrg(args, ctx).catch(() => ctx.apiKey?.organizationId ?? null),
+    });
+  }
+  return result;
+}
+
+async function runToolAndAudit(
+  name: string,
+  args: Record<string, unknown>,
+  ctx: ToolContext,
+  channel: ToolCallChannel,
   summary?: string,
 ): Promise<ToolRunResult> {
   const tool = tools[name];

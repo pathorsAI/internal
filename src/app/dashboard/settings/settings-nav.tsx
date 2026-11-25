@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { BookOpenCheck, Building2, KeyRound, MessageCircle, Plug, Puzzle } from "lucide-react";
+import { BarChart3, BookOpenCheck, Building2, KeyRound, MessageCircle, Plug, Puzzle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const sections = [
@@ -13,6 +13,8 @@ const sections = [
   { key: "mcp", href: "/dashboard/settings/mcp", icon: Plug },
   { key: "api", href: "/dashboard/settings/api", icon: KeyRound },
   { key: "chat", href: "/dashboard/settings/chat", icon: MessageCircle },
+  // 只有擁有者或管理員看得到內容（頁面自己擋）；一般成員點進去只會看到一行說明。
+  { key: "usage", href: "/dashboard/settings/usage", icon: BarChart3 },
 ] as const;
 
 export function SettingsNav() {

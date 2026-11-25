@@ -6,9 +6,32 @@ import { getDb } from "@/db";
 import { member } from "@/db/auth-schema";
 import { getCurrentOrgId, resolveCurrentOrgId } from "@/db/current-org";
 import { auth } from "@/lib/auth";
+import { USAGE_ROUTE_HEADER, recordPageView } from "@/lib/usage/record";
+import { isDashboardRoute } from "@/lib/usage/routes";
 
+/**
+ * 目前登入的 session。dashboard 頁面載入時（src/proxy.ts 標了 USAGE_ROUTE_HEADER）順便記一筆
+ * 功能使用紀錄：只記路由 pattern，寫入排在回應之後，失敗不影響頁面（src/lib/usage/record.ts）。
+ * layout 與 page 各呼叫一次也只記一筆（30 秒去重）。
+ */
 export async function getSession() {
-  return auth.api.getSession({ headers: await headers() });
+  const reqHeaders = await headers();
+  const session = await auth.api.getSession({ headers: reqHeaders });
+  // proxy 的 matcher 沒涵蓋的路徑（例如 /signup）不會清掉外部送來的 header，所以再確認一次
+  // 它是一個已知頁面的 pattern，不讓任意字串寫進統計。
+  const route = reqHeaders.get(USAGE_ROUTE_HEADER);
+  if (session && route && isDashboardRoute(route)) {
+    const userId = session.user.id;
+    const active = session.session.activeOrganizationId ?? null;
+    recordPageView({
+      route,
+      userId,
+      // 跟 resolveSessionOrgId 同一個順序（目前的組織 → session 的 active org），但只讀不寫，
+      // 在回應送出後才查；查不到就記 NULL，統計時依成員資格歸戶。
+      resolveOrg: async () => (await getCurrentOrgId(userId)) ?? active,
+    });
+  }
+  return session;
 }
 
 /**
