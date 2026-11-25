@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   bankAccounts,
@@ -7,6 +7,7 @@ import {
   contracts,
   documents,
   employees,
+  invoices,
   payslips,
   projects,
   subscriptions,
@@ -793,6 +794,38 @@ async function applyTxnRelationPatch(
   }
 }
 
+// 綁發票（invoiceId；0＝解除）。總帳靠它把收款沖到那張發票的應收（docs/general-ledger.md §2.3），
+// 所以只接受同組織、有效、方向對得上的發票：收入綁開立發票、支出綁收到的發票。
+async function applyTxnInvoicePatch(
+  patch: TxnPatch,
+  db: Db,
+  args: Record<string, unknown>,
+  orgId: string,
+  txnType: string,
+) {
+  if (optNumber(args, "invoiceId") === undefined) return;
+  const invoiceId = requireNumber(args, "invoiceId");
+  if (invoiceId === 0) {
+    patch.invoiceId = null;
+    return;
+  }
+  const [inv] = await db
+    .select({ direction: invoices.direction, status: invoices.status })
+    .from(invoices)
+    .where(and(eq(invoices.organizationId, orgId), eq(invoices.id, invoiceId), isNull(invoices.deletedAt)))
+    .limit(1);
+  if (!inv) throw new Error(`Invoice ${invoiceId} not found in your organization.`);
+  if (inv.status !== "valid") throw new Error(`Invoice ${invoiceId} is ${inv.status}; only valid invoices can be linked.`);
+  const expected = txnType === "income" ? "issued" : "received";
+  if (txnType !== "income" && txnType !== "expense") {
+    throw new Error("Only income or expense transactions can be linked to an invoice.");
+  }
+  if (inv.direction !== expected) {
+    throw new Error(`An ${txnType} transaction can only be linked to a ${expected} invoice.`);
+  }
+  patch.invoiceId = invoiceId;
+}
+
 // Apply amount/currency and the reported→book flag to the patch, falling back to
 // the existing row's values when only one of amount/currency is supplied.
 function applyTxnAmountPatch(
@@ -1385,7 +1418,7 @@ export const transactionTools: Record<string, ToolDef> = {
 
   update_transaction: {
     description:
-      "Edit a transaction's date, amount, currency, description, category (categoryId 0 clears it → 未分類; setting a category also clears needsReview on imported rows), needsReview (待確認 flag on rows imported by e.g. the Wise sync; pass false to confirm a row without choosing a category; a synced Wise currency conversion is a transfer with only one account set — that is expected and it can be edited like any other row), project, contract, subscription, subscription period, billing item (billingItemId; 0 clears it), reported flag, or billedToCompanyTaxId (有報公司統編), or attach files the user sent in chat (documentIds + docKind) — only provided fields change. To change the account or counterparty, delete and recreate, or use the app. If the edit touches a contract-linked transaction, the result carries `contractProgress` for the contracts involved — when an entry is `fullyCollected` while the contract is still draft/active, tell the user and ask whether to set that contract to completed (已完成) via update_contract; never flip the status without asking. Linking a billingItemId / subscriptionId / contractId re-derives the inherited contract and project (values you set yourself are kept)." +
+      "Edit a transaction's date, amount, currency, description, category (categoryId 0 clears it → 未分類; setting a category also clears needsReview on imported rows), needsReview (待確認 flag on rows imported by e.g. the Wise sync; pass false to confirm a row without choosing a category; a synced Wise currency conversion is a transfer with only one account set — that is expected and it can be edited like any other row), project, contract, subscription, subscription period, billing item (billingItemId; 0 clears it), invoice (invoiceId; 0 clears it), reported flag, or billedToCompanyTaxId (有報公司統編), or attach files the user sent in chat (documentIds + docKind) — only provided fields change. To change the account or counterparty, delete and recreate, or use the app. If the edit touches a contract-linked transaction, the result carries `contractProgress` for the contracts involved — when an entry is `fullyCollected` while the contract is still draft/active, tell the user and ask whether to set that contract to completed (已完成) via update_contract; never flip the status without asking. Linking a billingItemId / subscriptionId / contractId re-derives the inherited contract and project (values you set yourself are kept)." +
       LINKING_NOTE,
     inputSchema: {
       type: "object",
@@ -1406,6 +1439,11 @@ export const transactionTools: Record<string, ToolDef> = {
         billingItemId: {
           type: "number",
           description: "Link/relink to a billing item (請款項); 0 to unset. Inherits its contract and project.",
+        },
+        invoiceId: {
+          type: "number",
+          description:
+            "Link this payment to an invoice; 0 to unset. Income → an issued invoice, expense → a received invoice; the invoice must be valid. The general ledger then settles that invoice's receivable with this payment instead of booking the payment as revenue (see list_ledger_review_items: invoice_unlinked).",
         },
         reported: { type: "boolean" },
         billedToCompanyTaxId: { type: "boolean", description: "有報公司統編（進項可扣抵）。" },
@@ -1467,6 +1505,7 @@ export const transactionTools: Record<string, ToolDef> = {
         patch.billedToCompanyTaxId = optBoolean(args, "billedToCompanyTaxId");
       }
       await applyTxnRelationPatch(patch, db, args, orgId);
+      await applyTxnInvoicePatch(patch, db, args, orgId, existing.type);
       // 指定了分類 = 有人看過這筆了；自動匯入（Wise 同步）的「待確認」一併清掉。
       if (typeof patch.categoryId === "number") patch.needsReview = false;
       if (optBoolean(args, "needsReview") !== undefined) {
