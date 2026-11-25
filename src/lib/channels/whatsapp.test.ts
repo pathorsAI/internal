@@ -157,6 +157,13 @@ describe("WhatsApp 事件解析", () => {
     expect(events[6]).toMatchObject({ kind: "unsupported", what: "sticker" });
   });
 
+  test("request_welcome（第一次打開對話）→ follow", () => {
+    const [e] = parseWhatsAppWebhook(
+      JSON.stringify(webhook([{ from: "16315551181", id: "wamid.WELCOME", timestamp: "1504902988", type: "request_welcome" }])),
+    );
+    expect(e).toMatchObject({ kind: "follow", externalUserId: "16315551181", provider: "whatsapp" });
+  });
+
   test("statuses 略過；別的號碼、別的 object 略過", () => {
     const statuses = webhook([], {
       statuses: [{ id: "wamid.X", status: "delivered", timestamp: "1", recipient_id: "16315551181" }],
