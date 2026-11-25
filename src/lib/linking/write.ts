@@ -196,13 +196,20 @@ async function clearInheritedParents(ctx: LinkContext, existing: TxnRow, patch: 
   }
 }
 
-/** 決定最後寫進去的待連結狀態（review_reason / link_candidates）。 */
-function reviewStateOf(
+const LINK_REVIEW_REASONS = new Set(["link_suggested", "link_ambiguous", "link_amount_mismatch"]);
+
+/**
+ * 決定最後寫進去的待連結狀態（review_reason / link_candidates）。
+ * 有收款分配的交易歸屬已經定了：舊的 link_* 旗標與候選一律清掉，不再帶著過期的建議
+ * （party_similar 是對象的事、link_skipped 是人的決定，都不動）。
+ */
+export function reviewStateOf(
   resolved: LinkResolution["values"],
   existing: TxnRow,
   patch: LinkedPatch,
   rematch: boolean,
   explicitLink: boolean,
+  hasAllocations = false,
 ): LinkResolution["values"] {
   const values = { ...resolved };
   if (!rematch && !explicitLink && !("reviewReason" in patch) && !patch.pendingParty) {
@@ -214,6 +221,10 @@ function reviewStateOf(
   // patch.reviewReason = null 則代表「舊的狀態作廢」：重新比對有新結果就用新的，沒有就是 null。
   if (patch.reviewReason === "link_skipped" && !explicitLink) {
     values.reviewReason = "link_skipped";
+    values.linkCandidates = null;
+  }
+  if (hasAllocations && values.reviewReason != null && LINK_REVIEW_REASONS.has(values.reviewReason)) {
+    values.reviewReason = null;
     values.linkCandidates = null;
   }
   return values;
@@ -263,7 +274,7 @@ export async function updateTransactionLinked(
     autoMatch: rematch,
     excludeTransactionIds: [id, ...(ctx.excludeTransactionIds ?? [])],
   });
-  const values = reviewStateOf(res.values, existing, patch, rematch, explicitLink);
+  const values = reviewStateOf(res.values, existing, patch, rematch, explicitLink, Boolean(allocated));
 
   const { pendingParty: _pending, ...plain } = patch;
   const [row] = await db
