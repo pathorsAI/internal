@@ -323,7 +323,7 @@ export const ORG_ARG = {
   organizationId: {
     type: "string",
     description:
-      "Which organization to act on (id or slug). Only needed if you belong to multiple orgs; otherwise defaults to your org. Use list_organizations to discover values.",
+      "Which organization to act on (id or slug). Omit to use your current organization (the one selected in the web app). Pass it only to act on another organization you belong to; list_organizations lists them.",
   },
 } as const;
 

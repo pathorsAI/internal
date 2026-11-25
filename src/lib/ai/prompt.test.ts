@@ -58,6 +58,30 @@ describe("systemPrompt", () => {
     expect(p).not.toContain("[org #61]");
   });
 
+  test("multi-org users: lists every org with its slug and role, marks the current one, no asking", () => {
+    const p = systemPrompt({
+      ...base,
+      role: "member",
+      currentOrgId: "org_p",
+      orgs: [
+        { id: "org_p", name: "派斯科技", slug: "pathors", role: "member" },
+        { id: "org_d", name: "東蜂科技", slug: "dongfeng", role: "admin" },
+      ],
+    });
+    expect(p).toContain("- 派斯科技 (organizationId: pathors, role: member) — current");
+    expect(p).toContain("- 東蜂科技 (organizationId: dongfeng, role: admin)");
+    expect(p).toContain("Reads default to the current organization");
+    expect(p).toContain("instead of stopping to ask");
+    expect(p).toContain("infer the organization from the record");
+    // 在東蜂是 admin：寫入流程照樣教（每次呼叫再用目標組織的角色檢查）
+    expect(p).toContain("call the tool directly with complete arguments");
+    expect(p).not.toContain("Never ask which organization and never pass organizationId");
+  });
+
+  test("single-org users are not told about organizationId", () => {
+    expect(systemPrompt(base)).toContain('The organization is "派斯科技". You do not need to pass organizationId.');
+  });
+
   test("members are read-only except their own advances", () => {
     const p = systemPrompt({ ...base, role: "member" });
     expect(p).toContain("submit_advance");

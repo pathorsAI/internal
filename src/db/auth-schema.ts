@@ -11,6 +11,9 @@ export const user = pgTable("user", {
   image: text("image"),
   // 上傳頭像的物件 key（migrations/0039、src/lib/owner-avatar.ts）；image 是給畫面的網址
   avatarKey: text("avatar_key"),
+  // 目前在操作的組織（migrations/0046、src/db/current-org.ts）：網頁切換器、站內 AI、聊天 bot、MCP 共用。
+  // 讀的時候要再確認還是成員。
+  currentOrgId: text("current_org_id").references(() => organization.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

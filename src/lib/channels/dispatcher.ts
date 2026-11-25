@@ -137,6 +137,13 @@ export type DispatcherDeps = {
     getCategoryName?: (orgId: string, id: number) => Promise<string | null>;
   };
   getOrgRole: (orgId: string, userId: string) => Promise<string | null>;
+  /**
+   * 使用者目前的組織（"user".current_org_id，仍是成員才回）。沒給（測試）就只看
+   * chat_identities.active_org_id。
+   */
+  currentOrgId?: (userId: string) => Promise<string | null>;
+  /** 在聊天裡切換組織時一併改使用者目前的組織（網頁、MCP 跟著換）。 */
+  setCurrentOrgId?: (userId: string, orgId: string) => Promise<unknown>;
   putObject: (key: string, body: Uint8Array, contentType: string) => Promise<void>;
   runTurn: TurnRunner | null;
   /** 排一個工作（flush）在 delaySeconds 秒後執行。 */
@@ -456,7 +463,9 @@ async function resolveOrg(
   s: BotStrings,
   deps: DispatcherDeps,
 ): Promise<OrgContext | null> {
-  let orgId = identity.activeOrgId;
+  // 以使用者「目前的組織」為準（網頁切換器、MCP 共用，src/db/current-org.ts）；
+  // 沒設才看這個聊天帳號自己記的 active_org_id。
+  let orgId = (deps.currentOrgId ? await deps.currentOrgId(identity.userId) : null) ?? identity.activeOrgId;
   if (!orgId) {
     const orgs = await deps.directory.listUserOrgs(identity.userId);
     if (orgs.length === 1) {
@@ -796,7 +805,11 @@ async function makeCards(
   const cards: ConfirmCard[] = [];
   for (const call of pending) {
     const row = await deps.db.createChatCard({ identityId: identity.id, conversationId, toolCallIds: [call.id] });
-    cards.push(toConfirmCard(await withCategoryName(call, org.orgId, deps), { ...meta, cardId: row.id }));
+    // AI 可以寫進本人的其他組織（引擎已解析成組織 id）：卡片上的組織名稱、分類名稱都用那個組織的。
+    const callOrgId = call.organizationId ?? org.orgId;
+    const orgName =
+      callOrgId === org.orgId ? org.orgName : ((await deps.directory.getOrgName(callOrgId)) ?? org.orgName);
+    cards.push(toConfirmCard(await withCategoryName(call, callOrgId, deps), { ...meta, orgName, cardId: row.id }));
   }
   if (cards.length >= 3) {
     const row = await deps.db.createChatCard({
@@ -889,6 +902,7 @@ async function handleButton(
       return;
     }
     await deps.db.setChatIdentityOrg(identity.id, orgId);
+    await deps.setCurrentOrgId?.(identity.userId, orgId);
     for (const card of await deps.db.listOpenChatCards(identity.id)) await deps.db.closeChatCard(card.id);
     await replier.text(s.switched((await deps.directory.getOrgName(orgId)) ?? ""));
     return;

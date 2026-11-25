@@ -204,7 +204,7 @@ function undoChannel(ctx: Parameters<ToolDef["execute"]>[1]): UndoChannel {
 const billingTools: Record<string, ToolDef> = {
   list_organizations: {
     description:
-      "List the organizations the signed-in user can access. Call this first in a session, show the user the options, and ask which organization to work in — then pass the chosen value as `organizationId` to every other tool. Required when the account belongs to more than one organization.",
+      "List the organizations the signed-in user can access. Other tools default to the user's current organization (named in `hint`), so you do not need to call this first or ask which organization to use. Use it to act on another organization (pass its `organizationId`), or to look for a party, contract or project that is not in the current organization.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -243,6 +243,9 @@ const billingTools: Record<string, ToolDef> = {
       const all = await listMyOrgs(ctx.userId);
       // An API key only ever sees the one organization it was created in.
       const orgs = ctx.apiKey ? all.filter((o) => o.id === ctx.apiKey?.organizationId) : all;
+      // 沒帶 organizationId 時工具會用哪個組織（連線釘了 ?org 就是那個，否則是使用者目前的組織）。
+      const currentId = orgs.length > 1 ? await resolveOrg({}, ctx).catch(() => null) : null;
+      const current = orgs.find((o) => o.id === currentId);
       return {
         organizations: orgs.map((o) => ({
           name: o.name,
@@ -252,7 +255,7 @@ const billingTools: Record<string, ToolDef> = {
         })),
         hint:
           orgs.length > 1
-            ? "Ask the user which organization to use, then pass its organizationId to the other tools."
+            ? `Tools act on ${current ? `"${current.name}" (organizationId: ${current.slug ?? current.id})` : "the user's current organization"} when organizationId is omitted. Pass another organizationId only to act on that organization, and tell the user which organization an answer comes from.`
             : "Single organization — you can call the other tools directly.",
       };
     },

@@ -81,6 +81,8 @@ const ai = {
     running: { "zh-TW": "執行中", en: "Running" },
     details: { "zh-TW": "參數", en: "Details" },
     undone: { "zh-TW": "已復原", en: "Undone" },
+    orgLabel: { "zh-TW": "（要寫入的組織）", en: "(organization this writes to)" },
+    switchOrg: { "zh-TW": "換到 {name}", en: "Switch to {name}" },
   },
   options: {
     label: { "zh-TW": "快速回覆", en: "Quick replies" },

@@ -30,7 +30,7 @@ import type {
 import { cn } from "@/lib/utils";
 import { deleteConversation } from "./actions";
 import { CHAT_FRAME } from "./frame";
-import { AssistantMessage, UserMessage, type ChatUser } from "./messages";
+import { AssistantMessage, UserMessage, type ChatOrgs, type ChatUser } from "./messages";
 
 type Props = Readonly<{
   conversationId: string | null;
@@ -39,6 +39,8 @@ type Props = Readonly<{
   canWrite: boolean;
   /** 發問的人（本人）：使用者訊息旁的頭像。 */
   user: ChatUser;
+  /** 本人的組織＋目前的組織：確認卡顯示寫進哪個組織、可以一鍵換。 */
+  orgScope: ChatOrgs;
 }>;
 
 /** 讀 NDJSON 串流，一行一個事件。 */
@@ -112,7 +114,7 @@ function cancelPendingCards(messages: UiMessage[]): UiMessage[] {
   );
 }
 
-export function AiChat({ conversationId, initialMessages, initialConversations, canWrite, user }: Props) {
+export function AiChat({ conversationId, initialMessages, initialConversations, canWrite, user, orgScope }: Props) {
   const t = useTranslations("ai");
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -250,10 +252,17 @@ export function AiChat({ conversationId, initialMessages, initialConversations, 
       targetRef.current = bubble?.id ?? null;
       separateRef.current = true;
       setMessages((ms) => updateTool(ms, call.id, { status: approve ? "running" : "cancelled" }));
-      post({ conversationId: activeRef.current, confirm: { toolCallId: call.id, approve } });
+      // 卡片上換過組織：一起送出，伺服器再檢查成員與角色、記下改過的參數。
+      const retarget = approve && call.retargeted && call.organizationId ? { organizationId: call.organizationId } : {};
+      post({ conversationId: activeRef.current, confirm: { toolCallId: call.id, approve, ...retarget } });
     },
     [busy, messages, post],
   );
+
+  // 「換到 …」只改畫面上的卡（還沒送出），按確認時才帶給伺服器。
+  const retarget = useCallback((call: UiToolCall, orgId: string) => {
+    setMessages((ms) => updateTool(ms, call.id, { organizationId: orgId, retargeted: true }));
+  }, []);
 
   // 從首頁輸入框／⌘K 帶過來的問題：一進來就送出（只送一次）。放進 timeout 再讀，
   // 開發模式 StrictMode 掛兩次 effect 時第一次的會被 cleanup 取消，不會讀走又沒送。
@@ -340,7 +349,9 @@ export function AiChat({ conversationId, initialMessages, initialConversations, 
                     message={m}
                     streaming={busy && i === messages.length - 1}
                     disabled={busy}
+                    orgScope={orgScope}
                     onConfirm={confirm}
+                    onRetarget={retarget}
                     onOption={i === messages.length - 1 ? send : undefined}
                   />
                 ),

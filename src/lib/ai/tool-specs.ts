@@ -2,7 +2,7 @@ import { tools } from "@/lib/mcp/tools";
 import type { ChatTool } from "./openrouter";
 import { baseToolLevel, canOffer, type OrgRole, type PolicyChannel } from "./tool-policy";
 import { loadToolGroupsTool, toolsForGroups, type ToolGroupId } from "./tool-groups";
-import { CONFIRM_SUMMARY_ARG } from "./types";
+import { CONFIRM_SUMMARY_ARG, type AssistantOrg } from "./types";
 
 type Schema = {
   type: "object";
@@ -16,13 +16,37 @@ function omit(obj: Record<string, unknown>, keys: readonly string[]): Record<str
   return Object.fromEntries(Object.entries(obj).filter(([k]) => !keys.includes(k)));
 }
 
+/** 站內 AI 這一題的組織範圍：本人所屬的組織，以及目前的組織（沒帶 organizationId 時用它）。 */
+export type OrgScope = {
+  currentOrgId: string;
+  orgs: readonly AssistantOrg[];
+};
+
+/** 給模型看、也是 prepareArgs 收的值：有 slug 用 slug（比較好讀），沒有用 id。 */
+function orgKey(o: AssistantOrg): string {
+  return o.slug ?? o.id;
+}
+
+/** organizationId 參數：只在本人屬於兩個以上組織時出現，enum 是那些組織。 */
+function orgParam(scope: OrgScope): Record<string, unknown> {
+  const current = scope.orgs.find((o) => o.id === scope.currentOrgId);
+  const options = scope.orgs.map((o) => `${orgKey(o)} = ${o.name}`).join("; ");
+  return {
+    type: "string",
+    enum: scope.orgs.map(orgKey),
+    description: `Organization to run this call in. Omit for the current organization${current ? ` (${current.name})` : ""}. Pass another one only when the record or the question belongs to it. Options: ${options}.`,
+  };
+}
+
 /**
- * 給模型看的 inputSchema：拿掉 organizationId（站內 AI 的組織固定是目前登入的組織，
- * 執行時由伺服器塞進去），寫入工具多一個 confirmSummary，讓模型寫一句確認卡上的說明。
+ * 給模型看的 inputSchema：organizationId 換成本人所屬組織的 enum（只屬於一個組織時拿掉，
+ * 執行時由伺服器補上），寫入工具多一個 confirmSummary，讓模型寫一句確認卡上的說明。
  */
-export function assistantSchema(name: string, schema: Schema): Schema {
+export function assistantSchema(name: string, schema: Schema, scope?: OrgScope): Schema {
+  const hadOrg = "organizationId" in schema.properties;
   const properties = omit(schema.properties, ["organizationId"]);
   const required = (schema.required ?? []).filter((r) => r !== "organizationId");
+  if (hadOrg && scope && scope.orgs.length > 1) properties.organizationId = orgParam(scope);
   const mayWrite = baseToolLevel(name) !== "read" || name === "preview_billing_notifications" || name === "simpany_prepare_salary_filing";
   if (mayWrite) {
     properties[CONFIRM_SUMMARY_ARG] = {
@@ -50,6 +74,7 @@ export function buildToolSpecs(
   groups: readonly ToolGroupId[],
   role: OrgRole,
   channel: PolicyChannel = "web",
+  scope?: OrgScope,
 ): ChatTool[] {
   const specs: ChatTool[] = [];
   for (const name of toolsForGroups(groups)) {
@@ -60,7 +85,7 @@ export function buildToolSpecs(
       function: {
         name,
         description: `${tag(name)} ${def.description.replace(/^\s*\[(read|write|delete)\]\s*/i, "")}`,
-        parameters: assistantSchema(name, def.inputSchema) as unknown as Record<string, unknown>,
+        parameters: assistantSchema(name, def.inputSchema, scope) as unknown as Record<string, unknown>,
       },
     });
   }
@@ -69,12 +94,36 @@ export function buildToolSpecs(
 }
 
 /**
- * 模型給的參數字串 → 實際要執行的參數：拿掉 confirmSummary，強制 organizationId 為目前組織
- * （模型就算自己塞了別的組織也會被蓋掉）。JSON 壞掉就丟錯，由呼叫端回成工具錯誤。
+ * 模型（或確認卡的「換到 …」）指定的組織 → 組織 id。id 或 slug 都收，但只收本人所屬的組織；
+ * 沒指定就是目前的組織。不是成員就丟錯（呼叫端回成工具錯誤，模型看得到可以選哪些）。
+ */
+export function resolveTargetOrg(scope: OrgScope, requested: unknown): string {
+  if (requested === undefined || requested === null || requested === "") return scope.currentOrgId;
+  const found =
+    typeof requested === "string" ? scope.orgs.find((o) => o.id === requested || o.slug === requested) : undefined;
+  if (!found) {
+    const options = scope.orgs.map((o) => `${orgKey(o)} (${o.name})`).join(", ");
+    throw new Error(
+      `You are not a member of organization "${String(requested)}". organizationId must be one of: ${options || scope.currentOrgId}.`,
+    );
+  }
+  return found.id;
+}
+
+/** 只知道目前組織 id 的舊呼叫方式：範圍就只有它一個。 */
+function toScope(scope: OrgScope | string): OrgScope {
+  if (typeof scope !== "string") return scope;
+  return { currentOrgId: scope, orgs: [{ id: scope, name: "", slug: null, logo: null, role: null }] };
+}
+
+/**
+ * 模型給的參數字串 → 實際要執行的參數：拿掉 confirmSummary，organizationId 解析成組織 id
+ * （沒帶 = 目前的組織；帶了本人不屬於的組織就丟錯，不會默默換掉）。JSON 壞掉也丟錯，
+ * 由呼叫端回成工具錯誤。角色由呼叫端用目標組織另外檢查（canRunInOrg）。
  */
 export function prepareArgs(
   raw: string,
-  orgId: string,
+  scopeOrOrgId: OrgScope | string,
 ): { args: Record<string, unknown>; summary: string | null } {
   let parsed: unknown = {};
   if (raw.trim()) {
@@ -84,8 +133,9 @@ export function prepareArgs(
     throw new Error("Tool arguments must be a JSON object.");
   }
   const { [CONFIRM_SUMMARY_ARG]: summary, ...rest } = parsed as Record<string, unknown>;
+  const organizationId = resolveTargetOrg(toScope(scopeOrOrgId), rest.organizationId);
   return {
-    args: { ...rest, organizationId: orgId },
+    args: { ...rest, organizationId },
     summary: typeof summary === "string" && summary.trim() ? summary.trim().slice(0, 300) : null,
   };
 }

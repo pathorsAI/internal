@@ -36,7 +36,8 @@ export const EXCLUDED_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * 站內 AI 的組織固定是目前登入的組織，所以切換／加入組織的工具不給它。
+ * 站內 AI 的組織清單直接寫在 system prompt 裡（本人所屬的全部組織、哪個是目前的），
+ * 跨組織查詢是在工具參數帶 organizationId，所以列／加入組織的工具不給它。
  * 這幾支不算「對外生效」，只是在這裡沒意義。
  */
 export const ORG_SCOPE_TOOLS: ReadonlySet<string> = new Set([
@@ -133,6 +134,43 @@ export function canOffer(name: string, role: OrgRole, channel: PolicyChannel = "
   );
 }
 
+/** 這個人在某個組織的角色；不是成員（或沒給組織）回 null。 */
+export function roleIn(
+  orgs: readonly { id: string; role: OrgRole }[],
+  orgId: unknown,
+): OrgRole {
+  if (typeof orgId !== "string") return null;
+  return orgs.find((o) => o.id === orgId)?.role ?? null;
+}
+
+const ROLE_RANK: Record<string, number> = { owner: 3, admin: 2 };
+
+/**
+ * 決定工具清單用的角色：只要在任何一個組織是 owner／admin 就提供寫入工具
+ * （實際能不能寫，每次呼叫再用目標組織的角色檢查，見 canRunInOrg）。
+ */
+export function bestRole(roles: readonly OrgRole[]): OrgRole {
+  let best: OrgRole = null;
+  for (const r of roles) {
+    if (!r) continue;
+    if (best === null || (ROLE_RANK[r] ?? 1) > (ROLE_RANK[best] ?? 1)) best = r;
+  }
+  return best;
+}
+
+/**
+ * canRun，但角色用「這次呼叫的目標組織」（args.organizationId，prepareArgs 已經解析成 id）的角色：
+ * 在派斯是 admin、在東蜂只是 member 的人，對東蜂的寫入一樣擋下。
+ */
+export function canRunInOrg(
+  name: string,
+  args: Record<string, unknown>,
+  orgs: readonly { id: string; role: OrgRole }[],
+  channel: PolicyChannel = "web",
+): boolean {
+  return canRun(name, args, roleIn(orgs, args.organizationId), channel);
+}
+
 /** 這次呼叫（含參數）能不能跑。執行前一律再檢查一次，不信任模型給的工具清單。 */
 export function canRun(
   name: string,
@@ -153,5 +191,5 @@ export function refusalReason(name: string, args: Record<string, unknown> | null
   if (blockedInChannel(name, args, channel)) {
     return "Deleting, merging counterparties and paying salaries are not available in chat. Tell the user to do it on the web app and include a link to the page.";
   }
-  return "This member has read-only access; writes need an owner or admin (members can only submit their own advances with submit_advance and manage their own rules).";
+  return "This member has read-only access in that organization; writes need an owner or admin of the organization the call targets (members can only submit their own advances with submit_advance and manage their own rules).";
 }

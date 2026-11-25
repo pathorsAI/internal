@@ -1,11 +1,13 @@
-import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import type { AttachmentRef, ChatChannel } from "@/lib/ai/types";
 import { getDb } from "./index";
+import { member } from "./auth-schema";
 import { aiConversations, aiMessages } from "./schema";
 
 /**
- * 站內 AI 助理的對話（migrations/0036）。每個查詢都同時過濾 organization_id 與 user_id：
- * 對話只有本人、而且只在發問當下的組織看得到。
+ * 站內 AI 助理的對話（migrations/0036）。對話只有本人看得到；不再鎖在發問當下的組織 ——
+ * 同一個人在派斯、東蜂開的對話都列在一起（organization_id 記「在哪個組織開的」），
+ * 但仍要是那個組織的成員才看得到（被移出組織後，那邊開的對話就看不到了）。
  */
 
 export type AiToolCall = { id: string; name: string; arguments: string };
@@ -29,15 +31,21 @@ export type AiConversationRow = {
   toolGroups: string[];
   /** 從哪個入口開的（migrations/0042）。 */
   channel: ChatChannel;
+  /** 在哪個組織開的（對話本身不鎖組織，工具呼叫可以跑在本人的任何一個組織）。 */
+  organizationId?: string;
   updatedAt: string;
 };
 
 type Owner = { orgId: string; userId: string };
 
+/** 本人的對話，而且本人仍是對話所屬組織的成員。owner.orgId 只在建立新對話時用。 */
 function ownedBy(owner: Owner) {
   return and(
-    eq(aiConversations.organizationId, owner.orgId),
     eq(aiConversations.userId, owner.userId),
+    inArray(
+      aiConversations.organizationId,
+      getDb().select({ id: member.organizationId }).from(member).where(eq(member.userId, owner.userId)),
+    ),
   );
 }
 
@@ -48,6 +56,7 @@ export async function listAiConversations(owner: Owner, limit = 50): Promise<AiC
       title: aiConversations.title,
       toolGroups: aiConversations.toolGroups,
       channel: aiConversations.channel,
+      organizationId: aiConversations.organizationId,
       updatedAt: aiConversations.updatedAt,
     })
     .from(aiConversations)
@@ -66,6 +75,7 @@ export async function getAiConversation(
       title: aiConversations.title,
       toolGroups: aiConversations.toolGroups,
       channel: aiConversations.channel,
+      organizationId: aiConversations.organizationId,
       updatedAt: aiConversations.updatedAt,
     })
     .from(aiConversations)
@@ -75,7 +85,7 @@ export async function getAiConversation(
 }
 
 /**
- * 聊天入口用：這個人在這個組織、這個平台最近一段「還在進行中」的對話（updated_at 在 since 之後）。
+ * 聊天入口用：這個人在這個平台最近一段「還在進行中」的對話（updated_at 在 since 之後）。
  * 閒置超過時間就回 null，呼叫端開新的。
  */
 export async function findRecentAiConversation(
@@ -89,6 +99,7 @@ export async function findRecentAiConversation(
       title: aiConversations.title,
       toolGroups: aiConversations.toolGroups,
       channel: aiConversations.channel,
+      organizationId: aiConversations.organizationId,
       updatedAt: aiConversations.updatedAt,
     })
     .from(aiConversations)
@@ -118,6 +129,7 @@ export async function createAiConversation(
       title: aiConversations.title,
       toolGroups: aiConversations.toolGroups,
       channel: aiConversations.channel,
+      organizationId: aiConversations.organizationId,
       updatedAt: aiConversations.updatedAt,
     });
   return row as AiConversationRow;
@@ -261,6 +273,27 @@ export async function setToolMessageResult(
         eq(aiMessages.conversationId, conversationId),
         eq(aiMessages.toolCallId, toolCallId),
         eq(aiMessages.role, "tool"),
+      ),
+    );
+}
+
+/**
+ * 改寫一則 assistant 訊息的 tool_calls（確認卡「換到 …」之後記下實際執行的組織）。
+ * 只改這段對話裡的這一則。
+ */
+export async function updateAiMessageToolCalls(
+  conversationId: string,
+  messageId: number,
+  toolCalls: AiToolCall[],
+): Promise<void> {
+  await getDb()
+    .update(aiMessages)
+    .set({ toolCalls })
+    .where(
+      and(
+        eq(aiMessages.conversationId, conversationId),
+        eq(aiMessages.id, messageId),
+        eq(aiMessages.role, "assistant"),
       ),
     );
 }

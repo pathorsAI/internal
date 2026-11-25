@@ -15,7 +15,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { auth } from "@/lib/auth";
-import { getSession } from "@/lib/session";
+import { getSession, resolveSessionOrgId } from "@/lib/session";
 import { getDb } from "@/db";
 import { countPendingLinks } from "@/lib/linking/pending";
 
@@ -38,7 +38,9 @@ export default async function DashboardLayout({
     slug: o.slug,
     logo: o.logo ?? null,
   }));
-  const initialActiveOrgId = session?.session.activeOrganizationId ?? null;
+  // 以使用者「目前的組織」為準（在別台裝置、LINE、MCP 切過也一樣），第一屏就畫對；
+  // 與 session 不一致時 resolveSessionOrgId 會順手改 session。頁面的 requireOrg 用同一個值。
+  const initialActiveOrgId = session ? await resolveSessionOrgId(session) : null;
   // 左下角使用者列第一屏就畫出本人，不等 client 端的 useSession 回來（否則會先閃「未登入」）
   const initialUser = session
     ? { name: session.user.name, email: session.user.email, image: session.user.image ?? null }
