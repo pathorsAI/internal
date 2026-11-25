@@ -1,8 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
+import { helpMessage, splitReply } from "./render";
+import { botStrings } from "./strings";
 import {
   buildLineMessages,
   cardBubble,
+  LINE_ALT_TEXT_MAX,
+  LINE_LABEL_MAX,
+  LINE_MAX_MESSAGES,
+  LINE_TABLE_MAX_ROWS,
   cardsToFlex,
   createLineAdapter,
   LINE_BUBBLE_MAX_BYTES,
@@ -11,7 +17,7 @@ import {
   parseLineWebhook,
   verifyLineSignature,
 } from "./line";
-import type { ConfirmCard } from "./types";
+import type { ChatTable, ConfirmCard, OutboundMessage } from "./types";
 
 const SECRET = "test-channel-secret";
 const enc = (s: string) => new TextEncoder().encode(s);
@@ -268,6 +274,189 @@ describe("LINE Flex", () => {
   });
 });
 
+const BASE = "https://internal.pathors.com";
+
+/** 一則 LINE 訊息裡所有按鈕／快速選項的 action（檢查 label 長度、uri 用）。 */
+function actions(v: unknown): { type: string; label?: string; uri?: string; text?: string }[] {
+  const out: { type: string; label?: string; uri?: string; text?: string }[] = [];
+  const walk = (x: unknown) => {
+    if (Array.isArray(x)) x.forEach(walk);
+    else if (x && typeof x === "object") {
+      const o = x as Record<string, unknown>;
+      if (o.action && typeof o.action === "object") out.push(o.action as { type: string });
+      Object.values(o).forEach(walk);
+    }
+  };
+  walk(v);
+  return out;
+}
+
+/** 每則 Flex 訊息都要守的限制。 */
+function expectFlexLimits(m: Record<string, unknown>) {
+  expect(m.type).toBe("flex");
+  expect(typeof m.altText).toBe("string");
+  expect((m.altText as string).length).toBeGreaterThan(0);
+  expect((m.altText as string).length).toBeLessThanOrEqual(LINE_ALT_TEXT_MAX);
+  const c = m.contents as { type: string; contents?: unknown[] };
+  if (c.type === "carousel") {
+    expect(c.contents!.length).toBeLessThanOrEqual(LINE_CAROUSEL_MAX);
+    expect(bytes(c)).toBeLessThanOrEqual(LINE_CAROUSEL_MAX_BYTES);
+    for (const b of c.contents!) expect(bytes(b)).toBeLessThanOrEqual(LINE_BUBBLE_MAX_BYTES);
+  } else {
+    expect(c.type).toBe("bubble");
+    expect(bytes(c)).toBeLessThanOrEqual(LINE_BUBBLE_MAX_BYTES);
+  }
+  for (const a of actions(m)) {
+    if (a.label !== undefined) expect(a.label.length).toBeLessThanOrEqual(LINE_LABEL_MAX);
+    if (a.type === "uri") expect(a.uri).toStartWith("https://");
+  }
+}
+
+describe("LINE 說明卡、表格、連結、收據、組織選單", () => {
+  const s = botStrings("zh-TW");
+
+  test("說明卡：一則 carousel 四張，hero 圖 20:13、標題、內文、message／uri 按鈕", () => {
+    const built = buildLineMessages([helpMessage(s, BASE, `${BASE}/dashboard/settings/chat`)], "zh-TW");
+    expect(built.length).toBe(1);
+    const m = built[0].message;
+    expectFlexLimits(m);
+    const c = m.contents as { type: string; contents: Record<string, unknown>[] };
+    expect(c.type).toBe("carousel");
+    expect(c.contents.length).toBe(4);
+    expect(c.contents[0].hero).toEqual({
+      type: "image",
+      url: `${BASE}/line/help-1.png`,
+      size: "full",
+      aspectRatio: "20:13",
+      aspectMode: "cover",
+    });
+    expect(JSON.stringify(c.contents[0].body)).toContain("拍照記帳");
+    expect(actions(c.contents[0])).toEqual([{ type: "message", label: "試試看", text: "怎麼記一筆帳？" }]);
+    expect(actions(c.contents[3])).toEqual([
+      { type: "message", label: "切換組織", text: "切換組織" },
+      { type: "uri", label: "規則頁", uri: `${BASE}/dashboard/ai/rules` },
+    ]);
+  });
+
+  function table(rows: number, cols = 2): ChatTable {
+    return {
+      title: "本月支出",
+      headers: Array.from({ length: cols }, (_, k) => (k === 0 ? "對象" : `欄${k}`)),
+      rows: Array.from({ length: rows }, (_, i) => Array.from({ length: cols }, (_, k) => (k === 0 ? `對象${i}` : `${i * 100}`))),
+      numeric: Array.from({ length: cols }, (_, k) => k > 0),
+    };
+  }
+
+  test("表格：標題、表頭、每列一個水平 box，數字欄靠右，最多 12 列，多的寫還有 N 筆", () => {
+    const [b] = buildLineMessages([{ type: "table", table: table(15) }], "zh-TW");
+    expectFlexLimits(b.message);
+    const body = (b.message.contents as { body: { contents: Record<string, unknown>[] } }).body.contents;
+    expect(body[0]).toMatchObject({ type: "text", text: "本月支出", weight: "bold" });
+    const rows = body.filter((x) => x.type === "box");
+    expect(rows.length).toBe(1 + LINE_TABLE_MAX_ROWS); // 表頭＋12 列
+    const first = rows[1] as { layout: string; contents: { align: string; flex: number; text: string }[] };
+    expect(first.layout).toBe("horizontal");
+    expect(first.contents.map((x) => x.align)).toEqual(["start", "end"]);
+    expect(first.contents.map((x) => x.flex)).toEqual([3, 2]);
+    expect(body.at(-1)).toMatchObject({ text: "還有 3 筆" });
+    expect(b.message.altText).toBe("本月支出");
+    expect(b.snippet).toContain("對象：對象0");
+  });
+
+  test("超大的表格縮到 30KB 以內", () => {
+    const big: ChatTable = { ...table(12, 6), rows: table(12, 6).rows.map((r) => r.map(() => "長".repeat(60))) };
+    const [b] = buildLineMessages([{ type: "table", table: big }], "zh-TW");
+    expectFlexLimits(b.message);
+  });
+
+  test("站內連結：同一則回覆最後一個小 bubble，footer 最多 3 顆 uri 按鈕，網址不在文字裡", () => {
+    const { parts, links } = splitReply("看[交易](/dashboard/transactions)和[代墊](/dashboard/advances)", BASE);
+    const msgs: OutboundMessage[] = [
+      ...parts.map((p) => (p.kind === "text" ? { type: "text" as const, text: p.text } : { type: "table" as const, table: p.table })),
+      { type: "links", links },
+    ];
+    const built = buildLineMessages(msgs, "zh-TW");
+    expect(built.length).toBe(2);
+    expect(built[0].message).toEqual({ type: "text", text: "看交易和代墊" });
+    const m = built[1].message;
+    expectFlexLimits(m);
+    expect(actions(m)).toEqual([
+      { type: "uri", label: "交易", uri: `${BASE}/dashboard/transactions` },
+      { type: "uri", label: "代墊", uri: `${BASE}/dashboard/advances` },
+    ]);
+    expect(m.altText).toBe("相關頁面：交易、代墊");
+  });
+
+  test("快速選項可以掛在 Flex 訊息上", () => {
+    const [b] = buildLineMessages(
+      [{ type: "links", links: [{ label: "交易", url: `${BASE}/dashboard/transactions` }], quickReplies: [{ label: "再查", text: "再查" }] }],
+      "zh-TW",
+    );
+    expect(b.message.quickReply).toEqual({ items: [{ type: "action", action: { type: "message", label: "再查", text: "再查" } }] });
+  });
+
+  test("收據卡：標題、重點列、「在 internal 查看」；多張用 carousel", () => {
+    const receipt = {
+      title: "已記帳",
+      rows: [
+        { label: "日期", value: "2026-11-24" },
+        { label: "金額", value: "TWD 1,860" },
+      ],
+      link: { label: "在 internal 查看", url: `${BASE}/dashboard/transactions?ids=9` },
+    };
+    const [one] = buildLineMessages([{ type: "done", receipts: [receipt] }], "zh-TW");
+    expectFlexLimits(one.message);
+    expect((one.message.contents as { type: string }).type).toBe("bubble");
+    expect(JSON.stringify(one.message)).toContain("TWD 1,860");
+    expect(actions(one.message)).toEqual([{ type: "uri", label: "在 internal 查看", uri: `${BASE}/dashboard/transactions?ids=9` }]);
+    expect(one.snippet).toContain("已記帳");
+
+    const [many] = buildLineMessages([{ type: "done", receipts: Array.from({ length: 3 }, () => receipt) }], "zh-TW");
+    expectFlexLimits(many.message);
+    expect((many.message.contents as { type: string; contents: unknown[] }).contents.length).toBe(3);
+  });
+
+  test("組織選單：Flex bubble，每個組織一顆 postback，目前的標「目前」", () => {
+    const [m] = buildLineMessages(
+      [
+        {
+          type: "orgPicker",
+          text: "要切換到哪個組織？",
+          orgs: [
+            { id: "org-1", name: "一個名字非常非常非常非常長的組織", current: true },
+            { id: "org-2", name: "東蜂科技" },
+          ],
+        },
+      ],
+      "zh-TW",
+    );
+    expectFlexLimits(m.message);
+    const a = actions(m.message) as { type: string; label: string; data?: string }[];
+    expect(a.map((x) => x.data)).toEqual(["o:org-1", "o:org-2"]);
+    expect(a[0].label).toEndWith("（目前）");
+    expect(a[1].label).toBe("東蜂科技");
+  });
+
+  test("相鄰純文字併成一則；說明卡＋綁定訊息兩則都在 5 則內", () => {
+    const built = buildLineMessages(
+      [
+        { type: "text", text: "a" },
+        { type: "text", text: "b" },
+        { type: "table", table: table(1) },
+        { type: "text", text: "c" },
+        { type: "text", text: "d", quickReplies: [{ label: "x", text: "x" }] },
+      ],
+      "zh-TW",
+    );
+    expect(built.map((b) => b.message.type)).toEqual(["text", "flex", "text"]);
+    expect(built[0].message.text).toBe("a\n\nb");
+    expect(built[2].message.text).toBe("c\n\nd");
+    expect(built[2].message.quickReply).toBeDefined();
+    const linked = buildLineMessages([{ type: "text", text: "已綁定" }, helpMessage(s, BASE, BASE)], "zh-TW");
+    expect(linked.length).toBeLessThanOrEqual(LINE_MAX_MESSAGES);
+  });
+});
+
 describe("LINE send", () => {
   function fakeFetch(fail400 = false) {
     const calls: { url: string; body: Record<string, unknown> }[] = [];
@@ -307,9 +496,14 @@ describe("LINE send", () => {
 
     const g = fakeFetch();
     const b = createLineAdapter(cfg, g.fetchImpl);
+    // 帶快速選項的文字不會被併，7 則照樣是 7 則。
     const sent = await b.send(
       USER,
-      Array.from({ length: 7 }, (_, i) => ({ type: "text" as const, text: `m${i}` })),
+      Array.from({ length: 7 }, (_, i) => ({
+        type: "text" as const,
+        text: `m${i}`,
+        quickReplies: [{ label: "好", text: "好" }],
+      })),
       { replyToken: "rt", replyTokenAt: Date.now() },
     );
     expect(g.calls.map((c) => c.url.split("/").pop())).toEqual(["reply", "push"]);

@@ -26,7 +26,7 @@ import {
 } from "./tool-groups";
 import { bestRole, canRunInOrg, refusalReason, toolLevel, type OrgRole } from "./tool-policy";
 import { buildToolSpecs, prepareArgs, resolveTargetOrg, type OrgScope } from "./tool-specs";
-import type { AssistantOrg, ChatChannel, ChatEvent, UiToolStatus } from "./types";
+import type { AssistantOrg, ChatChannel, ChatEvent, ToolDoneInfo, UiToolStatus } from "./types";
 
 /**
  * 站內 AI 助理的一題：呼叫模型 → 執行只讀工具 → 再呼叫模型……直到模型直接回答、
@@ -152,7 +152,21 @@ function stringify(out: unknown): string {
   return truncate(JSON.stringify(out ?? null), MAX_STORED_TOOL_CHARS);
 }
 
-type ExecResult = { status: "ok" | "error"; content: string; error?: string; activityId?: number };
+type ExecResult = {
+  status: "ok" | "error";
+  content: string;
+  error?: string;
+  activityId?: number;
+  /** 寫入結果是一列資料（有數字 id）時的 id。 */
+  recordId?: number;
+};
+
+/** 工具結果裡那一列的 id（create_transaction 等回的是整列）。 */
+function recordIdOf(out: unknown): number | undefined {
+  if (!out || typeof out !== "object" || Array.isArray(out)) return undefined;
+  const id = (out as { id?: unknown }).id;
+  return typeof id === "number" && Number.isFinite(id) ? id : undefined;
+}
 
 /**
  * 執行一支工具（權限已檢查過），回傳要存進 DB 的狀態與內容。
@@ -175,8 +189,10 @@ async function execute(
   );
   if (res.ok) {
     const activityId = res.activityId;
-    if (activityId === undefined) return { status: "ok", content: stringify(res.out) };
-    return { status: "ok", content: stringify(withActivityId(res.out, activityId)), activityId };
+    const recordId = recordIdOf(res.out);
+    const withRecord = recordId === undefined ? {} : { recordId };
+    if (activityId === undefined) return { status: "ok", content: stringify(res.out), ...withRecord };
+    return { status: "ok", content: stringify(withActivityId(res.out, activityId)), activityId, ...withRecord };
   }
   return { status: "error", content: JSON.stringify({ error: res.error }), error: res.error };
 }
@@ -383,7 +399,7 @@ async function approveCall(
   call: AiToolCall,
   assistant: AiMessageRow,
   retargetOrgId?: string,
-): Promise<{ status: UiToolStatus; error?: string; activityId?: number } | null> {
+): Promise<ConfirmOutcome | null> {
   let prepared: Prepared | null = null;
   let invalid = "Invalid arguments.";
   try {
@@ -413,8 +429,18 @@ async function approveCall(
   const result = await execute(ctx, call.name, prepared.args, prepared.summary);
   await ctx.deps.db.setToolMessageResult(ctx.conversationId, toolCallId, result.status, result.content);
   if (result.status === "ok") await recordRuleApplied(ctx, call.name, prepared.args);
-  return { status: result.status, error: result.error, activityId: result.activityId };
+  const done: ToolDoneInfo | undefined =
+    result.status === "ok"
+      ? {
+          name: call.name,
+          args: prepared.args,
+          ...(result.recordId === undefined ? {} : { recordId: result.recordId }),
+        }
+      : undefined;
+  return { status: result.status, error: result.error, activityId: result.activityId, ...(done ? { done } : {}) };
 }
+
+type ConfirmOutcome = { status: UiToolStatus; error?: string; activityId?: number; done?: ToolDoneInfo };
 
 /**
  * 換過組織的呼叫寫回 assistant 訊息的 tool_calls（organizationId 改成實際執行的組織 id），
@@ -464,7 +490,7 @@ export async function resolveConfirmation(
     return;
   }
 
-  let outcome: { status: UiToolStatus; error?: string; activityId?: number } | null;
+  let outcome: ConfirmOutcome | null;
   if (approve) {
     outcome = await approveCall(ctx, toolCallId, call, assistant, retargetOrgId);
     if (!outcome) {
@@ -486,6 +512,7 @@ export async function resolveConfirmation(
     status: outcome.status,
     error: outcome.error,
     ...(outcome.activityId === undefined ? {} : { activityId: outcome.activityId }),
+    ...(outcome.done ? { done: outcome.done } : {}),
   });
 
   // 同一輪還有別張卡沒按，就等使用者；全部處理完才讓模型接著講。

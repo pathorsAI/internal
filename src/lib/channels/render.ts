@@ -1,14 +1,23 @@
 /**
  * 把站內 AI 的輸出轉成聊天看得懂的樣子（純函式，好測）：
  * - Markdown → 純文字：去粗體、表格轉「欄：值」、站內連結轉絕對網址、截長度、帳號遮成末四碼。
+ * - LINE 用的拆法（splitReply）：表格拆成 ChatTable、站內連結拆成按鈕，其他照純文字。
  * - runTurn 送出的事件 → 要送的文字＋待確認的工具呼叫。
  * - 待確認的 UiToolCall → ConfirmCard（參數轉成中文標籤列）。
  */
 import type { Locale } from "@/i18n/config";
 import { parseOptions } from "@/lib/ai/options";
-import type { ChatErrorCode, ChatEvent, UiToolCall, UiToolStatus } from "@/lib/ai/types";
-import { botStrings } from "./strings";
-import type { ConfirmCard, ConfirmCardRow, QuickReply } from "./types";
+import type { ChatErrorCode, ChatEvent, ToolDoneInfo, UiToolCall, UiToolStatus } from "@/lib/ai/types";
+import { botStrings, type BotStrings } from "./strings";
+import type {
+  ChatLink,
+  ChatTable,
+  ConfirmCard,
+  ConfirmCardRow,
+  DoneReceipt,
+  OutboundMessage,
+  QuickReply,
+} from "./types";
 
 /** 一則聊天文字最多幾個字（LINE 5000、WhatsApp 4096，留餘裕）。 */
 export const MAX_CHAT_TEXT = 3800;
@@ -156,7 +165,9 @@ function linkEnd(scan: LinkScan, j: number): number | null {
  * 用 indexOf 掃描取代 regex：`[` 很多卻沒有收尾時，regex 每個起點都要掃到底（O(n²)）。
  * 同一個 `]` 之前的所有 `[` 結果都一樣，失敗就直接跳過那個 `]`，整體線性。
  */
-function replaceLinks(text: string, baseUrl: string): string {
+type LinkFormat = (label: string, href: string) => string;
+
+function replaceLinks(text: string, format: LinkFormat): string {
   const scan: LinkScan = { text, failedUntil: -1, noQuoteFrom: Infinity };
   let out = "";
   let last = 0;
@@ -170,7 +181,7 @@ function replaceLinks(text: string, baseUrl: string): string {
       continue;
     }
     const start = open > last && text[open - 1] === "!" ? open - 1 : open;
-    out += text.slice(last, start) + linkText(text.slice(open + 1, close), m.href, baseUrl);
+    out += text.slice(last, start) + format(text.slice(open + 1, close), m.href);
     last = m.end;
     open = text.indexOf("[", last);
   }
@@ -203,13 +214,15 @@ function trimLineEnds(text: string): string {
     .join("\n");
 }
 
-/**
- * Markdown → 聊天純文字。只處理模型常用的那幾種寫法，其他原樣留著（聊天裡多一個 * 不會壞）。
- */
-export function markdownToChat(md: string, baseUrl: string, maxChars = MAX_CHAT_TEXT): string {
-  let lines = md.replaceAll("\r\n", "\n").split("\n");
-  lines = lines.filter((l) => !/^\s*```/.test(l)); // code fence 只留內容
-  lines = tablesToLines(lines);
+function prepareLines(md: string): string[] {
+  return md
+    .replaceAll("\r\n", "\n")
+    .split("\n")
+    .filter((l) => !/^\s*```/.test(l)); // code fence 只留內容
+}
+
+/** 行（表格已處理掉）→ 聊天純文字（還沒截長度）。 */
+function linesToChat(lines: readonly string[], format: LinkFormat): string {
   let text = lines
     .map((l) =>
       l
@@ -218,16 +231,278 @@ export function markdownToChat(md: string, baseUrl: string, maxChars = MAX_CHAT_
         .replace(/^\s*>\s?/, ""), // 引用
     )
     .join("\n");
-  text = replaceLinks(text, baseUrl)
+  text = stripEmphasis(replaceLinks(text, format));
+  text = trimLineEnds(spaceAfterUrls(text))
+    .replaceAll(/\n{3,}/g, "\n\n")
+    .trim();
+  return maskAccountNumbers(text);
+}
+
+function stripEmphasis(text: string): string {
+  return text
     .replaceAll(/\*\*([^*\n]+)\*\*/g, "$1")
     .replaceAll(/__([^_\n]+)__/g, "$1")
     .replaceAll(/(^|[^*\w])\*([^*\n]+)\*(?=[^*\w]|$)/g, "$1$2")
     .replaceAll(/~~([^~\n]+)~~/g, "$1")
     .replaceAll(/`([^`\n]+)`/g, "$1");
-  text = trimLineEnds(spaceAfterUrls(text))
-    .replaceAll(/\n{3,}/g, "\n\n")
-    .trim();
-  return ellipsis(maskAccountNumbers(text), maxChars);
+}
+
+/**
+ * Markdown → 聊天純文字。只處理模型常用的那幾種寫法，其他原樣留著（聊天裡多一個 * 不會壞）。
+ */
+export function markdownToChat(md: string, baseUrl: string, maxChars = MAX_CHAT_TEXT): string {
+  const lines = tablesToLines(prepareLines(md));
+  return ellipsis(linesToChat(lines, (label, href) => linkText(label, href, baseUrl)), maxChars);
+}
+
+// ---------------------------------------------------------------------------
+// LINE 用的拆法：表格、站內連結按鈕
+// ---------------------------------------------------------------------------
+
+/** 一則回覆最多拆幾顆連結按鈕（LINE bubble footer 放得下的量）。 */
+export const MAX_LINK_BUTTONS = 3;
+/** 按鈕上的字最多幾個字。 */
+export const MAX_BUTTON_LABEL = 20;
+/** 表格儲存格最多幾個字。 */
+export const MAX_TABLE_CELL = 60;
+
+export type ReplyPart = { kind: "text"; text: string } | { kind: "table"; table: ChatTable };
+
+/** 指向 internal 的連結：站內相對路徑（`/dashboard/…`，不含 `//host`）或 internal 自己的網址。 */
+export function isInternalHref(href: string, baseUrl: string): boolean {
+  if (href.startsWith("/")) return !href.startsWith("//");
+  return href === baseUrl || href.startsWith(`${baseUrl}/`) || href.startsWith(`${baseUrl}?`);
+}
+
+/**
+ * 站內連結收進 links（最多 MAX_LINK_BUTTONS 個，同一個網址只收一次），文字裡只留連結的字；
+ * 外部連結、沒有字的連結、收滿之後的站內連結照舊寫成「字：網址」。
+ */
+function buttonLinkFormat(baseUrl: string, links: ChatLink[]): LinkFormat {
+  return (label, href) => {
+    const l = label.trim();
+    const url = absolutize(href, baseUrl);
+    if (!l || l === href || l === url || !isInternalHref(href, baseUrl)) return linkText(label, href, baseUrl);
+    if (links.some((x) => x.url === url)) return l;
+    if (links.length >= MAX_LINK_BUTTONS) return linkText(label, href, baseUrl);
+    links.push({ label: ellipsis(stripEmphasis(l), MAX_BUTTON_LABEL), url });
+    return l;
+  };
+}
+
+/** 儲存格的錢、數量、百分比（`TWD 1,860`、`NT$500`、`-3.5%`、`(1,200)`、`1,860 元`）。 */
+export function isNumericCell(cell: string): boolean {
+  const t = cell
+    .replaceAll(/[,\s]/g, "")
+    .replace(/^(?:[A-Z]{3}|NT\$|US\$|[$€¥£])/, "")
+    .replace(/(?:元|%|[A-Z]{3})$/, "");
+  return /^[-+(]?\d+(?:\.\d+)?\)?$/.test(t);
+}
+
+/** 表格正上方那行如果是標題（`### …`）或整行粗體，拿來當表格標題（從文字裡拿掉）。 */
+function takeTableTitle(buf: string[]): string | undefined {
+  let k = buf.length - 1;
+  while (k >= 0 && !buf[k].trim()) k -= 1;
+  if (k < 0) return undefined;
+  const line = buf[k].trim();
+  const heading = /^#{1,6}\s+(.+)$/.exec(line);
+  const bold = /^\*\*([^*]+)\*\*[:：]?$/.exec(line);
+  const title = (heading?.[1] ?? bold?.[1])?.trim();
+  if (!title) return undefined;
+  buf.length = k;
+  return ellipsis(stripEmphasis(title), 80);
+}
+
+function tableAt(lines: readonly string[], i: number, format: LinkFormat): { table: Omit<ChatTable, "title">; end: number } {
+  const cell = (c: string) => ellipsis(maskAccountNumbers(stripEmphasis(replaceLinks(c, format))).trim(), MAX_TABLE_CELL);
+  const headers = splitRow(lines[i]).map(cell);
+  const rows: string[][] = [];
+  let j = i + 2;
+  while (j < lines.length && lines[j].trim().startsWith("|")) {
+    const r = splitRow(lines[j]).map(cell);
+    if (r.some(Boolean)) rows.push(r);
+    j += 1;
+  }
+  const width = Math.max(headers.length, ...rows.map((r) => r.length));
+  const pad = (r: string[]) => [...r, ...Array.from({ length: width - r.length }, () => "")];
+  const padded = rows.map(pad);
+  const numeric = Array.from({ length: width }, (_, k) => {
+    const cells = padded.map((r) => r[k]).filter(Boolean);
+    return cells.length > 0 && cells.every(isNumericCell);
+  });
+  return { table: { headers: pad(headers), rows: padded, numeric }, end: j };
+}
+
+/**
+ * 模型的回覆（已拿掉 `[[選項：…]]`）→ 依序的文字段與表格，加上拆出來的站內連結。
+ * 文字段的處理跟 markdownToChat 一樣（只是站內連結只留字）。
+ */
+export function splitReply(md: string, baseUrl: string): { parts: ReplyPart[]; links: ChatLink[] } {
+  const lines = prepareLines(md);
+  const links: ChatLink[] = [];
+  const format = buttonLinkFormat(baseUrl, links);
+  const parts: ReplyPart[] = [];
+  let buf: string[] = [];
+  const flushText = () => {
+    const text = linesToChat(buf, format);
+    if (text) parts.push({ kind: "text", text: ellipsis(text, MAX_CHAT_TEXT) });
+    buf = [];
+  };
+  let i = 0;
+  while (i < lines.length) {
+    if (!isTableStart(lines, i)) {
+      buf.push(lines[i]);
+      i += 1;
+      continue;
+    }
+    const title = takeTableTitle(buf);
+    flushText();
+    const { table, end } = tableAt(lines, i, format);
+    parts.push({ kind: "table", table: { ...(title ? { title } : {}), ...table } });
+    i = end;
+  }
+  flushText();
+  return { parts, links };
+}
+
+/** 表格的純文字版（WhatsApp、記 chat_message_refs 的摘要）：「欄：值」，列之間空一行。 */
+export function tableToText(table: ChatTable): string {
+  const rows = table.rows.map((r) =>
+    r
+      .map((c, k) => (c ? `${table.headers[k] || `#${k + 1}`}：${c}` : ""))
+      .filter(Boolean)
+      .join("\n"),
+  );
+  return [...(table.title ? [table.title] : []), ...rows].join("\n\n");
+}
+
+/** 連結的純文字版：「字：網址」一行一個。 */
+export function linksToText(links: readonly ChatLink[]): string {
+  return links.map((l) => `${l.label}：${l.url}`).join("\n");
+}
+
+/**
+ * 模型的回覆 → 要送的訊息。
+ * rich（LINE）：文字段、表格、最後一則站內連結按鈕；快速選項掛在最後一則。
+ * 不是 rich（WhatsApp）：照舊一則純文字（表格「欄：值」、連結寫成網址）。
+ */
+export function replyToMessages(md: string, baseUrl: string, rich: boolean, emptyText: string): OutboundMessage[] {
+  if (!rich) {
+    const { text, quickReplies } = replyToChat(md, baseUrl);
+    if (!text && quickReplies.length === 0) return [];
+    return [{ type: "text", text: text || emptyText, ...(quickReplies.length > 0 ? { quickReplies } : {}) }];
+  }
+  const { text: body, options } = parseOptions(md);
+  const quickReplies: QuickReply[] = options.map((o) => ({ label: o, text: o }));
+  const { parts, links } = splitReply(body, baseUrl);
+  const msgs: OutboundMessage[] = parts.map((p) =>
+    p.kind === "text" ? { type: "text", text: p.text } : { type: "table", table: p.table },
+  );
+  if (links.length > 0) msgs.push({ type: "links", links });
+  if (quickReplies.length === 0) return msgs;
+  const last = msgs.at(-1);
+  if (last?.type === "text" || last?.type === "table" || last?.type === "links") {
+    msgs[msgs.length - 1] = { ...last, quickReplies };
+  } else {
+    msgs.push({ type: "text", text: emptyText, quickReplies });
+  }
+  return msgs;
+}
+
+// ---------------------------------------------------------------------------
+// 說明卡、收據卡
+// ---------------------------------------------------------------------------
+
+/** 說明卡圖片的路徑（public/line/，proxy 不擋）。 */
+export function helpImagePath(index: number): string {
+  return `/line/help-${index + 1}.png`;
+}
+
+/** 「說明」與綁定成功後送的說明卡組。圖片與「規則頁」都是 baseUrl 上的絕對網址。 */
+export function helpMessage(s: BotStrings, baseUrl: string, settingsUrl: string): OutboundMessage {
+  return {
+    type: "help",
+    altText: ellipsis(s.helpAltText, 400),
+    cards: s.helpCards.map((c, i) => ({
+      imageUrl: `${baseUrl}${helpImagePath(i)}`,
+      title: c.title,
+      body: c.body,
+      buttons: c.buttons.map((b) => ("path" in b ? { label: b.label, url: `${baseUrl}${b.path}` } : b)),
+    })),
+    commandsText: s.helpCommands(settingsUrl),
+  };
+}
+
+/** 寫進交易表的工具：收據卡連到那一筆。 */
+const TRANSACTION_TOOLS = new Set(["create_transaction", "submit_advance", "update_transaction", "create_reimbursement"]);
+
+/** 其他寫入工具：收據卡連到列表頁。 */
+const LIST_PAGES: Record<string, string> = {
+  create_party: "/dashboard/parties",
+  update_party: "/dashboard/parties",
+  create_category: "/dashboard/categories",
+  create_contract: "/dashboard/contracts",
+  update_contract: "/dashboard/contracts",
+  create_ai_rule: "/dashboard/ai/rules",
+  update_ai_rule: "/dashboard/ai/rules",
+  remove_ai_rule: "/dashboard/ai/rules",
+};
+
+function receiptLinkPath(info: ToolDoneInfo): string | null {
+  if (TRANSACTION_TOOLS.has(info.name)) {
+    const id = info.recordId ?? (info.name === "update_transaction" ? info.args.id : undefined);
+    return typeof id === "number" ? `/dashboard/transactions?ids=${id}` : "/dashboard/transactions";
+  }
+  return LIST_PAGES[info.name] ?? null;
+}
+
+function firstString(args: Record<string, unknown>, keys: readonly string[]): string | null {
+  for (const k of keys) {
+    const v = args[k];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return null;
+}
+
+/**
+ * 確認後寫入成功 → 收據卡：標題（已記帳、已提交代墊…）＋日期、金額、對象、分類（參數裡有的才列）
+ * ＋「在 internal 查看」連到那一筆。categoryName 是查好的分類名稱（沒查到就不列分類 id）。
+ */
+export function doneReceipt(
+  info: ToolDoneInfo,
+  opts: { locale: Locale; baseUrl: string; categoryName?: string | null },
+): DoneReceipt {
+  const s = botStrings(opts.locale);
+  const a = info.args;
+  const rows: DoneReceipt["rows"] = [];
+  const date = firstString(a, ["txnDate", "date", "payDate"]);
+  if (date) rows.push({ label: s.doneRowDate, value: date });
+  if (typeof a.amount === "number" || (typeof a.amount === "string" && a.amount.trim())) {
+    const amount = formatValue("amount", typeof a.amount === "string" ? Number(a.amount) || a.amount : a.amount, opts.locale);
+    const currency = typeof a.currency === "string" && a.currency ? `${a.currency} ` : "";
+    rows.push({ label: s.doneRowAmount, value: `${currency}${amount}` });
+  }
+  const party = firstString(a, ["partyName"]);
+  if (party) rows.push({ label: s.doneRowParty, value: ellipsis(maskAccountNumbers(party), MAX_CARD_VALUE) });
+  const category = opts.categoryName ?? firstString(a, ["categoryName"]);
+  if (category) rows.push({ label: s.doneRowCategory, value: ellipsis(category, MAX_CARD_VALUE) });
+  if (rows.length === 0) {
+    const desc = firstString(a, ["description", "name", "title", "text"]);
+    if (desc) rows.push({ label: s.doneRowDescription, value: ellipsis(maskAccountNumbers(desc), MAX_CARD_VALUE) });
+  }
+  const path = receiptLinkPath(info);
+  return {
+    title: s.doneTitle(info.name, toolTitle(info.name, opts.locale)),
+    rows,
+    ...(path ? { link: { label: s.viewInInternal, url: `${opts.baseUrl}${path}` } } : {}),
+  };
+}
+
+/** 收據卡的純文字版（WhatsApp、摘要）。 */
+export function receiptToText(r: DoneReceipt): string {
+  return [r.title, ...r.rows.map((x) => `${x.label}：${x.value}`), ...(r.link ? [`${r.link.label}：${r.link.url}`] : [])].join(
+    "\n",
+  );
 }
 
 /** 模型的回覆 → 聊天文字＋快速選項（`[[選項：…]]` 拆成 quick reply）。 */
@@ -249,7 +524,7 @@ export type TurnOutput = {
   /** 還在等確認的寫入（依序）。 */
   pending: UiToolCall[];
   /** 這一題裡確認卡的結果（按確認／取消後）。 */
-  results: { id: string; status: UiToolStatus; error?: string }[];
+  results: { id: string; status: UiToolStatus; error?: string; done?: ToolDoneInfo }[];
   error?: ChatErrorCode;
   conversationId?: string;
 };
@@ -283,7 +558,12 @@ export function collectTurn(events: readonly ChatEvent[]): TurnOutput {
       case "tool_done":
         if (e.status !== "running") {
           pending.delete(e.id);
-          results.push({ id: e.id, status: e.status, ...(e.error ? { error: e.error } : {}) });
+          results.push({
+            id: e.id,
+            status: e.status,
+            ...(e.error ? { error: e.error } : {}),
+            ...(e.done ? { done: e.done } : {}),
+          });
         }
         break;
       case "error":

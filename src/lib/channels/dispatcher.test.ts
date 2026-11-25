@@ -15,6 +15,24 @@ import type { ChannelAdapter, ChannelJob, InboundEvent, OutboundMessage } from "
 
 // 記憶體裡的假 DB、假平台、假 runTurn：跑 dispatcher 不碰網路、資料庫、STORAGE、模型。
 
+function snippetOf(m: OutboundMessage): string {
+  switch (m.type) {
+    case "text":
+    case "orgPicker":
+      return m.text;
+    case "cards":
+      return m.cards.map((c) => c.title).join(" / ");
+    case "help":
+      return m.altText;
+    case "table":
+      return m.table.headers.join(" / ");
+    case "links":
+      return m.links.map((l) => l.label).join(" / ");
+    case "done":
+      return m.receipts.map((r) => r.title).join(" / ");
+  }
+}
+
 type Turn = Omit<RunTurnParams, "deps">;
 
 function world(opts: { linked?: boolean; orgs?: { id: string; name: string; role: string }[]; turnEvents?: ChatEvent[][] } = {}) {
@@ -66,7 +84,7 @@ function world(opts: { linked?: boolean; orgs?: { id: string; name: string; role
       sent.push({ to, msgs, ...(o?.replyToken ? { replyToken: o.replyToken } : {}) });
       return msgs.map((m) => ({
         externalId: `out-${sentId++}`,
-        snippet: m.type === "text" ? m.text : m.type === "cards" ? m.cards.map((c) => c.title).join(" / ") : m.text,
+        snippet: snippetOf(m),
         ...(m.type === "cards" ? { cardId: m.cards[0].cardId } : {}),
       }));
     },
@@ -261,8 +279,13 @@ describe("未綁定", () => {
     w.codes.set("482913", { userId: "user-me", orgId: "org-1" });
     await handleEvent(ev({ kind: "text", text: "綁定　482913" }, "U-new"), w.deps);
     expect(w.identities.some((i) => i.externalId === "U-new" && i.userId === "user-me")).toBe(true);
-    expect(w.lastText()).toBe("已綁定 Tiger · 派斯科技。直接傳收據照片或打字問我；傳「說明」看我能做什麼。");
+    expect(w.lastText()).toBe("已綁定 Tiger · 派斯科技。下面是我能幫你做的事，之後傳「說明」可以再看一次。");
     expect(w.sent.at(-1)?.replyToken).toBeDefined();
+    // 綁定成功那則後面接說明卡組（同一次 reply）。
+    const help = w.sent.at(-1)!.msgs[1];
+    expect(help).toMatchObject({ type: "help" });
+    if (help.type !== "help") throw new Error("not help");
+    expect(help.cards.map((c) => c.imageUrl)).toEqual([1, 2, 3, 4].map((i) => `https://internal.pathors.com/line/help-${i}.png`));
   });
 
   test("過期碼、用過的碼", async () => {
@@ -364,6 +387,47 @@ describe("合成一題", () => {
       ],
     });
   });
+
+  const tableReply = [
+    "本月支出前三名：",
+    "",
+    "| 對象 | 金額 |",
+    "|---|---:|",
+    "| AWS | TWD 12,000 |",
+    "| 全家 | TWD 1,860 |",
+    "",
+    "細節看[交易](/dashboard/transactions?period=2026-11)。",
+    "[[選項：看上個月]]",
+  ].join("\n");
+
+  test("LINE（richReplies）：表格拆成 table、站內連結拆成 links，快速選項掛在最後一則", async () => {
+    const w = world({ turnEvents: [[{ t: "msg", id: "r0" }, { t: "text", d: tableReply }]] });
+    const real = w.deps.adapter("line")!;
+    w.deps.adapter = () => ({ ...real, richReplies: true });
+    await handleEvent(ev({ kind: "text", text: "這個月支出前三名？" }), w.deps);
+    await w.runScheduled();
+    const msgs = w.sent.at(-1)!.msgs;
+    expect(msgs.map((m) => m.type)).toEqual(["text", "table", "text", "links"]);
+    expect(msgs[0]).toEqual({ type: "text", text: "本月支出前三名：" });
+    expect(msgs[1]).toMatchObject({ table: { headers: ["對象", "金額"], numeric: [false, true] } });
+    expect(msgs[2]).toEqual({ type: "text", text: "細節看交易。" });
+    expect(msgs[3]).toEqual({
+      type: "links",
+      links: [{ label: "交易", url: "https://internal.pathors.com/dashboard/transactions?period=2026-11" }],
+      quickReplies: [{ label: "看上個月", text: "看上個月" }],
+    });
+  });
+
+  test("WhatsApp（沒有 richReplies）：照舊一則純文字，表格「欄：值」、連結寫網址", async () => {
+    const w = world({ turnEvents: [[{ t: "msg", id: "r0" }, { t: "text", d: tableReply }]] });
+    await handleEvent(ev({ kind: "text", text: "這個月支出前三名？" }), w.deps);
+    await w.runScheduled();
+    const msgs = w.sent.at(-1)!.msgs;
+    expect(msgs.length).toBe(1);
+    expect(msgs[0]).toMatchObject({ type: "text", quickReplies: [{ label: "看上個月" }] });
+    expect(w.lastText()).toContain("對象：AWS\n金額：TWD 12,000");
+    expect(w.lastText()).toContain("交易：https://internal.pathors.com/dashboard/transactions?period=2026-11");
+  });
 });
 
 describe("指令", () => {
@@ -374,6 +438,20 @@ describe("指令", () => {
     expect(w.buffer.length).toBe(0);
     expect(w.turns.length).toBe(0);
     expect(w.sent.length).toBeGreaterThan(0);
+  });
+
+  test("說明：送說明卡組（四張，圖片與規則頁都是 internal 的絕對網址）", async () => {
+    const w = world();
+    await handleEvent(ev({ kind: "text", text: "說明" }), w.deps);
+    const [m] = w.sent.at(-1)!.msgs;
+    expect(m).toMatchObject({ type: "help", cards: [{ title: "拍照記帳" }, { title: "代墊" }, { title: "問帳" }, { title: "教 AI 與指令" }] });
+    if (m.type !== "help") throw new Error("not help");
+    expect(m.cards[0].buttons).toEqual([{ label: "試試看", text: "怎麼記一筆帳？" }]);
+    expect(m.cards[3].buttons).toEqual([
+      { label: "切換組織", text: "切換組織" },
+      { label: "規則頁", url: "https://internal.pathors.com/dashboard/ai/rules" },
+    ]);
+    expect(m.commandsText).toContain("解除綁定");
   });
 
   test("引用某則訊息時，就算內容像指令也照一般訊息合併", async () => {
@@ -490,6 +568,60 @@ describe("確認卡", () => {
     await handleEvent(ev({ kind: "button", payload: "c:card000001:confirm" }), w.deps);
     expect(w.turns.length).toBe(2);
     expect(w.lastText()).toContain("已過期或已經處理過");
+  });
+
+  test("按確認、寫入成功：先送收據卡（已記帳＋重點＋連到那一筆），再送 AI 的文字", async () => {
+    const w = await withCard([
+      [
+        {
+          t: "tool_done",
+          id: "call-1",
+          status: "ok",
+          done: {
+            name: "create_transaction",
+            args: { type: "expense", txnDate: "2026-11-24", amount: 1860, currency: "TWD", partyName: "全家", categoryId: 12 },
+            recordId: 981,
+          },
+        },
+        { t: "msg", id: "r1" },
+        { t: "text", d: "記好了" },
+      ],
+    ]);
+    w.deps.directory.getCategoryName = async (_org, id) => (id === 12 ? "雜項支出" : null);
+    await handleEvent(ev({ kind: "button", payload: "c:card000001:confirm" }), w.deps);
+    const msgs = w.sent.at(-1)!.msgs;
+    expect(msgs.map((m) => m.type)).toEqual(["done", "text"]);
+    expect(msgs[0]).toEqual({
+      type: "done",
+      receipts: [
+        {
+          title: "已記帳",
+          rows: [
+            { label: "日期", value: "2026-11-24" },
+            { label: "金額", value: "TWD 1,860" },
+            { label: "對象", value: "全家" },
+            { label: "分類", value: "雜項支出" },
+          ],
+          link: { label: "在 internal 查看", url: "https://internal.pathors.com/dashboard/transactions?ids=981" },
+        },
+      ],
+    });
+    expect(w.lastText()).toBe("記好了");
+  });
+
+  test("寫入成功但模型沒說話：只送收據卡，不補「好了。」；失敗就沒有收據卡", async () => {
+    const ok = await withCard([
+      [{ t: "tool_done", id: "call-1", status: "ok", done: { name: "submit_advance", args: { date: "2026-11-24", amount: 415 } } }],
+    ]);
+    await handleEvent(ev({ kind: "button", payload: "c:card000001:confirm" }), ok.deps);
+    const msgs = ok.sent.at(-1)!.msgs;
+    expect(msgs.map((m) => m.type)).toEqual(["done"]);
+    expect(msgs[0]).toMatchObject({ receipts: [{ title: "已提交代墊", link: { url: "https://internal.pathors.com/dashboard/transactions" } }] });
+
+    const bad = await withCard([[{ t: "tool_done", id: "call-1", status: "error", error: "帳戶幣別不符" }]]);
+    await handleEvent(ev({ kind: "button", payload: "c:card000001:confirm" }), bad.deps);
+    expect(bad.sent.at(-1)!.msgs.map((m) => m.type)).toEqual(["text"]);
+    expect(bad.lastText()).toContain("帳戶幣別不符");
   });
 
   test("別人按這張卡被擋", async () => {
