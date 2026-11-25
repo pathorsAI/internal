@@ -65,7 +65,10 @@ const usage = {
     views: { "zh-TW": "次數", en: "Uses" },
     users: { "zh-TW": "人數", en: "People" },
     actions: { "zh-TW": "在這頁做了什麼", en: "What people did here" },
-    actionsToggle: { "zh-TW": "{count} 種動作", en: "{count} kinds of action" },
+    actionsToggle: {
+      "zh-TW": "{count} 種動作",
+      en: "{count, plural, one {# kind of action} other {# kinds of action}}",
+    },
     noActions: { "zh-TW": "只有瀏覽", en: "Viewed only" },
     empty: { "zh-TW": "近 30 天沒有網頁使用紀錄", en: "No page usage in the last 30 days" },
   },

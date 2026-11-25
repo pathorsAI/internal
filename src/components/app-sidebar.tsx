@@ -90,6 +90,7 @@ export type NavItemKey =
   | "integrations"
   | "chatAccounts"
   | "aiRules"
+  | "featureUsage"
   | "settings";
 
 const daily = [
