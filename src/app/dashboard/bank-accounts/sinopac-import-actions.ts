@@ -64,6 +64,11 @@ async function readUpload(formData: FormData): Promise<SinopacParseResult | { er
   }
 }
 
+/** skipUnmatched 欄位：「1」= 配不上的只列出來、不新建。 */
+function readSkipUnmatched(formData: FormData): boolean {
+  return formData.get("skipUnmatched") === "1";
+}
+
 /** map 欄位：JSON 物件 { "9228": 1 }；沒給回 null（= 用猜的）。 */
 function readMap(formData: FormData): Record<string, number> | null | "invalid" {
   const raw = formData.get("map");
@@ -105,7 +110,9 @@ export async function previewSinopacImport(formData: FormData): Promise<SinopacA
     const db = getDb();
     const options = await listImportAccountOptions(db, ctx.orgId);
     const accountMap = prep.map ?? guessAccountMap(statementAccounts(parsed.lines), options);
-    const plan = await planSinopacImport(db, ctx.orgId, parsed, accountMap);
+    const plan = await planSinopacImport(db, ctx.orgId, parsed, accountMap, {
+      skipUnmatched: readSkipUnmatched(formData),
+    });
     return { ok: true, result: { plan, options, accountMap } };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : t("errors.failed") };
@@ -128,6 +135,7 @@ export async function applySinopacImportAction(
     if (prep.map === null) return { ok: false, error: t("errors.badMap") };
     const res = await applySinopacImport(getDb(), ctx.orgId, parsed, prep.map, {
       userId: ctx.userId,
+      skipUnmatched: readSkipUnmatched(formData),
       log: (summary) => logWeb(ctx.orgId, "create", "transaction", null, summary),
     });
     revalidatePath("/dashboard/transactions");

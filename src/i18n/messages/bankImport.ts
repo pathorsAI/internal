@@ -6,8 +6,8 @@ const bankImport = {
   title: { "zh-TW": "匯入永豐銀行明細", en: "Import a SinoPac statement" },
   description: {
     "zh-TW":
-      "上傳永豐寰宇金融網匯出的明細（CSV、TSV 或 Excel）。先試算給你看，按「匯入」才寫入：對到的交易補上銀行備註與參考號，對不到的新建一筆待確認交易，沖正的兩行互相抵銷，匯過的行不會重複。",
-    en: "Upload the statement exported from SinoPac online banking (CSV, TSV or Excel). You see a dry run first; nothing is written until you press Import. Matched entries get the bank memo and reference, unmatched lines become new entries to review, correction pairs cancel out, and lines imported before are skipped.",
+      "上傳永豐寰宇金融網匯出的明細（CSV、TSV 或 Excel）。先試算給你看，按「匯入」才寫入：對到的交易補上銀行備註與參考號（銀行一筆對系統好幾筆、加總剛好相等的也算），對不到的新建一筆待確認交易，金額差一點的只提示不新建，沖正的兩行互相抵銷，匯過的行不會重複。",
+    en: "Upload the statement exported from SinoPac online banking (CSV, TSV or Excel). You see a dry run first; nothing is written until you press Import. Matched entries get the bank memo and reference (including one bank line that equals several entries added up), unmatched lines become new entries to review, near-amount lines are only flagged, correction pairs cancel out, and lines imported before are skipped.",
   },
   file: { "zh-TW": "明細檔", en: "Statement file" },
   fileHint: {
@@ -35,6 +35,14 @@ const bankImport = {
     correctionPair: { "zh-TW": "沖正抵銷", en: "Correction pairs" },
     duplicate: { "zh-TW": "已匯入過", en: "Already imported" },
     skipped: { "zh-TW": "略過", en: "Skipped" },
+    nearMatch: { "zh-TW": "金額差一點", en: "Near amount" },
+  },
+  skipUnmatched: {
+    label: { "zh-TW": "配不上的只列出來，不新建交易", en: "List unmatched lines only; don't create entries" },
+    hint: {
+      "zh-TW": "例如銀行一筆、系統拆成好幾筆但湊不出來時，先別建，人工處理完再重匯同一份檔案。",
+      en: "Useful when a bank line was split into entries that couldn't be matched automatically: fix them by hand, then import the same file again.",
+    },
   },
   parseErrors: {
     "zh-TW": "{count} 行讀不懂，不會匯入：{list}",
@@ -58,6 +66,8 @@ const bankImport = {
   },
   decision: {
     match: { "zh-TW": "配對 #{id}", en: "Match #{id}" },
+    matchMulti: { "zh-TW": "一對多：{count} 筆", en: "Split across {count} entries" },
+    near_match: { "zh-TW": "金額差一點：#{id} 記 {amount}", en: "Near amount: #{id} has {amount}" },
     create: { "zh-TW": "新建待確認", en: "New, to review" },
     recover: { "zh-TW": "補記 #{id}", en: "Record #{id}" },
     correction_pair: { "zh-TW": "沖正（第 {line} 行）", en: "Correction (line {line})" },
@@ -68,6 +78,7 @@ const bankImport = {
       unmapped: { "zh-TW": "帳戶未對應", en: "Account not mapped" },
       currency_mismatch: { "zh-TW": "幣別不同", en: "Currency differs" },
       created_deleted: { "zh-TW": "之前建的交易已刪除", en: "Entry created earlier was deleted" },
+      left_unmatched: { "zh-TW": "配不上，只列出", en: "Unmatched, listed only" },
     },
   },
   fillNote: { "zh-TW": "補：{fields}", en: "Adds: {fields}" },

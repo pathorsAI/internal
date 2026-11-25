@@ -16,6 +16,8 @@ import {
   amountOf,
   createdDescription,
   directionOf,
+  findMultiMatch,
+  findNearMatch,
   matchStatementLines,
   MATCH_WINDOW_DAYS,
   pairCorrections,
@@ -39,6 +41,8 @@ export type PlanDecision =
   | "match"
   /** 對不到：新建待確認交易。 */
   | "create"
+  /** 對不到，但有一筆金額差一點（1% 內）的交易：可能是同一筆、金額記錯。不新建、不記錄，留給人看。 */
+  | "near_match"
   /** 之前的匯入已經建了交易、但這一行沒記到（中途失敗）：只補記這一行。 */
   | "recover"
   /** 沖正與被沖正的那一行。 */
@@ -56,7 +60,9 @@ export type SkipReason =
   /** 對應的帳本帳戶幣別不同（不記錄）。 */
   | "currency_mismatch"
   /** 之前這一行建的交易已經被刪掉（不記錄、不重建）。 */
-  | "created_deleted";
+  | "created_deleted"
+  /** 對不到，這次選了「配不上的只列出來、不建立」（不記錄，下次可以再匯）。 */
+  | "left_unmatched";
 
 export type PlannedLine = {
   lineNo: number;
@@ -74,8 +80,12 @@ export type PlannedLine = {
   bankAccountId: number | null;
   decision: PlanDecision;
   skipReason?: SkipReason;
-  /** match / recover：對到的交易。 */
+  /** match / recover：對到的交易（一對多時是第一筆）；near_match：金額差一點的那筆。 */
   transactionId?: number;
+  /** match 一對多：銀行這一筆對到的全部交易（兩筆以上）。 */
+  transactionIds?: number[];
+  /** near_match：那筆交易記的金額。 */
+  nearAmount?: string;
   transactionDescription?: string | null;
   /** match：哪幾欄會被補上。 */
   fillMemo?: boolean;
@@ -102,7 +112,14 @@ export type PlanCounts = {
   correctionPair: number;
   duplicate: number;
   skipped: number;
+  /** 金額差一點、等人確認的行。 */
+  nearMatch: number;
   parseErrors: number;
+};
+
+export type PlanOptions = {
+  /** true：配不上的行只列出來（left_unmatched），不新建交易。 */
+  skipUnmatched?: boolean;
 };
 
 export type SinopacPlan = {
@@ -209,6 +226,7 @@ async function loadCandidates(db: Db, orgId: string, accountIds: number[], dates
       bankRef: transactions.bankRef,
       bankMemo: transactions.bankMemo,
       description: transactions.description,
+      partyId: transactions.partyId,
     })
     .from(transactions)
     .where(
@@ -256,12 +274,22 @@ function baseLine(l: SinopacLine, hash: string, bankAccountId: number | null): P
 }
 
 function countPlan(lines: readonly PlannedLine[], parseErrors: number): PlanCounts {
-  const c: PlanCounts = { total: lines.length, matched: 0, created: 0, correctionPair: 0, duplicate: 0, skipped: 0, parseErrors };
+  const c: PlanCounts = {
+    total: lines.length,
+    matched: 0,
+    created: 0,
+    correctionPair: 0,
+    duplicate: 0,
+    skipped: 0,
+    nearMatch: 0,
+    parseErrors,
+  };
   for (const l of lines) {
     if (l.decision === "match") c.matched += 1;
     else if (l.decision === "create" || l.decision === "recover") c.created += 1;
     else if (l.decision === "correction_pair") c.correctionPair += 1;
     else if (l.decision === "duplicate") c.duplicate += 1;
+    else if (l.decision === "near_match") c.nearMatch += 1;
     else c.skipped += 1;
   }
   return c;
@@ -336,33 +364,74 @@ function markRecovered(
   });
 }
 
-async function markMatches(db: Db, orgId: string, planned: PlannedLine[], toMatch: number[]): Promise<void> {
+function setMatch(p: PlannedLine, matched: Candidate[]): void {
+  p.decision = "match";
+  p.transactionId = matched[0].id;
+  if (matched.length > 1) p.transactionIds = matched.map((c) => c.id);
+  p.transactionDescription = matched.map((c) => c.description ?? `#${c.id}`).join("、");
+  p.fillMemo = p.remarks !== null && matched.some((c) => !c.bankMemo?.trim());
+  p.fillRef = p.ref !== null && matched.some((c) => !c.bankRef?.trim());
+}
+
+function toMatchLine(p: PlannedLine, key: number): MatchLine {
+  return {
+    key,
+    bankAccountId: p.bankAccountId as number,
+    date: p.date,
+    currency: p.currency,
+    direction: p.direction,
+    cents: toCents(p.amount),
+    ref: p.ref,
+  };
+}
+
+/**
+ * 比對：先一對一；剩下的試一對多（幾筆加總剛好相等）；再剩下的找金額差一點的提示；
+ * 都沒有的才新建（或 skipUnmatched 時只列出來）。
+ */
+async function markMatches(
+  db: Db,
+  orgId: string,
+  planned: PlannedLine[],
+  toMatch: number[],
+  opts: PlanOptions,
+): Promise<void> {
   const accountIds = [...new Set(toMatch.map((i) => planned[i].bankAccountId as number))];
   const candidates = await loadCandidates(db, orgId, accountIds, toMatch.map((i) => planned[i].date));
   const claimed = await claimedTransactionIds(db, orgId, candidates.map((c) => c.id));
   // 這次要補記的（recover）交易也算已認領，不能再被別行對走。
   for (const p of planned) if (p.decision === "recover" && p.transactionId) claimed.add(p.transactionId);
-  const matchLines: MatchLine[] = toMatch.map((i) => ({
-    key: i,
-    bankAccountId: planned[i].bankAccountId as number,
-    date: planned[i].date,
-    currency: planned[i].currency,
-    direction: planned[i].direction,
-    cents: toCents(planned[i].amount),
-    ref: planned[i].ref,
-  }));
-  const result = matchStatementLines(matchLines, candidates, claimed);
+  const result = matchStatementLines(toMatch.map((i) => toMatchLine(planned[i], i)), candidates, claimed);
   const byId = new Map(candidates.map((c) => [c.id, c]));
+  const unmatched: number[] = [];
   for (const i of toMatch) {
     const txnId = result.get(i) ?? null;
-    if (txnId === null) continue; // 預設就是 create
-    const c = byId.get(txnId) as Candidate;
+    if (txnId === null) unmatched.push(i);
+    else {
+      claimed.add(txnId);
+      setMatch(planned[i], [byId.get(txnId) as Candidate]);
+    }
+  }
+  const stillUnmatched: number[] = [];
+  for (const i of unmatched) {
+    const ids = findMultiMatch(toMatchLine(planned[i], i), candidates, claimed);
+    if (ids) {
+      for (const id of ids) claimed.add(id);
+      setMatch(planned[i], ids.map((id) => byId.get(id) as Candidate));
+    } else stillUnmatched.push(i);
+  }
+  for (const i of stillUnmatched) {
     const p = planned[i];
-    p.decision = "match";
-    p.transactionId = txnId;
-    p.transactionDescription = c.description;
-    p.fillMemo = p.remarks !== null && !c.bankMemo?.trim();
-    p.fillRef = p.ref !== null && !c.bankRef?.trim();
+    const near = findNearMatch(toMatchLine(p, i), candidates, claimed);
+    if (near) {
+      p.decision = "near_match";
+      p.transactionId = near.id;
+      p.nearAmount = near.amount;
+      p.transactionDescription = byId.get(near.id)?.description ?? null;
+    } else if (opts.skipUnmatched) {
+      p.decision = "skip";
+      p.skipReason = "left_unmatched";
+    }
   }
 }
 
@@ -374,6 +443,7 @@ export async function planSinopacImport(
   orgId: string,
   parsed: SinopacParseResult,
   accountMap: Readonly<Record<string, number>>,
+  opts: PlanOptions = {},
 ): Promise<SinopacPlan> {
   const { lines } = parsed;
   const found = await loadAccounts(db, orgId, [...new Set(Object.values(accountMap))]);
@@ -389,7 +459,7 @@ export async function planSinopacImport(
   const remaining = markCorrections(planned, lines, live);
   const prior = await createdBefore(db, orgId, remaining.map((i) => planned[i].hash));
   const toMatch = markRecovered(planned, remaining, prior);
-  await markMatches(db, orgId, planned, toMatch);
+  await markMatches(db, orgId, planned, toMatch, opts);
 
   return { accounts, lines: planned, counts: countPlan(planned, parsed.errors.length), parseErrors: parsed.errors };
 }
@@ -444,8 +514,7 @@ async function recordLine(db: Db, row: typeof bankStatementLines.$inferInsert): 
 }
 
 /** 對到的交易：備註、參考號各自「空的才補」（條件寫在 where，跟同時有人改不會互相蓋掉）。 */
-async function fillTransaction(db: Db, orgId: string, p: PlannedLine): Promise<boolean> {
-  const id = p.transactionId as number;
+async function fillTransaction(db: Db, orgId: string, p: PlannedLine, id: number): Promise<boolean> {
   const now = new Date().toISOString();
   let changed = false;
   if (p.remarks !== null) {
@@ -513,8 +582,11 @@ type Tally = { written: SinopacApplyResult["written"]; filled: number; failures:
 async function applyLine(db: Db, orgId: string, p: PlannedLine, userId: string | null, t: Tally): Promise<void> {
   switch (p.decision) {
     case "match": {
-      if (await fillTransaction(db, orgId, p)) t.filled += 1;
-      if (await recordLine(db, lineRecord(orgId, p, "matched", userId, p.transactionId as number, null))) {
+      for (const id of p.transactionIds ?? [p.transactionId as number]) {
+        if (await fillTransaction(db, orgId, p, id)) t.filled += 1;
+      }
+      const note = p.transactionIds ? "一對多：" + p.transactionIds.map((id) => "#" + id).join("、") : null;
+      if (await recordLine(db, lineRecord(orgId, p, "matched", userId, p.transactionId as number, note))) {
         t.written.matched += 1;
       }
       return;
@@ -546,7 +618,7 @@ async function applyLine(db: Db, orgId: string, p: PlannedLine, userId: string |
       return;
     }
     default:
-      return; // duplicate：什麼都不做
+      return; // duplicate、near_match：什麼都不做（near_match 等人確認，下次重匯會再判斷）
   }
 }
 
@@ -561,9 +633,9 @@ export async function applySinopacImport(
   orgId: string,
   parsed: SinopacParseResult,
   accountMap: Readonly<Record<string, number>>,
-  opts: { userId: string | null; log?: (summary: string) => Promise<unknown> },
+  opts: PlanOptions & { userId: string | null; log?: (summary: string) => Promise<unknown> },
 ): Promise<SinopacApplyResult> {
-  const plan = await planSinopacImport(db, orgId, parsed, accountMap);
+  const plan = await planSinopacImport(db, orgId, parsed, accountMap, { skipUnmatched: opts.skipUnmatched });
   const tally: Tally = { written: { matched: 0, created: 0, correctionPair: 0, skipped: 0 }, filled: 0, failures: [] };
   for (const p of plan.lines) {
     try {
@@ -575,7 +647,8 @@ export async function applySinopacImport(
   if (opts.log) {
     const w = tally.written;
     const failed = tally.failures.length ? "、失敗 " + tally.failures.length : "";
-    const summary = `永豐明細匯入：配對補備註 ${w.matched}、新建待確認 ${w.created}、沖正抵銷 ${w.correctionPair}、略過 ${w.skipped}、已匯入過 ${plan.counts.duplicate}${failed}`;
+    const near = plan.counts.nearMatch ? "、金額差一點待確認 " + plan.counts.nearMatch : "";
+    const summary = `永豐明細匯入：配對補備註 ${w.matched}、新建待確認 ${w.created}、沖正抵銷 ${w.correctionPair}、略過 ${w.skipped}、已匯入過 ${plan.counts.duplicate}${near}${failed}`;
     try {
       await opts.log(summary);
     } catch {

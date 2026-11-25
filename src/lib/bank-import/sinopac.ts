@@ -542,6 +542,8 @@ export type MatchCandidate = {
   fromAccountId: number | null;
   toAccountId: number | null;
   bankRef: string | null;
+  /** 交易對象（一對多比對時，同對象的一組交易優先）。 */
+  partyId?: number | null;
 };
 
 function dayDiff(a: string, b: string): number {
@@ -555,9 +557,15 @@ function dayDiff(a: string, b: string): number {
  * 回傳日期差（天，絕對值）；不行回傳 null。
  */
 export function candidateGap(line: MatchLine, c: MatchCandidate, claimed: ReadonlySet<number>): number | null {
+  if (toCents(c.amount) !== line.cents) return null;
+  return windowGap(line, c, claimed);
+}
+
+/** candidateGap 不看金額的那一半：方向、幣別、參考號、日期窗、還沒被認領。 */
+export function windowGap(line: MatchLine, c: MatchCandidate, claimed: ReadonlySet<number>): number | null {
   if (claimed.has(c.id)) return null;
   const sideOk = line.direction === "out" ? c.fromAccountId === line.bankAccountId : c.toAccountId === line.bankAccountId;
-  if (!sideOk || c.currency !== line.currency || toCents(c.amount) !== line.cents) return null;
+  if (!sideOk || c.currency !== line.currency) return null;
   const existingRef = c.bankRef?.trim() || null;
   if (existingRef && existingRef !== line.ref) return null;
   const gap = Math.abs(dayDiff(c.txnDate, line.date));
@@ -597,6 +605,118 @@ export function matchStatementLines(
     out.set(lines[e.li].key, e.cand.id);
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// 一對多：銀行一筆 = 系統好幾筆（例如一次匯款還好幾筆代墊）
+// ---------------------------------------------------------------------------
+
+/** 一對多比對最多看幾筆候選（日期最近的優先），避免組合爆炸。 */
+export const MULTI_MATCH_MAX_CANDIDATES = 30;
+
+/** 子集合加總的金額上限（以所有金額的最大公因數為單位），超過就不試，免得陣列太大。 */
+const SUBSET_MAX_UNITS = 5_000_000;
+
+function gcd(a: number, b: number): number {
+  let x = a;
+  let y = b;
+  while (y) [x, y] = [y, x % y];
+  return x;
+}
+
+/**
+ * 加總剛好等於 target 的子集合（金額單位：分）。**只在恰好一種組合時回傳**（索引，由小到大）；
+ * 沒有、或有兩種以上組合（無法判斷是哪幾筆）都回 null。
+ * 做法：以最大公因數縮小單位後做 0/1 背包計數（計數到 2 就停），唯一時沿著第一次到達的路徑倒推。
+ */
+export function uniqueSubsetSum(amounts: readonly number[], target: number): number[] | null {
+  if (target <= 0 || amounts.length === 0) return null;
+  const g = amounts.reduce((acc, a) => gcd(acc, a), target);
+  const units = target / g;
+  if (units > SUBSET_MAX_UNITS || amounts.some((a) => a <= 0)) return null;
+  const count = new Uint8Array(units + 1);
+  const from = new Int16Array(units + 1).fill(-1);
+  count[0] = 1;
+  amounts.forEach((raw, i) => {
+    const a = raw / g;
+    for (let s = units; s >= a; s -= 1) {
+      if (count[s - a] === 0) continue;
+      if (count[s] === 0) from[s] = i;
+      count[s] = Math.min(2, count[s] + count[s - a]);
+    }
+  });
+  if (count[units] !== 1) return null;
+  const picked: number[] = [];
+  for (let s = units; s > 0; s -= amounts[from[s]] / g) picked.push(from[s]);
+  return picked.sort((a, b) => a - b);
+}
+
+/**
+ * 一對多：還沒配上的一行，在 ±3 天、同方向、同幣別、還沒被認領的交易裡找「幾筆加起來剛好等於它」。
+ * 1. 先看自然的一組：同一天的、同一個對象的（兩筆以上）全部加起來剛好相等 → 就是它們（只有一組符合才算）。
+ * 2. 再對日期最近的 MULTI_MATCH_MAX_CANDIDATES 筆做子集合加總，**只有唯一一種組合才算**：
+ *    候選一多，總有某幾筆碰巧湊得出同一個數字，不唯一就不猜，留給人看。
+ * 回傳交易 id（兩筆以上）；找不到回 null。
+ */
+export function findMultiMatch(
+  line: MatchLine,
+  candidates: readonly MatchCandidate[],
+  claimed: ReadonlySet<number>,
+): number[] | null {
+  const pool = candidates
+    .map((c) => ({ c, gap: windowGap(line, c, claimed), cents: toCents(c.amount) }))
+    .filter((x): x is { c: MatchCandidate; gap: number; cents: number } => x.gap !== null && x.cents > 0 && x.cents < line.cents)
+    .sort((a, b) => a.gap - b.gap || a.c.id - b.c.id);
+  if (pool.length < 2) return null;
+
+  const groups = new Map<string, typeof pool>();
+  for (const x of pool) {
+    for (const k of [`d:${x.c.txnDate}`, x.c.partyId ? `p:${x.c.partyId}` : null]) {
+      if (k) groups.set(k, [...(groups.get(k) ?? []), x]);
+    }
+  }
+  const natural = new Map<string, number[]>();
+  for (const g of groups.values()) {
+    if (g.length < 2 || g.reduce((sum, x) => sum + x.cents, 0) !== line.cents) continue;
+    const ids = g.map((x) => x.c.id).sort((a, b) => a - b);
+    natural.set(ids.join(","), ids);
+  }
+  if (natural.size === 1) return [...natural.values()][0];
+  if (natural.size > 1) return null;
+
+  const top = pool.slice(0, MULTI_MATCH_MAX_CANDIDATES);
+  const picked = uniqueSubsetSum(top.map((x) => x.cents), line.cents);
+  if (!picked || picked.length < 2) return null;
+  return picked.map((i) => top[i].c.id).sort((a, b) => a - b);
+}
+
+// ---------------------------------------------------------------------------
+// 金額差一點：可能是同一筆、只是記錯金額
+// ---------------------------------------------------------------------------
+
+/** 金額相差在這個比例以內（且不為零）算「可能是同一筆」。 */
+export const NEAR_MATCH_RATIO = 0.01;
+
+/**
+ * 還沒配上的一行：±3 天、同方向、同幣別、還沒被認領、金額差在 1% 以內的交易，差最少的那筆。
+ * 只是提示，不會自動配對，也不會因此新建交易。
+ */
+export function findNearMatch(
+  line: MatchLine,
+  candidates: readonly MatchCandidate[],
+  claimed: ReadonlySet<number>,
+): { id: number; amount: string } | null {
+  let best: { c: MatchCandidate; diff: number; gap: number } | null = null;
+  for (const c of candidates) {
+    const gap = windowGap(line, c, claimed);
+    if (gap === null) continue;
+    const diff = Math.abs(toCents(c.amount) - line.cents);
+    if (diff === 0 || diff > line.cents * NEAR_MATCH_RATIO) continue;
+    if (!best || diff < best.diff || (diff === best.diff && (gap < best.gap || (gap === best.gap && c.id < best.c.id)))) {
+      best = { c, diff, gap };
+    }
+  }
+  return best ? { id: best.c.id, amount: best.c.amount } : null;
 }
 
 /** 新建交易的說明：備註原文，沒有備註就寫「永豐明細」。 */
