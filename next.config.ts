@@ -151,7 +151,18 @@ const MOVED_TO_DASHBOARD = [
   "transactions",
 ] as const;
 
+/**
+ * 這次 build 的版本號：Cloudflare Workers Builds 給 commit SHA，其他環境（本機、Docker）用
+ * build 當下的時間。寫進 client（NEXT_PUBLIC_APP_VERSION）與 /api/version，開著舊頁面的人
+ * 比對到不一樣就提示重新整理（src/components/version-watcher.tsx）。
+ */
+const APP_VERSION =
+  process.env.WORKERS_CI_COMMIT_SHA?.slice(0, 12) ||
+  process.env.GITHUB_SHA?.slice(0, 12) ||
+  `t${Date.now().toString(36)}`;
+
 const nextConfig: NextConfig = {
+  env: { NEXT_PUBLIC_APP_VERSION: APP_VERSION },
   // Production/OpenNext builds use a separate dist dir (NEXT_DIST_DIR=.next-prod)
   // so they never clobber the `.next` that `next dev` is actively using.
   distDir: process.env.NEXT_DIST_DIR || ".next",

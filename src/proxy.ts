@@ -88,6 +88,6 @@ function usageRequestHeaders(request: NextRequest): Headers {
 // 那頁要的是真的去查 session 與 credential account。
 export const config = {
   matcher: [
-    "/((?!login|signup|forgot-password|reset-password|landing|privacy|terms|flags|line/|api/auth|api/cron|api/channels|api/simpany-tax-uploads|api/v1|mcp|.well-known|_next/static|_next/image|favicon.ico).*)",
+    "/((?!login|signup|forgot-password|reset-password|landing|privacy|terms|flags|line/|api/auth|api/version|api/cron|api/channels|api/simpany-tax-uploads|api/v1|mcp|.well-known|_next/static|_next/image|favicon.ico).*)",
   ],
 };

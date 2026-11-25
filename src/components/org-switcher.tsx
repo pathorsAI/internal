@@ -66,6 +66,8 @@ export function OrgSwitcher({
       }
       // force-dynamic 的頁面要重新由 server 產出才會換成新組織的資料。
       router.refresh();
+      const name = orgs.find((o) => o.id === organizationId)?.name;
+      if (name) toast.success(t("orgSwitcher.toast.switched", { name }));
     });
   }
 

@@ -3,7 +3,8 @@ import { Inter, Noto_Sans_TC, Geist_Mono } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getTranslations } from "next-intl/server";
 import "./globals.css";
-import { Toaster } from "@/components/ui/sonner";
+import { AppToaster } from "@/components/app-toaster";
+import { VersionWatcher } from "@/components/version-watcher";
 import { LOCALES, type Locale } from "@/i18n/config";
 
 // 拉丁字與數字用 Inter，中文用 Noto Sans TC；兩套都由 next/font 在 build 時抓下來自架，
@@ -57,7 +58,8 @@ export default async function RootLayout({
       <body className="min-h-full flex flex-col">
         <NextIntlClientProvider>
           {children}
-          <Toaster />
+          <AppToaster />
+          <VersionWatcher />
         </NextIntlClientProvider>
       </body>
     </html>
