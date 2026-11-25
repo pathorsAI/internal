@@ -34,7 +34,9 @@ export function decodeBase64Content(raw: string, maxBytes = CHAT_MEDIA_MAX_BYTES
     throw new Error('"contentBase64" is not valid base64 (standard alphabet A-Z a-z 0-9 + /, optional = padding).');
   }
   const padded = body + "=".repeat((4 - (body.length % 4)) % 4);
-  const padding = padded.length - padded.replace(/=+$/, "").length;
+  // 結尾的 = 最多兩個（BASE64_RE 已保證），直接數，不用 regex。
+  let padding = 0;
+  while (padding < 2 && padded[padded.length - 1 - padding] === "=") padding++;
   const estimated = (padded.length / 4) * 3 - padding;
   if (estimated > maxBytes) {
     throw new Error(`File is too large (${estimated} bytes); the limit is ${MAX_MB} MB.`);
