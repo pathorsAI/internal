@@ -53,7 +53,7 @@ type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 // 驗簽
 // ---------------------------------------------------------------------------
 
-export { verifyLineSignature };
+export { verifyLineSignature } from "./signature";
 
 // ---------------------------------------------------------------------------
 // 事件解析

@@ -65,7 +65,7 @@ export function whatsappChallenge(params: URLSearchParams, verifyToken: string):
   return params.get("hub.challenge");
 }
 
-export { verifyWhatsAppSignature };
+export { verifyWhatsAppSignature } from "./signature";
 
 // ---------------------------------------------------------------------------
 // 事件解析
