@@ -160,6 +160,10 @@ queue 不存在時 `wrangler deploy` 會失敗，所以要先建。Queues 包含
    - Basic settings：抄 Channel secret。
    - Messaging API：Issue 一個 long-lived Channel access token；抄 Bot basic ID。
    - Webhook URL：`https://internal.pathors.com/api/channels/line/webhook` → Verify（應該回 Success）→ 打開 Use webhook。
+     正式站這兩條 webhook 路徑由前哨 Worker `pathors-internal-webhook-ack` 接：驗簽後把原始 body 放進同一個佇列
+     （`kind: "raw"`）就回 200，主站的 queue() 重驗、去重、拆成 event job（主站冷啟動 1–4 秒，LINE 的 Verify 等不了）。
+     前哨要設跟主站同一組 `LINE_CHANNEL_SECRET`／`WHATSAPP_APP_SECRET`，換 secret 時兩邊一起換。
+     見 [deployment.md](deployment.md#webhook-front-pathors-internal-webhook-ack)。
    - 「Auto-reply messages」與「Greeting messages」關掉（在 Official Account Manager 的回應設定），
      不然 LINE 自己的自動回覆會跟 bot 搶著回。
    - 「Allow bot to join group chats」關掉（第一版不支援群組；就算被拉進去 bot 也會說「請私訊我」並離開）。
