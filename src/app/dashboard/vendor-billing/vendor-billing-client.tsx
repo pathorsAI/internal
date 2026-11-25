@@ -18,12 +18,13 @@ import type { MatchStatus } from "@/lib/vendor-billing/match";
 import type { BillingAccountRow, InvoiceRow, PaymentMethodRow } from "@/lib/vendor-billing/service";
 import { reconcileNowAction, syncNowAction } from "./actions";
 import { AccountSheet, type AccountSheetTarget } from "./account-sheet";
+import { CostBreakdownView } from "./cost-breakdown-view";
 import { AttentionBanner } from "./attention-banner";
 import { PaymentMethodSheet, type MethodSheetTarget } from "./payment-method-sheet";
 import { AccountsTable, InvoicesTable, MethodsTable } from "./tables";
 import type { BankAccountOption, MemberOption, Option } from "./shared";
 
-const VIEWS = ["accounts", "methods", "invoices"] as const;
+const VIEWS = ["accounts", "methods", "invoices", "costs"] as const;
 export type View = (typeof VIEWS)[number];
 
 const INVOICE_FILTERS = ["all", "pending", "done", "ignored"] as const;
@@ -210,6 +211,7 @@ export function VendorBillingClient({
     setView(next);
     router.replace(next === "accounts" ? pathname : `${pathname}?view=${next}`, { scroll: false });
   }
+  const isCosts = view === "costs";
 
   function openAccount(id: number, focusInvoices = false) {
     setAccountTarget((prev) => ({ mode: "edit", id, focusInvoices, nonce: (prev?.nonce ?? 0) + 1 }));
@@ -312,7 +314,9 @@ export function VendorBillingClient({
         ) : null}
       </div>
 
-      <ViewTable
+      {isCosts ? <CostBreakdownView /> : null}
+
+      {isCosts ? null : <ViewTable
         view={view}
         today={today}
         statuses={statuses}
@@ -321,7 +325,7 @@ export function VendorBillingClient({
         invoices={shownInvoices}
         onOpenAccount={openAccount}
         onOpenMethod={openMethod}
-      />
+      />}
 
       {accountTarget ? (
         <AccountSheet

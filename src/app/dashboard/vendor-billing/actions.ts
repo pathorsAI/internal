@@ -12,12 +12,17 @@ import {
   VendorBillingInputError,
   type InvoiceAction,
 } from "@/lib/vendor-billing/inputs";
+import { buildCostBreakdown, shiftMonth, type CostBreakdown } from "@/lib/vendor-billing/cost-breakdown";
 import { reconcileVendorInvoices } from "@/lib/vendor-billing/reconcile";
+import { taipeiToday } from "@/lib/vendor-billing/sync-plan";
 import {
   deleteBillingAccount,
   deletePaymentMethod,
   getBillingAccount,
+  listCostAccounts,
+  listCostLines,
   listLinkCandidates,
+  type CostAccountOption,
   resolveVendorInvoice,
   upsertBillingAccount,
   upsertPaymentMethod,
@@ -196,6 +201,35 @@ export async function reconcileNowAction(): Promise<VendorBillingActionState> {
       ok: true,
       message: [`自動綁定 ${r.matched}`, `建議 ${r.suggested}`, ...(r.created ? [`新建交易 ${r.created}`] : [])].join("、"),
     };
+  } catch (e) {
+    return { ok: false, error: errorMessage(e) };
+  }
+}
+
+export type CostBreakdownResult =
+  | { ok: true; accounts: CostAccountOption[]; accountId: number | null; currentMonth: string; breakdown: CostBreakdown | null }
+  | { ok: false; error: string };
+
+const TREND_MONTHS = 6;
+
+/**
+ * 花費明細：有費用資料的帳號清單 + 選定帳號、月份的彙總（近 6 個月趨勢、跟上個月比）。
+ * 讀取，任何成員都可以看。沒指定就取第一個帳號、它最新的月份。
+ */
+export async function costBreakdownAction(input: { accountId?: number | null; month?: string | null }): Promise<CostBreakdownResult> {
+  const { orgId } = await requireOrg();
+  try {
+    const accounts = await listCostAccounts(orgId);
+    const account = accounts.find((a) => a.id === Number(input.accountId)) ?? accounts[0];
+    const current = `${taipeiToday().slice(0, 7)}-01`;
+    if (!account) return { ok: true, accounts, accountId: null, currentMonth: current, breakdown: null };
+    // 預設看最近一個已經結束的月份（這個月還沒過完，跟上個月比會失真）；只有本月資料就看本月
+    const month =
+      input.month && account.months.includes(input.month)
+        ? input.month
+        : (account.months.find((m) => m < current) ?? account.months[0]);
+    const rows = await listCostLines(orgId, account.id, shiftMonth(month, -(TREND_MONTHS - 1)), month);
+    return { ok: true, accounts, accountId: account.id, currentMonth: current, breakdown: buildCostBreakdown(rows, month, { trendMonths: TREND_MONTHS }) };
   } catch (e) {
     return { ok: false, error: errorMessage(e) };
   }
