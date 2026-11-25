@@ -111,6 +111,48 @@ Two things worth knowing:
 Secrets set with `wrangler secret put` live on the Worker, not in the build, so
 they survive every Workers Builds deploy and do not need to be re-entered.
 
+### Cold starts and the webpack build
+
+Cloudflare spreads requests over many isolates, and on a low-traffic site most
+requests land on a fresh one. A fresh isolate has to load the whole Worker
+script before it can answer, so **script size is response time**. Measured on
+2026-11-25 (Singapore, via a route that returns a string without touching Next):
+
+| Build | Upload (gzip) | Cold request | Warm request |
+| --- | --- | --- | --- |
+| Turbopack (`next build`, the Next 16 default) | 56 MB (12 MB) | 2–4 s | 0.4 s |
+| webpack (`next build --webpack`) | 25 MB (5 MB) | 1–1.5 s | 0.4 s |
+
+Turbopack emits a separate server chunk group per route, so the shared server
+code (auth, DB, zod schemas…) is copied into dozens of chunks; webpack shares
+it. That is why `package.json`'s `build` script passes `--webpack`. `next dev`
+still uses Turbopack. Keep an eye on the upload size wrangler prints on deploy:
+if it creeps back up, every request gets slower.
+
+`placement.region` is not the cause: a tiny Worker with and without it sees the
+same spread over isolates and answers cold in ~0.35 s.
+
+### Webhook front (`pathors-internal-webhook-ack`)
+
+Even at 1–1.5 s a cold start is too slow for LINE's webhook Verify / test call,
+which times out. The two chat webhooks are therefore served by a separate,
+few-KB Worker in [`workers/webhook-ack/`](../workers/webhook-ack/index.ts): a
+Workers route on the same hostname (routes win over the Custom Domain) answers
+`200` immediately and forwards the untouched request to `pathors-internal`
+through a service binding inside `waitUntil`, retrying on 5xx. Signature
+checks, dedupe and enqueueing stay in the main app.
+
+It is not covered by Workers Builds. Deploy it by hand when `index.ts` or its
+`wrangler.jsonc` changes (it holds no secrets):
+
+```bash
+bunx wrangler deploy -c workers/webhook-ack/wrangler.jsonc
+```
+
+Self-hosting without it is fine: the webhooks still work, they are just as slow
+as any other cold request. Change the route patterns to your own hostname, or
+skip this Worker.
+
 ### Secrets
 
 Local dev reads `.env.local`. For the deployed Worker, set secrets with wrangler
