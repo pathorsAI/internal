@@ -26,6 +26,7 @@ const READ_ONLY_PATHS: readonly RegExp[] = [
   /^\/v2\/profiles$/,
   /^\/v4\/profiles\/\d+\/balances$/,
   /^\/v1\/profiles\/\d+\/balance-statements\/\d+\/statement\.json$/,
+  /^\/v1\/rates$/,
 ];
 
 /** 對帳單單次查詢上限是 469 天；我們一律按月切，遠低於上限。 */
@@ -207,7 +208,11 @@ export type WiseClient = {
     start: string,
     end: string,
   ): Promise<WiseStatement>;
+  /** 每日匯率（總帳換算用）。from / to 是 ISO 8601 時間點。 */
+  getDailyRates(source: string, target: string, from: string, to: string): Promise<WiseRate[]>;
 };
+
+export type WiseRate = { rate: number; source: string; target: string; time: string };
 
 function makeClient(token: string): WiseClient {
   return {
@@ -222,6 +227,8 @@ function makeClient(token: string): WiseClient {
         `/v1/profiles/${Math.trunc(profileId)}/balance-statements/${Math.trunc(balanceId)}/statement.json`,
         { currency, intervalStart: start, intervalEnd: end, type: "COMPACT" },
       ),
+    getDailyRates: (source, target, from, to) =>
+      wiseGet<WiseRate[]>(token, "/v1/rates", { source, target, from, to, group: "day" }),
   };
 }
 

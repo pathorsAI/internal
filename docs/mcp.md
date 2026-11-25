@@ -272,6 +272,18 @@ carry month-over-month change and `isNew` (first expense ever falls in the
 window). The shaping is the same pure function the page uses
 (`src/lib/spend-trend.ts`).
 
+**Financial statements (財務報表, see `docs/general-ledger.md`)** — read-only, computed on
+the fly by `src/lib/ledger` from transactions and invoices, the same functions behind 報表 >
+財務報表 and its Excel export. `get_financial_statement` (`report`: `balance_sheet` |
+`income_statement` | `cash_flow` | `equity_changes` | `trial_balance`; `ledger`: `government`
+政府帳 (default) | `management` 管理帳; `from?`, `to?` / `as_of?` — defaults to the start of the
+fiscal year through today; `compare_from?` / `compare_to?` adds a comparison column) returns the
+rows with zh-TW names plus the ledger checks. `list_ledger_review_items` (`as_of?`) lists the data
+problems behind the books (uncategorized, missing / estimated FX, unlinked invoices, receivables
+not settled, 股東往來 plugs on the government ledger, …) with the source id to fix them.
+`get_vat_report` (`year`) gives one row per filing period (bi-monthly 401 or quarterly small-scale)
+with invoice-side and ledger-side figures side by side.
+
 **Accounting master data** — parties: `list_parties`/`get_party`/`create_party`/
 `update_party`/`delete_party`/`merge_parties`; categories: `list_categories`/`create_category`/
 `update_category`/`delete_category`; bank accounts: `list_bank_accounts`/

@@ -21,6 +21,7 @@ import {
   CalendarClock,
   Receipt,
   BarChart3,
+  BookOpenCheck,
   UserCog,
   Settings,
   Plug,
@@ -72,6 +73,13 @@ export type NavItemKey =
   | "invoices"
   | "reports"
   | "spendAnalysis"
+  | "ledger"
+  | "ledgerAssets"
+  | "ledgerPeriods"
+  | "ledgerFx"
+  | "financialStatements"
+  | "statementsPrint"
+  | "accountingSettings"
   | "invoiceReconcile"
   | "employees"
   | "payroll"
@@ -108,6 +116,7 @@ const clients = [
   { key: "contracts", href: "/dashboard/contracts", icon: FileSignature },
   { key: "invoices", href: "/dashboard/invoices", icon: Receipt },
   { key: "reports", href: "/dashboard/reports", icon: BarChart3 },
+  { key: "ledger", href: "/dashboard/accounting", icon: BookOpenCheck },
 ] as const satisfies { key: NavItemKey; href: string; icon: typeof LayoutDashboard }[];
 
 const hr = [
