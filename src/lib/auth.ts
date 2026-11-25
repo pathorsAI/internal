@@ -1,3 +1,5 @@
+// 必須在 better-auth 之前：先把它的 AsyncLocalStorage 建好，見檔內說明。
+import "@/lib/better-auth-als";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware } from "better-auth/api";
