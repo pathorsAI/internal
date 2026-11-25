@@ -57,6 +57,7 @@ const routeKeys: Record<string, NavItemKey> = {
   "/dashboard/settings/integrations": "integrations",
   "/dashboard/settings/chat": "chatAccounts",
   "/dashboard/settings/accounting": "accountingSettings",
+  "/dashboard/settings/usage": "featureUsage",
 };
 
 export function HeaderBreadcrumb() {

@@ -26,6 +26,7 @@ import employees from "./employees";
 import payroll from "./payroll";
 import members from "./members";
 import activity from "./activity";
+import usage from "./usage";
 import settings from "./settings";
 import integrations from "./integrations";
 import wise from "./wise";
@@ -63,6 +64,7 @@ const catalogue = {
   payroll,
   members,
   activity,
+  usage,
   settings,
   integrations,
   wise,

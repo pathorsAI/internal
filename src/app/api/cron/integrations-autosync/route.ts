@@ -2,6 +2,7 @@ import { consumeCronToken, CRON_TOKEN_HEADER } from "@/lib/cron-token";
 import { runScheduledSync } from "@/lib/integrations/autosync";
 import { runBillingNotifications } from "@/lib/billing-notify";
 import { runChatCleanup, type ChatCleanupResult } from "@/lib/chat-cleanup";
+import { purgeOldUsageEvents } from "@/lib/usage/record";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,9 @@ export const dynamic = "force-dynamic";
  * 最後做聊天 bot 的清理（src/lib/chat-cleanup.ts：收件匣 30 天、去重 7 天、暫存 7 天、
  * 引用對照 90 天、過期卡片）。清理在同步與通知之後、自己接住所有錯誤，失敗只寫進回應，
  * 不影響同步結果，也不改變回應的狀態碼。
+ *
+ * 功能使用紀錄（usage_events，src/lib/usage/record.ts）也在這裡清：刪掉 180 天以前的資料，
+ * 一樣自己接住錯誤（例如 migration 0047 還沒跑、表不存在）。
  */
 export async function POST(request: Request): Promise<Response> {
   if (!consumeCronToken(request.headers.get(CRON_TOKEN_HEADER))) {
@@ -36,10 +40,24 @@ export async function POST(request: Request): Promise<Response> {
     console.error(`[cron] billing notifications failed: ${notificationsError}`);
   }
   const chatCleanup = await safeChatCleanup();
+  const usageCleanup = await safeUsageCleanup();
   if (notificationsError !== null) {
-    return Response.json({ ...result, notifications: null, notificationsError, chatCleanup }, { status: 500 });
+    return Response.json(
+      { ...result, notifications: null, notificationsError, chatCleanup, usageCleanup },
+      { status: 500 },
+    );
   }
-  return Response.json({ ...result, notifications, chatCleanup });
+  return Response.json({ ...result, notifications, chatCleanup, usageCleanup });
+}
+
+async function safeUsageCleanup(): Promise<{ deleted: number } | { error: string }> {
+  try {
+    return await purgeOldUsageEvents();
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    console.error(`[cron] usage cleanup failed: ${error}`);
+    return { error };
+  }
 }
 
 /** runChatCleanup 本身已逐項接住錯誤；這裡再包一層，連 import 階段的意外都不外漏。 */
