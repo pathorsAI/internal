@@ -62,6 +62,7 @@ const common = {
       integrations: { "zh-TW": "整合", en: "Integrations" },
       chatAccounts: { "zh-TW": "聊天帳號", en: "Chat accounts" },
       aiRules: { "zh-TW": "規則", en: "Rules" },
+      featureUsage: { "zh-TW": "功能使用狀況", en: "Feature usage" },
       settings: { "zh-TW": "組織設定", en: "Organization settings" },
     },
   },

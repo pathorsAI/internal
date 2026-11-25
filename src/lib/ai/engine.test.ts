@@ -195,6 +195,11 @@ describe("runModelLoop", () => {
     expect(h.ran[1].args).toEqual({ amount: 3000, organizationId: "org_1" });
     expect(h.rows.find((r) => r.toolCallId === "w1")?.status).toBe("ok");
     expect(h.rows.at(-1)?.content).toBe("已記帳");
+    // 寫入成功的 tool_done 帶實際執行的工具、參數與那一列的 id（聊天的收據卡用）。
+    const done = h.events.find((e) => e.t === "tool_done" && e.id === "w1" && e.status === "ok");
+    expect(done).toMatchObject({
+      done: { name: "create_transaction", args: { amount: 3000, organizationId: "org_1" }, recordId: 42 },
+    });
 
     // 第二次按確認不會再執行
     await resolveConfirmation(h.ctx, "w1", true);

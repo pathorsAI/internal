@@ -759,6 +759,27 @@ export const entityChanges = pgTable("entity_changes", {
 	check("chk_entity_change_op", sql`op = ANY (ARRAY['insert'::text, 'update'::text, 'delete'::text])`),
 ]);
 
+// ---- 功能使用紀錄（migrations/0047，docs/usage-tracking.md）。
+// 頁面載入與工具呼叫的用量統計，跟稽核用的 activity_log 分開；保留 180 天。----
+export const usageEvents = pgTable("usage_events", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "usage_events_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id"),
+	userId: text("user_id"),
+	kind: text().notNull(),
+	channel: text().notNull(),
+	feature: text().notNull(),
+	ok: boolean(),
+	durationMs: integer("duration_ms"),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_usage_org_time").using("btree", table.organizationId.asc().nullsLast(), table.createdAt.desc()),
+	index("idx_usage_user_time").using("btree", table.userId.asc().nullsLast(), table.createdAt.desc()),
+	index("idx_usage_time").using("btree", table.createdAt.asc()),
+	check("chk_usage_kind", sql`kind = ANY (ARRAY['page'::text, 'tool'::text])`),
+	check("chk_usage_channel", sql`channel = ANY (ARRAY['web'::text, 'mcp'::text, 'api'::text, 'ai'::text, 'line'::text, 'whatsapp'::text])`),
+	check("chk_usage_feature_len", sql`char_length(feature) <= 200`),
+]);
+
 // ---- Google 日曆同步（migrations/0018）。
 // 事件寫進 Google 之後提醒由 Google 自己發，所以本專案沒有、也不需要 cron。----
 

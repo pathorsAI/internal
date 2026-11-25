@@ -673,3 +673,31 @@
     transform: scaleX(1);
   }
 }
+
+
+/* ── 側欄捲動：細捲軸＋上下漸層提示（data-fade-* 由 app-sidebar.tsx 依捲動位置設定） ── */
+.sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  --fade: 28px;
+  transition: scrollbar-color var(--dur-2, 200ms);
+}
+.sidebar-scroll:hover,
+.sidebar-scroll:focus-within {
+  scrollbar-color: color-mix(in oklab, var(--muted-foreground) 45%, transparent) transparent;
+}
+.sidebar-scroll::-webkit-scrollbar { width: 6px; }
+.sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
+.sidebar-scroll::-webkit-scrollbar-thumb { background: transparent; border-radius: 999px; }
+.sidebar-scroll:hover::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--muted-foreground) 45%, transparent);
+}
+.sidebar-scroll[data-fade-bottom="true"] {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), transparent);
+}
+.sidebar-scroll[data-fade-top="true"] {
+  mask-image: linear-gradient(to bottom, transparent, #000 var(--fade));
+}
+.sidebar-scroll[data-fade-top="true"][data-fade-bottom="true"] {
+  mask-image: linear-gradient(to bottom, transparent, #000 var(--fade), #000 calc(100% - var(--fade)), transparent);
+}

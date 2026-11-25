@@ -37,7 +37,8 @@ dispatcher.handleFlush（安靜幾秒後）
    整則就是指令 → 切換組織／新對話／解除綁定／說明／綁定
    解析引用（被引用的文字放最前面、檔案帶進附件、還開著的確認卡當成修改）
    每題重查角色（getOrgRole）→ runTurn（channel = line／whatsapp）
-   → 最終文字（Markdown 轉純文字、[[選項：…]] 轉快速選項）＋待確認的寫入變成確認卡（chat_cards）
+   → 最終文字（Markdown 轉純文字、[[選項：…]] 轉快速選項；LINE 另把表格、站內連結拆成 Flex）
+     ＋待確認的寫入變成確認卡（chat_cards）
    放鎖；暫存區還有訊息就 2 秒後再 flush
 ```
 
@@ -66,6 +67,41 @@ Workers 的 waitUntil 在回應送出後只保證 30 秒，照片要等 10 秒�
 卡上寫組織名、操作人、規則提示（ruleHint）；帳號類欄位與文字裡 10 碼以上的長串數字遮成末四碼。
 只有開卡的那個人能按；按的時候再查一次角色；同一張卡按兩次只執行一次；卡 24 小時後過期；
 問新的一題時舊卡一律收掉。「修改」= 取消那張卡並回「要改哪裡？」，使用者直接打字，AI 重出一張。
+
+### 回覆的呈現（LINE Flex）
+
+LINE 的 adapter 宣告 `richReplies`，AI 的回覆會拆開來畫；WhatsApp 沒有 Flex，照舊一則純文字。
+
+| 種類（`OutboundMessage.type`） | LINE | WhatsApp |
+|---|---|---|
+| `help` 說明卡組（「說明」指令、綁定成功之後） | carousel 四張：hero 圖 `/line/help-1..4.png`（1040×676，20:13）、粗體標題、一兩行內文、footer 按鈕（message action 送出那段字；「規則頁」是 uri） | 四則 image（`link`＋caption 寫標題與內文），最後一則文字列出指令 |
+| `table` AI 回覆裡的 Markdown 表格 | bubble：可選標題（表格正上方的 `###` 或整行粗體）、表頭、每列一個水平 box（第一欄 flex 3 靠左、其他 flex 2，數字欄靠右），最多 12 列，多的寫「還有 N 筆」 | 「欄：值」文字（跟以前一樣） |
+| `links` 指向 internal 的 Markdown 連結 | 文字裡只留連結的字，同一則回覆最後附一個小 bubble，footer 最多 3 顆 uri 按鈕（字 ≤ 20）；外部連結、第 4 個以後照舊寫網址 | 文字網址（跟以前一樣） |
+| `done` 確認卡按確認、寫入成功 | 收據 bubble：標題（已記帳／已提交代墊／已記錄還款…）、日期／金額／對象／分類、「在 internal 查看」連到 `/dashboard/transactions?ids=<id>`；多筆用 carousel。AI 的文字接在後面 | 同內容的文字 |
+| `orgPicker` 切換組織 | bubble，每個組織一顆 postback 按鈕，目前的那個標「目前」 | 跟以前一樣（≤ 3 個按鈕、更多用 list） |
+
+收據卡的資料來自引擎：確認後寫入成功的 `tool_done` 事件多帶 `done: { name, args, recordId }`（實際執行的工具、
+參數、結果那一列的 id），網頁不用。
+
+LINE 的限制都在 `line.ts` 守住：每個 bubble ≤ 30 KB（超過就少畫幾列）、carousel ≤ 12 張且 ≤ 50 KB、
+altText 必填且 ≤ 400 字、按鈕字 ≤ 20 字、uri 一律是 `appBaseUrl()` 組出的絕對網址。一次 reply 最多 5 則：
+相鄰的純文字先併成一則，還是超過的部分改 push（算則數）。顏色只用品牌藍 `#1469D4`、文字 `#1A1A1A`／`#6B6B6B`。
+
+圖片放 `public/line/`，`src/proxy.ts` 的 matcher 排除了 `/line/`，LINE／Meta 的伺服器不登入也抓得到。
+
+### Rich menu
+
+聊天室下方常駐的六格選單由 `scripts/line-rich-menu.ts` 建：圖 `public/line/rich-menu.png`（2500×843、
+兩列各三格、≤ 1 MB），六格依序是說明、我的代墊、本月支出、切換組織、新對話（都是 message action，點了等於打那段字）
+與開啟 internal（uri `https://internal.pathors.com/dashboard`），chatBarText「選單」。
+
+```bash
+bun scripts/line-rich-menu.ts --dry-run       # 只印 JSON，不打 API
+LINE_CHANNEL_ACCESS_TOKEN=… bun scripts/line-rich-menu.ts
+```
+
+腳本先 validate、建新的、傳圖、設成所有人的預設選單，最後才刪掉其他同名（`pathors-internal-main`）的舊選單，
+所以重跑是冪等的、中途失敗也不會讓大家沒有選單。換圖或改動作就改腳本再跑一次。
 
 ### 回覆（引用）前面的訊息
 
@@ -133,6 +169,7 @@ queue 不存在時 `wrangler deploy` 會失敗，所以要先建。Queues 包含
    - 「Allow bot to join group chats」關掉（第一版不支援群組；就算被拉進去 bot 也會說「請私訊我」並離開）。
 4. 設好三個 secret、部署。
 5. 到 internal → 個人設定 → 聊天帳號 → LINE → 產生綁定碼，點連結加好友，送出預填的「綁定 123456」。
+6. 跑 `scripts/line-rich-menu.ts` 建下方選單（見上面「Rich menu」）。
 
 ## Meta（WhatsApp Cloud API）後台
 

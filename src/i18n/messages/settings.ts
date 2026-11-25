@@ -11,6 +11,7 @@ const settings = {
     mcp: { "zh-TW": "MCP", en: "MCP" },
     api: { "zh-TW": "API", en: "API" },
     chat: { "zh-TW": "聊天帳號", en: "Chat accounts" },
+    usage: { "zh-TW": "功能使用狀況", en: "Feature usage" },
   },
   org: {
     title: { "zh-TW": "基本資料", en: "Basic info" },

@@ -62,13 +62,27 @@ export type UiMessage =
 
 export type UiConversation = { id: string; title: string; updatedAt: string; channel?: ChatChannel };
 
+/** 確認後寫入成功的那支工具（見 ChatEvent 的 tool_done.done）。 */
+export type ToolDoneInfo = { name: string; args: Record<string, unknown>; recordId?: number };
+
 /** /api/ai/chat 回應是一行一個 JSON（NDJSON）的這些事件。 */
 export type ChatEvent =
   | { t: "conv"; id: string; title: string }
   | { t: "msg"; id: string }
   | { t: "text"; d: string }
   | { t: "tool"; call: UiToolCall }
-  | { t: "tool_done"; id: string; status: UiToolStatus; error?: string; activityId?: number }
+  | {
+      t: "tool_done";
+      id: string;
+      status: UiToolStatus;
+      error?: string;
+      activityId?: number;
+      /**
+       * 確認卡按下確認、寫入成功時才帶：實際執行的工具與參數、寫進去那一列的 id（結果有數字 `id` 才有）。
+       * 聊天入口拿來畫「已記帳」收據卡；網頁不用。
+       */
+      done?: ToolDoneInfo;
+    }
   | { t: "error"; code: ChatErrorCode; message?: string }
   | { t: "done" };
 

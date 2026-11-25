@@ -12,7 +12,10 @@
  *   → 搶「這個人正在跑一題」的鎖，搶不到 5 秒後重排
  *   → 取出所有未用的訊息合成一題；整則就是指令（切換組織、新對話、解除綁定、說明、綁定）就當指令
  *   → 解析引用（被引用的文字放最前面、被引用的檔案帶進附件、被引用的確認卡當成修改）
- *   → runTurn → 最終文字（`[[選項：…]]` 拆成快速選項）＋待確認的寫入變成確認卡
+ *   → runTurn → 最終文字（`[[選項：…]]` 拆成快速選項；LINE 另把表格、站內連結拆成 Flex）＋待確認的寫入變成確認卡
+ *
+ * 確認卡按下確認、寫入成功：先回收據卡（已記帳＋重點＋「在 internal 查看」），再送 AI 的文字。
+ * 「說明」與綁定成功之後送說明卡組。
  *   → 放鎖；暫存區還有訊息就 2 秒後再 flush 一次
  */
 import {
@@ -29,12 +32,14 @@ import {
 import type { Locale } from "@/i18n/config";
 import { MAX_USER_MESSAGE_CHARS } from "@/lib/ai/config";
 import type { RunTurnParams, RunTurnResult } from "@/lib/ai/turn";
-import type { AttachmentRef, ChatEvent, UiToolCall } from "@/lib/ai/types";
+import type { AttachmentRef, ChatEvent, ToolDoneInfo, UiToolCall } from "@/lib/ai/types";
 import { parsePgTimestamp } from "@/lib/pg-time";
 import {
   batchCard,
   collectTurn,
-  replyToChat,
+  doneReceipt,
+  helpMessage,
+  replyToMessages,
   toConfirmCard,
   type TurnOutput,
 } from "./render";
@@ -46,6 +51,7 @@ import {
   type ChannelJob,
   type ChatProvider,
   type ConfirmCard,
+  type DoneReceipt,
   type InboundEvent,
   type OutboundMessage,
 } from "./types";
@@ -260,6 +266,11 @@ class Replier {
   text(text: string, conversationId?: string | null): Promise<void> {
     return this.send([{ type: "text", text }], conversationId);
   }
+
+  /** 這個平台畫得出表格、連結按鈕（LINE Flex）。 */
+  get rich(): boolean {
+    return this.adapter.richReplies === true;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -313,6 +324,13 @@ export async function handleEvent(event: InboundEvent, deps: DispatcherDeps): Pr
       return;
     case "text": {
       await recordIn(deps, event, identity, null);
+      // 整則就是指令（說明、切換組織、新對話、解除綁定…）：馬上處理，不進暫存區等合併。
+      // 回覆用這則事件自己的 reply token，不算推播則數。暫存區裡先前的訊息照原本的 flush 處理。
+      const command = event.quotedMessageId ? null : parseCommand(event.text);
+      if (command) {
+        await runCommand(command, identity, adapter, replier, s, deps);
+        return;
+      }
       const row = await deps.db.appendChatBuffer({
         identityId: identity.id,
         provider: event.provider,
@@ -444,7 +462,11 @@ async function bind(
     deps.directory.getOrgName(result.orgId),
   ]);
   // 網頁那頭的「兩邊都通知」：設定頁讀 chat_identities 就會看到已綁定，不需要另外推。
-  await replier.send([{ type: "text", text: s.linked(userName ?? "", orgName ?? "") }], null, false);
+  await replier.send(
+    [{ type: "text", text: s.linked(userName ?? "", orgName ?? "") }, helpMessage(s, deps.baseUrl, settingsUrl(deps))],
+    null,
+    false,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -767,19 +789,17 @@ type DeliverContext = {
   deps: DispatcherDeps;
   /** 接在模型文字與錯誤之後的固定訊息（「已取消」等）。 */
   extra?: readonly string[];
+  /** 確認後寫入成功的收據卡（放在最前面，AI 的文字接在後面）。 */
+  receipts?: readonly DoneReceipt[];
 };
 
 /** 一題的結果送出去：文字（含快速選項）＋確認卡（3 張以上多一張「全部確認」）。 */
 async function deliver(out: TurnOutput, ctx: DeliverContext): Promise<void> {
-  const { conversationId, identity, org, actorName, replier, s, locale, deps, extra = [] } = ctx;
+  const { conversationId, identity, org, actorName, replier, s, locale, deps, extra = [], receipts = [] } = ctx;
   const msgs: OutboundMessage[] = [];
+  if (receipts.length > 0) msgs.push({ type: "done", receipts: [...receipts] });
   const body = out.texts.join("\n\n");
-  if (body) {
-    const { text, quickReplies } = replyToChat(body, deps.baseUrl);
-    if (text || quickReplies.length > 0) {
-      msgs.push({ type: "text", text: text || s.emptyReply, ...(quickReplies.length > 0 ? { quickReplies } : {}) });
-    }
-  }
+  if (body) msgs.push(...replyToMessages(body, deps.baseUrl, replier.rich, s.emptyReply));
   const err = errorText(out.error, s);
   if (err) msgs.push({ type: "text", text: err });
   for (const line of extra) msgs.push({ type: "text", text: line });
@@ -877,7 +897,7 @@ async function runCommand(
       await deps.db.deleteChatIdentity(identity.id);
       return;
     case "help":
-      await replier.text(s.help(settingsUrl(deps)));
+      await replier.send([helpMessage(s, deps.baseUrl, settingsUrl(deps))]);
       return;
   }
 }
@@ -985,7 +1005,8 @@ async function runCardAction(
   }
 
   const out = collectTurn(events);
-  const extra = cardActionExtras(out, action, s);
+  const receipts = await receiptsFor(out, org, locale, deps);
+  const extra = cardActionExtras(out, action, s, receipts.length > 0);
   await deliver(out, {
     conversationId: card.conversationId,
     identity,
@@ -996,7 +1017,37 @@ async function runCardAction(
     locale,
     deps,
     extra,
+    receipts,
   });
+}
+
+/** 這次確認裡寫入成功的工具 → 收據卡（分類 id 換成名稱；查不到就不列分類）。 */
+async function receiptsFor(
+  out: TurnOutput,
+  org: OrgContext,
+  locale: Locale,
+  deps: DispatcherDeps,
+): Promise<DoneReceipt[]> {
+  const infos = out.results
+    .filter((r) => r.status === "ok" && r.done)
+    .map((r) => r.done as ToolDoneInfo);
+  const receipts: DoneReceipt[] = [];
+  for (const info of infos) {
+    receipts.push(doneReceipt(info, { locale, baseUrl: deps.baseUrl, categoryName: await categoryNameOf(info, org, deps) }));
+  }
+  return receipts;
+}
+
+async function categoryNameOf(info: ToolDoneInfo, org: OrgContext, deps: DispatcherDeps): Promise<string | null> {
+  const id = info.args.categoryId;
+  if (typeof id !== "number" || id <= 0 || !deps.directory.getCategoryName) return null;
+  const orgId = typeof info.args.organizationId === "string" ? info.args.organizationId : org.orgId;
+  try {
+    return await deps.directory.getCategoryName(orgId, id);
+  } catch (err) {
+    console.error("[channels] getCategoryName failed", err);
+    return null;
+  }
 }
 
 type CardAction = "confirm" | "edit" | "cancel" | "all";
@@ -1040,13 +1091,16 @@ async function confirmToolCalls(card: ChatCardRow, action: CardAction, run: Conf
   }
 }
 
-/** 模型沒說話時補的固定訊息：失敗原因、「已確認」、「請說要改什麼」、「已取消」。 */
-function cardActionExtras(out: TurnOutput, action: CardAction, s: BotStrings): string[] {
+/**
+ * 模型沒說話時補的固定訊息：失敗原因、「已確認」、「請說要改什麼」、「已取消」。
+ * 有收據卡時就不再補「好了。」（收據卡本身就是回覆）。
+ */
+function cardActionExtras(out: TurnOutput, action: CardAction, s: BotStrings, hasReceipts: boolean): string[] {
   const extra: string[] = [];
   if (out.texts.length === 0 && !out.error) {
     const failed = out.results.find((r) => r.status === "error");
     if (failed) extra.push(s.failed((failed.error ?? "").slice(0, 200)));
-    else if (action === "confirm" || action === "all") extra.push(s.emptyReply);
+    else if ((action === "confirm" || action === "all") && !hasReceipts) extra.push(s.emptyReply);
   }
   if (action === "edit") extra.push(s.editPrompt);
   else if (action === "cancel" && out.texts.length === 0) extra.push(s.cancelled);

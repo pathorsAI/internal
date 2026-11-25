@@ -4,6 +4,13 @@
  */
 import type { Locale } from "@/i18n/config";
 
+/** 說明卡的一張（圖片依順序是 /line/help-1.png … help-4.png）。按鈕：text 送出那段字、path 開 internal 的頁面。 */
+export type HelpCardCopy = {
+  title: string;
+  body: string;
+  buttons: ({ label: string; text: string } | { label: string; path: string })[];
+};
+
 export type BotStrings = {
   groupNotSupported: string;
   notLinked: (settingsUrl: string) => string;
@@ -21,7 +28,24 @@ export type BotStrings = {
   switched: (orgName: string) => string;
   newConversation: string;
   unlinked: string;
-  help: (settingsUrl: string) => string;
+  helpAltText: string;
+  helpCards: HelpCardCopy[];
+  /** WhatsApp 說明卡最後那則：指令清單。 */
+  helpCommands: (settingsUrl: string) => string;
+  /** LINE 連結 bubble 上那行小字。 */
+  linksTitle: string;
+  linksAltText: (labels: string) => string;
+  tableAltText: string;
+  moreTableRows: (n: number) => string;
+  currentOrg: string;
+  viewInInternal: string;
+  /** 寫入成功的收據卡標題（依工具）。 */
+  doneTitle: (toolName: string, fallback: string) => string;
+  doneRowDate: string;
+  doneRowAmount: string;
+  doneRowParty: string;
+  doneRowCategory: string;
+  doneRowDescription: string;
   unsupported: string;
   mediaTooLarge: (url: string) => string;
   mediaType: string;
@@ -57,7 +81,7 @@ const zh: BotStrings = {
   welcome: (url) =>
     `你好，我是 Pathors Internal 的帳務助理。先到 ${url} 產生綁定碼，再把「綁定 123456」傳給我就能開始用。`,
   welcomeBack: (user, org) => `${user} 你好，目前操作的是 ${org}。直接傳收據照片或打字問我。`,
-  linked: (user, org) => `已綁定 ${user} · ${org}。直接傳收據照片或打字問我；傳「說明」看我能做什麼。`,
+  linked: (user, org) => `已綁定 ${user} · ${org}。下面是我能幫你做的事，之後傳「說明」可以再看一次。`,
   bindInvalid: "綁定碼不對，請到 internal 重新產生一組。",
   bindExpired: "綁定碼過期了（10 分鐘內有效），請到 internal 重新產生一組。",
   bindUsed: "這組綁定碼已經用過了，請到 internal 重新產生一組。",
@@ -69,15 +93,51 @@ const zh: BotStrings = {
   switched: (org) => `已切換到 ${org}。`,
   newConversation: "好，開一段新對話。",
   unlinked: "已解除綁定。之後要用請到 internal 重新綁定。",
-  help: (url) =>
-    [
-      "直接傳收據、發票、匯款水單的照片或 PDF，或打字問我帳務的事。寫入前都會先給你一張確認卡。",
-      "指令：",
-      "・切換組織",
-      "・新對話",
-      "・解除綁定",
-      `設定：${url}`,
-    ].join("\n"),
+  helpAltText: "我能做的事：拍照記帳、代墊、問帳、教 AI 與指令",
+  helpCards: [
+    {
+      title: "拍照記帳",
+      body: "傳收據、發票、水單照片，我讀出金額日期，你按確認就記好",
+      buttons: [{ label: "試試看", text: "怎麼記一筆帳？" }],
+    },
+    {
+      title: "代墊",
+      body: "先墊的錢傳收據並說「我先墊的」，管理者審核後記還款",
+      buttons: [{ label: "我的代墊", text: "我還有哪些代墊沒還？" }],
+    },
+    {
+      title: "問帳",
+      body: "應收、支出、代墊、餘額直接問",
+      buttons: [{ label: "試試看", text: "這個月支出前五名？" }],
+    },
+    {
+      title: "教 AI 與指令",
+      body: "說「以後 X 都歸 Y」我就記住；指令：切換組織、新對話、解除綁定",
+      buttons: [
+        { label: "切換組織", text: "切換組織" },
+        { label: "規則頁", path: "/dashboard/ai/rules" },
+      ],
+    },
+  ],
+  helpCommands: (url) => ["指令：", "・說明", "・切換組織", "・新對話", "・解除綁定", `設定：${url}`].join("\n"),
+  linksTitle: "在 internal 開啟",
+  linksAltText: (labels) => `相關頁面：${labels}`,
+  tableAltText: "表格",
+  moreTableRows: (n) => `還有 ${n} 筆`,
+  currentOrg: "目前",
+  viewInInternal: "在 internal 查看",
+  doneTitle: (name, fallback) =>
+    ({
+      create_transaction: "已記帳",
+      submit_advance: "已提交代墊",
+      update_transaction: "已更新交易",
+      create_reimbursement: "已記錄還款",
+    })[name] ?? `已完成：${fallback}`,
+  doneRowDate: "日期",
+  doneRowAmount: "金額",
+  doneRowParty: "對象",
+  doneRowCategory: "分類",
+  doneRowDescription: "說明",
   unsupported: "我目前看得懂文字、照片和 PDF。",
   mediaTooLarge: (url) => `檔案超過 10 MB，請到網頁上傳：${url}`,
   mediaType: "我只收照片和 PDF。",
@@ -113,7 +173,7 @@ const en: BotStrings = {
   welcome: (url) =>
     `Hi, I'm the Pathors Internal assistant. Generate a link code at ${url}, then send me "綁定 123456" to start.`,
   welcomeBack: (user, org) => `Hi ${user}, you're working in ${org}. Send a receipt photo or ask me anything.`,
-  linked: (user, org) => `Linked ${user} · ${org}. Send a receipt photo or ask me; send "help" to see what I can do.`,
+  linked: (user, org) => `Linked ${user} · ${org}. Here's what I can do; send "help" to see this again.`,
   bindInvalid: "That code doesn't match. Generate a new one in Internal.",
   bindExpired: "That code has expired (valid for 10 minutes). Generate a new one in Internal.",
   bindUsed: "That code was already used. Generate a new one in Internal.",
@@ -125,15 +185,51 @@ const en: BotStrings = {
   switched: (org) => `Switched to ${org}.`,
   newConversation: "OK, starting a new conversation.",
   unlinked: "Unlinked. Link again from Internal whenever you need me.",
-  help: (url) =>
-    [
-      "Send photos or PDFs of receipts, invoices or transfer slips, or ask me about the books. I always show a confirmation card before writing anything.",
-      "Commands:",
-      "- switch org",
-      "- new chat",
-      "- unlink",
-      `Settings: ${url}`,
-    ].join("\n"),
+  helpAltText: "What I can do: snap receipts, advances, ask about the books, teach the AI",
+  helpCards: [
+    {
+      title: "Snap to record",
+      body: "Send a photo of a receipt, invoice or transfer slip. I read the amount and date; tap Confirm and it's recorded.",
+      buttons: [{ label: "Try it", text: "How do I record an expense?" }],
+    },
+    {
+      title: "Advances",
+      body: "Paid out of pocket? Send the receipt and say it's an advance. An admin reviews it and records the repayment.",
+      buttons: [{ label: "My advances", text: "Which of my advances are still unpaid?" }],
+    },
+    {
+      title: "Ask the books",
+      body: "Receivables, spending, advances, balances: just ask.",
+      buttons: [{ label: "Try it", text: "Top five expenses this month?" }],
+    },
+    {
+      title: "Teach me, commands",
+      body: "Say \"from now on X goes to Y\" and I'll remember. Commands: switch org, new chat, unlink.",
+      buttons: [
+        { label: "Switch org", text: "switch org" },
+        { label: "Rules", path: "/dashboard/ai/rules" },
+      ],
+    },
+  ],
+  helpCommands: (url) => ["Commands:", "- help", "- switch org", "- new chat", "- unlink", `Settings: ${url}`].join("\n"),
+  linksTitle: "Open in Internal",
+  linksAltText: (labels) => `Links: ${labels}`,
+  tableAltText: "Table",
+  moreTableRows: (n) => `${n} more`,
+  currentOrg: "Current",
+  viewInInternal: "View in Internal",
+  doneTitle: (name, fallback) =>
+    ({
+      create_transaction: "Recorded",
+      submit_advance: "Advance submitted",
+      update_transaction: "Transaction updated",
+      create_reimbursement: "Repayment recorded",
+    })[name] ?? `Done: ${fallback}`,
+  doneRowDate: "Date",
+  doneRowAmount: "Amount",
+  doneRowParty: "Party",
+  doneRowCategory: "Category",
+  doneRowDescription: "Description",
   unsupported: "I can read text, photos and PDFs.",
   mediaTooLarge: (url) => `The file is over 10 MB. Please upload it on the web: ${url}`,
   mediaType: "I only accept photos and PDFs.",

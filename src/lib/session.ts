@@ -4,20 +4,39 @@ import { redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { member } from "@/db/auth-schema";
-import { getCurrentOrgId, resolveCurrentOrgId } from "@/db/current-org";
+import { getCurrentOrgId, resolveCurrentOrgId, setCurrentOrgId } from "@/db/current-org";
 import { auth } from "@/lib/auth";
+import { USAGE_ROUTE_HEADER, recordPageView } from "@/lib/usage/record";
+import { isDashboardRoute } from "@/lib/usage/routes";
 
 export async function getSession() {
   return auth.api.getSession({ headers: await headers() });
 }
 
 /**
+ * 功能使用紀錄（src/lib/usage/record.ts）：dashboard 頁面載入時記一筆，只記路由 pattern，
+ * 寫入排在回應之後，失敗不影響頁面。
+ *
+ * 放在 requireOrg() 而不是 getSession()：App Router 的 prefetch 會跑 dashboard layout（它在
+ * loading.tsx 之上，裡面呼叫 getSession），但動態頁面的 prefetch 停在 loading.tsx、不會跑到頁面
+ * 本身的 requireOrg()。Next 在 proxy 與 headers() 都把 prefetch header 拿掉了，沒辦法直接判斷，
+ * 所以靠「只有頁面本身才呼叫 requireOrg」來分辨。src/proxy.ts 只在 GET、非 server action 時
+ * 標 USAGE_ROUTE_HEADER，所以 server action 裡的 requireOrg 不會記。
+ * matcher 沒涵蓋的路徑不會清掉外部送來的 header，這裡再確認它是已知頁面的 pattern。
+ * 同一人同一頁 30 秒內只記一次。
+ */
+async function trackPageView(userId: string, orgId: string): Promise<void> {
+  const route = (await headers()).get(USAGE_ROUTE_HEADER);
+  if (route && isDashboardRoute(route)) recordPageView({ route, userId, orgId });
+}
+
+/**
  * 這個 session 該在哪個組織（每個 request 只算一次，layout 與頁面共用）。
  *
- * 以使用者「目前的組織」（"user".current_org_id，src/db/current-org.ts）為準：在另一台裝置、
- * LINE 或 MCP 切過組織，這裡的 session 下一次 request 就跟著換過去，組織切換器第一屏就是對的。
- * current_org_id 沒設或已不是成員時，沿用 session 自己的 active org；兩個都沒有才退回
- * 最早加入的組織。和 session 不一致時順手把 session 的 active org 改成它。
+ * session 已經有 active org（網頁切換器選過）就以它為準，並把使用者「目前的組織」
+ * （"user".current_org_id，src/db/current-org.ts）同步成它。session 還沒有 active org
+ * （新登入、新裝置）時才用 current_org_id 當起點，沒設或已不是成員就退回最早加入的組織，
+ * 並把 session 的 active org 補上。
  * 一個組織都沒有回 null。
  */
 export function resolveSessionOrgId(session: {
@@ -31,8 +50,24 @@ export function resolveSessionOrgId(session: {
 // 所以 key 用 userId + active org 這兩個字串，不用 session 物件本身。
 const sessionOrgId = cache(
   async (userId: string, active: string | null): Promise<string | null> => {
-    const orgId = (await getCurrentOrgId(userId)) ?? active ?? (await resolveCurrentOrgId(userId));
-    if (orgId && orgId !== active) {
+    // 網頁 session 已經選了組織（切換器剛切過）就以它為準，並把「目前的組織」同步過去。
+    // 以前是反過來以 current_org_id 為準：切換時 auth hook 沒寫進 current_org_id 的話，
+    // 下一個 request 就把 session 改回舊組織，切換器看起來像被定住（2026-11-25）。
+    // set-active 本身會擋非成員，所以 active 有值就是本人的組織；current_org_id 只在
+    // session 還沒有 active org（新登入、新裝置）時拿來決定起點。
+    if (active) {
+      const current = await getCurrentOrgId(userId);
+      if (current !== active) {
+        try {
+          await setCurrentOrgId(userId, active);
+        } catch (err) {
+          console.error("[session] setCurrentOrgId failed", err);
+        }
+      }
+      return active;
+    }
+    const orgId = (await getCurrentOrgId(userId)) ?? (await resolveCurrentOrgId(userId));
+    if (orgId) {
       try {
         await auth.api.setActiveOrganization({
           headers: await headers(),
@@ -62,6 +97,7 @@ export async function requireOrg() {
   const orgId = await resolveSessionOrgId(session);
   if (!orgId) redirect("/onboarding");
 
+  await trackPageView(session.user.id, orgId);
   return { session, orgId, userId: session.user.id };
 }
 

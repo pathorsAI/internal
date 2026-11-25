@@ -196,8 +196,26 @@ only. See [`docs/sso.md`](docs/sso.md).
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth credentials (sign-in **and** the optional Google Calendar integration) |
 | `RESEND_API_KEY` | Resend API key for sign-up confirmation and password reset emails. Required in production; in dev a missing key prints the emails to the console |
 | `RESEND_FROM` | Optional sender, default `Pathors Internal <noreply@pathors.com>` |
+| `USAGE_TRACKING` | Optional: `off` stops recording feature usage (see below). Default on |
 
 See [`.env.example`](.env.example) for the full template.
+
+### Feature usage tracking
+
+Internal records which features people use, so owners and admins can find pages and tools
+nobody needs (Settings › Feature usage). Everything stays in **your own database** (the
+`usage_events` table); nothing is sent to a third-party analytics service and nothing runs in
+the browser.
+
+- **Recorded:** for each dashboard page load, the organization, the user, the route *pattern*
+  (`/dashboard/ai/[id]`, never the real id) and the time. For each MCP, REST API, in-app AI or
+  chat-bot tool call (reads included), the organization, the user, the channel, the tool name,
+  whether it succeeded and how long it took.
+- **Not recorded:** query strings, page content, tool arguments, tool results, IP addresses or
+  user agents.
+- The same person reloading the same page within 30 seconds counts once. Rows older than 180 days
+  are deleted by the daily cron.
+- Set `USAGE_TRACKING=off` to stop recording. Details: [`docs/usage-tracking.md`](docs/usage-tracking.md).
 
 ---
 

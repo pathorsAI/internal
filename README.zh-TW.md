@@ -145,8 +145,20 @@ bun scripts/create-user.ts --email you@example.com \
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth 憑證（登入**以及**選用的 Google 日曆整合） |
 | `RESEND_API_KEY` | 寄註冊確認信與密碼重設信用的 Resend API key。正式環境必填；開發時沒設定會把信件內容印在 console |
 | `RESEND_FROM` | 選填：寄件人，預設 `Pathors Internal <noreply@pathors.com>` |
+| `USAGE_TRACKING` | 選填：設 `off` 就不記功能使用紀錄（見下方）。預設開啟 |
 
 完整範本請見 [`.env.example`](.env.example)。
+
+### 功能使用紀錄
+
+Internal 會記哪些功能有人在用，讓擁有者與管理員找出沒人需要的頁面和工具（設定 › 功能使用狀況）。
+資料只存在**你自己的資料庫**（`usage_events` 表），不送去任何第三方 analytics，也不在瀏覽器裡跑。
+
+- **記什麼：** dashboard 每次載入頁面時，記組織、使用者、路由 *pattern*（`/dashboard/ai/[id]`，不記實際的 id）與時間。
+  MCP、REST API、站內 AI、聊天 bot 每次呼叫工具時（讀取也算），記組織、使用者、管道、工具名稱、成功或失敗、耗時。
+- **不記什麼：** query string、頁面內容、工具參數、工具回傳值、IP、user agent。
+- 同一個人 30 秒內重複載入同一頁只算一次。超過 180 天的資料由每日 cron 刪掉。
+- 設 `USAGE_TRACKING=off` 就停止記錄。細節見 [`docs/usage-tracking.md`](docs/usage-tracking.md)。
 
 ---
 

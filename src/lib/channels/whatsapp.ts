@@ -8,6 +8,8 @@
  * - 檔案：先 GET /{media-id} 拿下載網址，再帶 token 下載。
  * - 送出：text（≤ 4096）、interactive button（≤ 3 顆、標題 ≤ 20 字、body ≤ 1024）、
  *   interactive list（組織選單超過 3 個時）；每則各打一次 API，依序送。
+ * - 說明卡：每張一則 image（`link` 是 internal 上的公開圖片＋caption），最後一則文字列出指令。
+ *   表格、站內連結、收據卡沒有 Flex 可畫，一律寫成文字（表格「欄：值」、連結寫網址）。
  * - 處理中：mark read＋typing indicator（要帶對方那則訊息的 id）。
  *
  * 參考：https://developers.facebook.com/docs/whatsapp/cloud-api/
@@ -15,7 +17,7 @@
 import type { Locale } from "@/i18n/config";
 import type { WhatsAppConfig } from "./config";
 import { readBodyLimited, timingSafeEqual } from "./crypto";
-import { cardToText } from "./render";
+import { cardToText, linksToText, receiptToText, tableToText } from "./render";
 import { verifyWhatsAppSignature } from "./signature";
 import { botStrings } from "./strings";
 import {
@@ -45,6 +47,7 @@ export const WA_BUTTONS_MAX = 3;
 export const WA_BUTTON_ID_MAX = 256;
 export const WA_LIST_ROWS_MAX = 10;
 export const WA_LIST_ROW_TITLE_MAX = 24;
+export const WA_CAPTION_MAX = 1024;
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -300,21 +303,43 @@ function orgPickerPayload(text: string, orgs: { id: string; name: string; curren
   };
 }
 
-export function buildWhatsAppMessages(msgs: readonly OutboundMessage[], locale: Locale): BuiltWaMessage[] {
-  const out: BuiltWaMessage[] = [];
-  for (const m of msgs) {
-    if (m.type === "text") {
-      if (!m.text.trim()) continue;
-      out.push(...textWithOptions(clip(m.text, WA_TEXT_MAX), m.quickReplies ?? []));
-    } else if (m.type === "cards") {
-      for (const card of m.cards) {
-        out.push({ payload: cardToWhatsApp(card, locale), snippet: cardToText(card, locale), cardId: card.cardId });
-      }
-    } else {
-      out.push({ payload: orgPickerPayload(m.text, m.orgs, locale), snippet: m.text });
+function outboundImage(link: string, caption: string): WaPayload {
+  return { type: "image", image: { link, caption: clip(caption, WA_CAPTION_MAX) } };
+}
+
+function buildOne(m: OutboundMessage, locale: Locale): BuiltWaMessage[] {
+  switch (m.type) {
+    case "text":
+      return m.text.trim() ? textWithOptions(clip(m.text, WA_TEXT_MAX), m.quickReplies ?? []) : [];
+    case "cards":
+      return m.cards.map((card) => ({
+        payload: cardToWhatsApp(card, locale),
+        snippet: cardToText(card, locale),
+        cardId: card.cardId,
+      }));
+    case "orgPicker":
+      return [{ payload: orgPickerPayload(m.text, m.orgs, locale), snippet: m.text }];
+    case "help":
+      return [
+        ...m.cards.map((c) => {
+          const caption = `${c.title}\n${c.body}`;
+          return { payload: outboundImage(c.imageUrl, caption), snippet: caption };
+        }),
+        { payload: textPayload(m.commandsText), snippet: m.commandsText },
+      ];
+    case "table":
+      return textWithOptions(clip(tableToText(m.table), WA_TEXT_MAX), m.quickReplies ?? []);
+    case "links":
+      return m.links.length > 0 ? textWithOptions(clip(linksToText(m.links), WA_TEXT_MAX), m.quickReplies ?? []) : [];
+    case "done": {
+      const text = clip(m.receipts.map(receiptToText).join("\n\n"), WA_TEXT_MAX);
+      return text.trim() ? [{ payload: textPayload(text), snippet: text }] : [];
     }
   }
-  return out;
+}
+
+export function buildWhatsAppMessages(msgs: readonly OutboundMessage[], locale: Locale): BuiltWaMessage[] {
+  return msgs.flatMap((m) => buildOne(m, locale));
 }
 
 // ---------------------------------------------------------------------------
