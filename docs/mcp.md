@@ -253,6 +253,15 @@ integration (the Wise sync) carry `externalSource` / `externalRef` and
 `needsReview` (待確認); `list_transactions` takes `needsReview: true` to list only
 those, and `update_transaction` clears the flag when it sets a category (or pass
 `needsReview: false` explicitly).
+Every transaction also carries `bankMemo` (the bank's own remark text, verbatim — separate
+from `description`) and `bankRef` (the bank's transaction reference number).
+`create_transaction` / `bulk_create_transactions` / `update_transaction` accept both; when an
+entry comes from a bank statement, transfer slip or screenshot the assistant always fills them.
+The Wise sync fills them from Wise's payment reference / description and `referenceNumber`
+(and backfills older synced rows when a re-sync sees them), and the SinoPac statement import
+(帳戶頁「匯入永豐明細」, `scripts/import-sinopac-statement.ts`) fills them on matched rows.
+`list_transactions` takes `query`, a case-insensitive text search over description,
+`bankMemo`, `bankRef` and the counterparty name.
 
 **Data links (資料聯動，see `docs/data-links.md`)** — every write goes through one
 linking layer: a billing item / subscription / contract passes its contract and project

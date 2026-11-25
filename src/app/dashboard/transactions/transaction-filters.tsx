@@ -1,7 +1,9 @@
 "use client";
 
+import { useRef } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { Filter } from "lucide-react";
+import { Filter, Search } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { useTranslations } from "next-intl";
 import {
   Select,
@@ -21,6 +23,7 @@ export function TransactionFilters({
   account,
   party,
   period,
+  q,
 }: Readonly<{
   categories: { id: number; name: string }[];
   accounts: { id: number; name: string }[];
@@ -31,6 +34,8 @@ export function TransactionFilters({
   account?: string;
   party?: string;
   period?: string;
+  /** 文字搜尋（說明、銀行備註、參考號、對象）。 */
+  q?: string;
 }>) {
   const t = useTranslations("transactions");
   const router = useRouter();
@@ -41,8 +46,17 @@ export function TransactionFilters({
     const next = new URLSearchParams(params.toString());
     if (value && value !== "all") next.set(key, value);
     else next.delete(key);
+    // 換條件就回第一頁，不然可能停在超出範圍的頁數。
+    next.delete("page");
     const qs = next.toString();
     router.push(qs ? `${pathname}?${qs}` : pathname);
+  }
+
+  // 搜尋框：停止打字 400ms 後才換網址，不是每個字都重新查一次。
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function onSearch(value: string) {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setParam("q", value.trim()), 400);
   }
 
   const bookItems: Record<string, string> = {
@@ -86,6 +100,17 @@ export function TransactionFilters({
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Filter className="size-4 shrink-0 text-muted-foreground" />
+      <div className="relative w-full sm:w-56">
+        <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          type="search"
+          aria-label={t("filters.search.label")}
+          placeholder={t("filters.search.placeholder")}
+          defaultValue={q ?? ""}
+          onChange={(e) => onSearch(e.target.value)}
+          className="pl-8"
+        />
+      </div>
       {filters.map((f) => (
         <Select
           key={f.key}

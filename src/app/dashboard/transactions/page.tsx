@@ -176,7 +176,17 @@ function TransactionRow({
               </div>
             </div>
           </TableCell>
-          <TableCell className="truncate">{t.description ?? "—"}</TableCell>
+          <TableCell>
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <span className="truncate">{t.description ?? "—"}</span>
+              {/* 銀行自己的備註原文（對帳單／Wise），跟人寫的說明分開顯示 */}
+              {t.bankMemo ? (
+                <span className="truncate text-xs text-muted-foreground" title={t.bankMemo}>
+                  {t.bankMemo}
+                </span>
+              ) : null}
+            </div>
+          </TableCell>
           <TableCell className="truncate text-muted-foreground">
             {t.categoryName ?? uncategorizedLabel}
           </TableCell>
@@ -219,6 +229,8 @@ function TransactionRow({
           conversionText: singleLeg ? typeText : null,
           projectId: t.projectId,
           contractId: t.contractId,
+          bankMemo: t.bankMemo,
+          bankRef: t.bankRef,
         }}
         categories={categories}
         parties={parties}
@@ -257,8 +269,9 @@ function parseTransactionFilters(params: {
   party?: string;
   ids?: string | string[];
   link?: string;
+  q?: string;
 }) {
-  const { book, category, account, period, page: pageParam, review, party, ids: idsParam, link } = params;
+  const { book, category, account, period, page: pageParam, review, party, ids: idsParam, link, q: qParam } = params;
   const active = (["internal", "external", "both"].includes(book ?? "") ? book : undefined) as
     | Book
     | undefined;
@@ -271,8 +284,9 @@ function parseTransactionFilters(params: {
   const idsQuery = ids?.join(",");
   const pendingLink = link === "pending" ? true : undefined;
   const linkQuery = pendingLink ? "pending" : undefined;
-  const filters = { book: active, categoryId, accountId, partyId, period, needsReview, ids, pendingLink };
-  return { active, partyId, page, needsReview, ids, idsQuery, pendingLink, linkQuery, filters };
+  const q = qParam?.trim() || undefined;
+  const filters = { book: active, categoryId, accountId, partyId, period, needsReview, ids, pendingLink, q };
+  return { active, partyId, page, needsReview, ids, idsQuery, pendingLink, linkQuery, q, filters };
 }
 
 /** 網址 query：拿掉 undefined 的鍵（鍵的順序照傳入的物件，覆寫既有鍵不會改變順序）。 */
@@ -350,6 +364,8 @@ export default async function TransactionsPage({
     ids?: string | string[];
     /** link=pending：只看待連結（還沒確定屬於哪一筆請款 / 訂閱 / 合約，或對象待確認）。 */
     link?: string;
+    /** 文字搜尋：說明、銀行備註、銀行參考號、對象名稱。 */
+    q?: string;
   }>;
 }>) {
   const { orgId } = await requireOrg();
@@ -375,7 +391,7 @@ export default async function TransactionsPage({
   ];
   const params = await searchParams;
   const { book, category, account, period, review, party } = params;
-  const { active, partyId, page, needsReview, ids, idsQuery, pendingLink, linkQuery, filters } =
+  const { active, partyId, page, needsReview, ids, idsQuery, pendingLink, linkQuery, q, filters } =
     parseTransactionFilters(params);
   const db = getDb();
   const [rows, total, accounts, categories, parties, employees, projects, contracts, months, reviewCount, pendingLinkCount] =
@@ -433,13 +449,14 @@ export default async function TransactionsPage({
         account={account}
         party={partyId === undefined ? undefined : String(partyId)}
         period={period}
+        q={q}
       />
 
       {reviewCount > 0 || needsReview ? (
         <ReviewNotice
           reviewCount={reviewCount}
           needsReview={needsReview === true}
-          query={{ book, category, account, party, period, review: undefined, ids: idsQuery, link: linkQuery }}
+          query={{ book, category, account, party, period, review: undefined, ids: idsQuery, link: linkQuery, q }}
         />
       ) : null}
 
@@ -447,7 +464,7 @@ export default async function TransactionsPage({
         <PendingLinkNotice
           pendingLinkCount={pendingLinkCount}
           pendingLink={pendingLink === true}
-          query={{ book, category, account, party, period, review, ids: idsQuery, link: undefined }}
+          query={{ book, category, account, party, period, review, ids: idsQuery, link: undefined, q }}
         />
       ) : null}
 
@@ -540,7 +557,7 @@ export default async function TransactionsPage({
         totalPages={totalPages}
         total={total}
         basePath="/dashboard/transactions"
-        params={{ book, category, account, party, period, review, ids: idsQuery, link: linkQuery }}
+        params={{ book, category, account, party, period, review, ids: idsQuery, link: linkQuery, q }}
       />
     </>
   );

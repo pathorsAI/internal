@@ -331,6 +331,8 @@ const ARG_LABELS: Record<string, { "zh-TW": string; en: string }> = {
   partyName: { "zh-TW": "對象", en: "Party" },
   partyId: { "zh-TW": "對象", en: "Party" },
   description: { "zh-TW": "說明", en: "Description" },
+  bankMemo: { "zh-TW": "銀行備註", en: "Bank memo" },
+  bankRef: { "zh-TW": "銀行參考號", en: "Bank ref" },
   note: { "zh-TW": "備註", en: "Note" },
   categoryId: { "zh-TW": "分類", en: "Category" },
   categoryName: { "zh-TW": "分類", en: "Category" },

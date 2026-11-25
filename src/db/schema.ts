@@ -350,7 +350,12 @@ export const transactions = pgTable("transactions", {
 	linkCandidates: jsonb("link_candidates").$type<Record<string, unknown>>(),
 	// 這筆支出屬於哪個廠商計費帳戶（固定支出）。FK 在 DB 端（migrations/0041）。
 	vendorBillingAccountId: bigint("vendor_billing_account_id", { mode: "number" }),
+	// 銀行自己的備註原文與交易參考號（migrations/0049）。bankMemo 跟 description（人寫的摘要）分開，
+	// 匯入／AI 只補空的，不覆蓋。對帳單匯入見 src/lib/bank-import。
+	bankMemo: text("bank_memo"),
+	bankRef: text("bank_ref"),
 }, (table) => [
+	index("idx_txn_bank_ref").on(table.organizationId, table.bankRef).where(sql`bank_ref IS NOT NULL`),
 	uniqueIndex("uq_txn_external_ref").on(table.organizationId, table.externalSource, table.externalRef).where(sql`external_ref IS NOT NULL`),
 	index("idx_txn_needs_review").on(table.organizationId).where(sql`needs_review AND deleted_at IS NULL`),
 	index("idx_txn_settle_to").using("btree", table.settleToAccountId.asc().nullsLast().op("int8_ops")),
@@ -1544,3 +1549,39 @@ export const fixedAssets = pgTable("fixed_assets", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	deletedAt: timestamp("deleted_at", { withTimezone: true, mode: 'string' }),
 });
+
+// 匯入過的銀行對帳單明細（migrations/0049，src/db/bank-import.ts）：一行一列，line_hash 去重。
+export const bankStatementLines = pgTable("bank_statement_lines", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "bank_statement_lines_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id").notNull(),
+	bankAccountId: bigint("bank_account_id", { mode: "number" }).notNull(),
+	lineHash: text("line_hash").notNull(),
+	txnAt: timestamp("txn_at", { withTimezone: true, mode: 'string' }).notNull(),
+	currency: char({ length: 3 }).notNull(),
+	withdrawal: numeric({ precision: 18, scale: 2 }),
+	deposit: numeric({ precision: 18, scale: 2 }),
+	balance: numeric({ precision: 18, scale: 2 }),
+	bankRef: text("bank_ref"),
+	remarks: text(),
+	isCorrection: boolean("is_correction").default(false).notNull(),
+	// matched | created | correction_pair | skipped
+	status: text().notNull(),
+	note: text(),
+	transactionId: bigint("transaction_id", { mode: "number" }),
+	importedByUserId: text("imported_by_user_id"),
+	importedAt: timestamp("imported_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	unique("uq_bank_statement_line").on(table.organizationId, table.lineHash),
+	index("idx_bsl_transaction").on(table.organizationId, table.transactionId).where(sql`transaction_id IS NOT NULL`),
+	foreignKey({
+			columns: [table.bankAccountId],
+			foreignColumns: [bankAccounts.id],
+			name: "bank_statement_lines_bank_account_id_fkey"
+		}),
+	foreignKey({
+			columns: [table.transactionId],
+			foreignColumns: [transactions.id],
+			name: "bank_statement_lines_transaction_id_fkey"
+		}).onDelete("set null"),
+	check("chk_bsl_status", sql`status = ANY (ARRAY['matched', 'created', 'correction_pair', 'skipped'])`),
+]);

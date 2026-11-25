@@ -631,6 +631,9 @@ function transactionColumns(formData: FormData, header: TxnHeader, f: TxnFields)
     currency: header.currency,
     amountTwd: header.currency === "TWD" ? header.amount : null,
     description: str(formData.get("description")),
+    // 銀行備註與參考號（0049）：只有編輯表單有這兩格；新增表單沒有就不帶，不會把值清掉。
+    ...(formData.has("bankMemo") ? { bankMemo: str(formData.get("bankMemo")) } : {}),
+    ...(formData.has("bankRef") ? { bankRef: str(formData.get("bankRef")) } : {}),
     categoryId: f.categoryId,
     partyId: f.partyId,
     settleEmployeeId: f.settleEmployeeId,

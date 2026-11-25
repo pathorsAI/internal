@@ -49,7 +49,8 @@ export type LinkSource =
   | "payroll"
   | "billing_board"
   | "pending_links"
-  | "rescan";
+  | "rescan"
+  | "bank_import";
 
 export type LinkDraft = {
   type: string;
