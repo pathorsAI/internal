@@ -1,6 +1,6 @@
-import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import type { Db } from "@/db";
-import { parties, transactions } from "@/db/schema";
+import { parties, paymentAllocations, transactions } from "@/db/schema";
 import { resolveLinksMany, type LinkDraft, type LinkedRef, type LinkSource, type Unlinked } from "./resolve";
 import { flagTransactionsForReview, type ReviewFlag } from "./write";
 
@@ -61,6 +61,7 @@ export async function rescanUnlinkedIncome(db: Db, orgId: string, opts: RescanOp
         isNull(transactions.subscriptionId),
         isNull(transactions.contractId),
         isNull(transactions.reviewReason),
+        sql`not exists (select 1 from ${paymentAllocations} pa where pa.transaction_id = ${transactions.id})`,
         partyFilter,
       );
 

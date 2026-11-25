@@ -58,6 +58,15 @@
 重新掃描既有交易（`rescan`）時，剛好一個相符也**不自動掛**，標成 `link_suggested` 等人確認：
 歷史資料一律給人看過。
 
+### 跟收款分配（`payment_allocations`）的關係
+
+一筆入帳拆分給多個應收（`src/db/allocations.ts`，含吸收的手續費）時：
+
+- 候選的「已收」一律用有效分配算（`billingItemCollected`、`subscriptionPeriodCollected`、`contractCollected`），
+  跟請款看板、合約進度同一套口徑。
+- 已經有分配列的交易視同已連結：不再自動比對、重新掃描跳過、不出現在待連結頁。
+- 寫入分配時，這筆的待連結旗標（`link_*`）一併清掉（`src/lib/linking/allocation-review.ts`）。
+
 ### 待連結（`review_reason`）
 
 跟 `needs_review` 分開：`needs_review` 是「分類還沒確認」，指定分類就清掉；`review_reason` 是

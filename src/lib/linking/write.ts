@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull, type SQL } from "drizzle-orm";
 import type { Db } from "@/db";
-import { billingItems, transactions } from "@/db/schema";
+import { billingItems, paymentAllocations, transactions } from "@/db/schema";
 import { statusHints, type StatusHint } from "./hints";
 import type { PendingParty } from "./party";
 import {
@@ -55,7 +55,7 @@ type LinkKey = (typeof LINK_KEYS)[number];
 type DriverKey = (typeof DRIVER_KEYS)[number];
 export type PlainPatch = Omit<Partial<TxnInsert>, LinkKey | DriverKey | "id" | "organizationId">;
 
-function draftOf(r: Partial<TxnInsert> & { pendingParty?: PendingParty | null }): LinkDraft {
+function draftOf(r: Partial<TxnInsert> & { pendingParty?: PendingParty | null; hasAllocations?: boolean }): LinkDraft {
   return {
     type: r.type ?? "expense",
     txnDate: r.txnDate ?? "",
@@ -71,6 +71,7 @@ function draftOf(r: Partial<TxnInsert> & { pendingParty?: PendingParty | null })
     relatedToId: r.relatedToId ?? null,
     reviewReason: r.reviewReason ?? null,
     pendingParty: r.pendingParty ?? null,
+    hasAllocations: r.hasAllocations ?? false,
   };
 }
 
@@ -166,7 +167,7 @@ function changed<T extends object>(patch: Partial<T>, existing: T, key: keyof T)
   return key in patch && patch[key] !== undefined && (patch[key] ?? null) !== (existing[key] ?? null);
 }
 
-type LinkedPatch = Partial<TxnInsert> & { pendingParty?: PendingParty | null };
+type LinkedPatch = Partial<TxnInsert> & { pendingParty?: PendingParty | null; hasAllocations?: boolean };
 
 /**
  * 換了請款項 / 訂閱 / 合約：原本的專案、合約如果是從舊上層繼承來的，就在 merged 裡清掉讓它重新繼承
@@ -242,7 +243,12 @@ export async function updateTransactionLinked(
     .limit(1);
   if (!existing) return null;
 
-  const merged: LinkedPatch = { ...existing, ...patch };
+  const [allocated] = await db
+    .select({ id: paymentAllocations.id })
+    .from(paymentAllocations)
+    .where(eq(paymentAllocations.transactionId, id))
+    .limit(1);
+  const merged: LinkedPatch = { ...existing, ...patch, hasAllocations: Boolean(allocated) };
   if (PARENT_KEYS.some((k) => changed(patch, existing, k))) {
     await clearInheritedParents(ctx, existing, patch, merged);
   }
@@ -332,3 +338,4 @@ export async function flagTransactionsForReview(
   }
   return out;
 }
+

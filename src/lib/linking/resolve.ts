@@ -11,6 +11,7 @@ import {
 } from "@/db/schema";
 import { computeSubscriptionSchedule } from "@/db/queries";
 import { getOrgTaxSetting } from "@/db/org-tax";
+import { billingItemCollected, contractCollected, subscriptionPeriodCollected } from "@/db/allocations";
 import { effectiveTaxSetting, taxedAmountOrNull, type TaxColumns } from "@/lib/tax-amounts";
 import type { TaxSetting } from "@/lib/tax-treatment";
 import { matchPartiesOf } from "@/lib/vendor-billing/account-meta";
@@ -65,6 +66,8 @@ export type LinkDraft = {
   relatedToId?: number | null;
   /** 對象名稱很像既有對象、沒自動新建（同步用 hold 模式時） */
   pendingParty?: PendingParty | null;
+  /** 這筆已經有收款分配（payment_allocations）＝人已經拆分好了，視同已連結、不再自動比對 */
+  hasAllocations?: boolean;
   /** 既有的待連結狀態（更新時帶入）；link_skipped 代表人說過不要連，不再自動比對 */
   reviewReason?: string | null;
 };
@@ -283,49 +286,19 @@ async function loadRefs(ctx: LinkContext, drafts: readonly LinkDraft[], matchPar
 
 type Refs = Awaited<ReturnType<typeof loadRefs>>;
 
-/** 候選的「已收」：請款項、訂閱各期、合約。排除 excludeTransactionIds（更新中的那筆自己）。 */
+/** 候選的「已收」：請款項、訂閱各期、合約（含收款分配與吸收的手續費）。 */
 async function loadPaid(ctx: LinkContext, refs: Refs) {
   const { db, orgId } = ctx;
-  const exclude = ids(ctx.excludeTransactionIds ?? []);
-  const base = and(
-    eq(transactions.organizationId, orgId),
-    eq(transactions.type, "income"),
-    isNull(transactions.deletedAt),
-    exclude.length ? notInArray(transactions.id, exclude) : undefined,
-  );
   const biIds = refs.openBi.map((b) => b.id);
   const subIds = refs.openSub.map((s) => s.id);
   const ctIds = refs.openCt.map((c) => c.id);
+  // 已收一律走收款分配的「有效分配」（src/db/allocations.ts）：拆分過的入帳看分配列（含吸收的手續費），
+  // 其餘看舊的單一綁定。跟請款看板、合約進度同一套口徑。
+  // 不用排除更新中的那筆自己：會重新比對的交易都沒有任何綁定或分配，本來就不在已收裡。
   const [biPaid, subPaid, ctPaid, overrides] = await Promise.all([
-    biIds.length
-      ? db
-          .select({ id: transactions.billingItemId, paid: sql<string>`coalesce(sum(${transactions.amount}), 0)` })
-          .from(transactions)
-          .where(and(base, inArray(transactions.billingItemId, biIds)))
-          .groupBy(transactions.billingItemId)
-      : Promise.resolve([]),
-    subIds.length
-      ? db
-          .select({
-            id: transactions.subscriptionId,
-            period: transactions.subscriptionPeriod,
-            paid: sql<string>`coalesce(sum(${transactions.amount}), 0)`,
-          })
-          .from(transactions)
-          .where(and(base, inArray(transactions.subscriptionId, subIds)))
-          .groupBy(transactions.subscriptionId, transactions.subscriptionPeriod)
-      : Promise.resolve([]),
-    ctIds.length
-      ? db
-          .select({
-            id: transactions.contractId,
-            paid: sql<string>`coalesce(sum(${transactions.amount}) filter (where ${transactions.currency} = ${contracts.currency}), 0)`,
-          })
-          .from(transactions)
-          .innerJoin(contracts, eq(contracts.id, transactions.contractId))
-          .where(and(base, inArray(transactions.contractId, ctIds)))
-          .groupBy(transactions.contractId)
-      : Promise.resolve([]),
+    billingItemCollected(orgId, biIds, db),
+    subscriptionPeriodCollected(orgId, subIds, db),
+    contractCollected(orgId, ctIds, db),
     subIds.length
       ? db
           .select({
@@ -343,28 +316,14 @@ async function loadPaid(ctx: LinkContext, refs: Refs) {
           )
       : Promise.resolve([]),
   ]);
+  const sub = new Map<string, number>();
+  for (const [id, periods] of subPaid) for (const p of periods) sub.set(`${id}:${p.periodStart}`, p.paid);
   return {
-    bi: paidById(biPaid),
-    sub: paidBySubPeriod(subPaid),
-    ct: paidById(ctPaid),
+    bi: new Map([...biPaid].map(([id, c]) => [id, c.paid])),
+    sub,
+    ct: new Map([...ctPaid].map(([id, c]) => [id, c.paid])),
     overrideBySub: overridesBySub(overrides),
   };
-}
-
-/** 已收加總列 → id 對已收金額。 */
-function paidById(rows: readonly { id: number | null; paid: string }[]): Map<number, number> {
-  const out = new Map<number, number>();
-  for (const r of rows) if (r.id != null) out.set(r.id, Number(r.paid));
-  return out;
-}
-
-/** 訂閱各期已收 → 「訂閱 id:期別」對已收金額。 */
-function paidBySubPeriod(
-  rows: readonly { id: number | null; period: string | null; paid: string }[],
-): Map<string, number> {
-  const out = new Map<string, number>();
-  for (const r of rows) if (r.id != null && r.period) out.set(`${r.id}:${r.period}`, Number(r.paid));
-  return out;
 }
 
 /** 訂閱期別的金額覆寫，依訂閱分組。 */
@@ -555,7 +514,7 @@ function round2(n: number): number {
 }
 
 function hasAnyLink(d: LinkDraft): boolean {
-  return Boolean(d.billingItemId || d.subscriptionId || d.contractId);
+  return Boolean(d.billingItemId || d.subscriptionId || d.contractId || d.hasAllocations);
 }
 
 function wantsMatch(ctx: LinkContext, d: LinkDraft): boolean {
