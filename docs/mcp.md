@@ -238,7 +238,7 @@ revenue estimates should use **net**. `set_subscription_period`'s
 
 **Ledger (management & tax books)** — `list_transactions`, `get_transaction`,
 `list_outstanding_advances`, `create_transaction` (expense/income/advance/transfer),
-`update_transaction` (date/amount/category/project/contract/billing item/…), `delete_transaction`,
+`update_transaction` (date/amount/category/project/contract/billing item/invoice/…), `delete_transaction`,
 `create_reimbursement` (book an advance as repaid). Rows imported by an
 integration (the Wise sync) carry `externalSource` / `externalRef` and
 `needsReview` (待確認); `list_transactions` takes `needsReview: true` to list only
