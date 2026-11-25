@@ -23,6 +23,7 @@ import {
   transactions,
 } from "./schema";
 import type { ActionState } from "./mutations";
+import { insertJournalEntry, type JournalEntryInput } from "./ledger-journal";
 import { getAccountingSettings, hasJournalData, loadLedgerInputs, todayInTaipei } from "./ledger";
 import { logWeb } from "./activity";
 import { canManageOrg, requireOrg, requireOrgWithRole } from "@/lib/session";
@@ -494,66 +495,18 @@ export async function fillMissingAmountTwd(): Promise<ActionState & { filled?: n
 // 手動分錄
 // ---------------------------------------------------------------------------
 
-export type JournalLineInput = { glAccountId: number; debit: number; credit: number; memo?: string | null };
-export type JournalEntryInput = {
-  date: string;
-  ledger: (typeof ENTRY_LEDGERS)[number];
-  kind?: (typeof ENTRY_KINDS)[number];
-  memo?: string | null;
-  lines: JournalLineInput[];
-};
-
-/** 驗證並正規化分錄的行（金額取到分）。回傳錯誤訊息或乾淨的行。 */
-function normalizeLines(lines: JournalLineInput[], t: T): { error: string } | { lines: JournalLineInput[] } {
-  if (!Array.isArray(lines) || lines.length < 2) return { error: t("errors.linesMin") };
-  const out: JournalLineInput[] = [];
-  let dr = 0;
-  let cr = 0;
-  for (const l of lines) {
-    const debit = cents(Number(l.debit) || 0);
-    const credit = cents(Number(l.credit) || 0);
-    if (!Number.isInteger(l.glAccountId) || l.glAccountId <= 0) return { error: t("errors.lineAccount") };
-    if (debit < 0 || credit < 0 || (debit > 0) === (credit > 0)) return { error: t("errors.lineOneSide") };
-    dr += debit;
-    cr += credit;
-    out.push({ glAccountId: l.glAccountId, debit: debit / 100, credit: credit / 100, memo: l.memo?.trim() || null });
-  }
-  if (dr !== cr) return { error: t("errors.unbalanced") };
-  return { lines: out };
-}
+export type { JournalEntryInput, JournalLineInput } from "./ledger-journal";
 
 export async function createJournalEntry(input: JournalEntryInput): Promise<ActionState & { id?: number }> {
   const t = await getTranslations("accounting");
   try {
     const { orgId, session } = await requireOrg();
-    if (!isDate(input.date)) return { ok: false, error: t("errors.invalidDate") };
-    if (!ENTRY_LEDGERS.includes(input.ledger)) return { ok: false, error: t("errors.invalid") };
-    const kind = input.kind ?? "manual";
-    if (!ENTRY_KINDS.includes(kind)) return { ok: false, error: t("errors.invalid") };
-    const normalized = normalizeLines(input.lines, t);
-    if ("error" in normalized) return { ok: false, error: normalized.error };
-    const ids = [...new Set(normalized.lines.map((l) => l.glAccountId))];
-    if ((await accountIdsOf(orgId, ids)).size !== ids.length) return { ok: false, error: t("errors.lineAccount") };
-
-    const payload = JSON.stringify(
-      normalized.lines.map((l) => ({ glAccountId: l.glAccountId, debit: money(l.debit), credit: money(l.credit), memo: l.memo })),
-    );
     const createdBy = session.user.name || session.user.email;
-    const res = await getDb().execute(sql`
-      WITH e AS (
-        INSERT INTO ${journalEntries} (organization_id, ledger, kind, entry_date, memo, created_by)
-        VALUES (${orgId}, ${input.ledger}, ${kind}, ${input.date}::date, ${input.memo?.trim() || null}, ${createdBy})
-        RETURNING id
-      )
-      INSERT INTO journal_lines (entry_id, gl_account_id, debit, credit, memo)
-      SELECT e.id, (l->>'glAccountId')::bigint, (l->>'debit')::numeric, (l->>'credit')::numeric, l->>'memo'
-      FROM e, jsonb_array_elements(${payload}::text::jsonb) AS l
-      RETURNING entry_id
-    `);
-    const id = Number(rowsOf<{ entry_id: number | string }>(res)[0]?.entry_id);
-    await logWeb(orgId, "create", "journal_entry", id || null, `${input.date} ${input.ledger} ${input.memo ?? ""}`.trim());
+    const res = await insertJournalEntry(orgId, createdBy, input);
+    if (!res.ok) return { ok: false, error: t(`errors.${res.reason}`) };
+    await logWeb(orgId, "create", "journal_entry", res.id || null, `${input.date} ${input.ledger} ${input.memo ?? ""}`.trim());
     revalidateLedger();
-    return { ok: true, id };
+    return { ok: true, id: res.id };
   } catch (e) {
     return fail(e, t, t("errors.saveFailed"));
   }

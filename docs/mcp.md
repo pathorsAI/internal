@@ -291,7 +291,12 @@ rows with zh-TW names plus the ledger checks. `list_ledger_review_items` (`as_of
 problems behind the books (uncategorized, missing / estimated FX, unlinked invoices, receivables
 not settled, 股東往來 plugs on the government ledger, …) with the source id to fix them.
 `get_vat_report` (`year`) gives one row per filing period (bi-monthly 401 or quarterly small-scale)
-with invoice-side and ledger-side figures side by side.
+with invoice-side and ledger-side figures side by side. `create_journal_entry` (`date`, `ledger?`
+both | government | management, `kind?` manual | opening | adjustment, `memo?`, `lines` with
+`accountCode` or `glAccountId` plus a debit or a credit) writes a manual 傳票 — accruals such as
+unpaid salary, opening balances, year-end adjustments; debits must equal credits and closed periods
+are rejected. `unlink_payslip_payment` (`payslipId`) turns a payslip back to unpaid when the
+salary transaction it points to actually paid another month; the transaction is left as is.
 
 **Accounting master data** — parties: `list_parties`/`get_party`/`create_party`/
 `update_party`/`delete_party`/`merge_parties`; categories: `list_categories`/`create_category`/

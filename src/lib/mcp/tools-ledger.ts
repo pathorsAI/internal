@@ -1,5 +1,10 @@
 import { createTranslator } from "next-intl";
+import { eq } from "drizzle-orm";
+import { getDb } from "@/db";
 import { loadLedgerInputs, todayInTaipei } from "@/db/ledger";
+import { ENTRY_KINDS, ENTRY_LEDGERS, insertJournalEntry, type JournalEntryError, type JournalLineInput } from "@/db/ledger-journal";
+import { glAccounts } from "@/db/schema";
+import { user } from "@/db/auth-schema";
 import {
   balanceSheet,
   cashFlowStatement,
@@ -268,4 +273,106 @@ export const ledgerTools: Record<string, ToolDef> = {
       };
     },
   },
+  create_journal_entry: {
+    description:
+      "Write a manual journal entry (傳票) into the general ledger: accruals such as unpaid salary (借 6111 薪資支出 / 貸 2191 應付薪資), reversals when the accrual is paid, opening balances or year-end adjustments. Lines name accounts by `accountCode` (the chart-of-accounts code, e.g. \"6111\") or `glAccountId`; each line has either a debit or a credit, at least two lines, and total debits must equal total credits. `ledger`: both (default) = 政府帳 and 管理帳, government = 政府帳 only, management = 管理帳 only. Bookkeeping only — no money moves. Rejected when the date falls in a closed accounting period. Confirm the lines with the user before calling.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        date: { type: "string", description: "Entry date, YYYY-MM-DD." },
+        ledger: { type: "string", enum: [...ENTRY_LEDGERS], description: "Default both." },
+        kind: { type: "string", enum: [...ENTRY_KINDS], description: "manual (default), opening or adjustment." },
+        memo: { type: "string" },
+        lines: {
+          type: "array",
+          minItems: 2,
+          items: {
+            type: "object",
+            properties: {
+              accountCode: { type: "string", description: "Chart-of-accounts code, e.g. 6111." },
+              glAccountId: { type: "number", description: "Alternative to accountCode." },
+              debit: { type: "number" },
+              credit: { type: "number" },
+              memo: { type: "string" },
+            },
+            additionalProperties: false,
+          },
+        },
+        ...ORG_ARG,
+      },
+      required: ["date", "lines"],
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "number" },
+        date: { type: "string" },
+        ledger: { type: "string" },
+        lines: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { code: { type: "string" }, name: { type: "string" }, debit: { type: "number" }, credit: { type: "number" } },
+            required: ["code", "name", "debit", "credit"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["id", "date", "ledger", "lines"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const orgId = await resolveOrg(args, ctx);
+      const rawLines = Array.isArray(args.lines) ? (args.lines as Record<string, unknown>[]) : [];
+      const db = getDb();
+      const accounts = await db
+        .select({ id: glAccounts.id, code: glAccounts.code, name: glAccounts.name })
+        .from(glAccounts)
+        .where(eq(glAccounts.organizationId, orgId));
+      const byCode = new Map(accounts.map((a) => [a.code, a]));
+      const byId = new Map(accounts.map((a) => [a.id, a]));
+      const lines: JournalLineInput[] = rawLines.map((l, i) => {
+        const code = typeof l.accountCode === "string" ? l.accountCode.trim() : "";
+        const acct = code ? byCode.get(code) : byId.get(Number(l.glAccountId));
+        if (!acct) throw new Error(`Line ${i + 1}: unknown account ${code || String(l.glAccountId ?? "")} in this organization's chart of accounts.`);
+        return {
+          glAccountId: acct.id,
+          debit: Number(l.debit) || 0,
+          credit: Number(l.credit) || 0,
+          memo: typeof l.memo === "string" ? l.memo : null,
+        };
+      });
+      const ledger = (optString(args, "ledger") ?? "both") as (typeof ENTRY_LEDGERS)[number];
+      const kind = (optString(args, "kind") ?? "manual") as (typeof ENTRY_KINDS)[number];
+      const date = optDate(args, "date") ?? "";
+      const [actor] = await db.select({ name: user.name, email: user.email }).from(user).where(eq(user.id, ctx.userId)).limit(1);
+      const res = await insertJournalEntry(orgId, actor?.name || actor?.email || "MCP", {
+        date,
+        ledger,
+        kind,
+        memo: optString(args, "memo") ?? null,
+        lines,
+      });
+      if (!res.ok) throw new Error(JOURNAL_ERRORS[res.reason]);
+      return {
+        id: res.id,
+        date,
+        ledger,
+        lines: lines.map((l) => {
+          const a = byId.get(l.glAccountId)!;
+          return { code: a.code, name: a.name, debit: l.debit, credit: l.credit };
+        }),
+      };
+    },
+  },
+};
+
+const JOURNAL_ERRORS: Record<JournalEntryError, string> = {
+  invalidDate: '"date" must be a valid YYYY-MM-DD date.',
+  invalid: '"ledger" or "kind" is not one of the allowed values.',
+  linesMin: "A journal entry needs at least two lines.",
+  lineAccount: "Every line needs an account from this organization's chart of accounts.",
+  lineOneSide: "Each line must have either a debit or a credit (positive), not both.",
+  unbalanced: "Total debits must equal total credits.",
 };
