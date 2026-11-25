@@ -14,8 +14,9 @@
  */
 import type { Locale } from "@/i18n/config";
 import type { WhatsAppConfig } from "./config";
-import { hexToBytes, hmacSha256, readBodyLimited, timingSafeEqual } from "./crypto";
+import { readBodyLimited, timingSafeEqual } from "./crypto";
 import { cardToText } from "./render";
+import { verifyWhatsAppSignature } from "./signature";
 import { botStrings } from "./strings";
 import {
   cardPayload,
@@ -64,17 +65,7 @@ export function whatsappChallenge(params: URLSearchParams, verifyToken: string):
   return params.get("hub.challenge");
 }
 
-export async function verifyWhatsAppSignature(
-  appSecret: string,
-  rawBody: Uint8Array,
-  header: string | null,
-): Promise<boolean> {
-  if (!header?.startsWith("sha256=")) return false;
-  const given = hexToBytes(header.slice("sha256=".length));
-  if (!given) return false;
-  const expected = await hmacSha256(appSecret, rawBody);
-  return timingSafeEqual(expected, given);
-}
+export { verifyWhatsAppSignature };
 
 // ---------------------------------------------------------------------------
 // 事件解析

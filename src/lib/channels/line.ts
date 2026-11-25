@@ -11,8 +11,9 @@
  */
 import type { Locale } from "@/i18n/config";
 import type { LineConfig } from "./config";
-import { base64ToBytes, hmacSha256, readBodyLimited, timingSafeEqual } from "./crypto";
+import { readBodyLimited } from "./crypto";
 import { cardToText } from "./render";
+import { verifyLineSignature } from "./signature";
 import { botStrings } from "./strings";
 import {
   cardPayload,
@@ -52,17 +53,7 @@ type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 // 驗簽
 // ---------------------------------------------------------------------------
 
-export async function verifyLineSignature(
-  channelSecret: string,
-  rawBody: Uint8Array,
-  signature: string | null,
-): Promise<boolean> {
-  if (!signature) return false;
-  const given = base64ToBytes(signature);
-  if (!given) return false;
-  const expected = await hmacSha256(channelSecret, rawBody);
-  return timingSafeEqual(expected, given);
-}
+export { verifyLineSignature };
 
 // ---------------------------------------------------------------------------
 // 事件解析

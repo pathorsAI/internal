@@ -127,6 +127,17 @@ export function parseOrgPayload(payload: string): string | null {
 /** WhatsApp 的快速選項按鈕：id 帶原文，按下去當成使用者打了那段字。 */
 export const QUICK_REPLY_PREFIX = "q:";
 
+/**
+ * 前哨 Worker（workers/webhook-ack）驗過簽後直接放進佇列的原始 webhook：body 是原始 bytes 的 base64，
+ * headers 只帶驗簽要的那一個。處理端（/api/channels/process）重新驗簽、parse、去重，再拆成 event job。
+ */
+export type RawWebhookJob = {
+  kind: "raw";
+  provider: ChatProvider;
+  body: string;
+  headers: Record<string, string>;
+};
+
 /** 佇列訊息：webhook 收到的事件、或某個人的 flush 排程。 */
 export type ChannelJob =
   | { kind: "event"; event: InboundEvent }

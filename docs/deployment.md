@@ -136,18 +136,36 @@ same spread over isolates and answers cold in ~0.35 s.
 
 Even at 1–1.5 s a cold start is too slow for LINE's webhook Verify / test call,
 which times out. The two chat webhooks are therefore served by a separate,
-few-KB Worker in [`workers/webhook-ack/`](../workers/webhook-ack/index.ts): a
-Workers route on the same hostname (routes win over the Custom Domain) answers
-`200` immediately and forwards the untouched request to `pathors-internal`
-through a service binding inside `waitUntil`, retrying on 5xx. Signature
-checks, dedupe and enqueueing stay in the main app.
+4 KB Worker in [`workers/webhook-ack/`](../workers/webhook-ack/index.ts). A
+Workers route on the same hostname (routes win over the Custom Domain) sends
+`internal.pathors.com/api/channels/{line,whatsapp}/webhook` to it; everything
+else still goes to `pathors-internal`. On a POST it:
 
-It is not covered by Workers Builds. Deploy it by hand when `index.ts` or its
-`wrangler.jsonc` changes (it holds no secrets):
+1. verifies the signature with the same code the app uses
+   (`src/lib/channels/signature.ts`),
+2. puts the raw body (base64) and the signature header on the existing
+   `pathors-internal-chat` queue as a `{ kind: "raw" }` job,
+3. answers `200` (`500` if the queue refuses, so the platform redelivers).
+
+The app's `queue()` re-verifies, parses, dedupes and fans the raw job out into
+the usual `event` jobs (`handleRawWebhookJob` in `src/lib/channels/webhook.ts`).
+A failure there is retried by the queue, so no message is lost. Bodies too big
+for a queue message, and the WhatsApp `GET` handshake, are forwarded
+synchronously to the app through a service binding.
+
+It is not covered by Workers Builds. It needs the same `LINE_CHANNEL_SECRET`
+(and `WHATSAPP_APP_SECRET` if WhatsApp is on) as the app; a provider without its
+secret answers `404`, like the app. **Deploy order matters**: the app must
+already understand `raw` jobs, so deploy `pathors-internal` first. Then do the
+first deploy of the front together with its secrets, otherwise the webhooks answer
+`404` between the route going live and the secret being set:
 
 ```bash
-bunx wrangler deploy -c workers/webhook-ack/wrangler.jsonc
+bunx wrangler deploy -c workers/webhook-ack/wrangler.jsonc --secrets-file <.env with only those secrets>
 ```
+
+Later code changes: plain `bunx wrangler deploy -c workers/webhook-ack/wrangler.jsonc`
+(secrets are kept).
 
 Self-hosting without it is fine: the webhooks still work, they are just as slow
 as any other cold request. Change the route patterns to your own hostname, or
