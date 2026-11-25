@@ -60,7 +60,10 @@ export default async function DashboardLayout({
           badges={{ links: pendingLinks }}
         />
         {/* min-w-0：SidebarInset 是 flex 子項，沒有它寬表格會把整頁撐寬（表格應在自己的容器裡捲動） */}
-        <SidebarInset className="min-w-0">
+        {/* overflow-x-clip：最後一道保險。哪一頁有元素超出內容區，就裁在這裡，不讓整份文件變寬 ——
+            手機瀏覽器遇到比螢幕寬的文件會整頁縮小，所有東西都變小還偏一邊。clip 不產生捲動容器，
+            所以 sticky 的 header 照常運作。這不是不修的理由：超出的元素本身仍要在該頁修掉。 */}
+        <SidebarInset className="min-w-0 overflow-x-clip">
           <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b bg-background/80 px-4 backdrop-blur-md">
             <SidebarTrigger className="-ml-1" />
             <Separator

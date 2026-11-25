@@ -102,6 +102,29 @@ The glow uses the brand blue only. It is deliberately restrained in light mode a
 - No card inside a card. No grid of bordered boxes for short text — use a table or a `dl`.
 - Every string goes through `next-intl` in both `zh-TW` and `en` (`src/i18n/messages/*`).
 
+## Phone width
+
+Every page has to hold at 375px. One element wider than the screen is enough to break the whole
+page: the document grows, and a phone browser then zooms the entire page out to fit.
+
+- **Money does not wrap** (`<Amount>` is `whitespace-nowrap`), so it needs room. Never put amounts
+  in side-by-side columns without a breakpoint — three seven-digit amounts do not fit in 280px and
+  will overlap. Stack them as label-left / amount-right rows and switch to columns at `sm:`.
+- **Give every grid a column count at the base size**: `grid grid-cols-1 lg:grid-cols-2`, not
+  `grid lg:grid-cols-2`. Without it the single column is `auto` and grows to the widest child
+  instead of shrinking to the screen.
+- **A chart with a fixed height needs `aspect-auto`**: `<ChartContainer className="aspect-auto h-56
+  w-full">`. The default is `aspect-video`, so `h-56` alone means "at least 398px wide".
+  `src/components/ui/chart.test.ts` fails the build on this.
+- **Horizontal bar charts with a name column and a value column do not work on a phone** — the bar
+  is what gets squeezed. Below `md` render a list instead (name and amount on one line, a thin bar
+  under it); see `MobileList` in `src/app/dashboard/spend-chart.tsx`.
+- Wide tables scroll inside their own card (`<Table>` already wraps itself in `overflow-x-auto`).
+- `SidebarInset` has `overflow-x-clip` as a last resort so a stray element cannot widen the
+  document. It hides the symptom, not the bug — still fix the element.
+- Before opening a PR for a page change, load it at 375px and check
+  `document.documentElement.scrollWidth === window.innerWidth`.
+
 ## Motion inventory
 
 | Motion | When | How |
