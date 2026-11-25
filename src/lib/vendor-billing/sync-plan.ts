@@ -96,6 +96,12 @@ export type CostLineInput = {
   resourceExternalId: string;
   resourceName: string | null;
   service: string;
+  /** GCP SKU 說明；Azure 不給（存 ''）。 */
+  sku?: string;
+  /** GKE cluster；沒有不給。 */
+  cluster?: string;
+  /** 原價（未扣任何 credits）；Azure 不給（存 NULL，讀取時視同 grossAmount）。 */
+  listAmount?: number;
   /** 淨額 = grossAmount + promotionCredit。 */
   amount: number;
   /** 沒有抵用點數時的金額（Azure = amount）。 */
@@ -106,7 +112,7 @@ export type CostLineInput = {
 };
 
 /**
- * 同一個 (月, 資源, 服務) 合併成一列 —— 同一次 upsert 裡出現重複鍵，Postgres 會拒絕。
+ * 同一個 (月, 資源, 服務, SKU, cluster) 合併成一列 —— 同一次 upsert 裡出現重複鍵，Postgres 會拒絕。
  * 同鍵不同幣別的極端情況：保留第一個幣別、金額照加（Azure / GCP 一個帳號只有一種幣別）。
  */
 const round4 = (n: number) => Math.round(n * 10_000) / 10_000;
@@ -114,12 +120,13 @@ const round4 = (n: number) => Math.round(n * 10_000) / 10_000;
 export function aggregateCostLines(rows: readonly CostLineInput[]): CostLineInput[] {
   const map = new Map<string, CostLineInput>();
   for (const r of rows) {
-    const key = `${r.month}|${r.resourceExternalId}|${r.service}`;
+    const key = `${r.month}|${r.resourceExternalId}|${r.service}|${r.sku ?? ""}|${r.cluster ?? ""}`;
     const cur = map.get(key);
     if (cur) {
       cur.amount = round4(cur.amount + r.amount);
       cur.grossAmount = round4(cur.grossAmount + r.grossAmount);
       cur.promotionCredit = round4(cur.promotionCredit + r.promotionCredit);
+      if (r.listAmount !== undefined) cur.listAmount = round4((cur.listAmount ?? 0) + r.listAmount);
       cur.resourceName ??= r.resourceName;
     } else {
       map.set(key, { ...r });
