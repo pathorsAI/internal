@@ -165,7 +165,27 @@ export function buildCostBreakdown(
     .filter((s) => !isZero(s) || Math.abs(s.prevListAmount) >= 0.005)
     .sort((a, b) => b.listAmount - a.listAmount || b.prevListAmount - a.prevListAmount);
 
-  // 趨勢：選取月份往前 trendMonths 個月；帳號還沒開始計費的前段空月份不畫
+  const { trend, trendServices } = buildTrend(rows, month, trendMonths, maxTrendServices);
+
+  return {
+    month,
+    prevMonth,
+    currency,
+    total: rounded(total),
+    prevTotal: rounded(prevTotal),
+    services: serviceList,
+    trend,
+    trendServices,
+  };
+}
+
+/** 近 trendMonths 個月 × 服務的原價；帳號還沒開始計費的前段空月份不畫，尾端的服務併成「其他」。 */
+function buildTrend(
+  rows: readonly CostLineRow[],
+  month: string,
+  trendMonths: number,
+  maxTrendServices: number,
+): { trend: CostTrendPoint[]; trendServices: string[] } {
   const firstWithData = rows.reduce<string | null>((min, r) => (min === null || r.month < min ? r.month : min), null);
   const months: string[] = [];
   for (let i = trendMonths - 1; i >= 0; i--) {
@@ -200,14 +220,5 @@ export function buildCostBreakdown(
     return { month: m, total: round2(t), byService };
   });
 
-  return {
-    month,
-    prevMonth,
-    currency,
-    total: rounded(total),
-    prevTotal: rounded(prevTotal),
-    services: serviceList,
-    trend,
-    trendServices: hasOther ? [...shown, OTHER_SERVICE] : shown,
-  };
+  return { trend, trendServices: hasOther ? [...shown, OTHER_SERVICE] : shown };
 }

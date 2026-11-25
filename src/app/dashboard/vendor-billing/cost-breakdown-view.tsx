@@ -440,20 +440,20 @@ export function CostBreakdownView() {
     if (q.month) sp.set("month", toParam(q.month));
     else sp.delete("month");
     // 只改網址不重跑 server page（Next 會同步 useSearchParams）；資料由上面的 effect 抓
-    window.history.replaceState(null, "", `${pathname}?${sp.toString()}`);
+    globalThis.history.replaceState(null, "", `${pathname}?${sp.toString()}`);
   }
 
   let body: React.ReactNode;
   if (loading && !ok) body = <CostSkeleton />;
   else if (data && !data.ok) body = <EmptyState icon={Cloud} message={data.error} />;
-  else if (!ok?.breakdown) body = <EmptyState icon={Cloud} message={t("empty")} />;
-  else
+  else if (ok?.breakdown)
     body = (
       <div className={cn("flex flex-col gap-4 transition-opacity", loading && "pointer-events-none opacity-60")}>
         <Charts b={ok.breakdown} />
         <ServiceTable b={ok.breakdown} />
       </div>
     );
+  else body = <EmptyState icon={Cloud} message={t("empty")} />;
 
   return (
     <>
