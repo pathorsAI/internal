@@ -1,0 +1,17 @@
+{
+  // 聊天平台 webhook 的前哨，說明見 index.ts。部署：
+  //   bunx wrangler deploy -c workers/webhook-ack/wrangler.jsonc
+  // 主站 pathors-internal 要先存在（service binding 指向它）。
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "pathors-internal-webhook-ack",
+  "main": "index.ts",
+  "compatibility_date": "2025-08-01",
+  "workers_dev": false,
+  // 只接這兩條。同一個 hostname 上 route 優先於主站的 Custom Domain，其他路徑照舊進主站。
+  "routes": [
+    { "pattern": "internal.pathors.com/api/channels/line/webhook", "zone_name": "pathors.com" },
+    { "pattern": "internal.pathors.com/api/channels/whatsapp/webhook", "zone_name": "pathors.com" }
+  ],
+  "services": [{ "binding": "APP", "service": "pathors-internal" }],
+  "observability": { "logs": { "enabled": true, "invocation_logs": true } }
+}
