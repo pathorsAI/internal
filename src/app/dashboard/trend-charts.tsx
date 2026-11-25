@@ -224,7 +224,10 @@ export function TrendCharts({
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      {/* grid-cols-1 + aspect-auto 缺一不可：沒寫欄數的 grid 欄寬是 auto，會被內容的最小寬度撐開；
+          ChartContainer 預設 aspect-video，配上固定高度 h-56 就等於宣告「我至少 398px 寬」，
+          手機上整張卡片因此超出螢幕、把整頁撐寬。 */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card className="gap-3">
           <CardHeader>
             <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -235,7 +238,7 @@ export function TrendCharts({
           </CardHeader>
           <CardContent>
             {hasFlow ? (
-              <ChartContainer config={chartConfig} className="h-56 w-full">
+              <ChartContainer config={chartConfig} className="aspect-auto h-56 w-full">
                 <BarChart data={flowData} margin={{ left: 4, right: 4 }} barGap={3}>
                   <CartesianGrid vertical={false} stroke="var(--border-soft)" />
                   <XAxis
@@ -297,7 +300,7 @@ export function TrendCharts({
           </CardHeader>
           <CardContent>
             {hasBalance ? (
-              <ChartContainer config={chartConfig} className="h-56 w-full">
+              <ChartContainer config={chartConfig} className="aspect-auto h-56 w-full">
                 <AreaChart data={balanceData} margin={{ left: 4, right: 4 }}>
                   <defs>
                     <linearGradient id="fillBalance" x1="0" y1="0" x2="0" y2="1">

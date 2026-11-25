@@ -192,13 +192,21 @@ export default async function DashboardPage() {
             <EmptyState icon={ArrowLeftRight} message={t("flow.empty")} />
           ) : (
             overview.map((c) => (
-              <div key={c.currency} className="flex items-center gap-4 px-4 py-3">
-                <span className="w-8 shrink-0 text-xs font-medium text-muted-foreground">
+              // 手機：幣別一行、收入／支出／淨額各一行（標籤左、金額右）。三欄並排放不下七位數金額，
+              // 金額又不換行，會互相蓋住還把整頁撐寬。sm 以上才並排三欄。
+              <div
+                key={c.currency}
+                className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:gap-4"
+              >
+                <span className="shrink-0 text-xs font-medium text-muted-foreground sm:w-8">
                   {currencyLabel[c.currency] ?? c.currency}
                 </span>
-                <div className="grid flex-1 grid-cols-3 gap-4">
+                <div className="grid min-w-0 flex-1 gap-1.5 sm:grid-cols-3 sm:gap-4">
                   {stats.map((m) => (
-                    <div key={m.label} className="space-y-0.5">
+                    <div
+                      key={m.label}
+                      className="flex min-w-0 items-baseline justify-between gap-3 sm:block sm:space-y-0.5"
+                    >
                       <div className="text-xs text-muted-foreground">{m.label}</div>
                       {/* 支出欄位金額為正，語意為支出（墨色帶 −）；淨額依正負決定 */}
                       <Amount
@@ -247,13 +255,14 @@ export default async function DashboardPage() {
                       {txn.categoryName ?? t("recent.uncategorized")} · {formatDate(txn.txnDate)}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  {/* 手機：金額在上、帳別徽章在下，把橫向空間讓給左邊的摘要（並排時摘要只剩五個字） */}
+                  <div className="flex shrink-0 flex-col-reverse items-end gap-1 sm:flex-row sm:items-center sm:gap-2">
                     <BookBadge book={txn.book} />
                     <Amount
                       value={txn.amount}
                       currency={txn.currency}
                       kind={amountKind(txn.type)}
-                      className="inline-block min-w-24 text-right text-sm font-medium"
+                      className="inline-block text-right text-sm font-medium sm:min-w-24"
                     />
                   </div>
                 </div>

@@ -30,11 +30,9 @@ import {
 import { cn } from "@/lib/utils";
 
 const ROW_HEIGHT = 40;
-// 左邊「頭像 + 名稱」與右邊「金額 · 占比」的寬度；手機上縮窄、金額改用壓縮表示（1.2萬 / 12K）
+// 左邊「頭像 + 名稱」與右邊「金額 · 占比」的寬度（桌機的橫條圖；手機改用 MobileList）
 const LABEL_WIDTH = 168;
 const VALUE_WIDTH = 132;
-const LABEL_WIDTH_SM = 108;
-const VALUE_WIDTH_SM = 116;
 const TICK_GAP = 8;
 
 /** 長條旁邊的金額取整數（總覽看量級，不看角）。 */
@@ -210,6 +208,71 @@ function ValueLabel({
   );
 }
 
+/**
+ * 手機版：不用橫條圖。名稱欄＋金額欄固定寬度後，長條只剩幾十 px、名稱也被截成「Garag…」。
+ * 改成兩行一列：上面名稱（可用整列寬度）與金額 · 占比，下面一條跟金額等比的細條。
+ */
+function MobileList({
+  data,
+  groupBy,
+  total,
+  percent,
+}: Readonly<{
+  data: Row[];
+  groupBy: SpendGroupBy;
+  total: number;
+  percent: Intl.NumberFormat;
+}>) {
+  const max = Math.max(...data.map((r) => r.total), 0);
+  return (
+    <ul className="divide-y divide-border-soft">
+      {data.map((row) => {
+        const muted = row.kind === "other" || row.kind === "none";
+        const body = (
+          <>
+            {groupBy === "party" && row.kind === "party" ? (
+              <PartyAvatar name={row.label} partyId={row.id} avatarVersion={row.avatarVersion} size="md" />
+            ) : null}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className={cn("truncate text-sm", muted && "text-muted-foreground")}>{row.label}</span>
+                <span className="shrink-0 text-xs tabular-nums">
+                  {money(row.total)}
+                  <span className="text-muted-foreground"> · {percent.format(total > 0 ? row.total / total : 0)}</span>
+                </span>
+              </div>
+              <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full"
+                  style={{
+                    width: `${max > 0 ? Math.max((row.total / max) * 100, 1) : 0}%`,
+                    background: muted ? "var(--chart-3)" : "var(--chart-1)",
+                    opacity: muted ? 0.55 : 0.9,
+                  }}
+                />
+              </div>
+            </div>
+          </>
+        );
+        return (
+          <li key={row.key}>
+            {row.href ? (
+              <Link
+                href={row.href}
+                className="flex items-center gap-2.5 py-2.5 focus-visible:outline-2 focus-visible:outline-ring"
+              >
+                {body}
+              </Link>
+            ) : (
+              <div className="flex items-center gap-2.5 py-2.5">{body}</div>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 export function SpendChart({
   months,
   rows,
@@ -218,8 +281,8 @@ export function SpendChart({
   const locale = useLocale();
   const router = useRouter();
   const isMobile = useIsMobile();
-  const labelWidth = isMobile ? LABEL_WIDTH_SM : LABEL_WIDTH;
-  const valueWidth = isMobile ? VALUE_WIDTH_SM : VALUE_WIDTH;
+  const labelWidth = LABEL_WIDTH;
+  const valueWidth = VALUE_WIDTH;
   const [range, setRange] = useState<SpendRange>("3m");
   const [groupBy, setGroupBy] = useState<SpendGroupBy>("party");
 
@@ -227,11 +290,6 @@ export function SpendChart({
     () => new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 }),
     [locale],
   );
-  const compact = useMemo(
-    () => new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }),
-    [locale],
-  );
-  const barValue = (n: number) => (isMobile ? `NT$${compact.format(n)}` : money(n));
   const chartConfig = {
     // 品牌藍而非紅：這張圖整張都是支出，紅色只留給要人處理的狀態
     total: { label: t("tooltip.amount"), color: "var(--chart-1)" },
@@ -272,6 +330,8 @@ export function SpendChart({
         <CardContent>
           {data.length === 0 ? (
             <EmptyState icon={HandCoins} message={t("empty")} />
+          ) : isMobile ? (
+            <MobileList data={data} groupBy={groupBy} total={summary.total} percent={percent} />
           ) : (
             <ChartContainer
               config={chartConfig}
@@ -318,7 +378,7 @@ export function SpendChart({
                   <LabelList
                     dataKey="total"
                     // 自己畫 <text>：內建的 label 會依剩餘寬度自動換行，金額與占比被拆成兩行
-                    content={<ValueLabel total={summary.total} percent={percent} format={barValue} />}
+                    content={<ValueLabel total={summary.total} percent={percent} format={money} />}
                   />
                 </Bar>
               </BarChart>
