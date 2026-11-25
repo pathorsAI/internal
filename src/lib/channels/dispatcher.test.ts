@@ -367,6 +367,21 @@ describe("合成一題", () => {
 });
 
 describe("指令", () => {
+  test("整則是指令：馬上回、用這則的 reply token，不進暫存區", async () => {
+    const w = world();
+    await handleEvent(ev({ kind: "text", text: "說明" }), w.deps);
+    expect(w.scheduled.length).toBe(0);
+    expect(w.buffer.length).toBe(0);
+    expect(w.turns.length).toBe(0);
+    expect(w.sent.length).toBeGreaterThan(0);
+  });
+
+  test("引用某則訊息時，就算內容像指令也照一般訊息合併", async () => {
+    const w = world();
+    await handleEvent(ev({ kind: "text", text: "說明", quotedMessageId: "m-old" }), w.deps);
+    expect(w.scheduled.length).toBe(1);
+  });
+
   test("切換組織：選單 → 按下去換組織", async () => {
     const w = world({
       orgs: [

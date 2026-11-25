@@ -313,6 +313,13 @@ export async function handleEvent(event: InboundEvent, deps: DispatcherDeps): Pr
       return;
     case "text": {
       await recordIn(deps, event, identity, null);
+      // 整則就是指令（說明、切換組織、新對話、解除綁定…）：馬上處理，不進暫存區等合併。
+      // 回覆用這則事件自己的 reply token，不算推播則數。暫存區裡先前的訊息照原本的 flush 處理。
+      const command = event.quotedMessageId ? null : parseCommand(event.text);
+      if (command) {
+        await runCommand(command, identity, adapter, replier, s, deps);
+        return;
+      }
       const row = await deps.db.appendChatBuffer({
         identityId: identity.id,
         provider: event.provider,
