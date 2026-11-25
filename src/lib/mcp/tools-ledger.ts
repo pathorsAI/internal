@@ -335,7 +335,7 @@ export const ledgerTools: Record<string, ToolDef> = {
       const lines: JournalLineInput[] = rawLines.map((l, i) => {
         const code = typeof l.accountCode === "string" ? l.accountCode.trim() : "";
         const acct = code ? byCode.get(code) : byId.get(Number(l.glAccountId));
-        if (!acct) throw new Error(`Line ${i + 1}: unknown account ${code || String(l.glAccountId ?? "")} in this organization's chart of accounts.`);
+        if (!acct) throw new Error(`Line ${i + 1}: unknown account ${code || (typeof l.glAccountId === "number" || typeof l.glAccountId === "string" ? l.glAccountId : "")} in this organization's chart of accounts.`);
         return {
           glAccountId: acct.id,
           debit: Number(l.debit) || 0,
