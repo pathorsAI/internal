@@ -40,6 +40,11 @@ export const ENTITY_TABLES: Readonly<Record<string, string>> = {
   payment_method: "payment_methods",
   vendor_invoice: "vendor_invoices",
   ai_rule: "ai_rules",
+  // 0044 總帳
+  journal_entry: "journal_entries",
+  fixed_asset: "fixed_assets",
+  gl_account: "gl_accounts",
+  fx_rate: "fx_rates",
 };
 
 /** 有 deleted_at（軟刪）的表。新增的復原在這些表上是軟刪，其他表是真的 DELETE。 */
@@ -62,7 +67,35 @@ export const SOFT_DELETE_TABLES: ReadonlySet<string> = new Set([
   "vendor_billing_accounts",
   "payment_methods",
   "ai_rules",
+  "journal_entries",
+  "fixed_assets",
 ]);
+
+/**
+ * 0044 結帳鎖定（guard_closed_period）擋的表：日期欄位、以及改了才會被擋的欄位（跟 trigger 參數一致）。
+ * 新增／刪除（含軟刪、救回）一律算動到帳；修改只有動到這些欄位才算。
+ */
+export const PERIOD_GUARDS: Readonly<Record<string, { dateColumn: string; columns: readonly string[] }>> = {
+  transactions: {
+    dateColumn: "txn_date",
+    columns: [
+      "txn_date", "amount", "amount_twd", "currency", "type", "book", "category_id", "from_account_id",
+      "to_account_id", "invoice_id", "related_to_id", "settle_employee_id", "party_id", "deleted_at",
+    ],
+  },
+  invoices: {
+    dateColumn: "invoice_date",
+    columns: ["invoice_date", "direction", "status", "amount_net", "tax", "amount_gross", "currency", "deleted_at"],
+  },
+  journal_entries: { dateColumn: "entry_date", columns: ["entry_date", "ledger", "deleted_at"] },
+  fixed_assets: {
+    dateColumn: "acquired_on",
+    columns: [
+      "acquired_on", "cost", "salvage_value", "useful_life_months", "asset_account_id", "source_transaction_id",
+      "deleted_at",
+    ],
+  },
+};
 
 export type UndoReasonCode = keyof typeof activityMessages.undo.reasons;
 
@@ -71,9 +104,12 @@ export const NOT_UNDOABLE_ENTITIES: Readonly<Record<string, UndoReasonCode>> = {
   integration: "integration",
   api_key: "integration",
   organization: "integration",
+  accounting_settings: "integration",
   member: "integration",
   tool: "integration",
   calendar: "calendar",
+  // 結帳／重新開帳：到財務報表操作
+  fiscal_period: "period_close",
   // 發薪：薪資單＋支出交易；刪薪資批次會連帶刪掉底下的薪資單
   payslip: "pay_employee_salary",
   payroll_run: "multi_row",
@@ -227,6 +263,8 @@ export type UndoFacts = {
   lastChange: ChangeRow | null;
   /** 這列現在的樣子（完整、未遮罩）；不存在是 null。 */
   current: Snapshot | null;
+  /** 這個組織已結帳的月份（YYYY-MM）。 */
+  closedPeriods?: ReadonlySet<string>;
   /** change_id 之後這一列最新的一筆變動（有就代表之後又被改過）。 */
   newer: { changedAt: string; activityId: number | null; actorName: string | null } | null;
 };
@@ -320,8 +358,57 @@ function decideDelete(table: string, rowId: number, f: UndoFacts, guard: number)
   return { ok: true, kind: "reinsert", table, rowId, values: before, guardChangeId: guard };
 }
 
+function monthOf(v: unknown): string | null {
+  return typeof v === "string" && /^\d{4}-\d{2}/.test(v) ? v.slice(0, 7) : null;
+}
+
+/**
+ * 復原會不會撞到已結帳的月份（0044 guard_closed_period）：這列現在的日期、或要改回去的日期，
+ * 落在已結帳月份，而且這次復原會動到 trigger 會擋的欄位。撞到就回那個月份。
+ */
+export function closedPeriodHit(d: Extract<UndoDecision, { ok: true }>, f: UndoFacts): string | null {
+  const guard = PERIOD_GUARDS[d.table];
+  if (!guard || !f.closedPeriods || f.closedPeriods.size === 0) return null;
+  if (d.kind === "restore" && !Object.keys(d.values).some((k) => guard.columns.includes(k))) return null;
+  const dates = [f.current?.[guard.dateColumn], d.values[guard.dateColumn]];
+  for (const v of dates) {
+    const m = monthOf(v);
+    if (m && f.closedPeriods.has(m)) return m;
+  }
+  return null;
+}
+
+/** 結帳時系統自動產生的分錄（kind = snapshot）：跟著結帳／重新開帳走，不能單獨復原。 */
+function isSystemGenerated(table: string, f: UndoFacts): boolean {
+  if (table !== "journal_entries") return false;
+  const row = f.current ?? f.lastChange?.before ?? f.lastChange?.after;
+  return row?.kind === "snapshot";
+}
+
 /** 這筆操作紀錄能不能復原、要怎麼復原。 */
 export function decideUndo(f: UndoFacts): UndoDecision {
+  const d = decideRow(f);
+  if (!d.ok) return d;
+  if (isSystemGenerated(d.table, f)) return refuse("system_generated");
+  const month = closedPeriodHit(d, f);
+  return month ? refuse("period_closed", { month }) : d;
+}
+
+/** 執行時撞到的資料庫錯誤 → 看得懂的理由（PERIOD_CLOSED 來自 0044 的 trigger）。 */
+export function undoErrorRefusal(err: unknown): UndoRefusal {
+  const parts: string[] = [];
+  let cur: unknown = err;
+  for (let i = 0; i < 4 && cur; i++) {
+    parts.push(cur instanceof Error ? cur.message : String(cur));
+    cur = cur instanceof Error ? (cur as Error & { cause?: unknown }).cause : null;
+  }
+  const text = parts.join(" | ");
+  const m = /PERIOD_CLOSED:\s*(\d{4}-\d{2})/.exec(text);
+  if (text.includes("PERIOD_CLOSED")) return refuse("period_closed", { month: m ? m[1] : "?" });
+  return refuse("failed", { error: text.slice(0, 200) });
+}
+
+function decideRow(f: UndoFacts): UndoDecision {
   const a = f.activity;
   const blocked = blockedReason(a);
   if (blocked) return blocked;

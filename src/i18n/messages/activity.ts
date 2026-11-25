@@ -55,6 +55,11 @@ const activity = {
     ai_rule: { "zh-TW": "AI 規則", en: "AI rule" },
     calendar: { "zh-TW": "日曆", en: "Calendar" },
     member: { "zh-TW": "成員", en: "Member" },
+    journal_entry: { "zh-TW": "分錄", en: "Journal entry" },
+    fixed_asset: { "zh-TW": "財產", en: "Fixed asset" },
+    gl_account: { "zh-TW": "會計科目", en: "GL account" },
+    fx_rate: { "zh-TW": "匯率", en: "FX rate" },
+    fiscal_period: { "zh-TW": "結帳期間", en: "Fiscal period" },
   },
   // 復原（migrations/0045、src/lib/undo.ts）
   undo: {
@@ -165,6 +170,18 @@ const activity = {
         en: "The record is already in the restored state; nothing to undo.",
       },
       failed: { "zh-TW": "復原失敗：{error}", en: "Undo failed: {error}" },
+      period_closed: {
+        "zh-TW": "這筆落在已結帳的 {month}，要先在財務報表重開該期間才能復原。",
+        en: "This falls in the closed period {month}; reopen that period in Financial statements before undoing.",
+      },
+      period_close: {
+        "zh-TW": "結帳／重新開帳不能從這裡復原，請到財務報表重新開帳或再結一次。",
+        en: "Closing / reopening a period cannot be undone here; reopen or close it again in Financial statements.",
+      },
+      system_generated: {
+        "zh-TW": "這是結帳時系統自動產生的分錄，會跟著結帳／重新開帳更新，不能單獨復原。",
+        en: "This journal entry was generated when the period was closed; it follows close / reopen and cannot be undone on its own.",
+      },
     },
     someone: { "zh-TW": "其他人", en: "someone else" },
     // 欄位名稱：看得懂的就翻，其他顯示原始欄位名

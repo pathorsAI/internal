@@ -63,6 +63,11 @@ export default async function ActivityPage() {
     ai_rule: t("entity.ai_rule"),
     calendar: t("entity.calendar"),
     member: t("entity.member"),
+    journal_entry: t("entity.journal_entry"),
+    fixed_asset: t("entity.fixed_asset"),
+    gl_account: t("entity.gl_account"),
+    fx_rate: t("entity.fx_rate"),
+    fiscal_period: t("entity.fiscal_period"),
   };
   const { orgId } = await requireOrg();
   const rows = await listActivity(orgId, { limit: 300 });

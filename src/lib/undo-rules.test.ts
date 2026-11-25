@@ -15,6 +15,7 @@ import {
   pickChangeGroup,
   restoreValues,
   SOFT_DELETE_TABLES,
+  undoErrorRefusal,
   undoReasonText,
   undoSummary,
   type ChangeRow,
@@ -187,6 +188,55 @@ describe("decideUndo", () => {
       code: "unsupported_entity",
       params: { entity: "widget" },
     });
+  });
+});
+
+describe("closed accounting periods (0044)", () => {
+  const closed = new Set(["2026-10"]);
+  const octRow = { id: 5, txn_date: "2026-10-05", amount: 200, note: "b", deleted_at: null };
+
+  test("restore touching a guarded column in a closed month is refused up front", () => {
+    const d = decideUndo(facts({ current: octRow, closedPeriods: closed }));
+    expect(d).toEqual({ ok: false, code: "period_closed", params: { month: "2026-10" } });
+    if (d.ok) throw new Error("unreachable");
+    expect(undoReasonText(d, "zh-TW")).toBe("這筆落在已結帳的 2026-10，要先在財務報表重開該期間才能復原。");
+    expect(undoReasonText(d, "en")).toContain("2026-10");
+  });
+
+  test("restore of unguarded columns only (note) is allowed even in a closed month", () => {
+    const first: ChangeRow = { id: 100, op: "update", before: { ...octRow, note: "a" }, after: octRow };
+    const d = decideUndo(facts({ current: octRow, firstChange: first, lastChange: first, closedPeriods: closed }));
+    expect(d).toMatchObject({ ok: true, kind: "restore", values: { note: "a" } });
+  });
+
+  test("create / delete undo in a closed month is refused; open months are fine", () => {
+    const create = activity({ action: "create", changeId: 100, firstChangeId: 100 });
+    const f = { activity: create, firstChange: ins, lastChange: ins, current: octRow };
+    expect(decideUndo(facts({ ...f, closedPeriods: closed }))).toMatchObject({ ok: false, code: "period_closed" });
+    expect(decideUndo(facts({ ...f, closedPeriods: new Set(["2026-09"]) }))).toMatchObject({ ok: true });
+    // 不受結帳鎖定的表不看期間
+    const party = activity({ action: "create", entityType: "party", changeId: 100, firstChangeId: 100 });
+    expect(decideUndo(facts({ ...f, activity: party, closedPeriods: closed }))).toMatchObject({ ok: true });
+  });
+
+  test("system-generated snapshot journal entries are refused", () => {
+    const je = activity({ action: "create", entityType: "journal_entry", changeId: 100, firstChangeId: 100 });
+    const row = { id: 5, kind: "snapshot", entry_date: "2026-09-30", deleted_at: null };
+    expect(decideUndo(facts({ activity: je, firstChange: ins, lastChange: ins, current: row }))).toEqual({
+      ok: false,
+      code: "system_generated",
+    });
+    expect(
+      decideUndo(facts({ activity: je, firstChange: ins, lastChange: ins, current: { ...row, kind: "manual" } })),
+    ).toMatchObject({ ok: true, kind: "softDelete", table: "journal_entries" });
+  });
+
+  test("a PERIOD_CLOSED error at execute time maps to the same reason (also through error.cause)", () => {
+    const pgErr = new Error("PERIOD_CLOSED: 2026-10-05 falls in a closed accounting period");
+    expect(undoErrorRefusal(pgErr)).toEqual({ ok: false, code: "period_closed", params: { month: "2026-10" } });
+    const wrapped = new Error("Failed query: update ...", { cause: pgErr });
+    expect(undoErrorRefusal(wrapped)).toEqual({ ok: false, code: "period_closed", params: { month: "2026-10" } });
+    expect(undoErrorRefusal(new Error("duplicate key"))).toMatchObject({ ok: false, code: "failed" });
   });
 });
 

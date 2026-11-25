@@ -29,8 +29,12 @@
 --
 -- 不回填：舊的操作紀錄沒有快照，畫面會說「這筆紀錄沒有可復原的資料」。
 --
--- Forward-only，全部 additive。Run AFTER 0044（0044 是另一支 PR 的總帳，可能先上；
--- 這支不依賴它的任何物件）。
+-- 跟 0044 的結帳鎖定並存：guard_closed_period 是 BEFORE trigger，被擋下（PERIOD_CLOSED）的寫入
+-- 根本不會走到這裡的 AFTER trigger，所以 entity_changes 不會記到沒發生的變動；這支不動它的 trigger。
+-- 復原落在已結帳月份時，程式先用 fiscal_periods 判斷並拒絕（src/lib/undo-rules.ts），
+-- 執行時萬一還是撞到 PERIOD_CLOSED，也會轉成看得懂的理由。
+--
+-- Forward-only，全部 additive。Run AFTER 0044（0044_general_ledger）。
 
 CREATE TABLE entity_changes (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -93,7 +97,9 @@ BEGIN
     'subscriptions', 'subscription_periods', 'billing_items', 'invoices', 'employees',
     'employee_bank_accounts', 'account_reconciliations', 'recurring_expenses',
     'payment_allocations', 'documents',
-    'vendor_billing_accounts', 'payment_methods', 'vendor_invoices', 'ai_rules'
+    'vendor_billing_accounts', 'payment_methods', 'vendor_invoices', 'ai_rules',
+    -- 0044 總帳：分錄（分錄行 journal_lines 沒有 organization_id，跟著分錄走）、財產、會計科目、匯率
+    'journal_entries', 'fixed_assets', 'gl_accounts', 'fx_rates'
   ] LOOP
     IF EXISTS (
       SELECT 1 FROM information_schema.columns

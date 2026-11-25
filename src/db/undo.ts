@@ -144,6 +144,20 @@ async function loadCurrentRows(
   return out;
 }
 
+/** 已結帳的月份（0044 fiscal_periods）。表還不存在（0044 沒跑）就是空的。 */
+async function loadClosedPeriods(orgId: string, db: Db): Promise<Set<string>> {
+  try {
+    const res = await db.execute(sql`
+      select year::text as year, month::text as month from fiscal_periods
+      where organization_id = ${orgId} and status = 'closed'`);
+    return new Set(
+      rowsOf<{ year: string; month: string }>(res).map((r) => `${r.year}-${r.month.padStart(2, "0")}`),
+    );
+  } catch {
+    return new Set();
+  }
+}
+
 type Newer = NonNullable<UndoFacts["newer"]>;
 
 /** 每一列最新的一筆變動，以及認領它的操作紀錄（之後有沒有被改過、被誰改）。 */
@@ -214,7 +228,7 @@ export async function loadUndoFacts(
     list.push(a.entityId as number);
     byTable.set(table, list);
   }
-  const [changes, undoneBy, current, latest] = await Promise.all([
+  const [changes, undoneBy, current, latest, closedPeriods] = await Promise.all([
     loadChanges([...new Set(changeIds)], db),
     loadUndoneBy(orgId, ids, db),
     loadCurrentRows(orgId, byTable, db),
@@ -223,6 +237,7 @@ export async function loadUndoFacts(
       withChange.map((a) => ({ table: ENTITY_TABLES[a.entityType], rowId: a.entityId as number })),
       db,
     ),
+    loadClosedPeriods(orgId, db),
   ]);
   for (const a of activities) {
     const table = ENTITY_TABLES[a.entityType];
@@ -237,6 +252,7 @@ export async function loadUndoFacts(
       firstChange: first,
       lastChange: last,
       current: key ? (current.get(key) ?? null) : null,
+      closedPeriods,
       newer:
         newest && a.changeId !== null && newest.id > a.changeId
           ? { changedAt: newest.changedAt, activityId: newest.activityId, actorName: newest.actorName }

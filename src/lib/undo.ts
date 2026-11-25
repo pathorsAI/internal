@@ -4,6 +4,7 @@ import { formatDateTime } from "@/lib/format";
 import {
   decideUndo,
   UNDO_ACTION,
+  undoErrorRefusal,
   undoReasonText,
   undoSummary,
   type UndoDecision,
@@ -137,8 +138,9 @@ export async function executeUndo(opts: {
   try {
     applied = await applyUndo(opts.orgId, decision);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return failure("failed", locale, { error: message.slice(0, 200) });
+    // 0044 的結帳鎖定（PERIOD_CLOSED）等資料庫錯誤 → 看得懂的理由，不丟原始錯誤
+    const r = undoErrorRefusal(err);
+    return { ok: false, code: r.code, reason: undoReasonText(r, locale) };
   }
   if (!applied) return failure(decision.kind === "restore" ? "conflict" : "nothing_to_do", locale);
 
