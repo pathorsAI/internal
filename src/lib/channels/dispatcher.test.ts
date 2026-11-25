@@ -288,6 +288,16 @@ describe("未綁定", () => {
     expect(help.cards.map((c) => c.imageUrl)).toEqual([1, 2, 3, 4].map((i) => `https://internal.pathors.com/line/help-${i}.png`));
   });
 
+  test("第一次聯絡（加好友／WhatsApp 打開對話）：歡迎＋怎麼綁定，後面接說明卡組", async () => {
+    const w = world({ linked: false });
+    await handleEvent(ev({ kind: "follow" }, "U-stranger"), w.deps);
+    const [welcome, help] = w.sent.at(-1)!.msgs;
+    expect(welcome).toMatchObject({ type: "text" });
+    if (welcome.type !== "text") throw new Error("not text");
+    expect(welcome.text).toContain("綁定 123456");
+    expect(help).toMatchObject({ type: "help" });
+  });
+
   test("過期碼、用過的碼", async () => {
     const w = world({ linked: false });
     w.codes.set("111111", { userId: "user-me", orgId: "org-1", expired: true });
@@ -452,6 +462,14 @@ describe("指令", () => {
       { label: "規則頁", url: "https://internal.pathors.com/dashboard/ai/rules" },
     ]);
     expect(m.commandsText).toContain("解除綁定");
+  });
+
+  test("已綁定的人第一次聯絡：打招呼＋說明卡組，不進 AI", async () => {
+    const w = world();
+    await handleEvent(ev({ kind: "follow" }), w.deps);
+    const msgs = w.sent.at(-1)!.msgs;
+    expect(msgs.map((m) => m.type)).toEqual(["text", "help"]);
+    expect(w.turns.length).toBe(0);
   });
 
   test("引用某則訊息時，就算內容像指令也照一般訊息合併", async () => {

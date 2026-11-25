@@ -20,7 +20,7 @@ export type InboundPayload =
   | { kind: "media"; media: InboundMedia; caption?: string }
   /** 按下我們送出的按鈕（確認卡 `c:<id>:<action>`、組織選單 `o:<orgId>`）。 */
   | { kind: "button"; payload: string }
-  /** 加好友（LINE follow）。WhatsApp 沒有這個事件。 */
+  /** 第一次聯絡：LINE 加好友（follow）、WhatsApp 第一次打開對話（request_welcome）。 */
   | { kind: "follow" }
   /** 貼圖、影片、語音、位置……看不懂的都是這個。 */
   | { kind: "unsupported"; what?: string };

@@ -291,7 +291,15 @@ export async function handleEvent(event: InboundEvent, deps: DispatcherDeps): Pr
     case "follow": {
       const org = identity.activeOrgId ? await deps.directory.getOrgName(identity.activeOrgId) : null;
       const user = (await deps.directory.getUserName(identity.userId)) ?? identity.displayName ?? "";
-      await replier.text(org ? s.welcomeBack(user, org) : s.noActiveOrg);
+      // 第一次聯絡就附圖解說明，不然不知道要從哪裡開始。
+      await replier.send(
+        [
+          { type: "text", text: org ? s.welcomeBack(user, org) : s.noActiveOrg },
+          helpMessage(s, deps.baseUrl, settingsUrl(deps)),
+        ],
+        null,
+        false,
+      );
       return;
     }
     case "unsupported":
@@ -404,11 +412,12 @@ async function handleUnlinked(
 ): Promise<void> {
   const code = event.kind === "text" ? parseBindCommand(event.text) : null;
   if (!code) {
-    await replier.send(
-      [{ type: "text", text: event.kind === "follow" ? s.welcome(settingsUrl(deps)) : s.notLinked(settingsUrl(deps)) }],
-      null,
-      false,
-    );
+    // 第一次聯絡：歡迎＋怎麼綁定，再附圖解說明，讓人知道綁好之後能做什麼。
+    const messages: OutboundMessage[] =
+      event.kind === "follow"
+        ? [{ type: "text", text: s.welcome(settingsUrl(deps)) }, helpMessage(s, deps.baseUrl, settingsUrl(deps))]
+        : [{ type: "text", text: s.notLinked(settingsUrl(deps)) }];
+    await replier.send(messages, null, false);
     return;
   }
   await bind(

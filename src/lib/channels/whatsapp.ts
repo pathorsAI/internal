@@ -4,7 +4,8 @@
  * - GET 驗證：hub.mode=subscribe、hub.verify_token 對上就回 hub.challenge。
  * - 驗簽：X-Hub-Signature-256 = "sha256=" + hex(HMAC-SHA256(app secret, 原始 body))。
  * - 事件：entry[].changes[].value.messages[]（text、image、document、interactive.button_reply／
- *   list_reply、template 的 button；其他種類 → unsupported）。statuses（送達、已讀）略過。
+ *   list_reply、template 的 button；request_welcome（第一次打開聊天）→ follow；其他種類 → unsupported）。
+ *   statuses（送達、已讀）略過。
  * - 檔案：先 GET /{media-id} 拿下載網址，再帶 token 下載。
  * - 送出：text（≤ 4096）、interactive button（≤ 3 顆、標題 ≤ 20 字、body ≤ 1024）、
  *   interactive list（組織選單超過 3 個時）；每則各打一次 API，依序送。
@@ -142,6 +143,10 @@ function payloadOf(m: WaMessage): InboundPayload {
       return documentPayload(m.document);
     case "interactive":
       return interactivePayload(m.interactive);
+    case "request_welcome":
+      // 第一次打開這個對話（還沒傳過任何訊息）：跟 LINE 加好友一樣送歡迎訊息。要在號碼的
+      // conversational automation 開 enable_welcome_message 才會收到。回覆不收費（開了 24 小時窗口）。
+      return { kind: "follow" };
     case "button":
       // template 訊息的 quick reply 按鈕：當成使用者打了那段字。
       return { kind: "text", text: m.button?.text ?? m.button?.payload ?? "" };
