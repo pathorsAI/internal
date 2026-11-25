@@ -489,7 +489,9 @@ export default async function TransactionsPage({
         </TableCard>
       ) : (
         <TableCard>
-          <Table className="table-fixed">
+          {/* 其他欄固定寬加起來約 944px：不給最小寬度的話，筆電寬度下「說明」會被擠到剩一個字。
+              最小寬度＝固定欄＋說明至少 14rem，不夠寬就在卡片內左右捲動（設計系統：寬表格在卡片內捲動）。 */}
+          <Table className="table-fixed min-w-[1168px]">
             <TableHeader>
               <TableRow>
                 {COLUMNS.map((c) => (
