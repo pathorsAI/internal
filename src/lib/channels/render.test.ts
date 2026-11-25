@@ -5,14 +5,20 @@ import {
   batchCard,
   cardToText,
   collectTurn,
+  doneReceipt,
+  helpMessage,
+  isInternalHref,
+  isNumericCell,
   markdownToChat,
+  replyToMessages,
+  splitReply,
   maskAccountNumbers,
   maskTail,
   replyToChat,
   toConfirmCard,
   MAX_CARD_ROWS,
 } from "./render";
-import { parseBindCommand, parseCommand } from "./strings";
+import { botStrings, parseBindCommand, parseCommand } from "./strings";
 
 const BASE = "https://internal.pathors.com";
 
@@ -59,6 +65,139 @@ describe("replyToChat", () => {
     const r = replyToChat("這筆是誰付的？\n[[選項：我先墊的|公司信用卡|公司帳戶]]", BASE);
     expect(r.text).toBe("這筆是誰付的？");
     expect(r.quickReplies.map((q) => q.text)).toEqual(["我先墊的", "公司信用卡", "公司帳戶"]);
+  });
+});
+
+describe("splitReply（LINE 的拆法）", () => {
+  test("表格拆成 ChatTable：標題取正上方的標題行、數字欄、儲存格去粗體與連結", () => {
+    const md = [
+      "這是結果：",
+      "### 本月支出",
+      "| 對象 | 筆數 | 金額 |",
+      "|:--|--:|--:|",
+      "| **AWS** | 2 | TWD 12,000 |",
+      "| [全家](/dashboard/parties) | 5 | 1,860 元 |",
+      "| 其他 | - | (300) |",
+      "",
+      "以上。",
+    ].join("\n");
+    const { parts, links } = splitReply(md, BASE);
+    expect(parts).toEqual([
+      { kind: "text", text: "這是結果：" },
+      {
+        kind: "table",
+        table: {
+          title: "本月支出",
+          headers: ["對象", "筆數", "金額"],
+          rows: [
+            ["AWS", "2", "TWD 12,000"],
+            ["全家", "5", "1,860 元"],
+            ["其他", "-", "(300)"],
+          ],
+          numeric: [false, false, true],
+        },
+      },
+      { kind: "text", text: "以上。" },
+    ]);
+    expect(links).toEqual([{ label: "全家", url: `${BASE}/dashboard/parties` }]);
+  });
+
+  test("站內連結只留字、收成按鈕（最多 3 個、同網址一次、字 ≤ 20）；外部連結照舊寫網址", () => {
+    const md =
+      "看[交易](/dashboard/transactions)、[交易](/dashboard/transactions)、[代墊](https://internal.pathors.com/dashboard/advances)、" +
+      "[這是一個非常非常非常非常非常非常長的連結文字](/dashboard/contracts)、[第四個](/dashboard/parties)、[外部](https://example.com/x)";
+    const { parts, links } = splitReply(md, BASE);
+    expect(links).toEqual([
+      { label: "交易", url: `${BASE}/dashboard/transactions` },
+      { label: "代墊", url: `${BASE}/dashboard/advances` },
+      { label: "這是一個非常非常非常非常非常非常長的連…", url: `${BASE}/dashboard/contracts` },
+    ]);
+    for (const l of links) expect(l.label.length).toBeLessThanOrEqual(20);
+    expect(parts).toEqual([
+      {
+        kind: "text",
+        text: `看交易、交易、代墊、這是一個非常非常非常非常非常非常長的連結文字、第四個：${BASE}/dashboard/parties 、外部：https://example.com/x`,
+      },
+    ]);
+  });
+
+  test("沒有表格、沒有連結時跟 markdownToChat 一樣", () => {
+    const md = "## 結果\n**3 筆**代墊\n- 第一筆";
+    expect(splitReply(md, BASE)).toEqual({ parts: [{ kind: "text", text: markdownToChat(md, BASE) }], links: [] });
+  });
+
+  test("isInternalHref、isNumericCell", () => {
+    expect(isInternalHref("/dashboard", BASE)).toBe(true);
+    expect(isInternalHref("//evil.com/x", BASE)).toBe(false);
+    expect(isInternalHref(`${BASE}/dashboard`, BASE)).toBe(true);
+    expect(isInternalHref("https://internal.pathors.com.evil.com/x", BASE)).toBe(false);
+    for (const c of ["1,860", "TWD 1,860", "NT$500", "-3.5%", "(1,200)", "1,860 元", "USD 12.50"]) {
+      expect(isNumericCell(c)).toBe(true);
+    }
+    for (const c of ["AWS", "2026-11-24", "11/24", "第 3 筆", ""]) expect(isNumericCell(c)).toBe(false);
+  });
+
+  test("replyToMessages：rich 拆成 text／table／links；不是 rich 一則純文字；只有選項時補一句", () => {
+    const md = "| 項目 | 金額 |\n|---|---|\n| a | 1 |\n[[選項：再查]]";
+    const rich = replyToMessages(md, BASE, true, "好了。");
+    expect(rich).toEqual([
+      {
+        type: "table",
+        table: { headers: ["項目", "金額"], rows: [["a", "1"]], numeric: [false, true] },
+        quickReplies: [{ label: "再查", text: "再查" }],
+      },
+    ]);
+    expect(replyToMessages(md, BASE, false, "好了。")).toEqual([
+      { type: "text", text: "項目：a\n金額：1", quickReplies: [{ label: "再查", text: "再查" }] },
+    ]);
+    expect(replyToMessages("[[選項：是|否]]", BASE, true, "好了。")).toEqual([
+      { type: "text", text: "好了。", quickReplies: [{ label: "是", text: "是" }, { label: "否", text: "否" }] },
+    ]);
+  });
+});
+
+describe("說明卡、收據卡", () => {
+  test("helpMessage：四張卡，圖片與規則頁是絕對網址；英文版也是四張", () => {
+    const m = helpMessage(botStrings("zh-TW"), BASE, `${BASE}/dashboard/settings/chat`);
+    if (m.type !== "help") throw new Error("not help");
+    expect(m.cards.map((c) => c.title)).toEqual(["拍照記帳", "代墊", "問帳", "教 AI 與指令"]);
+    expect(m.cards.map((c) => c.imageUrl)).toEqual([1, 2, 3, 4].map((i) => `${BASE}/line/help-${i}.png`));
+    expect(m.cards[1].buttons).toEqual([{ label: "我的代墊", text: "我還有哪些代墊沒還？" }]);
+    expect(m.cards[2].buttons).toEqual([{ label: "試試看", text: "這個月支出前五名？" }]);
+    expect(m.altText.length).toBeLessThanOrEqual(400);
+    const en = helpMessage(botStrings("en"), BASE, "x");
+    if (en.type !== "help") throw new Error("not help");
+    expect(en.cards.length).toBe(4);
+    expect(en.cards[3].buttons[0]).toEqual({ label: "Switch org", text: "switch org" });
+    // 英文版的指令按鈕送出的字，bot 一樣認得是指令。
+    expect(parseCommand("switch org")).toEqual({ kind: "switchOrg" });
+  });
+
+  test("doneReceipt：交易連到那一筆、金額併幣別、分類用查好的名稱；規則連規則頁", () => {
+    const r = doneReceipt(
+      { name: "create_transaction", args: { txnDate: "2026-11-24", amount: 1860, currency: "TWD", partyName: "全家", categoryId: 12 }, recordId: 9 },
+      { locale: "zh-TW", baseUrl: BASE, categoryName: "雜項支出" },
+    );
+    expect(r).toEqual({
+      title: "已記帳",
+      rows: [
+        { label: "日期", value: "2026-11-24" },
+        { label: "金額", value: "TWD 1,860" },
+        { label: "對象", value: "全家" },
+        { label: "分類", value: "雜項支出" },
+      ],
+      link: { label: "在 internal 查看", url: `${BASE}/dashboard/transactions?ids=9` },
+    });
+    const upd = doneReceipt({ name: "update_transaction", args: { id: 33, amount: 10 } }, { locale: "zh-TW", baseUrl: BASE });
+    expect(upd.link?.url).toBe(`${BASE}/dashboard/transactions?ids=33`);
+    const rule = doneReceipt({ name: "create_ai_rule", args: { text: "Google → 軟體" } }, { locale: "zh-TW", baseUrl: BASE });
+    expect(rule).toEqual({
+      title: "已完成：新增規則",
+      rows: [{ label: "說明", value: "Google → 軟體" }],
+      link: { label: "在 internal 查看", url: `${BASE}/dashboard/ai/rules` },
+    });
+    const other = doneReceipt({ name: "some_tool", args: {} }, { locale: "en", baseUrl: BASE });
+    expect(other).toEqual({ title: "Done: some_tool", rows: [] });
   });
 });
 

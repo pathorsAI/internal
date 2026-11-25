@@ -6,19 +6,27 @@
  * - 檔案：GET api-data.line.me/v2/bot/message/{id}/content。
  * - 送出：reply token 還在 50 秒內就 reply（不算則數），否則 push；一次最多 5 則，超過的用 push 補。
  * - 確認卡：Flex bubble（每張 ≤ 30KB），多張用 carousel（≤ 12 張）；快速選項用 quick reply（≤ 13 個）。
+ * - 說明卡（carousel，hero 圖）、表格、站內連結按鈕、收據卡、組織選單也都是 Flex；altText ≤ 400 字、
+ *   按鈕字 ≤ 20 字。相鄰的純文字先併成一則，湊不進 5 則的部分改 push。
  *
  * 參考：https://developers.line.biz/en/reference/messaging-api/
  */
 import type { Locale } from "@/i18n/config";
 import type { LineConfig } from "./config";
 import { base64ToBytes, hmacSha256, readBodyLimited, timingSafeEqual } from "./crypto";
-import { cardToText } from "./render";
-import { botStrings } from "./strings";
+import { cardToText, linksToText, receiptToText, tableToText } from "./render";
+import { botStrings, type BotStrings } from "./strings";
 import {
   cardPayload,
   orgPayload,
   type ChannelAdapter,
+  type ChatButton,
+  type ChatLink,
+  type ChatTable,
   type ConfirmCard,
+  type DoneReceipt,
+  type HelpCard,
+  type QuickReply,
   type InboundEvent,
   type InboundMedia,
   type InboundPayload,
@@ -41,10 +49,14 @@ export const LINE_CAROUSEL_MAX = 12;
 export const LINE_QUICK_REPLY_MAX = 13;
 export const LINE_TEXT_MAX = 5000;
 export const LINE_ALT_TEXT_MAX = 400;
-const LABEL_MAX = 20;
+export const LINE_LABEL_MAX = 20;
+const LABEL_MAX = LINE_LABEL_MAX;
+/** 表格 bubble 最多畫幾列，多的寫「還有 N 筆」。 */
+export const LINE_TABLE_MAX_ROWS = 12;
 
-const BRAND = "#1D4ED8";
-const MUTED = "#6B7280";
+const BRAND = "#1469D4";
+const TEXT = "#1A1A1A";
+const MUTED = "#6B6B6B";
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -207,6 +219,7 @@ export function cardBubble(card: ConfirmCard, locale: Locale): LineMessage {
           type: "text",
           text: clip(r.note ? `${r.value}（${r.note}）` : r.value || "-", 200),
           size: "sm",
+          color: TEXT,
           flex: 5,
           wrap: true,
         },
@@ -242,7 +255,7 @@ export function cardBubble(card: ConfirmCard, locale: Locale): LineMessage {
         layout: "vertical",
         spacing: "xs",
         contents: [
-          { type: "text", text: clip(card.title || "-", 120), weight: "bold", size: "md", wrap: true },
+          { type: "text", text: clip(card.title || "-", 120), weight: "bold", size: "md", color: TEXT, wrap: true },
           { type: "text", text: clip(`${card.orgName} · ${card.actorName}`, 80), size: "xs", color: MUTED, wrap: true },
         ],
       },
@@ -291,32 +304,286 @@ function quickReply(items: { label: string; action: Record<string, unknown> }[])
   };
 }
 
-/** OutboundMessage → LINE 訊息物件（依序）。 */
-export function buildLineMessages(msgs: readonly OutboundMessage[], locale: Locale): BuiltLineMessage[] {
-  const out: BuiltLineMessage[] = [];
-  for (const m of msgs) {
-    if (m.type === "text") {
-      const text = clip(m.text, LINE_TEXT_MAX);
-      if (!text.trim()) continue;
-      const qr = (m.quickReplies ?? []).map((q) => ({
+function quickReplyOf(qrs: readonly QuickReply[] | undefined): { quickReply?: ReturnType<typeof quickReply> } {
+  if (!qrs || qrs.length === 0) return {};
+  return {
+    quickReply: quickReply(
+      qrs.map((q) => ({
         label: q.label,
         action: { type: "message", label: clip(q.label, LABEL_MAX), text: clip(q.text, 300) },
-      }));
-      out.push({
-        message: { type: "text", text, ...(qr.length > 0 ? { quickReply: quickReply(qr) } : {}) },
-        snippet: text,
-      });
-    } else if (m.type === "cards") {
-      out.push(...cardsToFlex(m.cards, locale));
+      })),
+    ),
+  };
+}
+
+/** 按鈕的 action：送出文字（message）或開網頁（uri）。 */
+function actionOf(b: ChatButton) {
+  if ("url" in b) return { type: "uri", label: clip(b.label, LABEL_MAX), uri: b.url };
+  return { type: "message", label: clip(b.label, LABEL_MAX), text: clip(b.text, 300) };
+}
+
+function flexButton(action: Record<string, unknown>, style: "primary" | "secondary" | "link") {
+  return { type: "button", style, height: "sm", ...(style === "primary" ? { color: BRAND } : {}), action };
+}
+
+function flexText(text: string, extra: Record<string, unknown> = {}) {
+  return { type: "text", text: text || "-", color: TEXT, wrap: true, ...extra };
+}
+
+function flexMessage(altText: string, contents: unknown, qrs?: readonly QuickReply[]): LineMessage {
+  return { type: "flex", altText: clip(altText.trim() || "-", LINE_ALT_TEXT_MAX), contents, ...quickReplyOf(qrs) };
+}
+
+/** build(n) 超過 30KB 就把 n 往下減（n 是列數、按鈕數這類可以少畫的東西）。 */
+function fitBubble(build: (n: number) => LineMessage, n: number): LineMessage {
+  let k = n;
+  let bubble = build(k);
+  while (k > 0 && byteLength(bubble) > LINE_BUBBLE_MAX_BYTES) bubble = build(--k);
+  return bubble;
+}
+
+/** 好幾個 bubble → 1 則以上的 Flex 訊息（一個用 bubble，多個用 carousel，每則 ≤ 12 張且 ≤ 50KB）。 */
+function bubblesToFlex(items: { bubble: LineMessage; snippet: string }[], altText: string): BuiltLineMessage[] {
+  const out: BuiltLineMessage[] = [];
+  let chunk: typeof items = [];
+  const emit = () => {
+    if (chunk.length === 0) return;
+    const contents = chunk.length === 1 ? chunk[0].bubble : { type: "carousel", contents: chunk.map((c) => c.bubble) };
+    out.push({ message: flexMessage(altText, contents), snippet: chunk.map((c) => c.snippet).join(" / ") });
+    chunk = [];
+  };
+  for (const item of items) {
+    const size = byteLength({ type: "carousel", contents: [...chunk.map((c) => c.bubble), item.bubble] });
+    if (chunk.length >= LINE_CAROUSEL_MAX || (chunk.length > 0 && size > LINE_CAROUSEL_MAX_BYTES)) emit();
+    chunk.push(item);
+  }
+  emit();
+  return out;
+}
+
+// --- 說明卡 ------------------------------------------------------------------
+
+/** 一張說明卡：hero 圖（20:13）、粗體標題、一兩行內文、footer 按鈕。 */
+export function helpBubble(card: HelpCard): LineMessage {
+  return {
+    type: "bubble",
+    size: "kilo",
+    hero: { type: "image", url: card.imageUrl, size: "full", aspectRatio: "20:13", aspectMode: "cover" },
+    body: {
+      type: "box",
+      layout: "vertical",
+      spacing: "sm",
+      contents: [
+        flexText(clip(card.title, 40), { weight: "bold", size: "md" }),
+        flexText(clip(card.body, 200), { size: "sm", color: MUTED }),
+      ],
+    },
+    footer: {
+      type: "box",
+      layout: "vertical",
+      spacing: "sm",
+      contents: card.buttons.slice(0, 3).map((b, i) => flexButton(actionOf(b), i === 0 ? "primary" : "secondary")),
+    },
+  };
+}
+
+function helpToFlex(cards: readonly HelpCard[], altText: string): BuiltLineMessage[] {
+  return bubblesToFlex(
+    cards.map((c) => ({ bubble: helpBubble(c), snippet: c.title })),
+    altText,
+  );
+}
+
+// --- 表格 --------------------------------------------------------------------
+
+/** 每欄的 flex 比例：第一欄 3、其他 2（數字欄靠右，看起來像等寬數字對齊）。 */
+function columnFlex(k: number): number {
+  return k === 0 ? 3 : 2;
+}
+
+function tableRowBox(cells: readonly string[], table: ChatTable, header: boolean) {
+  const size = table.headers.length >= 4 ? "xxs" : "xs";
+  return {
+    type: "box",
+    layout: "horizontal",
+    spacing: "sm",
+    contents: cells.map((c, k) => ({
+      type: "text",
+      text: c || "-",
+      size: header ? size : table.headers.length >= 4 ? "xs" : "sm",
+      color: header ? MUTED : TEXT,
+      ...(header ? { weight: "bold" } : {}),
+      flex: columnFlex(k),
+      align: table.numeric[k] && k > 0 ? "end" : "start",
+      wrap: true,
+    })),
+  };
+}
+
+/** AI 回覆裡的表格 → Flex bubble：可選標題、表頭、每列一個水平 box，最多 12 列，多的寫「還有 N 筆」。 */
+export function tableBubble(table: ChatTable, s: BotStrings): LineMessage {
+  const build = (n: number): LineMessage => {
+    const shown = table.rows.slice(0, n);
+    const more = table.rows.length - shown.length;
+    const contents: unknown[] = [];
+    if (table.title) contents.push(flexText(clip(table.title, 80), { weight: "bold", size: "md" }));
+    contents.push(tableRowBox(table.headers, table, true), { type: "separator", margin: "sm" });
+    for (const r of shown) contents.push(tableRowBox(r, table, false));
+    if (more > 0) contents.push(flexText(s.moreTableRows(more), { size: "xs", color: MUTED, margin: "md" }));
+    return {
+      type: "bubble",
+      size: table.headers.length >= 4 ? "giga" : "mega",
+      body: { type: "box", layout: "vertical", spacing: "sm", contents },
+    };
+  };
+  return fitBubble(build, Math.min(table.rows.length, LINE_TABLE_MAX_ROWS));
+}
+
+// --- 站內連結 ----------------------------------------------------------------
+
+/** 站內連結 → 小 bubble，footer 最多 3 顆 uri 按鈕。 */
+export function linksBubble(links: readonly ChatLink[], s: BotStrings): LineMessage {
+  return {
+    type: "bubble",
+    size: "kilo",
+    body: {
+      type: "box",
+      layout: "vertical",
+      contents: [flexText(s.linksTitle, { size: "xs", color: MUTED })],
+    },
+    footer: {
+      type: "box",
+      layout: "vertical",
+      spacing: "sm",
+      contents: links.slice(0, 3).map((l) => flexButton(actionOf(l), "secondary")),
+    },
+  };
+}
+
+// --- 收據卡 ------------------------------------------------------------------
+
+/** 寫入成功 → 收據式 bubble：標題、幾列重點、「在 internal 查看」。 */
+export function doneBubble(r: DoneReceipt): LineMessage {
+  const rows = r.rows.map((x) => ({
+    type: "box",
+    layout: "baseline",
+    spacing: "sm",
+    contents: [
+      { type: "text", text: clip(x.label || "-", 20), size: "sm", color: MUTED, flex: 2 },
+      flexText(clip(x.value, 200), { size: "sm", flex: 5, align: "end" }),
+    ],
+  }));
+  return {
+    type: "bubble",
+    size: "kilo",
+    body: {
+      type: "box",
+      layout: "vertical",
+      spacing: "sm",
+      contents: [
+        flexText(clip(r.title, 60), { weight: "bold", size: "md", color: BRAND }),
+        ...(rows.length > 0 ? [{ type: "separator", margin: "md" }, { type: "box", layout: "vertical", spacing: "sm", margin: "md", contents: rows }] : []),
+      ],
+    },
+    ...(r.link
+      ? {
+          footer: {
+            type: "box",
+            layout: "vertical",
+            contents: [flexButton(actionOf(r.link), "primary")],
+          },
+        }
+      : {}),
+  };
+}
+
+// --- 組織選單 ----------------------------------------------------------------
+
+/** 組織選單 → Flex bubble：每個組織一顆按鈕（postback `o:<orgId>`），目前的那個標「目前」。 */
+export function orgPickerBubble(
+  text: string,
+  orgs: readonly { id: string; name: string; current?: boolean }[],
+  s: BotStrings,
+): LineMessage {
+  const suffix = `（${s.currentOrg}）`;
+  const build = (n: number): LineMessage => ({
+    type: "bubble",
+    size: "kilo",
+    body: {
+      type: "box",
+      layout: "vertical",
+      spacing: "sm",
+      contents: [
+        flexText(clip(text, 300), { size: "sm" }),
+        ...orgs.slice(0, n).map((o) =>
+          flexButton(
+            postback(o.current ? `${clip(o.name, LABEL_MAX - suffix.length)}${suffix}` : o.name, orgPayload(o.id), o.name),
+            o.current ? "primary" : "secondary",
+          ),
+        ),
+      ],
+    },
+  });
+  return fitBubble(build, orgs.length);
+}
+
+// --- 組裝 --------------------------------------------------------------------
+
+/** 相鄰的純文字併成一則（前一則沒有快速選項、合起來不超過 5000 字），省 reply 的 5 則額度。 */
+export function mergeTexts(msgs: readonly OutboundMessage[]): OutboundMessage[] {
+  const out: OutboundMessage[] = [];
+  for (const m of msgs) {
+    const prev = out.at(-1);
+    if (
+      m.type === "text" &&
+      m.text.trim() &&
+      prev?.type === "text" &&
+      !prev.quickReplies?.length &&
+      prev.text.length + m.text.length + 2 <= LINE_TEXT_MAX
+    ) {
+      out[out.length - 1] = { ...m, text: `${prev.text}\n\n${m.text}` };
     } else {
-      const items = m.orgs.map((o) => ({
-        label: o.name,
-        action: postback(o.current ? `✓ ${o.name}` : o.name, orgPayload(o.id), o.name),
-      }));
-      out.push({ message: { type: "text", text: clip(m.text, LINE_TEXT_MAX), quickReply: quickReply(items) }, snippet: m.text });
+      out.push(m);
     }
   }
   return out;
+}
+
+function buildOne(m: OutboundMessage, locale: Locale): BuiltLineMessage[] {
+  const s = botStrings(locale);
+  switch (m.type) {
+    case "text": {
+      const text = clip(m.text, LINE_TEXT_MAX);
+      if (!text.trim()) return [];
+      return [{ message: { type: "text", text, ...quickReplyOf(m.quickReplies) }, snippet: text }];
+    }
+    case "cards":
+      return cardsToFlex(m.cards, locale);
+    case "orgPicker":
+      return [{ message: flexMessage(m.text, orgPickerBubble(m.text, m.orgs, s)), snippet: m.text }];
+    case "help":
+      return helpToFlex(m.cards, m.altText);
+    case "table": {
+      const snippet = tableToText(m.table);
+      const alt = m.table.title ?? (m.table.headers.filter(Boolean).join(" / ") || s.tableAltText);
+      return [{ message: flexMessage(alt, tableBubble(m.table, s), m.quickReplies), snippet }];
+    }
+    case "links": {
+      if (m.links.length === 0) return [];
+      const alt = s.linksAltText(m.links.map((l) => l.label).join("、"));
+      return [{ message: flexMessage(alt, linksBubble(m.links, s), m.quickReplies), snippet: linksToText(m.links) }];
+    }
+    case "done":
+      return bubblesToFlex(
+        m.receipts.map((r) => ({ bubble: doneBubble(r), snippet: receiptToText(r) })),
+        m.receipts.map((r) => r.title).join(" / "),
+      );
+  }
+}
+
+/** OutboundMessage → LINE 訊息物件（依序；相鄰的純文字先併成一則）。 */
+export function buildLineMessages(msgs: readonly OutboundMessage[], locale: Locale): BuiltLineMessage[] {
+  return mergeTexts(msgs).flatMap((m) => buildOne(m, locale));
 }
 
 // ---------------------------------------------------------------------------
@@ -357,6 +624,7 @@ export function createLineAdapter(cfg: LineConfig, fetchImpl: FetchLike = (u, i)
 
   return {
     provider: "line",
+    richReplies: true,
 
     verify: (headers, rawBody) => verifyLineSignature(cfg.channelSecret, rawBody, headers.get("x-line-signature")),
 
