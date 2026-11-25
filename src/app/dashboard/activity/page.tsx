@@ -12,9 +12,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { activityActorImages, listActivity } from "@/db/queries";
+import { activityUndoLinks } from "@/db/undo";
 import { PartyAvatar } from "@/components/party-avatar";
 import { formatDateTime } from "@/lib/format";
 import { requireOrg } from "@/lib/session";
+import { ActivityDetailProvider, ActivityRow, UndoOfLink } from "./activity-detail";
 
 export const dynamic = "force-dynamic";
 
@@ -52,17 +54,25 @@ export default async function ActivityPage() {
     api_key: t("entity.api_key"),
     tool: t("entity.tool"),
     organization: t("entity.organization"),
+    employee_bank_account: t("entity.employee_bank_account"),
+    subscription_period: t("entity.subscription_period"),
+    vendor_billing_account: t("entity.vendor_billing_account"),
+    payment_method: t("entity.payment_method"),
+    vendor_invoice: t("entity.vendor_invoice"),
+    recurring_expense: t("entity.recurring_expense"),
+    ai_rule: t("entity.ai_rule"),
+    calendar: t("entity.calendar"),
+    member: t("entity.member"),
   };
   const { orgId } = await requireOrg();
   const rows = await listActivity(orgId, { limit: 300 });
-  const actorImages = await activityActorImages(
-    orgId,
-    rows.map((r) => r.id),
-  );
+  const ids = rows.map((r) => r.id);
+  const [actorImages, undoLinks] = await Promise.all([activityActorImages(orgId, ids), activityUndoLinks(orgId, ids)]);
 
   return (
     <>
       <PageHeader title={t("title")} />
+      <ActivityDetailProvider>
       <TableCard>
         <Table>
           <TableHeader>
@@ -80,7 +90,7 @@ export default async function ActivityPage() {
               <EmptyRow colSpan={6} message={t("empty")} />
             ) : (
               rows.map((r) => (
-                <TableRow key={r.id}>
+                <ActivityRow key={r.id} id={r.id}>
                   <TableCell className="whitespace-nowrap text-xs text-muted-foreground tabular-nums">
                     {formatDateTime(r.createdAt)}
                   </TableCell>
@@ -116,16 +126,36 @@ export default async function ActivityPage() {
                       <span className="ml-1 text-xs text-muted-foreground tabular-nums">#{r.entityId}</span>
                     )}
                   </TableCell>
-                  <TableCell className="max-w-[28ch] truncate text-muted-foreground" title={r.summary ?? ""}>
-                    {r.summary ?? "—"}
+                  <TableCell className="max-w-[36ch] text-muted-foreground">
+                    <div className="flex items-center gap-2">
+                      <span className="min-w-0 truncate" title={r.summary ?? ""}>
+                        {r.summary ?? "—"}
+                      </span>
+                      <UndoMarks links={undoLinks.get(r.id)} undoneLabel={t("undo.undoneBy")} />
+                    </div>
                   </TableCell>
-                </TableRow>
+                </ActivityRow>
               ))
             )}
           </TableBody>
         </Table>
       </TableCard>
+      </ActivityDetailProvider>
     </>
+  );
+}
+
+/** 這筆是復原（「已復原 #id」，點了開原本那筆）／這筆被復原過（「已被復原」）。 */
+function UndoMarks({
+  links,
+  undoneLabel,
+}: Readonly<{ links: { undoOf: number | null; undoneBy: number | null } | undefined; undoneLabel: string }>) {
+  if (!links) return null;
+  return (
+    <span className="flex shrink-0 items-center gap-2">
+      {links.undoOf === null ? null : <UndoOfLink id={links.undoOf} />}
+      {links.undoneBy === null ? null : <StatusTag tone="neutral">{undoneLabel}</StatusTag>}
+    </span>
   );
 }
 

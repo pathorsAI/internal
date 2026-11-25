@@ -719,10 +719,38 @@ export const activityLog = pgTable("activity_log", {
 	entityId: bigint("entity_id", { mode: "number" }),
 	summary: text(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	// 復原（migrations/0045）：操作前後的資料（敏感欄位已遮罩）、對到的 entity_changes 區間、
+	// 工具名稱、以及「這筆是復原哪一筆」。FK 在 DB 端，這裡不宣告（避免自我參照的型別循環）。
+	before: jsonb(),
+	after: jsonb(),
+	changeId: bigint("change_id", { mode: "number" }),
+	firstChangeId: bigint("first_change_id", { mode: "number" }),
+	toolName: text("tool_name"),
+	undoOf: bigint("undo_of", { mode: "number" }),
 }, (table) => [
+	index("idx_activity_change").on(table.changeId).where(sql`change_id IS NOT NULL`),
+	index("idx_activity_undo_of").on(table.undoOf).where(sql`undo_of IS NOT NULL`),
 	index("idx_activity_org_time").using("btree", table.organizationId.asc().nullsLast(), table.createdAt.desc()),
 	check("chk_activity_channel", sql`channel = ANY (ARRAY['web'::text, 'mcp'::text, 'system'::text, 'ai'::text, 'api'::text, 'line'::text, 'whatsapp'::text])`),
 	check("chk_activity_action", sql`action = ANY (ARRAY['create'::text, 'update'::text, 'delete'::text, 'read'::text])`),
+]);
+
+// ---- 資料列變動紀錄（migrations/0045）：trigger record_entity_change() 寫，app 只讀。
+// before / after 是完整的 to_jsonb(OLD / NEW)（含密文欄位），只給復原用，畫面不直接顯示。----
+export const entityChanges = pgTable("entity_changes", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "entity_changes_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
+	organizationId: text("organization_id"),
+	tableName: text("table_name").notNull(),
+	rowId: bigint("row_id", { mode: "number" }).notNull(),
+	op: text().notNull(),
+	before: jsonb(),
+	after: jsonb(),
+	changedAt: timestamp("changed_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	txid: bigint({ mode: "number" }).notNull(),
+}, (table) => [
+	index("idx_entity_changes_row").on(table.tableName, table.rowId, table.id),
+	index("idx_entity_changes_org").on(table.organizationId, table.id),
+	check("chk_entity_change_op", sql`op = ANY (ARRAY['insert'::text, 'update'::text, 'delete'::text])`),
 ]);
 
 // ---- Google 日曆同步（migrations/0018）。

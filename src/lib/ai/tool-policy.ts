@@ -96,9 +96,12 @@ export function canUseWrites(role: OrgRole): boolean {
  * 一般成員也能用的寫入（仍要按確認卡）。只放「只動得到自己」的工具：
  * - submit_advance：提交自己的代墊（代墊人固定是本人，記成 needs_review）。
  * - 規則工具：成員只能建／改／刪自己的個人規則；組織規則的角色檢查寫在工具裡（MCP 也會用到）。
+ * - undo_activity：寫入（要確認），成員只能復原自己的操作。
  */
 export const MEMBER_WRITES: ReadonlySet<string> = new Set([
   "submit_advance",
+  // 復原：工具裡再檢查一次——成員只能復原自己做的操作（src/lib/undo-rules.ts mayUndo）。
+  "undo_activity",
   "create_ai_rule",
   "update_ai_rule",
   "remove_ai_rule",

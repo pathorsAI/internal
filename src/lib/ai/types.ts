@@ -23,6 +23,8 @@ export type UiToolCall = {
    * 給使用者看的一句提示，例如「依規則：Google Workspace → 軟體工具」。網頁與聊天卡片都顯示。
    */
   ruleHint?: string;
+  /** 寫入成功：這次寫進操作紀錄的 id（確認卡的「復原」用）。 */
+  activityId?: number;
 };
 
 /** 對話從哪個入口來：網頁 /dashboard/ai、LINE、WhatsApp。 */
@@ -50,7 +52,7 @@ export type ChatEvent =
   | { t: "msg"; id: string }
   | { t: "text"; d: string }
   | { t: "tool"; call: UiToolCall }
-  | { t: "tool_done"; id: string; status: UiToolStatus; error?: string }
+  | { t: "tool_done"; id: string; status: UiToolStatus; error?: string; activityId?: number }
   | { t: "error"; code: ChatErrorCode; message?: string }
   | { t: "done" };
 

@@ -39,7 +39,9 @@ export async function saveCloudBillingScopeAction(
     await saveCloudBillingScopeForOrg(
       {
         ...me,
-        log: (action, entityType, entityId, summary) => logWeb(me.orgId, action, entityType, entityId, summary),
+        log: async (action, entityType, entityId, summary) => {
+          await logWeb(me.orgId, action, entityType, entityId, summary);
+        },
       },
       provider,
       // 網頁表單一律送 bigQuery（沒填 = null = 清掉），與舊行為一致。

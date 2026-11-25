@@ -170,7 +170,13 @@ export function AiChat({ conversationId, initialMessages, initialConversations, 
           break;
         }
         case "tool_done":
-          setMessages((ms) => updateTool(ms, e.id, { status: e.status, error: e.error }));
+          setMessages((ms) =>
+            updateTool(ms, e.id, {
+              status: e.status,
+              error: e.error,
+              ...(e.activityId === undefined ? {} : { activityId: e.activityId }),
+            }),
+          );
           break;
         case "error":
           setError(e.code);

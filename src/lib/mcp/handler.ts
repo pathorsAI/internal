@@ -91,7 +91,7 @@ export function deriveMcpAudit(name: string, out: unknown): McpAudit | null {
 
 /** Bump on every published change to tools, schemas or instructions. Clients
  *  (and OpenAI's plugin "Scan Tools") key their cached snapshot off this. */
-export const SERVER_VERSION = "1.16.0";
+export const SERVER_VERSION = "1.17.0";
 
 /** Public base URL of this deployment; doubles as the OAuth issuer.
  *  Keep in sync with the `resource` passed to `mcp()` in src/lib/auth.ts. */
@@ -454,7 +454,8 @@ export function describeTool(name: string, t: ToolDef) {
 // ---------------------------------------------------------------------------
 
 export type ToolRunResult =
-  | { ok: true; out: unknown }
+  /** activityId：這次呼叫寫進 activity_log 的那一筆（有寫才有；站內 AI 的確認卡拿它做「復原」）。 */
+  | { ok: true; out: unknown; activityId?: number }
   | { ok: false; error: string; code?: ToolRunErrorCode };
 
 /** Why a call never reached `execute` (REST maps these to HTTP status codes). */
@@ -500,6 +501,8 @@ async function auditApiKeyCall(
   out: unknown,
   error: string | null,
 ): Promise<void> {
+  // undo_activity 自己寫操作紀錄（帶 undo_of），成功時不再多記一筆
+  if (error === null && SELF_LOGGING_TOOLS.has(name)) return;
   try {
     const audit = error === null ? deriveMcpAudit(name, out) : null;
     const orgId = await resolveOrg(args, ctx).catch(() => ctx.apiKey.organizationId);
@@ -513,10 +516,21 @@ async function auditApiKeyCall(
       audit?.entityType ?? "tool",
       audit?.entityId ?? null,
       summary,
+      { toolName: name },
     );
   } catch {
     // ignore audit failures
   }
+}
+
+/** 自己在 execute 裡寫操作紀錄的工具：handler 不再替它記，避免重複。 */
+const SELF_LOGGING_TOOLS: ReadonlySet<string> = new Set(["undo_activity"]);
+
+/** 自己寫操作紀錄的工具把新紀錄的 id 放在結果的 activityId。 */
+function selfLoggedActivityId(name: string, out: unknown): number | undefined {
+  if (!SELF_LOGGING_TOOLS.has(name) || !out || typeof out !== "object") return undefined;
+  const id = (out as { activityId?: unknown }).activityId;
+  return typeof id === "number" ? id : undefined;
 }
 
 /**
@@ -554,9 +568,10 @@ export async function runToolWithAudit(
     await auditKey(undefined, message);
     return { ok: false, error: message };
   }
+  let activityId: number | null | undefined = selfLoggedActivityId(name, out);
   if (apiKey) await auditKey(out, null);
-  else await auditToolWrite(name, args, ctx, channel, out, summary);
-  return { ok: true, out };
+  else if (activityId === undefined) activityId = await auditToolWrite(name, args, ctx, channel, out, summary);
+  return typeof activityId === "number" ? { ok: true, out, activityId } : { ok: true, out };
 }
 
 function refusalReason(name: string): string {
@@ -565,7 +580,7 @@ function refusalReason(name: string): string {
     : `${name} is not a [read] tool; this API key is read-only. Create a read-write key to call it.`;
 }
 
-/** Best-effort audit log for writes over OAuth MCP / the in-app AI (never affects the response). */
+/** Best-effort audit log for writes over OAuth MCP / the in-app AI (never affects the response). Returns the activity id. */
 async function auditToolWrite(
   name: string,
   args: Record<string, unknown>,
@@ -573,23 +588,24 @@ async function auditToolWrite(
   channel: ToolCallChannel,
   out: unknown,
   summary?: string,
-): Promise<void> {
+): Promise<number | null> {
   const audit = deriveMcpAudit(name, out);
-  if (!audit) return;
+  if (!audit) return null;
   try {
     const orgId = await resolveOrg(
       audit.organizationId ? { organizationId: audit.organizationId } : args,
       ctx,
     );
     const label = summary ?? name;
+    const extra = { toolName: name };
     if (channel === "line" || channel === "whatsapp") {
-      await logChat(channel, orgId, ctx.userId, audit.action, audit.entityType, audit.entityId, label);
-    } else {
-      const log = channel === "ai" ? logAi : logMcp;
-      await log(orgId, ctx.userId, audit.action, audit.entityType, audit.entityId, label);
+      return await logChat(channel, orgId, ctx.userId, audit.action, audit.entityType, audit.entityId, label, extra);
     }
+    const log = channel === "ai" ? logAi : logMcp;
+    return await log(orgId, ctx.userId, audit.action, audit.entityType, audit.entityId, label, extra);
   } catch {
     // ignore audit failures
+    return null;
   }
 }
 

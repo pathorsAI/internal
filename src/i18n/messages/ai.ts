@@ -80,6 +80,7 @@ const ai = {
     failed: { "zh-TW": "執行失敗", en: "Failed" },
     running: { "zh-TW": "執行中", en: "Running" },
     details: { "zh-TW": "參數", en: "Details" },
+    undone: { "zh-TW": "已復原", en: "Undone" },
   },
   options: {
     label: { "zh-TW": "快速回覆", en: "Quick replies" },

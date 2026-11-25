@@ -2,7 +2,14 @@ import * as aiDb from "@/db/ai";
 import type { AiMessageRow, AiToolCall } from "@/db/ai";
 import { runToolWithAudit } from "@/lib/mcp/handler";
 import { MAX_MODEL_ROUNDS, MAX_STORED_TOOL_CHARS } from "./config";
-import { loadAttachmentParts, toModelMessages, truncate, uiToolCall, type AttachmentReader } from "./history";
+import {
+  loadAttachmentParts,
+  toModelMessages,
+  truncate,
+  uiToolCall,
+  withActivityId,
+  type AttachmentReader,
+} from "./history";
 import {
   streamModelTurn,
   type ChatMessage,
@@ -122,13 +129,19 @@ function stringify(out: unknown): string {
   return truncate(JSON.stringify(out ?? null), MAX_STORED_TOOL_CHARS);
 }
 
-/** 執行一支工具（權限已檢查過），回傳要存進 DB 的狀態與內容。 */
+type ExecResult = { status: "ok" | "error"; content: string; error?: string; activityId?: number };
+
+/**
+ * 執行一支工具（權限已檢查過），回傳要存進 DB 的狀態與內容。
+ * 寫入成功時操作紀錄的 id 放在結果最前面（{"activityId": 123, …}）：模型看得到、要復原時直接用；
+ * 確認卡也從這裡讀出來顯示「復原」。
+ */
 async function execute(
   ctx: TurnContext,
   name: string,
   args: Record<string, unknown>,
   summary: string | null,
-): Promise<{ status: "ok" | "error"; content: string; error?: string }> {
+): Promise<ExecResult> {
   const channel = auditChannel(ctx);
   const res = await ctx.deps.runTool(
     name,
@@ -137,7 +150,11 @@ async function execute(
     channel,
     summary ?? undefined,
   );
-  if (res.ok) return { status: "ok", content: stringify(res.out) };
+  if (res.ok) {
+    const activityId = res.activityId;
+    if (activityId === undefined) return { status: "ok", content: stringify(res.out) };
+    return { status: "ok", content: stringify(withActivityId(res.out, activityId)), activityId };
+  }
   return { status: "error", content: JSON.stringify({ error: res.error }), error: res.error };
 }
 
@@ -205,7 +222,7 @@ async function handleOneCall(ctx: TurnContext, call: AiToolCall, save: SaveResul
   ctx.emit({ t: "tool", call: uiToolCall(call, "running") });
   const result = await execute(ctx, call.name, prepared.args, prepared.summary);
   await save(result.status, result.content);
-  ctx.emit({ t: "tool_done", id: call.id, status: result.status, error: result.error });
+  ctx.emit({ t: "tool_done", id: call.id, status: result.status, error: result.error, activityId: result.activityId });
   return false;
 }
 
@@ -337,7 +354,7 @@ async function approveCall(
   ctx: TurnContext,
   toolCallId: string,
   call: AiToolCall,
-): Promise<{ status: UiToolStatus; error?: string } | null> {
+): Promise<{ status: UiToolStatus; error?: string; activityId?: number } | null> {
   let prepared: Prepared | null = null;
   try {
     prepared = prepareArgs(call.arguments, ctx.owner.orgId);
@@ -360,7 +377,7 @@ async function approveCall(
   const result = await execute(ctx, call.name, prepared.args, prepared.summary);
   await ctx.deps.db.setToolMessageResult(ctx.conversationId, toolCallId, result.status, result.content);
   if (result.status === "ok") await recordRuleApplied(ctx, call.name, prepared.args);
-  return { status: result.status, error: result.error };
+  return { status: result.status, error: result.error, activityId: result.activityId };
 }
 
 /** 確認後建成的交易用的就是規則建議的分類：記一次套用（失敗不影響寫入）。 */
@@ -392,7 +409,7 @@ export async function resolveConfirmation(
     return;
   }
 
-  let outcome: { status: UiToolStatus; error?: string } | null;
+  let outcome: { status: UiToolStatus; error?: string; activityId?: number } | null;
   if (approve) {
     outcome = await approveCall(ctx, toolCallId, call);
     if (!outcome) {
@@ -408,7 +425,13 @@ export async function resolveConfirmation(
     );
     outcome = { status: "cancelled" };
   }
-  ctx.emit({ t: "tool_done", id: toolCallId, status: outcome.status, error: outcome.error });
+  ctx.emit({
+    t: "tool_done",
+    id: toolCallId,
+    status: outcome.status,
+    error: outcome.error,
+    ...(outcome.activityId === undefined ? {} : { activityId: outcome.activityId }),
+  });
 
   // 同一輪還有別張卡沒按，就等使用者；全部處理完才讓模型接著講。
   const after = await ctx.deps.db.listAiMessages(ctx.conversationId);

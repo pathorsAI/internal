@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { AlertTriangle, BookMarked, Check, Loader2, Paperclip, PencilLine, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,7 @@ import { LOAD_TOOL_GROUPS } from "@/lib/ai/tool-groups";
 import type { AttachmentRef, UiMessage, UiToolCall } from "@/lib/ai/types";
 import { cn } from "@/lib/utils";
 import { splitOptions } from "./split-options";
+import { UndoButton } from "../activity/activity-detail";
 
 export type ChatUser = { name: string; image: string | null };
 
@@ -94,6 +96,9 @@ export function ConfirmCard({
   const danger = call.level === "danger";
   const args = Object.entries(call.args ?? {});
   const resolved = call.status !== "pending";
+  // 寫入成功後可以直接復原（呼叫跟操作紀錄頁同一支 server action）；復原過就換成「已復原」。
+  const [undone, setUndone] = useState(false);
+  const canUndo = call.status === "ok" && call.activityId !== undefined && !undone;
 
   return (
     <div
@@ -112,7 +117,13 @@ export function ConfirmCard({
           {danger ? <AlertTriangle className="size-3.5" /> : <PencilLine className="size-3.5" />}
           {danger ? t("danger") : t("write")}
         </span>
-        {resolved ? <ResolvedTag status={call.status} /> : null}
+        <span className="inline-flex items-center gap-2">
+          {resolved ? <ResolvedTag status={call.status} /> : null}
+          {undone ? <StatusTag tone="neutral">{t("undone")}</StatusTag> : null}
+          {canUndo ? (
+            <UndoButton id={call.activityId as number} size="xs" onDone={() => setUndone(true)} />
+          ) : null}
+        </span>
       </div>
       <div className="space-y-1">
         <p className="text-sm font-medium">{call.summary ?? call.name}</p>
