@@ -34,7 +34,7 @@ export function decodeBase64Content(raw: string, maxBytes = CHAT_MEDIA_MAX_BYTES
     throw new Error('"contentBase64" is not valid base64 (standard alphabet A-Z a-z 0-9 + /, optional = padding).');
   }
   const padded = body + "=".repeat((4 - (body.length % 4)) % 4);
-  const padding = padded.endsWith("==") ? 2 : padded.endsWith("=") ? 1 : 0;
+  const padding = padded.length - padded.replace(/=+$/, "").length;
   const estimated = (padded.length / 4) * 3 - padding;
   if (estimated > maxBytes) {
     throw new Error(`File is too large (${estimated} bytes); the limit is ${MAX_MB} MB.`);
