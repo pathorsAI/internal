@@ -1,6 +1,6 @@
 /**
  * 聊天 bot 的每日清理（由 /api/cron/integrations-autosync 在同步之後呼叫）：
- * - 收件匣：聊天收到、超過 30 天還沒掛到任何交易或發票的檔案 → 刪 STORAGE 物件再刪列
+ * - 收件匣：聊天收到（或 MCP upload_document 上傳）、超過 30 天還沒掛到任何交易或發票的檔案 → 刪 STORAGE 物件再刪列
  * - chat_inbound_events（webhook 去重）超過 7 天
  * - chat_buffer（合併成一題的暫存）超過 7 天
  * - chat_message_refs（回覆引用的對照）超過 90 天

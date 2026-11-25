@@ -254,6 +254,16 @@ integration (the Wise sync) carry `externalSource` / `externalRef` and
 those, and `update_transaction` clears the flag when it sets a category (or pass
 `needsReview: false` explicitly).
 
+**Document inbox (收件匣)** — `upload_document` (owner/admin only) stores a file
+(`fileName`, `contentType`, `contentBase64` — standard base64, a `data:…;base64,`
+prefix is accepted) in the organization's inbox and returns `documentId`. Same rules
+as files sent to the LINE / WhatsApp bot: PDF or images only, 10 MB max, stored under
+`mcp/<orgId>/…` with `documents.source = 'mcp'`. It does not attach anything: pass
+`documentIds: [documentId]` and `docKind` (`receipt`, `e_invoice`, `paper_invoice`,
+`other`) to `update_transaction` (or `create_transaction`) to attach it. Unattached
+inbox files are deleted after 30 days. The in-app assistant and chat bots do not get
+this tool (their files already land in the inbox from the conversation).
+
 **Data links (資料聯動，see `docs/data-links.md`)** — every write goes through one
 linking layer: a billing item / subscription / contract passes its contract and project
 down to the transaction, and an income row with a customer but no link is matched

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { tools } from "@/lib/mcp/tools";
 import {
   EXCLUDED_TOOLS,
+  EXTERNAL_ONLY_TOOLS,
   MEMBER_WRITES,
   baseToolLevel,
   refusalReason,
@@ -31,6 +32,19 @@ describe("tool policy", () => {
       expect(tools[n]).toBeDefined(); // 名稱打錯會讓排除失效
       expect(canOffer(n, "owner")).toBe(false);
       expect(canRun(n, {}, "owner")).toBe(false);
+      for (const g of TOOL_GROUP_IDS) expect(TOOL_GROUPS[g].tools).not.toContain(n);
+    }
+  });
+
+  test("external-only tools (upload_document) are never offered in the app or in chat", () => {
+    expect([...EXTERNAL_ONLY_TOOLS]).toEqual(["upload_document"]);
+    for (const n of EXTERNAL_ONLY_TOOLS) {
+      expect(tools[n]).toBeDefined();
+      expect(isAssistantTool(n)).toBe(false);
+      for (const ch of ["web", "line", "whatsapp"] as const) {
+        expect(canOffer(n, "owner", ch)).toBe(false);
+        expect(canRun(n, {}, "owner", ch)).toBe(false);
+      }
       for (const g of TOOL_GROUP_IDS) expect(TOOL_GROUPS[g].tools).not.toContain(n);
     }
   });

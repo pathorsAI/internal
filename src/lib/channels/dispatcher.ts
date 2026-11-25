@@ -43,6 +43,7 @@ import {
   toConfirmCard,
   type TurnOutput,
 } from "./render";
+import { CHAT_MEDIA_MAX_BYTES, isAcceptedMime, normalizeMime, safeFileName } from "./media";
 import { botStrings, parseBindCommand, parseCommand, type BotCommand, type BotStrings } from "./strings";
 import {
   parseCardPayload,
@@ -56,8 +57,7 @@ import {
   type OutboundMessage,
 } from "./types";
 
-/** 單檔上限（跟模型讀附件的上限一樣）。 */
-export const CHAT_MEDIA_MAX_BYTES = 10 * 1024 * 1024;
+export { CHAT_MEDIA_MAX_BYTES, isAcceptedMime, normalizeMime } from "./media";
 
 /** 安靜多久才合成一題（秒）。 */
 export const FLUSH_DELAY_TEXT_S = 4;
@@ -190,24 +190,6 @@ function isMark(r: ChatBufferRow): boolean {
   return r.kind === "button" && r.text === NEW_CONVERSATION_MARK;
 }
 
-/** 平台給的 mime 不可靠（LINE 檔案常是 octet-stream）：用副檔名補。 */
-export function normalizeMime(mime: string | undefined, fileName?: string): string {
-  const m = (mime ?? "").split(";")[0].trim().toLowerCase();
-  if (m && m !== "application/octet-stream" && m !== "binary/octet-stream") return m;
-  const ext = fileName?.split(".").pop()?.toLowerCase();
-  if (ext === "pdf") return "application/pdf";
-  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
-  if (ext === "png") return "image/png";
-  if (ext === "webp") return "image/webp";
-  if (ext === "heic") return "image/heic";
-  if (ext === "gif") return "image/gif";
-  return m || "application/octet-stream";
-}
-
-export function isAcceptedMime(mime: string): boolean {
-  return mime.startsWith("image/") || mime === "application/pdf";
-}
-
 function extFor(mime: string): string {
   if (mime === "application/pdf") return "pdf";
   if (mime === "image/png") return "png";
@@ -217,9 +199,6 @@ function extFor(mime: string): string {
   return "jpg";
 }
 
-function safeFileName(name: string): string {
-  return name.replaceAll(/[^\w.-]+/g, "_").slice(-120) || "file";
-}
 
 /** 送訊息的小幫手：記著 reply token（只能用一次），送出的每一則都記進 chat_message_refs。 */
 class Replier {

@@ -48,15 +48,18 @@ const AUDIT_BY_NAME: Record<string, Pick<McpAudit, "action" | "entityType">> = {
   set_payment_allocations: { action: "update", entityType: "transaction" },
   // 成員提交自己的代墊（tools-transactions.ts）：建一筆 advance 交易。
   submit_advance: { action: "create", entityType: "transaction" },
+  // API / MCP 上傳檔案到收件匣（tools-documents.ts）：記在新建的 document 上（結果的 documentId）。
+  upload_document: { action: "create", entityType: "document" },
   // AI 規則（tools-ai-rules.ts）：remove_ 是軟刪。
   remove_ai_rule: { action: "delete", entityType: "ai_rule" },
 };
 
-/** The numeric entity id a tool result names, if any (`id`, else first of `ids`). */
+/** The numeric entity id a tool result names, if any (`id`, then `documentId`, else first of `ids`). */
 function auditEntityId(out: unknown): number | null {
   if (!out || typeof out !== "object") return null;
   const o = out as Record<string, unknown>;
   if (typeof o.id === "number") return o.id;
+  if (typeof o.documentId === "number") return o.documentId;
   if (Array.isArray(o.ids) && typeof o.ids[0] === "number") return o.ids[0];
   return null;
 }
@@ -93,7 +96,7 @@ export function deriveMcpAudit(name: string, out: unknown): McpAudit | null {
 
 /** Bump on every published change to tools, schemas or instructions. Clients
  *  (and OpenAI's plugin "Scan Tools") key their cached snapshot off this. */
-export const SERVER_VERSION = "1.18.0";
+export const SERVER_VERSION = "1.19.0";
 
 /** Public base URL of this deployment; doubles as the OAuth issuer.
  *  Keep in sync with the `resource` passed to `mcp()` in src/lib/auth.ts. */

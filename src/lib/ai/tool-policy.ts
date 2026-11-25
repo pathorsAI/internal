@@ -46,6 +46,12 @@ export const ORG_SCOPE_TOOLS: ReadonlySet<string> = new Set([
   "accept_invitation",
 ]);
 
+/**
+ * 只給外部 MCP / REST API 用的工具。站內 AI 與聊天 bot 的檔案直接從對話進收件匣，
+ * 不需要（也不該讓模型）自己拼 base64 上傳。
+ */
+export const EXTERNAL_ONLY_TOOLS: ReadonlySet<string> = new Set(["upload_document"]);
+
 /** 刪除以外、但同樣收不回來的寫入：確認卡也標紅。 */
 const IRREVERSIBLE_WRITES = new Set([
   "merge_parties",
@@ -80,7 +86,7 @@ export function toolLevel(name: string, args: Record<string, unknown>): ToolLeve
 
 /** 這支工具能不能出現在站內 AI 裡（不看角色）。 */
 export function isAssistantTool(name: string): boolean {
-  return !EXCLUDED_TOOLS.has(name) && !ORG_SCOPE_TOOLS.has(name);
+  return !EXCLUDED_TOOLS.has(name) && !ORG_SCOPE_TOOLS.has(name) && !EXTERNAL_ONLY_TOOLS.has(name);
 }
 
 export type OrgRole = string | null;

@@ -56,6 +56,7 @@ import { linkTools } from "./tools-links";
 import { allocationTools } from "./tools-allocations";
 import { aiRuleTools } from "./tools-ai-rules";
 import { ledgerTools } from "./tools-ledger";
+import { documentTools } from "./tools-documents";
 
 export type { ToolContext, ToolDef } from "./shared";
 
@@ -979,6 +980,7 @@ export const tools: Record<string, ToolDef> = {
   ...billingItemTools,
   ...accountingTools,
   ...transactionTools,
+  ...documentTools,
   ...allocationTools,
   ...clientTools,
   ...hrTools,

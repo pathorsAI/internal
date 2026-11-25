@@ -60,6 +60,16 @@ curl -s -X POST "$INTERNAL/api/v1/tools/list_transactions" \
 curl -s -X POST "$INTERNAL/api/v1/tools/set_integration_auto_sync" \
   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
   -d '{"provider":"wise","autoSync":false}'
+
+# attach a receipt PDF to an existing transaction: upload it to the inbox, then attach it
+DOC=$(jq -n --arg b64 "$(base64 < receipt.pdf | tr -d '\n')" \
+  '{fileName:"receipt.pdf",contentType:"application/pdf",contentBase64:$b64}' |
+  curl -s -X POST "$INTERNAL/api/v1/tools/upload_document" \
+    -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -d @- |
+  jq '.result.documentId')
+curl -s -X POST "$INTERNAL/api/v1/tools/update_transaction" \
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d "{\"id\":1234,\"documentIds\":[$DOC],\"docKind\":\"receipt\"}"
 ```
 
 Responses:
