@@ -9,6 +9,7 @@
  *
  * 獨立成一支檔：queries.ts 與 mcp/shared.ts 都要用，放進 queries.ts 會造成循環 import。
  */
+import { clearLinkReviewForAllocated } from "@/lib/linking/allocation-review";
 import { and, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import { getDb, runBatch, type Db } from "./index";
 import { billingItems, contracts, paymentAllocations, subscriptions, transactions } from "./schema";
@@ -536,6 +537,8 @@ export async function replaceTransactionAllocations(
     await runBatch((q) => [del(q)] as const, db);
   } else {
     await runBatch((q) => [del(q), q.insert(paymentAllocations).values(values)] as const, db);
+    // 拆分好了＝歸屬定了：連結層的待連結旗標一併清掉
+    await clearLinkReviewForAllocated(db, orgId, txnId);
   }
   return storedAllocations(orgId, txnId, db);
 }

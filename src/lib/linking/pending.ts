@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Db } from "@/db";
-import { parties, transactions } from "@/db/schema";
+import { parties, paymentAllocations, transactions } from "@/db/schema";
 import { PENDING_REVIEW_REASONS, type LinkCandidate, type LinkKind, type ReviewReason } from "./match";
 import type { PendingParty } from "./party";
 import type { SimilarParty } from "./party-similarity";
@@ -83,11 +83,15 @@ export type PendingLinkRow = {
   party: PendingParty | null;
 };
 
+const notAllocated = sql`not exists (select 1 from ${paymentAllocations} pa where pa.transaction_id = ${transactions.id})`;
+
 function pendingWhere(orgId: string) {
   return and(
     eq(transactions.organizationId, orgId),
     isNull(transactions.deletedAt),
     inArray(transactions.reviewReason, [...PENDING_REVIEW_REASONS]),
+    // 已經用收款分配拆分好的入帳＝有歸屬了，不算待連結（分配寫入時也會清旗標，這裡再擋一次舊資料）
+    notAllocated,
   );
 }
 
