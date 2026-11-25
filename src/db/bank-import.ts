@@ -401,33 +401,52 @@ async function markMatches(
   const claimed = await claimedTransactionIds(db, orgId, candidates.map((c) => c.id));
   // 這次要補記的（recover）交易也算已認領，不能再被別行對走。
   for (const p of planned) if (p.decision === "recover" && p.transactionId) claimed.add(p.transactionId);
-  const result = matchStatementLines(toMatch.map((i) => toMatchLine(planned[i], i)), candidates, claimed);
-  const byId = new Map(candidates.map((c) => [c.id, c]));
-  const unmatched: number[] = [];
-  for (const i of toMatch) {
+  const ctx: MatchCtx = { planned, candidates, claimed, byId: new Map(candidates.map((c) => [c.id, c])) };
+  const unmatched = markOneToOne(ctx, toMatch);
+  const stillUnmatched = markOneToMany(ctx, unmatched);
+  markLeftovers(ctx, stillUnmatched, opts);
+}
+
+type MatchCtx = {
+  planned: PlannedLine[];
+  candidates: Candidate[];
+  claimed: Set<number>;
+  byId: Map<number, Candidate>;
+};
+
+/** 一對一：同金額。回傳沒配上的行。 */
+function markOneToOne(ctx: MatchCtx, toMatch: number[]): number[] {
+  const result = matchStatementLines(toMatch.map((i) => toMatchLine(ctx.planned[i], i)), ctx.candidates, ctx.claimed);
+  return toMatch.filter((i) => {
     const txnId = result.get(i) ?? null;
-    if (txnId === null) unmatched.push(i);
-    else {
-      claimed.add(txnId);
-      setMatch(planned[i], [byId.get(txnId) as Candidate]);
-    }
-  }
-  const stillUnmatched: number[] = [];
-  for (const i of unmatched) {
-    const ids = findMultiMatch(toMatchLine(planned[i], i), candidates, claimed);
-    if (ids) {
-      for (const id of ids) claimed.add(id);
-      setMatch(planned[i], ids.map((id) => byId.get(id) as Candidate));
-    } else stillUnmatched.push(i);
-  }
-  for (const i of stillUnmatched) {
-    const p = planned[i];
-    const near = findNearMatch(toMatchLine(p, i), candidates, claimed);
+    if (txnId === null) return true;
+    ctx.claimed.add(txnId);
+    setMatch(ctx.planned[i], [ctx.byId.get(txnId) as Candidate]);
+    return false;
+  });
+}
+
+/** 一對多：幾筆加總剛好相等。回傳還是沒配上的行。 */
+function markOneToMany(ctx: MatchCtx, lines: number[]): number[] {
+  return lines.filter((i) => {
+    const ids = findMultiMatch(toMatchLine(ctx.planned[i], i), ctx.candidates, ctx.claimed);
+    if (!ids) return true;
+    for (const id of ids) ctx.claimed.add(id);
+    setMatch(ctx.planned[i], ids.map((id) => ctx.byId.get(id) as Candidate));
+    return false;
+  });
+}
+
+/** 剩下的：金額差一點的只提示；其他預設新建，skipUnmatched 時只列出來。 */
+function markLeftovers(ctx: MatchCtx, lines: number[], opts: PlanOptions): void {
+  for (const i of lines) {
+    const p = ctx.planned[i];
+    const near = findNearMatch(toMatchLine(p, i), ctx.candidates, ctx.claimed);
     if (near) {
       p.decision = "near_match";
       p.transactionId = near.id;
       p.nearAmount = near.amount;
-      p.transactionDescription = byId.get(near.id)?.description ?? null;
+      p.transactionDescription = ctx.byId.get(near.id)?.description ?? null;
     } else if (opts.skipUnmatched) {
       p.decision = "skip";
       p.skipReason = "left_unmatched";
@@ -579,18 +598,21 @@ function correctionNote(p: PlannedLine): string {
 
 type Tally = { written: SinopacApplyResult["written"]; filled: number; failures: ApplyFailure[] };
 
+/** 對到的交易（一對多時每一筆）補備註與參考號，再記下這一行。 */
+async function applyMatch(db: Db, orgId: string, p: PlannedLine, userId: string | null, t: Tally): Promise<void> {
+  for (const id of p.transactionIds ?? [p.transactionId as number]) {
+    if (await fillTransaction(db, orgId, p, id)) t.filled += 1;
+  }
+  const note = p.transactionIds ? "一對多：" + p.transactionIds.map((id) => "#" + id).join("、") : null;
+  if (await recordLine(db, lineRecord(orgId, p, "matched", userId, p.transactionId as number, note))) {
+    t.written.matched += 1;
+  }
+}
+
 async function applyLine(db: Db, orgId: string, p: PlannedLine, userId: string | null, t: Tally): Promise<void> {
   switch (p.decision) {
-    case "match": {
-      for (const id of p.transactionIds ?? [p.transactionId as number]) {
-        if (await fillTransaction(db, orgId, p, id)) t.filled += 1;
-      }
-      const note = p.transactionIds ? "一對多：" + p.transactionIds.map((id) => "#" + id).join("、") : null;
-      if (await recordLine(db, lineRecord(orgId, p, "matched", userId, p.transactionId as number, note))) {
-        t.written.matched += 1;
-      }
-      return;
-    }
+    case "match":
+      return applyMatch(db, orgId, p, userId, t);
     case "recover": {
       if (await recordLine(db, lineRecord(orgId, p, "created", userId, p.transactionId as number, "補記：交易在之前的匯入已建立"))) {
         t.written.created += 1;
