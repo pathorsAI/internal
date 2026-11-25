@@ -75,6 +75,11 @@ function usageRequestHeaders(request: NextRequest): Headers {
 // 但 `next dev` 沒有那一層，於是同一張圖在本機會被導去 /login，公開頁面的語系切換器
 // 在開發時就少了旗子。列進來讓本機跟線上看到的是同一件事。
 //
+// /line 是 public/line 的圖片（LINE 說明卡、rich menu 圖）。LINE 與 Meta 的伺服器抓圖時沒有
+// session cookie，被導去 /login 圖就破了。正式環境跟 /flags 一樣由 assets binding 先送出，
+// 列進來是讓本機與任何沒有那一層的環境都一樣公開。注意要寫 `line/`（含斜線）：只排除這個資料夾，
+// 不會連帶排除哪天出現的 /lineup 之類的頁面。
+//
 // signup / forgot-password / reset-password 是公開註冊與忘記密碼的頁面，給還沒有
 // （或登不進）帳號的人用，當然不能要求 session。注意這裡的排除是**前綴**比對：
 // `signup` 也把 /signup/password（新帳號設密碼）排除在外了。那一頁確實需要登入，
@@ -83,6 +88,6 @@ function usageRequestHeaders(request: NextRequest): Headers {
 // 那頁要的是真的去查 session 與 credential account。
 export const config = {
   matcher: [
-    "/((?!login|signup|forgot-password|reset-password|landing|privacy|terms|flags|api/auth|api/cron|api/channels|api/simpany-tax-uploads|api/v1|mcp|.well-known|_next/static|_next/image|favicon.ico).*)",
+    "/((?!login|signup|forgot-password|reset-password|landing|privacy|terms|flags|line/|api/auth|api/cron|api/channels|api/simpany-tax-uploads|api/v1|mcp|.well-known|_next/static|_next/image|favicon.ico).*)",
   ],
 };

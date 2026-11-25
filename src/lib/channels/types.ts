@@ -67,12 +67,46 @@ export type ConfirmCard = {
   confirmLabel?: string;
 };
 
+/** 卡片上的按鈕：`text` 是按下去等於使用者打那段字；`url` 是開網頁（絕對 https 網址）。 */
+export type ChatButton = { label: string; text: string } | { label: string; url: string };
+
+/** 說明卡的一張（圖片是絕對網址，LINE／Meta 伺服器不登入也拿得到）。 */
+export type HelpCard = { imageUrl: string; title: string; body: string; buttons: ChatButton[] };
+
+/** Markdown 表格拆出來的資料（儲存格已轉純文字、遮過帳號）。 */
+export type ChatTable = {
+  title?: string;
+  headers: string[];
+  rows: string[][];
+  /** 每欄是不是數字欄（LINE 靠右對齊）。 */
+  numeric: boolean[];
+};
+
+/** 指向 internal 的連結（LINE 做成按鈕，WhatsApp 寫成文字網址）。 */
+export type ChatLink = { label: string; url: string };
+
+/** 寫入成功後的收據卡。 */
+export type DoneReceipt = {
+  title: string;
+  rows: { label: string; value: string }[];
+  /** 「在 internal 查看」連到那一筆。 */
+  link?: ChatLink;
+};
+
 export type OutboundMessage =
   | { type: "text"; text: string; quickReplies?: QuickReply[] }
   /** 一批確認卡（LINE 一張 Flex／輪播、WhatsApp 每張一則互動訊息）。 */
   | { type: "cards"; cards: ConfirmCard[] }
   /** 組織選單：按下去回 `o:<orgId>`。 */
-  | { type: "orgPicker"; text: string; orgs: { id: string; name: string; current?: boolean }[] };
+  | { type: "orgPicker"; text: string; orgs: { id: string; name: string; current?: boolean }[] }
+  /** 說明卡組（LINE carousel、WhatsApp 每張一則圖片＋最後一則列出指令）。 */
+  | { type: "help"; altText: string; cards: HelpCard[]; commandsText: string }
+  /** AI 回覆裡的表格（LINE Flex bubble、WhatsApp「欄：值」文字）。 */
+  | { type: "table"; table: ChatTable; quickReplies?: QuickReply[] }
+  /** AI 回覆裡指向 internal 的連結（LINE 一個小 bubble、WhatsApp 文字網址）。 */
+  | { type: "links"; links: ChatLink[]; quickReplies?: QuickReply[] }
+  /** 確認卡寫入成功後的收據（一張以上）。 */
+  | { type: "done"; receipts: DoneReceipt[] };
 
 /** 送出去的一則平台訊息（記 chat_message_refs 用）。 */
 export type SentMessage = { externalId: string; snippet: string; cardId?: string };
@@ -90,6 +124,11 @@ export type DownloadedMedia = { bytes: Uint8Array; mime: string; fileName?: stri
 
 export interface ChannelAdapter {
   readonly provider: ChatProvider;
+  /**
+   * AI 回覆要不要拆成表格、連結按鈕（LINE Flex 才畫得出來）。false：照舊一則純文字，
+   * 表格寫成「欄：值」、連結寫成網址（WhatsApp）。
+   */
+  readonly richReplies?: boolean;
   /** 用原始 body bytes 驗簽（constant-time 比較）。 */
   verify(headers: Headers, rawBody: Uint8Array): Promise<boolean>;
   /** webhook body → 我們處理得了的事件（狀態回報、已讀之類的直接略過）。 */
@@ -126,6 +165,17 @@ export function parseOrgPayload(payload: string): string | null {
 
 /** WhatsApp 的快速選項按鈕：id 帶原文，按下去當成使用者打了那段字。 */
 export const QUICK_REPLY_PREFIX = "q:";
+
+/**
+ * 前哨 Worker（workers/webhook-ack）驗過簽後直接放進佇列的原始 webhook：body 是原始 bytes 的 base64，
+ * headers 只帶驗簽要的那一個。處理端（/api/channels/process）重新驗簽、parse、去重，再拆成 event job。
+ */
+export type RawWebhookJob = {
+  kind: "raw";
+  provider: ChatProvider;
+  body: string;
+  headers: Record<string, string>;
+};
 
 /** 佇列訊息：webhook 收到的事件、或某個人的 flush 排程。 */
 export type ChannelJob =

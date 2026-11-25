@@ -441,6 +441,12 @@ export type GcpCostRow = {
   projectId: string;
   projectName: string | null;
   service: string;
+  /** SKU 說明（sku.description）。 */
+  sku: string;
+  /** GKE cluster 名稱（goog-k8s-cluster-name 標籤，user labels 優先、再看 system labels）；沒有為空字串。 */
+  cluster: string;
+  /** 原價：還沒扣任何 credits 的 cost。 */
+  listAmount: number;
   /** 淨額 = grossAmount + promotionCredit（實際要付的錢）。 */
   amount: number;
   /** 沒有抵用點數時要付的錢 = cost + 非 PROMOTION 的 credits（免費額度、各種折扣直接降低成本）。 */
@@ -454,8 +460,8 @@ export type GcpCostRow = {
 export const GCP_PROMOTION_CREDIT_TYPE = "PROMOTION";
 
 /**
- * 一個 billing account 的用量費用 export 表（標準或明細表，欄位相同）→ 每月 × 專案 × 服務的
- * 用量（cost + 折扣類 credits）與抵用點數（PROMOTION credits）。
+ * 一個 billing account 的用量費用 export 表（標準或明細表，欄位相同）→ 每月 × 專案 × 服務 × SKU ×
+ * GKE cluster 的原價（cost）、用量（cost + 折扣類 credits）與抵用點數（PROMOTION credits）。
  * 資料表名不能參數化，呼叫端要先用 scope.ts 的 isValidBigQueryTable / isValidBigQueryExport 驗過。
  */
 export function buildCostQuery(projectId: string, dataset: string, table: string): string {
@@ -463,17 +469,21 @@ export function buildCostQuery(projectId: string, dataset: string, table: string
   const promo = "'" + GCP_PROMOTION_CREDIT_TYPE + "'";
   const discounts = credits("IFNULL(c.type, '') <> " + promo);
   const promotions = credits("c.type = " + promo);
+  const cluster = (col: string) => "(SELECT ANY_VALUE(l.value) FROM UNNEST(" + col + ") l WHERE l.key = 'goog-k8s-cluster-name')";
   return [
     "SELECT invoice.month AS invoice_month,",
     "  IFNULL(project.id, '') AS project_id,",
     "  ANY_VALUE(project.name) AS project_name,",
     "  IFNULL(service.description, '') AS service,",
+    "  IFNULL(sku.description, '') AS sku,",
+    `  IFNULL(${cluster("labels")}, IFNULL(${cluster("system_labels")}, '')) AS cluster,`,
     "  currency,",
+    "  SUM(cost) AS list_amount,",
     `  SUM(cost) + ${discounts} AS gross_amount,`,
     `  ${promotions} AS promotion_credit`,
     `FROM \`${projectId}.${dataset}.${table}\``,
     "WHERE billing_account_id = @account AND invoice.month >= @fromMonth",
-    "GROUP BY invoice_month, project_id, service, currency",
+    "GROUP BY invoice_month, project_id, service, sku, cluster, currency",
   ].join("\n");
 }
 
@@ -484,15 +494,20 @@ export function parseCostRows(rows: Record<string, string | null>[]): GcpCostRow
   return rows.flatMap((r) => {
     const m = r.invoice_month ?? "";
     const grossAmount = Number(r.gross_amount);
+    // 舊查詢沒有 list_amount：視同 gross_amount
+    const listAmount = r.list_amount == null ? grossAmount : Number(r.list_amount);
     const promotionCredit = Number(r.promotion_credit ?? 0);
     const currency = (r.currency ?? "").toUpperCase();
-    if (!/^\d{6}$/.test(m) || !Number.isFinite(grossAmount) || !Number.isFinite(promotionCredit) || currency.length !== 3) return [];
+    if (!/^\d{6}$/.test(m) || !Number.isFinite(grossAmount) || !Number.isFinite(listAmount) || !Number.isFinite(promotionCredit) || currency.length !== 3) return [];
     return [
       {
         month: `${m.slice(0, 4)}-${m.slice(4, 6)}-01`,
         projectId: r.project_id ?? "",
         projectName: r.project_name ?? null,
         service: r.service ?? "",
+        sku: r.sku ?? "",
+        cluster: r.cluster ?? "",
+        listAmount: round4(listAmount),
         amount: round4(grossAmount + promotionCredit),
         grossAmount: round4(grossAmount),
         promotionCredit: round4(promotionCredit),

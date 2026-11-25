@@ -1,0 +1,24 @@
+{
+  // 聊天平台 webhook 的前哨，說明見 index.ts。部署：
+  //   bunx wrangler deploy -c workers/webhook-ack/wrangler.jsonc
+  // 主站 pathors-internal 與佇列 pathors-internal-chat 要先存在。secret 跟主站同一組（LINE_CHANNEL_SECRET，
+  // 有開 WhatsApp 再加 WHATSAPP_APP_SECRET）。第一次部署要跟 secret 一起上，不然 route 生效到 secret 設好
+  // 之間 webhook 會回 404：
+  //   bunx wrangler deploy -c workers/webhook-ack/wrangler.jsonc --secrets-file <只放這兩個值的 .env 檔>
+  // 之後改程式直接 deploy 就好，secret 會保留。
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "pathors-internal-webhook-ack",
+  "main": "index.ts",
+  "compatibility_date": "2025-08-01",
+  "workers_dev": false,
+  // 只接這兩條。同一個 hostname 上 route 優先於主站的 Custom Domain，其他路徑照舊進主站。
+  "routes": [
+    { "pattern": "internal.pathors.com/api/channels/line/webhook", "zone_name": "pathors.com" },
+    { "pattern": "internal.pathors.com/api/channels/whatsapp/webhook", "zone_name": "pathors.com" }
+  ],
+  // 驗簽後的原始 webhook 放進主站同一個佇列，由主站的 queue() 處理（只當 producer，consumer 還是主站）。
+  "queues": { "producers": [{ "binding": "CHAT_QUEUE", "queue": "pathors-internal-chat" }] },
+  // GET（WhatsApp 訂閱驗證）與放不進佇列的大 body 同步轉給主站。
+  "services": [{ "binding": "APP", "service": "pathors-internal" }],
+  "observability": { "logs": { "enabled": true, "invocation_logs": true } }
+}

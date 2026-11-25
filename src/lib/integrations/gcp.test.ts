@@ -168,6 +168,21 @@ describe("promotion credits", () => {
     expect(sql).toContain("`buzz-445414.billing_export.gcp_billing_export_resource_v1_01CBC3_343D16_C6AE22`");
   });
 
+  test("query groups by SKU and GKE cluster and keeps list cost", () => {
+    const sql = buildCostQuery("buzz-445414", "billing_export", "gcp_billing_export_resource_v1_01CBC3_343D16_C6AE22");
+    expect(sql).toContain("IFNULL(sku.description, '') AS sku");
+    expect(sql).toContain("l.key = 'goog-k8s-cluster-name'");
+    expect(sql).toContain("SUM(cost) AS list_amount");
+    expect(sql).toContain("GROUP BY invoice_month, project_id, service, sku, cluster, currency");
+  });
+
+  test("parseCostRows reads SKU, cluster and list cost", () => {
+    const [r] = parseCostRows([
+      { invoice_month: "202610", project_id: "buzz-445414", project_name: "pathors", service: "Kubernetes Engine", sku: "Zonal Kubernetes Clusters", cluster: "pathors-us", currency: "USD", list_amount: "74.54", gross_amount: "0", promotion_credit: "0" },
+    ]);
+    expect(r).toMatchObject({ sku: "Zonal Kubernetes Clusters", cluster: "pathors-us", listAmount: 74.54, grossAmount: 0, amount: 0 });
+  });
+
   test("parseCostRows keeps net = gross + promotion", () => {
     const [r] = parseCostRows([
       { invoice_month: "202610", project_id: "buzz-445414", project_name: "buzz", service: "Vertex AI", currency: "usd", gross_amount: "5682.42", promotion_credit: "-5670.32" },
@@ -177,6 +192,9 @@ describe("promotion credits", () => {
       projectId: "buzz-445414",
       projectName: "buzz",
       service: "Vertex AI",
+      sku: "",
+      cluster: "",
+      listAmount: 5682.42,
       amount: 12.1,
       grossAmount: 5682.42,
       promotionCredit: -5670.32,

@@ -13,9 +13,10 @@ import { VendorBillingClient, type View } from "./vendor-billing-client";
 export const dynamic = "force-dynamic";
 
 // view 放在網址上（?view=methods），重新整理或分享連結都停在同一個分頁。
+const VIEW_PARAMS = new Set<View>(["methods", "invoices", "costs"]);
 function parseView(raw: string | string[] | undefined): View {
   const v = Array.isArray(raw) ? raw[0] : raw;
-  return v === "methods" || v === "invoices" ? v : "accounts";
+  return v && VIEW_PARAMS.has(v as View) ? (v as View) : "accounts";
 }
 
 export default async function VendorBillingPage({

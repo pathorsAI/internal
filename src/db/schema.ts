@@ -1126,6 +1126,11 @@ export const vendorCostLines = pgTable("vendor_cost_lines", {
 	resourceExternalId: text("resource_external_id").default('').notNull(),
 	resourceName: text("resource_name"),
 	service: text().default('').notNull(),
+	// GCP SKU 說明、GKE cluster（migrations/0048）；Azure 與舊列為 ''
+	sku: text().default('').notNull(),
+	cluster: text().default('').notNull(),
+	// 原價 = 未扣任何 credits 的 cost；NULL（0048 前的舊列、Azure）視同 grossAmount
+	listAmount: numeric("list_amount", { precision: 18, scale: 4 }),
 	// 淨額 = grossAmount + promotionCredit（migrations/0037）
 	amount: numeric({ precision: 18, scale: 4 }).notNull(),
 	// 沒有抵用點數時要付的錢；NULL（0037 前的舊程式寫入）視同 amount
@@ -1137,7 +1142,7 @@ export const vendorCostLines = pgTable("vendor_cost_lines", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
-	unique("uq_vendor_cost_line").on(table.billingAccountId, table.month, table.resourceExternalId, table.service, table.source),
+	unique("uq_vendor_cost_line").on(table.billingAccountId, table.month, table.resourceExternalId, table.service, table.sku, table.cluster, table.source),
 	index("idx_vendor_cost_line_org_month").using("btree", table.organizationId.asc().nullsLast().op("text_ops"), table.month.asc().nullsLast().op("date_ops")),
 	foreignKey({
 			columns: [table.billingAccountId],

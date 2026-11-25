@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, max, notInArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, max, min, notInArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   paymentMethods,
@@ -382,6 +382,9 @@ async function upsertCostLines(
           resourceExternalId: r.resourceExternalId,
           resourceName: r.resourceName,
           service: r.service,
+          sku: r.sku ?? "",
+          cluster: r.cluster ?? "",
+          listAmount: r.listAmount === undefined ? null : r.listAmount.toFixed(4),
           amount: r.amount.toFixed(4),
           grossAmount: r.grossAmount.toFixed(4),
           promotionCredit: r.promotionCredit.toFixed(4),
@@ -395,10 +398,13 @@ async function upsertCostLines(
           vendorCostLines.month,
           vendorCostLines.resourceExternalId,
           vendorCostLines.service,
+          vendorCostLines.sku,
+          vendorCostLines.cluster,
           vendorCostLines.source,
         ],
         set: {
           amount: sql`excluded.amount`,
+          listAmount: sql`excluded.list_amount`,
           grossAmount: sql`excluded.gross_amount`,
           promotionCredit: sql`excluded.promotion_credit`,
           currency: sql`excluded.currency`,
@@ -408,6 +414,57 @@ async function upsertCostLines(
       });
   }
   return rows.length;
+}
+
+/**
+ * GCP 的費用每次同步都是整月重算：這次查到的月份裡，沒被這次 upsert 碰到的列（SKU 消失、
+ * 0048 前沒有 SKU 的舊列）刪掉，免得同一筆花費算兩次。只動有查到資料的月份。
+ */
+async function pruneStaleCostLines(
+  db: Db,
+  orgId: string,
+  billingAccountId: number,
+  source: "gcp_bigquery",
+  months: readonly string[],
+  before: string,
+): Promise<void> {
+  if (months.length === 0) return;
+  await db
+    .delete(vendorCostLines)
+    .where(
+      and(
+        eq(vendorCostLines.organizationId, orgId),
+        eq(vendorCostLines.billingAccountId, billingAccountId),
+        eq(vendorCostLines.source, source),
+        inArray(vendorCostLines.month, [...months]),
+        lt(vendorCostLines.updatedAt, before),
+      ),
+    );
+}
+
+/** DB 的現在時間（updated_at 是 DB 的 now() 寫的，比對要用同一個時鐘，不能用 Worker 的 Date）。 */
+async function dbNow(db: Db): Promise<string> {
+  const res: unknown = await db.execute(sql`select now()::text as t`);
+  const rows = Array.isArray(res) ? (res as { t: string }[]) : ((res as { rows?: { t: string }[] }).rows ?? []);
+  const t = rows[0]?.t;
+  if (!t) throw new Error("讀不到資料庫時間");
+  return t;
+}
+
+/** 最早一個還沒有 SKU 的月份（0048 前寫的舊列）；GCP 同步從這個月開始重抓，補齊歷史。 */
+async function oldestLegacyCostMonth(db: Db, orgId: string, billingAccountId: number): Promise<string | null> {
+  const [row] = await db
+    .select({ month: min(vendorCostLines.month) })
+    .from(vendorCostLines)
+    .where(
+      and(
+        eq(vendorCostLines.organizationId, orgId),
+        eq(vendorCostLines.billingAccountId, billingAccountId),
+        eq(vendorCostLines.source, "gcp_bigquery"),
+        eq(vendorCostLines.sku, ""),
+      ),
+    );
+  return row?.month ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -731,10 +788,14 @@ async function syncGcpAccount(
 
 /** 一個帳號的 export 表 → 費用明細 + 已結束月份的月帳。 */
 async function syncGcpAccountCosts(run: GcpRun, bq: BigQueryExport, table: string, a: GcpSyncedAccount): Promise<void> {
+  const legacy = await oldestLegacyCostMonth(run.db, run.orgId, a.accountRowId);
+  const fromMonth = legacy && legacy < firstOfMonth(a.from) ? legacy : firstOfMonth(a.from);
   const rows = await soft(run.r.warnings, `${a.id} 費用`, () =>
-    run.client.queryCosts(bq.projectId, bq.dataset, table, a.id, yyyymm(firstOfMonth(a.from))),
+    run.client.queryCosts(bq.projectId, bq.dataset, table, a.id, yyyymm(fromMonth)),
   );
   if (!rows) return;
+  // DB 的時鐘：updated_at 用 now() 寫，比對也要用同一個時鐘
+  const startedAt = await dbNow(run.db);
   run.r.costLines += await upsertCostLines(
     run.db,
     run.orgId,
@@ -745,12 +806,16 @@ async function syncGcpAccountCosts(run: GcpRun, bq: BigQueryExport, table: strin
       resourceExternalId: c.projectId,
       resourceName: c.projectName,
       service: c.service,
+      sku: c.sku,
+      cluster: c.cluster,
+      listAmount: c.listAmount,
       amount: c.amount,
       grossAmount: c.grossAmount,
       promotionCredit: c.promotionCredit,
       currency: c.currency,
     })),
   );
+  await pruneStaleCostLines(run.db, run.orgId, a.accountRowId, "gcp_bigquery", [...new Set(rows.map((c) => c.month))], startedAt);
   const up = await upsertInvoices(
     run.db,
     run.orgId,

@@ -200,6 +200,28 @@ export function AppSidebar({
     return () => observer.disconnect();
   }, [pathname]);
 
+  // 捲動提示：上下還有沒露出來的項目時，在那一邊加一段漸層（globals.css 的 .sidebar-scroll）。
+  // 只改 DOM 屬性不改 state，捲動時不會重新 render。
+  useLayoutEffect(() => {
+    const root = contentRef.current;
+    if (!root) return;
+    const update = () => {
+      const top = root.scrollTop > 2;
+      const bottom = root.scrollTop + root.clientHeight < root.scrollHeight - 2;
+      root.dataset.fadeTop = String(top);
+      root.dataset.fadeBottom = String(bottom);
+    };
+    update();
+    root.addEventListener("scroll", update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(root);
+    for (const child of Array.from(root.children)) observer.observe(child);
+    return () => {
+      root.removeEventListener("scroll", update);
+      observer.disconnect();
+    };
+  }, []);
+
   return (
     <Sidebar>
       <SidebarHeader>
@@ -210,7 +232,7 @@ export function AppSidebar({
         />
       </SidebarHeader>
 
-      <SidebarContent ref={contentRef} className="relative">
+      <SidebarContent ref={contentRef} className="sidebar-scroll relative">
         <div
           aria-hidden
           className="nav-indicator"

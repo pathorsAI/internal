@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
+import { helpMessage } from "./render";
+import { botStrings } from "./strings";
 import type { ConfirmCard } from "./types";
 import {
   buildWhatsAppMessages,
@@ -222,6 +224,53 @@ describe("WhatsApp interactive", () => {
     const [m] = buildWhatsAppMessages([{ type: "orgPicker", text: "選組織", orgs }], "zh-TW");
     expect((m.payload.interactive as { type: string }).type).toBe("list");
     expect(JSON.stringify(m.payload)).toContain('"id":"o:org-4"');
+  });
+
+  test("說明卡：四則 image（link＋caption 寫標題與內文），最後一則文字列出指令", () => {
+    const BASE = "https://internal.pathors.com";
+    const built = buildWhatsAppMessages([helpMessage(botStrings("zh-TW"), BASE, `${BASE}/dashboard/settings/chat`)], "zh-TW");
+    expect(built.length).toBe(5);
+    expect(built[0].payload).toEqual({
+      type: "image",
+      image: { link: `${BASE}/line/help-1.png`, caption: "拍照記帳\n傳收據、發票、水單照片，我讀出金額日期，你按確認就記好" },
+    });
+    expect(built.slice(0, 4).map((b) => (b.payload.image as { link: string }).link)).toEqual(
+      [1, 2, 3, 4].map((i) => `${BASE}/line/help-${i}.png`),
+    );
+    expect(built[4].payload.type).toBe("text");
+    const commands = (built[4].payload.text as { body: string }).body;
+    for (const c of ["說明", "切換組織", "新對話", "解除綁定"]) expect(commands).toContain(c);
+  });
+
+  test("表格、連結、收據卡沒有 Flex：都寫成文字", () => {
+    const [t] = buildWhatsAppMessages(
+      [{ type: "table", table: { title: "本月", headers: ["對象", "金額"], rows: [["AWS", "1,000"]], numeric: [false, true] } }],
+      "zh-TW",
+    );
+    expect((t.payload.text as { body: string }).body).toBe("本月\n\n對象：AWS\n金額：1,000");
+    const [l] = buildWhatsAppMessages(
+      [{ type: "links", links: [{ label: "交易", url: "https://internal.pathors.com/dashboard/transactions" }] }],
+      "zh-TW",
+    );
+    expect((l.payload.text as { body: string }).body).toBe("交易：https://internal.pathors.com/dashboard/transactions");
+    const [d] = buildWhatsAppMessages(
+      [
+        {
+          type: "done",
+          receipts: [
+            {
+              title: "已記帳",
+              rows: [{ label: "金額", value: "TWD 1,860" }],
+              link: { label: "在 internal 查看", url: "https://internal.pathors.com/dashboard/transactions?ids=9" },
+            },
+          ],
+        },
+      ],
+      "zh-TW",
+    );
+    expect((d.payload.text as { body: string }).body).toBe(
+      "已記帳\n金額：TWD 1,860\n在 internal 查看：https://internal.pathors.com/dashboard/transactions?ids=9",
+    );
   });
 
   test("send 記下 messages[0].id；media 下載兩段", async () => {

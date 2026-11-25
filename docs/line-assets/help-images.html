@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1040px; height: 676px; background: #FFFFFF; overflow: hidden;
+    font-family: "PingFang TC", "Noto Sans TC", "Helvetica Neue", sans-serif; color: #1A1A1A; }
+  .page { display: none; width: 1040px; height: 676px; background: #EEF5FD; justify-content: center; align-items: flex-start; padding-top: 36px; overflow: hidden; }
+  .copy { display: none !important; }
+  .phone { transform: scale(1.45); transform-origin: top center; width: 600px; height: 640px; border-radius: 28px; }
+  .phone .card { width: 72%; }
+  .phone .photo { width: 78px; height: 92px; padding: 10px; gap: 5px; }
+  .phone .card dl { gap: 3px 14px; padding: 8px 14px; }
+  .phone .note { display: none; }
+  .phone .me, .phone .bot { max-width: 64%; }
+  .page.on { display: flex; }
+  .copy { flex: 1 1 0; display: flex; flex-direction: column; gap: 20px; }
+  .step { font: 600 18px/1 "Helvetica Neue", sans-serif; color: #1469D4; letter-spacing: .04em; }
+  h1 { font-size: 46px; line-height: 1.2; font-weight: 700; letter-spacing: -.01em; }
+  .copy p { font-size: 22px; line-height: 1.6; color: #4A4A4A; }
+  .flow { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+  .flow div { display: flex; align-items: center; gap: 12px; font-size: 19px; color: #3A3A3A; }
+  .flow b { width: 30px; height: 30px; border-radius: 50%; background: #EEF5FD; color: #1469D4; font: 700 15px/30px "Helvetica Neue", sans-serif; text-align: center; flex: none; }
+  .phone { width: 380px; height: 564px; flex: none; border-radius: 36px; background: #F4F5F7; border: 1px solid #E3E5E8;
+    padding: 22px 18px; display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
+  .bar { display: flex; align-items: center; gap: 10px; padding-bottom: 10px; border-bottom: 1px solid #E3E5E8; }
+  .av { width: 34px; height: 34px; border-radius: 50%; background: #1469D4; position: relative; flex: none; }
+  .av::after { content: ""; position: absolute; left: 9px; top: 10px; width: 14px; height: 14px; border-radius: 4px; background: #fff; }
+  .bar span { font-size: 16px; font-weight: 600; }
+  .me { align-self: flex-end; background: #1469D4; color: #fff; border-radius: 16px 16px 4px 16px; padding: 9px 13px; font-size: 15px; max-width: 78%; }
+  .bot { align-self: flex-start; background: #fff; border-radius: 16px 16px 16px 4px; padding: 9px 13px; font-size: 15px; max-width: 82%; border: 1px solid #E8EAED; }
+  .photo { align-self: flex-end; width: 120px; height: 150px; border-radius: 12px; background: #fff; border: 1px solid #E3E5E8;
+    display: flex; flex-direction: column; gap: 8px; padding: 16px 14px; }
+  .photo i { display: block; height: 6px; border-radius: 3px; background: #D9DCE1; }
+  .photo i.s { width: 60%; } .photo i.t { width: 40%; background: #1A1A1A; height: 8px; margin-top: auto; }
+  .card { align-self: flex-start; width: 92%; background: #fff; border-radius: 14px; border: 1px solid #E3E5E8; overflow: hidden; }
+  .card .hd { padding: 11px 14px 9px; font-size: 15px; font-weight: 700; border-bottom: 1px solid #EEF0F2; }
+  .card .hd small { display: block; font-weight: 400; font-size: 12px; color: #8A8D92; margin-top: 2px; }
+  .card dl { display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; padding: 10px 14px; font-size: 14px; }
+  .card dt { color: #8A8D92; } .card dd { text-align: right; } .card dd em { font-style: normal; color: #1469D4; font-size: 12px; margin-right: 6px; }
+  .card .bt { display: flex; border-top: 1px solid #EEF0F2; }
+  .card .bt span { flex: 1; text-align: center; padding: 10px 0; font-size: 14px; font-weight: 600; color: #1469D4; }
+  .card .bt span.pri { background: #1469D4; color: #fff; }
+  .rows { padding: 6px 14px 10px; }
+  .rows div { display: flex; justify-content: space-between; font-size: 14px; padding: 6px 0; border-bottom: 1px solid #F1F2F4; }
+  .rows div:last-child { border-bottom: 0; font-weight: 700; }
+  .rows span:last-child { font-variant-numeric: tabular-nums; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chips span { border: 1px solid #1469D4; color: #1469D4; border-radius: 999px; padding: 5px 12px; font-size: 13px; background: #fff; }
+  .note { align-self: center; font-size: 12px; color: #8A8D92; }
+</style></head>
+<body>
+
+<section class="page" id="p1">
+  <div class="copy">
+    <div class="step">01 · 拍照記帳</div>
+    <h1>傳一張收據，<br>按確認就記好</h1>
+    <p>收據、發票、匯款水單、合約 PDF 都可以。我會讀出日期、金額、店家，填好放在確認卡上。</p>
+    <div class="flow"><div><b>1</b>拍照傳給我</div><div><b>2</b>看確認卡，有錯按「修改」</div><div><b>3</b>按「確認」才會記帳</div></div>
+  </div>
+  <div class="phone">
+    <div class="bar"><div class="av"></div><span>Internal 助手</span></div>
+    <div class="photo"><i></i><i class="s"></i><i></i><i class="s"></i><i class="t"></i></div>
+    <div class="card">
+      <div class="hd">新增支出<small>派斯科技</small></div>
+      <dl>
+        <dt>日期</dt><dd>2026-11-24</dd>
+        <dt>金額</dt><dd>NT$1,860</dd>
+        <dt>店家</dt><dd><em>讀自收據</em>信義區餐廳</dd>
+        <dt>分類</dt><dd><em>依規則</em>交際費</dd>
+        <dt>憑證</dt><dd>收據，已附照片</dd>
+      </dl>
+      <div class="bt"><span class="pri">確認</span><span>修改</span><span>取消</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="page" id="p2">
+  <div class="copy">
+    <div class="step">02 · 代墊</div>
+    <h1>先墊的錢，<br>傳收據說一聲</h1>
+    <p>說「我先墊的」，我就記成你的代墊，等管理者審核。之後問一句就知道還有哪些沒還。</p>
+    <div class="flow"><div><b>1</b>傳收據＋「我先墊的」</div><div><b>2</b>管理者審核</div><div><b>3</b>記還款，代墊結清</div></div>
+  </div>
+  <div class="phone">
+    <div class="bar"><div class="av"></div><span>Internal 助手</span></div>
+    <div class="photo"><i></i><i class="s"></i><i></i><i class="t"></i></div>
+    <div class="me">我先墊的，跟客戶吃飯</div>
+    <div class="card">
+      <div class="hd">提交代墊<small>等管理者確認</small></div>
+      <dl>
+        <dt>代墊人</dt><dd>你</dd>
+        <dt>金額</dt><dd>NT$1,860</dd>
+        <dt>日期</dt><dd>2026-11-24</dd>
+      </dl>
+      <div class="bt"><span class="pri">送出</span><span>修改</span><span>取消</span></div>
+    </div>
+    <div class="note">送出後出現在管理者的「待確認」</div>
+  </div>
+</section>
+
+<section class="page" id="p3">
+  <div class="copy">
+    <div class="step">03 · 問帳</div>
+    <h1>帳務問題，<br>直接問</h1>
+    <p>應收、支出、代墊、餘額、合約都可以問。我查 internal 的資料回答，不會亂編數字。</p>
+    <div class="flow"><div><b>?</b>這個月支出前五名？</div><div><b>?</b>誰還沒付款？</div><div><b>?</b>我還有哪些代墊沒還？</div></div>
+  </div>
+  <div class="phone">
+    <div class="bar"><div class="av"></div><span>Internal 助手</span></div>
+    <div class="me">這個月支出前五名？</div>
+    <div class="card">
+      <div class="hd">11 月支出前五名<small>派斯科技 · 管理帳</small></div>
+      <div class="rows">
+        <div><span>薪資</span><span>NT$412,000</span></div>
+        <div><span>雲端主機</span><span>NT$86,450</span></div>
+        <div><span>辦公室租金</span><span>NT$60,000</span></div>
+        <div><span>軟體工具</span><span>NT$18,230</span></div>
+        <div><span>交際費</span><span>NT$9,870</span></div>
+        <div><span>合計</span><span>NT$586,550</span></div>
+      </div>
+      <div class="bt"><span>在 internal 看全部</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="page" id="p4">
+  <div class="copy">
+    <div class="step">04 · 教我做事</div>
+    <h1>說一次，<br>以後都記得</h1>
+    <p>告訴我分類規則或你的習慣，我會存成規則，下次記帳自動套用。規則在 internal 的規則頁看得到、刪得掉。</p>
+    <div class="flow"><div><b>⌘</b>指令：切換組織、新對話、解除綁定、說明</div></div>
+  </div>
+  <div class="phone">
+    <div class="bar"><div class="av"></div><span>Internal 助手</span></div>
+    <div class="me">以後 Google Workspace 都歸軟體工具</div>
+    <div class="card">
+      <div class="hd">記住這條規則<small>組織規則</small></div>
+      <dl>
+        <dt>對象含</dt><dd>Google Workspace</dd>
+        <dt>分類</dt><dd>軟體工具</dd>
+      </dl>
+      <div class="bt"><span class="pri">確認</span><span>取消</span></div>
+    </div>
+    <div class="bot">記住了。過去 6 筆未分類的要一起改嗎？</div>
+    <div class="chips"><span>一起改</span><span>不用</span></div>
+  </div>
+</section>
+
+<script>
+  const n = new URLSearchParams(location.search).get('p') || '1';
+  document.getElementById('p' + n).classList.add('on');
+</script>
+</body></html>

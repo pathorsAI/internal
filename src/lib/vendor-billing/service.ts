@@ -12,6 +12,7 @@ import {
   vendorCostLines,
   vendorInvoices,
 } from "@/db/schema";
+import type { CostLineRow } from "./cost-breakdown";
 import { notPromotionTransaction } from "./promotion-ledger";
 import { booksPromotionCredits, matchPartiesOf, parseMatchPartyIds, parseRejectedTransactionIds, withRejected } from "./account-meta";
 import { computeAttention, type AttentionItem } from "./attention";
@@ -1063,4 +1064,75 @@ export async function removeRecurringSchedule(orgId: string, id: number): Promis
     .set({ schedule: null, anchorDate: null, updatedAt: sql`now()` })
     .where(and(eq(vendorBillingAccounts.id, id), eq(vendorBillingAccounts.organizationId, orgId)));
   return "unscheduled";
+}
+
+// ---------------------------------------------------------------------------
+// 花費明細（廠商計費頁「花費明細」）
+// ---------------------------------------------------------------------------
+
+export type CostAccountOption = { id: number; provider: string; displayName: string; months: string[] };
+
+/** 有費用明細的計費帳號，各自有資料的月份（新 → 舊）。 */
+export async function listCostAccounts(orgId: string): Promise<CostAccountOption[]> {
+  const db = getDb();
+  const rows = await db
+    .selectDistinct({ id: vendorCostLines.billingAccountId, month: vendorCostLines.month })
+    .from(vendorCostLines)
+    .where(eq(vendorCostLines.organizationId, orgId))
+    .orderBy(desc(vendorCostLines.month));
+  const months = new Map<number, string[]>();
+  for (const r of rows) months.set(r.id, [...(months.get(r.id) ?? []), r.month]);
+  if (months.size === 0) return [];
+  const accounts = await db
+    .select({ id: vendorBillingAccounts.id, provider: vendorBillingAccounts.provider, displayName: vendorBillingAccounts.displayName })
+    .from(vendorBillingAccounts)
+    .where(and(eq(vendorBillingAccounts.organizationId, orgId), inArray(vendorBillingAccounts.id, [...months.keys()])));
+  return accounts
+    .map((a) => ({ ...a, months: months.get(a.id) ?? [] }))
+    .sort((a, b) => (b.months[0] ?? "").localeCompare(a.months[0] ?? "") || a.displayName.localeCompare(b.displayName));
+}
+
+/** 一個帳號 [from, to] 月份的費用明細列（金額轉成數字；原價缺值視同用量、用量缺值視同淨額）。 */
+export async function listCostLines(orgId: string, billingAccountId: number, from: string, to: string): Promise<CostLineRow[]> {
+  const rows = await getDb()
+    .select({
+      month: vendorCostLines.month,
+      service: vendorCostLines.service,
+      resourceExternalId: vendorCostLines.resourceExternalId,
+      resourceName: vendorCostLines.resourceName,
+      sku: vendorCostLines.sku,
+      cluster: vendorCostLines.cluster,
+      amount: vendorCostLines.amount,
+      grossAmount: vendorCostLines.grossAmount,
+      listAmount: vendorCostLines.listAmount,
+      promotionCredit: vendorCostLines.promotionCredit,
+      currency: vendorCostLines.currency,
+    })
+    .from(vendorCostLines)
+    .where(
+      and(
+        eq(vendorCostLines.organizationId, orgId),
+        eq(vendorCostLines.billingAccountId, billingAccountId),
+        gte(vendorCostLines.month, from),
+        lte(vendorCostLines.month, to),
+      ),
+    );
+  return rows.map((r) => {
+    const net = Number(r.amount);
+    const gross = r.grossAmount == null ? net : Number(r.grossAmount);
+    const list = r.listAmount == null ? gross : Number(r.listAmount);
+    return {
+      month: r.month,
+      service: r.service,
+      resourceExternalId: r.resourceExternalId,
+      resourceName: r.resourceName,
+      sku: r.sku,
+      cluster: r.cluster,
+      listAmount: list,
+      discount: gross - list,
+      credit: Number(r.promotionCredit),
+      net,
+      currency: r.currency.trim(),
+    };
+  });
 }
