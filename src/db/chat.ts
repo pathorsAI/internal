@@ -893,7 +893,7 @@ export async function attachInboxDocuments(
   return rows.map((r) => r.id);
 }
 
-/** 每日 cron：超過 days 天（預設 30）還沒掛上的聊天檔案。呼叫端先刪 STORAGE 檔，再 deleteDocumentRows。 */
+/** 每日 cron：超過 days 天（預設 30）還沒掛上的收件匣檔案（聊天與 MCP upload_document 上傳的）。呼叫端先刪 STORAGE 檔，再 deleteDocumentRows。 */
 export async function listStaleInboxDocuments(days = 30, limit = 200): Promise<{ id: number; r2Key: string }[]> {
   return getDb()
     .select({ id: documents.id, r2Key: documents.r2Key })
@@ -902,7 +902,7 @@ export async function listStaleInboxDocuments(days = 30, limit = 200): Promise<{
       and(
         isNull(documents.transactionId),
         isNull(documents.invoiceId),
-        inArray(documents.source, ["line", "whatsapp"]),
+        inArray(documents.source, ["line", "whatsapp", "mcp"]),
         lt(documents.uploadedAt, sql`now() - make_interval(days => ${days})`),
       ),
     )

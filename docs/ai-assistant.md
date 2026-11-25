@@ -66,7 +66,8 @@ offered. Architecture, platform setup (LINE Developers, Meta), secrets, the queu
 - **Chats show up in `/dashboard/ai`** with a LINE / WhatsApp tag. One open chat per person, org
   and platform; after 6 idle hours (or `新對話`) the bot starts a new one.
 - **Files** sent in chat land in an inbox (`documents` with no transaction or invoice,
-  `source = line | whatsapp`, `uploaded_by`) and are attached when a card is confirmed. The
+  `source = line | whatsapp`, `uploaded_by`) and are attached when a card is confirmed. MCP / REST
+  clients add to the same inbox with `upload_document` (`source = mcp`, owner/admin only). The
   transaction detail shows "由 <name> 透過 LINE 上傳". Inbox files nobody attached are deleted
   after 30 days by the daily cron (`src/lib/chat-cleanup.ts`, run from
   `/api/cron/integrations-autosync`, which also purges webhook dedupe rows after 7 days, the

@@ -89,6 +89,7 @@ const BY_CATEGORY: Record<FeatureCategory, readonly string[]> = {
     "merge_parties",
     "create_reimbursement",
     "submit_advance",
+    "upload_document",
     "list_outstanding_advances",
     "list_accountant_notices",
     "mark_accountant_notified",
