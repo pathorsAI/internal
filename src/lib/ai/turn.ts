@@ -165,6 +165,7 @@ export async function runTurn(p: RunTurnParams): Promise<RunTurnResult> {
     rules,
     locale: p.locale,
     conversationId,
+    ...(p.deps.now ? { now: p.deps.now } : {}),
     toolGroups: conversation.toolGroups,
     systemPrompt: systemPrompt({
       orgName: p.orgName,

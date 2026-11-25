@@ -328,11 +328,11 @@ export function SpendChart({
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {data.length === 0 ? (
-            <EmptyState icon={HandCoins} message={t("empty")} />
-          ) : isMobile ? (
+          {data.length === 0 ? <EmptyState icon={HandCoins} message={t("empty")} /> : null}
+          {data.length > 0 && isMobile ? (
             <MobileList data={data} groupBy={groupBy} total={summary.total} percent={percent} />
-          ) : (
+          ) : null}
+          {data.length > 0 && !isMobile ? (
             <ChartContainer
               config={chartConfig}
               className="aspect-auto w-full"
@@ -383,7 +383,7 @@ export function SpendChart({
                 </Bar>
               </BarChart>
             </ChartContainer>
-          )}
+          ) : null}
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
             {summary.unconverted > 0 ? (
               <p className="text-xs text-muted-foreground">

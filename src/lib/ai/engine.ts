@@ -97,6 +97,8 @@ export type TurnContext = {
   /** 卡片提示的語言。 */
   locale?: "zh-TW" | "en";
   conversationId: string;
+  /** 現在時間（判斷附件夠不夠新）。沒給 = 系統時間；測試注入固定時間，結果才不會跟著跑測試的時刻變。 */
+  now?: () => Date;
   /** 對話目前記著的工具組（上一題用的）。 */
   toolGroups: readonly string[];
   systemPrompt: string;
@@ -307,7 +309,7 @@ async function attachmentPartsFor(
       for (const [id, part] of await read(ctx.owner.orgId, missing)) known.set(id, part);
     }
     return known;
-  });
+  }, ctx.now?.().getTime());
   return loaded;
 }
 
