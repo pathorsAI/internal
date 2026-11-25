@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { formatDateTime } from "@/lib/format";
 import { toast } from "sonner";
 import { Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -75,9 +76,12 @@ export function UndoOfLink({ id }: Readonly<{ id: number }>) {
   );
 }
 
+const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+
 function formatValue(v: unknown): string {
   if (v === null || v === undefined || v === "") return "—";
-  if (typeof v === "string") return v;
+  // 快照裡的 timestamptz 是 ISO 字串（2026-11-25T04:11:45.90213+00:00），轉成畫面上一致的日期時間
+  if (typeof v === "string") return ISO_TIMESTAMP.test(v) ? formatDateTime(v) : v;
   if (typeof v === "number" || typeof v === "boolean") return String(v);
   const s = JSON.stringify(v);
   return s.length > 240 ? `${s.slice(0, 239)}…` : s;
