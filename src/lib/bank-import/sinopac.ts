@@ -78,42 +78,52 @@ export function parseDelimited(text: string, delimiter: string): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let cell = "";
-  let quoted = false;
-  for (let i = 0; i < text.length; i += 1) {
+  let i = 0;
+  const endCell = () => {
+    row.push(cell);
+    cell = "";
+  };
+  const endRow = () => {
+    endCell();
+    rows.push(row);
+    row = [];
+  };
+  while (i < text.length) {
     const ch = text[i];
-    if (quoted) {
-      if (ch === '"') {
-        if (text[i + 1] === '"') {
-          cell += '"';
-          i += 1;
-        } else {
-          quoted = false;
-        }
-      } else {
-        cell += ch;
-      }
+    if (ch === '"' && cell === "") {
+      const q = readQuoted(text, i + 1);
+      cell = q.value;
+      i = q.next;
       continue;
     }
-    if (ch === '"' && cell === "") {
-      quoted = true;
-    } else if (ch === delimiter) {
-      row.push(cell);
-      cell = "";
-    } else if (ch === "\n" || ch === "\r") {
-      if (ch === "\r" && text[i + 1] === "\n") i += 1;
-      row.push(cell);
-      rows.push(row);
-      row = [];
-      cell = "";
+    if (ch === delimiter) endCell();
+    else if (ch === "\n") endRow();
+    else if (ch === "\r") {
+      if (text[i + 1] === "\n") i += 1;
+      endRow();
+    } else cell += ch;
+    i += 1;
+  }
+  if (cell !== "" || row.length > 0) endRow();
+  return rows;
+}
+
+/** 從開頭引號的下一個字開始讀到收尾引號；"" 是跳脫的引號。回傳內容與收尾引號之後的位置。 */
+function readQuoted(text: string, start: number): { value: string; next: number } {
+  let value = "";
+  let i = start;
+  while (i < text.length) {
+    if (text[i] !== '"') {
+      value += text[i];
+      i += 1;
+    } else if (text[i + 1] === '"') {
+      value += '"';
+      i += 2;
     } else {
-      cell += ch;
+      return { value, next: i + 1 };
     }
   }
-  if (cell !== "" || row.length > 0) {
-    row.push(cell);
-    rows.push(row);
-  }
-  return rows;
+  return { value, next: i };
 }
 
 /** 純文字（CSV / TSV）→ 表格。第一個非空行有 tab 就當 TSV，否則 CSV。 */
@@ -315,7 +325,10 @@ function parseAmounts(
 }
 
 function parseRow(cells: string[], lineNo: number, col: Partial<Record<ColumnKey, number>>): RowResult {
-  const at = (k: ColumnKey) => (col[k] === undefined ? "" : (cells[col[k] as number] ?? ""));
+  const at = (k: ColumnKey) => {
+    const i = col[k];
+    return i === undefined ? "" : (cells[i] ?? "");
+  };
   const digits = at("account").replaceAll(/\D/g, "");
   if (digits.length < 4) return { error: { lineNo, code: "badAccount", value: at("account") } };
   const when = parseStatementDateTime(at("datetime"));

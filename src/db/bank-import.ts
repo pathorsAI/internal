@@ -574,7 +574,8 @@ export async function applySinopacImport(
   }
   if (opts.log) {
     const w = tally.written;
-    const summary = `永豐明細匯入：配對補備註 ${w.matched}、新建待確認 ${w.created}、沖正抵銷 ${w.correctionPair}、略過 ${w.skipped}、已匯入過 ${plan.counts.duplicate}${tally.failures.length ? `、失敗 ${tally.failures.length}` : ""}`;
+    const failed = tally.failures.length ? "、失敗 " + tally.failures.length : "";
+    const summary = `永豐明細匯入：配對補備註 ${w.matched}、新建待確認 ${w.created}、沖正抵銷 ${w.correctionPair}、略過 ${w.skipped}、已匯入過 ${plan.counts.duplicate}${failed}`;
     try {
       await opts.log(summary);
     } catch {

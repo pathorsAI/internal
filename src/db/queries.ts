@@ -117,8 +117,10 @@ export type TxnFilters = {
 };
 
 /** ILIKE 的樣式：% 與 _ 是萬用字元，使用者打的要跳脫。 */
+const LIKE_ESCAPE = String.raw`\$&`;
+
 export function likePattern(q: string): string {
-  return `%${q.replaceAll(/[\\%_]/g, (c) => `\\${c}`)}%`;
+  return `%${q.replaceAll(/[\\%_]/g, LIKE_ESCAPE)}%`;
 }
 
 /** 收支紀錄的文字搜尋（說明、銀行備註、參考號、對象名稱）。count 沒有 join parties，所以對象用子查詢。 */

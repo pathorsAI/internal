@@ -66,14 +66,26 @@ function describe(l: PlannedLine): string {
   return `  第 ${String(l.lineNo).padStart(4)} 行  ${l.localDateTime.slice(0, 16)}  ··${l.last4}  ${sign}${l.amount} ${l.currency}  ${l.remarks ?? "（無備註）"}${ref}`;
 }
 
-function printPlan(plan: SinopacPlan) {
+function printSection<T>(title: string, items: T[], line: (item: T) => string) {
+  if (items.length === 0) return;
+  console.log(`\n${title}`);
+  for (const item of items) console.log(line(item));
+}
+
+function recoverSuffix(l: PlannedLine): string {
+  return l.decision === "recover" ? `  （補記既有 #${l.transactionId}）` : "";
+}
+
+function printAccounts(plan: SinopacPlan) {
   console.log("\n帳戶對應：");
   for (const a of plan.accounts) {
     const target = a.bankAccountId ? `#${a.bankAccountId} ${a.bankAccountName ?? "（找不到）"}` : "（未對應，略過）";
     const problem = a.problem && a.problem !== "unmapped" ? `  ⚠ ${a.problem}` : "";
     console.log(`  ··${a.last4} ${a.currency}  ${a.count} 行  →  ${target}${problem}`);
   }
-  const c = plan.counts;
+}
+
+function printCounts(c: SinopacPlan["counts"]) {
   console.log("\n筆數：");
   console.log(`  配對補備註   ${c.matched}`);
   console.log(`  新建待確認   ${c.created}`);
@@ -82,60 +94,69 @@ function printPlan(plan: SinopacPlan) {
   console.log(`  略過         ${c.skipped}`);
   console.log(`  讀不懂的行   ${c.parseErrors}`);
   console.log(`  合計         ${c.total + c.parseErrors}`);
-
-  const created = plan.lines.filter((l) => l.decision === "create" || l.decision === "recover");
-  if (created.length > 0) {
-    console.log(`\n對不到既有交易、會新建待確認的 ${created.length} 行：`);
-    for (const l of created) console.log(`${describe(l)}${l.decision === "recover" ? `  （補記既有 #${l.transactionId}）` : ""}`);
-  }
-  const pairs = plan.lines.filter((l) => l.decision === "correction_pair");
-  if (pairs.length > 0) {
-    console.log(`\n沖正抵銷（不建、不對交易）：`);
-    for (const l of pairs) console.log(`${describe(l)}  ↔ 第 ${l.partnerLineNo} 行`);
-  }
-  const skipped = plan.lines.filter((l) => l.decision === "skip");
-  if (skipped.length > 0) {
-    console.log(`\n略過：`);
-    for (const l of skipped) console.log(`${describe(l)}  — ${SKIP_LABEL[l.skipReason ?? ""] ?? l.skipReason}`);
-  }
-  if (plan.parseErrors.length > 0) {
-    console.log(`\n讀不懂、不會匯入的行：`);
-    for (const e of plan.parseErrors) console.log(`  第 ${e.lineNo} 行  ${e.code}  「${e.value}」`);
-  }
 }
 
-async function main() {
-  const db = getDb();
-  const orgArg = (values.org as string).trim();
+function printPlan(plan: SinopacPlan) {
+  printAccounts(plan);
+  printCounts(plan.counts);
+  const created = plan.lines.filter((l) => l.decision === "create" || l.decision === "recover");
+  printSection(`對不到既有交易、會新建待確認的 ${created.length} 行：`, created, (l) => `${describe(l)}${recoverSuffix(l)}`);
+  printSection(
+    "沖正抵銷（不建、不對交易）：",
+    plan.lines.filter((l) => l.decision === "correction_pair"),
+    (l) => `${describe(l)}  ↔ 第 ${l.partnerLineNo} 行`,
+  );
+  printSection(
+    "略過：",
+    plan.lines.filter((l) => l.decision === "skip"),
+    (l) => `${describe(l)}  — ${SKIP_LABEL[l.skipReason ?? ""] ?? l.skipReason}`,
+  );
+  printSection("讀不懂、不會匯入的行：", plan.parseErrors, (e) => `  第 ${e.lineNo} 行  ${e.code}  「${e.value}」`);
+}
+
+type Db = ReturnType<typeof getDb>;
+
+async function resolveOrg(db: Db, orgArg: string) {
   const [org] = await db
     .select({ id: organization.id, name: organization.name, slug: organization.slug })
     .from(organization)
     .where(or(eq(organization.id, orgArg), eq(organization.slug, orgArg)))
     .limit(1);
   if (!org) fail(`找不到組織「${orgArg}」（用 id 或 slug）`);
+  return org;
+}
 
-  let accountMap: Record<string, number>;
+function readAccountMap(arg: string): Record<string, number> {
   try {
-    accountMap = parseAccountMapArg(values.map as string);
+    return parseAccountMapArg(arg);
   } catch (e) {
     fail(e instanceof Error ? e.message : String(e));
   }
+}
 
-  let actorId: string | null = null;
-  if (values["actor-email"]) {
-    const [u] = await db.select({ id: user.id }).from(user).where(eq(user.email, values["actor-email"])).limit(1);
-    if (!u) fail(`找不到使用者 ${values["actor-email"]}`);
-    actorId = u.id;
-  }
+async function resolveActor(db: Db, email: string | undefined): Promise<string | null> {
+  if (!email) return null;
+  const [u] = await db.select({ id: user.id }).from(user).where(eq(user.email, email)).limit(1);
+  if (!u) fail(`找不到使用者 ${email}`);
+  return u.id;
+}
 
-  const buf = readFileSync(values.file as string);
-  let parsed;
+async function readStatement(path: string) {
+  const buf = readFileSync(path);
   try {
-    parsed = await parseSinopacFile(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer);
+    return await parseSinopacFile(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer);
   } catch (e) {
     if (e instanceof SinopacFileError) fail(`讀不了檔案：${e.message}`);
     throw e;
   }
+}
+
+async function main() {
+  const db = getDb();
+  const org = await resolveOrg(db, (values.org as string).trim());
+  const accountMap = readAccountMap(values.map as string);
+  const actorId = await resolveActor(db, values["actor-email"]);
+  const parsed = await readStatement(values.file as string);
 
   console.log(`組織：${org.name}（${org.slug ?? org.id}）`);
   console.log(`檔案：${values.file}（${parsed.lines.length} 行可讀、${parsed.errors.length} 行讀不懂）`);
