@@ -2,7 +2,7 @@ import { and, eq, inArray, isNull, max, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { bankAccounts, transactions } from "@/db/schema";
 import { pendingPartyOf, resolvePartiesForWrite, type PartyResolution } from "@/lib/linking/party";
-import { insertTransactions, type LinkedInsert } from "@/lib/linking/write";
+import { insertTransactions, updateTransactionsPlain, type LinkedInsert } from "@/lib/linking/write";
 import { getIntegration, updateConfig } from "@/lib/integrations/store";
 import type { IntegrationConfig } from "@/lib/integrations/types";
 import {
@@ -378,6 +378,10 @@ export type PlannedRow = {
   needsReview: boolean;
   fromAccountId: number | null;
   toAccountId: number | null;
+  /** Wise 上的備註原文（付款參考 paymentReference，沒有就用 Wise 的 description），寫進 bank_memo。 */
+  bankMemo: string | null;
+  /** Wise 的 referenceNumber，寫進 bank_ref（external_ref 照舊，換匯腳另有幣別後綴）。 */
+  bankRef: string;
 };
 
 type ResolvedMapping = WiseAccountMapping & { bankAccountId: number };
@@ -423,6 +427,13 @@ function accountSides(
   return isCredit
     ? { fromAccountId: null, toAccountId: bankAccountId }
     : { fromAccountId: bankAccountId, toAccountId: null };
+}
+
+/** bank_memo：付款參考（對方匯款時填的）優先，其次 Wise 的 description；兩個一樣只留一個。 */
+export function wiseBankMemo(d: WiseDetails): string | null {
+  const parts = [d.paymentReference?.trim(), d.description?.trim()].filter((v): v is string => Boolean(v));
+  const unique = [...new Set(parts)];
+  return unique.length ? unique.join(" · ") : null;
 }
 
 function merchantMeta(merchant: NonNullable<WiseDetails["merchant"]>): Record<string, unknown> {
@@ -510,6 +521,8 @@ function mapConversion(
     description: conversionDescription(tx, d, rate, fee),
     externalRef: `${tx.referenceNumber}:${currency}`,
     externalMeta: meta,
+    bankMemo: wiseBankMemo(d),
+    bankRef: tx.referenceNumber,
     ...accountSides(isCredit, m.bankAccountId),
   };
   if (counterMapping) {
@@ -565,6 +578,8 @@ export function mapWiseTransaction(
     externalRef: tx.referenceNumber,
     externalMeta: meta,
     needsReview: true,
+    bankMemo: wiseBankMemo(d),
+    bankRef: tx.referenceNumber,
     ...accountSides(isCredit, m.bankAccountId),
   };
 }
@@ -869,7 +884,28 @@ function toInsertRow(
     externalRef: p.externalRef,
     externalMeta: p.externalMeta,
     needsReview: p.needsReview,
+    bankMemo: p.bankMemo,
+    bankRef: p.bankRef,
   };
+}
+
+/**
+ * 已同步過的列（0049 之前寫的）補上 bank_memo / bank_ref：只補空的、只動這次抓回來且已存在的那幾筆，
+ * 所以重新同步一段期間就會順便回填，不另外掃整本帳。回傳補了幾筆。
+ */
+async function backfillBankFields(db: Db, orgId: string, rows: readonly PlannedRow[]): Promise<number> {
+  let filled = 0;
+  for (const p of rows) {
+    const mine = and(eq(transactions.externalSource, SOURCE), eq(transactions.externalRef, p.externalRef));
+    const ref = await updateTransactionsPlain(db, orgId, and(mine, isNull(transactions.bankRef)), {
+      bankRef: p.bankRef,
+    });
+    const memo = p.bankMemo
+      ? await updateTransactionsPlain(db, orgId, and(mine, isNull(transactions.bankMemo)), { bankMemo: p.bankMemo })
+      : [];
+    if (ref.length > 0 || memo.length > 0) filled += 1;
+  }
+  return filled;
 }
 
 /**
@@ -997,6 +1033,9 @@ export async function syncWiseTransactions(orgId: string, opts: SyncOptions): Pr
       opts.dryRun || toCreate.length === 0
         ? new Set<string>(toCreate.map((p) => p.externalRef))
         : await insertPlanned(db, orgId, toCreate);
+    if (!opts.dryRun) {
+      await backfillBankFields(db, orgId, planned.filter((p) => existing.has(p.externalRef)));
+    }
 
     tallyResults(results, planned, existing, toCreate, createdRefs, opts.dryRun);
 

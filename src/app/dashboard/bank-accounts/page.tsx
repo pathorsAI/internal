@@ -23,6 +23,7 @@ import { canManageOrg, requireOrgWithRole } from "@/lib/session";
 import { getIntegration } from "@/lib/integrations/store";
 import { parseWiseConfig } from "@/lib/wise-sync";
 import { WiseSyncButton } from "./wise-sync-sheet";
+import { SinopacImportButton } from "./sinopac-import-sheet";
 
 export const dynamic = "force-dynamic";
 
@@ -66,6 +67,7 @@ export default async function BankAccountsPage() {
     <>
       <PageHeader title={t("title")}>
         {canSyncWise ? <WiseSyncButton /> : null}
+        {canManageOrg(role) ? <SinopacImportButton /> : null}
         <NewBankAccountDialog />
       </PageHeader>
       <TableCard>

@@ -112,7 +112,29 @@ export type TxnFilters = {
   ids?: number[];
   /** 只看待連結（review_reason 在 PENDING_REVIEW_REASONS 裡；跟 needsReview 分開）。 */
   pendingLink?: boolean;
+  /** 文字搜尋：說明、銀行備註、銀行參考號、對象名稱（不分大小寫、部分符合）。 */
+  q?: string;
 };
+
+/** ILIKE 的樣式：% 與 _ 是萬用字元，使用者打的要跳脫。 */
+const LIKE_ESCAPE = String.raw`\$&`;
+
+export function likePattern(q: string): string {
+  return `%${q.replaceAll(/[\\%_]/g, LIKE_ESCAPE)}%`;
+}
+
+/** 收支紀錄的文字搜尋（說明、銀行備註、參考號、對象名稱）。count 沒有 join parties，所以對象用子查詢。 */
+function txnTextFilter(q: string | undefined) {
+  const text = q?.trim();
+  if (!text) return undefined;
+  const pattern = likePattern(text);
+  return or(
+    sql`${transactions.description} ILIKE ${pattern}`,
+    sql`${transactions.bankMemo} ILIKE ${pattern}`,
+    sql`${transactions.bankRef} ILIKE ${pattern}`,
+    sql`EXISTS (SELECT 1 FROM ${parties} WHERE ${parties.id} = ${transactions.partyId} AND ${parties.name} ILIKE ${pattern})`,
+  );
+}
 
 /** id 篩選："none" = 沒有指定（IS NULL），數字 = 等於，沒給 = 不篩。 */
 function idFilter(column: typeof transactions.categoryId | typeof transactions.partyId, v?: number | "none") {
@@ -122,7 +144,7 @@ function idFilter(column: typeof transactions.categoryId | typeof transactions.p
 
 // 收支紀錄列表與筆數共用的 where（篩選條件的 single source of truth）
 function txnWhere(orgId: string, filters: TxnFilters) {
-  const { book, categoryId, accountId, projectId, period, needsReview, partyId, ids, pendingLink } = filters;
+  const { book, categoryId, accountId, projectId, period, needsReview, partyId, ids, pendingLink, q } = filters;
   return and(
     eq(transactions.organizationId, orgId),
     book ? eq(transactions.book, book) : undefined,
@@ -140,6 +162,7 @@ function txnWhere(orgId: string, filters: TxnFilters) {
     needsReview === undefined ? undefined : eq(transactions.needsReview, needsReview),
     ids && ids.length > 0 ? inArray(transactions.id, ids) : undefined,
     pendingLink ? inArray(transactions.reviewReason, [...PENDING_REVIEW_REASONS]) : undefined,
+    txnTextFilter(q),
     isNull(transactions.deletedAt),
   );
 }
@@ -203,6 +226,8 @@ export async function listTransactions(
       externalSource: transactions.externalSource,
       externalRef: transactions.externalRef,
       externalMeta: transactions.externalMeta,
+      bankMemo: transactions.bankMemo,
+      bankRef: transactions.bankRef,
     })
     .from(transactions)
     .leftJoin(categories, eq(categories.id, transactions.categoryId))

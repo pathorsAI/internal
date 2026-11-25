@@ -76,6 +76,10 @@ const transactions = {
       all: { "zh-TW": "全部月份", en: "All months" },
       label: { "zh-TW": "{year} 年 {month} 月", en: "{month}/{year}" },
     },
+    search: {
+      label: { "zh-TW": "搜尋交易", en: "Search transactions" },
+      placeholder: { "zh-TW": "搜尋說明、銀行備註、參考號…", en: "Search description, bank memo, ref…" },
+    },
   },
   form: {
     addTransaction: { "zh-TW": "新增交易", en: "Add transaction" },
@@ -179,6 +183,12 @@ const transactions = {
     viewFile: { "zh-TW": "檢視檔案", en: "View file" },
     uploadedVia: { "zh-TW": "由 {name} 透過 {channel} 上傳", en: "Sent by {name} via {channel}" },
     uploadedViaAnon: { "zh-TW": "透過 {channel} 上傳", en: "Sent via {channel}" },
+    bankMemo: { "zh-TW": "銀行備註", en: "Bank memo" },
+    bankMemoHint: {
+      "zh-TW": "銀行明細上的備註原文（對帳單、匯款單、截圖），跟上面的摘要分開。",
+      en: "The bank's own remark text from the statement, slip or screenshot — separate from the description above.",
+    },
+    bankRef: { "zh-TW": "銀行參考號", en: "Bank reference" },
   },
   combobox: {
     category: {

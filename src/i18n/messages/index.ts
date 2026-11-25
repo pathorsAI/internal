@@ -30,6 +30,7 @@ import usage from "./usage";
 import settings from "./settings";
 import integrations from "./integrations";
 import wise from "./wise";
+import bankImport from "./bankImport";
 import auth from "./auth";
 import errors from "./errors";
 import lib from "./lib";
@@ -68,6 +69,7 @@ const catalogue = {
   settings,
   integrations,
   wise,
+  bankImport,
   auth,
   errors,
   lib,

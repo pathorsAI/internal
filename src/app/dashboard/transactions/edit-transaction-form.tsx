@@ -74,6 +74,9 @@ type Txn = {
   conversionText?: string | null;
   projectId: number | null;
   contractId: number | null;
+  /** 銀行自己的備註原文與交易參考號（對帳單匯入、Wise 同步、AI 從截圖讀的）。 */
+  bankMemo?: string | null;
+  bankRef?: string | null;
 };
 
 export function EditTransactionForm({
@@ -230,6 +233,16 @@ export function EditTransactionForm({
           wide
           defaultValue={txn.description ?? ""}
         />
+        <div className="grid gap-1.5 sm:col-span-2">
+          <TextField
+            name="bankMemo"
+            label={t("form.bankMemo")}
+            wide
+            defaultValue={txn.bankMemo ?? ""}
+          />
+          <p className="text-xs text-muted-foreground">{t("form.bankMemoHint")}</p>
+        </div>
+        <TextField name="bankRef" label={t("form.bankRef")} defaultValue={txn.bankRef ?? ""} />
 
         {isTransfer ? null : (
           <ReportingFields book={txn.book} billed={billed} onBilledChange={setBilled} />

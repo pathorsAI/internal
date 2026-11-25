@@ -74,6 +74,41 @@ import {
 const TXN_TYPES = ["expense", "income", "advance", "transfer"] as const;
 const BOOKS = ["both", "internal", "external"] as const;
 
+// 銀行備註與參考號（migrations/0049）：整列與列表共用。
+const BANK_FIELD_PROPS: Record<string, unknown> = {
+  bankMemo: {
+    type: ["string", "null"],
+    description: "The bank's own remark text for this entry, verbatim (statement 備註 / Wise reference). Separate from description.",
+  },
+  bankRef: {
+    type: ["string", "null"],
+    description: "The bank's transaction reference number (e.g. 6NBBJFT300RD4TM, Wise referenceNumber).",
+  },
+};
+
+// 寫入工具的 bankMemo / bankRef 參數。
+const BANK_MEMO_ARG = {
+  type: "string",
+  description:
+    "The bank's own remark text (備註／附言／memo) exactly as printed on the statement, transfer slip or screenshot. Never put your summary here.",
+} as const;
+const BANK_REF_ARG = {
+  type: "string",
+  description: "The bank's transaction reference / serial number (交易序號／參考號), e.g. 6NBBJFT300RD4TM.",
+} as const;
+const BANK_FIELDS_NOTE =
+  " When creating a transaction from a bank statement / transfer slip / screenshot, ALWAYS put the bank's own remark text in bankMemo (verbatim) and the bank reference number in bankRef; description stays your human summary.";
+
+/** bankMemo / bankRef 的更新值：沒給 = undefined（不動），空字串或 null = 清掉，其他 = 去頭尾空白。 */
+function optBankText(args: Record<string, unknown>, key: string): string | null | undefined {
+  if (!(key in args)) return undefined;
+  const v = args[key];
+  if (v === null) return null;
+  if (typeof v !== "string") throw new Error(`"${key}" must be a string.`);
+  const t = v.trim();
+  return t === "" ? null : t;
+}
+
 // 建立/更新/撥款/查單筆都直接把 transactions 整列回出去，形狀共用一份避免各寫各的走鐘。
 // 型別對照 db/schema.ts：numeric → string（drizzle 不轉 number，避免精度失真）、
 // date 與 timestamp(mode:'string') → string、bigint(mode:'number') → number。
@@ -127,6 +162,7 @@ const TXN_ROW_PROPS: Record<string, unknown> = {
     type: "boolean",
     description: "Imported automatically and not yet confirmed by a person (category still to be chosen).",
   },
+  ...BANK_FIELD_PROPS,
   deletedAt: { type: ["string", "null"] },
   createdAt: { type: "string" },
   updatedAt: { type: "string" },
@@ -360,6 +396,7 @@ const TXN_LIST_ROW = rowSchema({
     type: ["object", "null"],
     description: "Raw details from the source (merchant, original amount, rate, fees; for a Wise conversion leg: conversion.counterCurrency).",
   },
+  ...BANK_FIELD_PROPS,
 });
 
 // getOverview 已經把聚合結果轉成 number。
@@ -605,6 +642,8 @@ type Norm = {
   partyName: string | null;
   settleEmployeeName: string | null;
   billedToCompanyTaxId: boolean;
+  bankMemo: string | null;
+  bankRef: string | null;
 };
 
 type BulkTxnSets = {
@@ -732,6 +771,8 @@ function normalizeBulkTxnItem(
     partyName: null,
     settleEmployeeName: null,
     billedToCompanyTaxId: optBoolean(it, "billedToCompanyTaxId") === true,
+    bankMemo: optString(it, "bankMemo") ?? null,
+    bankRef: optString(it, "bankRef") ?? null,
   };
   if (type === "expense" || type === "income") {
     fillIncomeExpense(n, it, at, sets.acctSet, sets.catSet, partyLabelByName);
@@ -942,6 +983,8 @@ async function createTransactionFromArgs(
       toAccountId: f.toAccountId,
       book: reported ? "both" : "internal",
       billedToCompanyTaxId: optBoolean(args, "billedToCompanyTaxId") ?? false,
+      bankMemo: optString(args, "bankMemo") ?? null,
+      bankRef: optString(args, "bankRef") ?? null,
       needsReview: extra.needsReview ?? false,
     },
   );
@@ -983,10 +1026,14 @@ export const NO_EMPLOYEE_RECORD_ERROR =
 export const transactionTools: Record<string, ToolDef> = {
   list_transactions: {
     description:
-      "List ledger transactions (management & tax books), newest first. Optional filters: book, categoryId, accountId, projectId, period (YYYY-MM), needsReview (true = rows imported by an integration such as the Wise sync that nobody has confirmed yet — review them and set a category with update_transaction).",
+      "List ledger transactions (management & tax books), newest first. Optional filters: query (text search over description, bankMemo, bankRef and the counterparty name — use it to find an entry by the bank's remark or reference number), book, categoryId, accountId, projectId, period (YYYY-MM), needsReview (true = rows imported by an integration such as the Wise sync that nobody has confirmed yet — review them and set a category with update_transaction).",
     inputSchema: {
       type: "object",
       properties: {
+        query: {
+          type: "string",
+          description: "Case-insensitive substring match on description, bankMemo, bankRef or counterparty name.",
+        },
         book: {
           type: "string",
           enum: [...BOOKS],
@@ -1015,6 +1062,7 @@ export const transactionTools: Record<string, ToolDef> = {
         projectId: optNumber(args, "projectId"),
         period: optString(args, "period"),
         needsReview: optBoolean(args, "needsReview"),
+        q: optString(args, "query"),
       };
       const db = getDb();
       if (filters.categoryId !== undefined)
@@ -1134,6 +1182,7 @@ export const transactionTools: Record<string, ToolDef> = {
   create_transaction: {
     description:
       "Write one bookkeeping entry into the ledger for money that has already moved elsewhere. This records history; it never sends, collects or transfers anything, and 'transfer' here means a book entry between two of the organization's own ledger accounts. Required per type — expense/income: accountId + partyName; advance: partyName + settleEmployeeName (no account); transfer: fromAccountId + toAccountId. categoryId is optional — omit it to leave the entry 未分類 (unclassified; no need for a separate holding account). Resolve ids with list_bank_accounts / list_categories / list_parties first. 'reported' (計入稅務帳 — include in the tax books) sets the book to 'both' (management + tax), otherwise 'internal' (management books only); transfers are always 'both'. Set billedToCompanyTaxId=true to mark 有報公司統編 (the invoice attachment itself is done in the app). To book a repaid advance use create_reimbursement. When contractId is set, the result carries `contractProgress` (amount/received/remaining/fullyCollected) — if `fullyCollected` is true while the contract is still draft/active, tell the user the contract is now fully collected and ask whether to set it to completed (已完成); on a yes, call update_contract with status='completed'. Never flip the status without asking." +
+      BANK_FIELDS_NOTE +
       LINKING_NOTE,
     inputSchema: {
       type: "object",
@@ -1175,6 +1224,8 @@ export const transactionTools: Record<string, ToolDef> = {
           type: "boolean",
           description: "有報公司統編（進項可扣抵）。Default false.",
         },
+        bankMemo: BANK_MEMO_ARG,
+        bankRef: BANK_REF_ARG,
         ...DOCUMENT_ARGS,
         ...ORG_ARG,
       },
@@ -1202,7 +1253,8 @@ export const transactionTools: Record<string, ToolDef> = {
 
   bulk_create_transactions: {
     description:
-      "Write many ledger entries in one call — use this instead of calling create_transaction in a loop. Like create_transaction, this only records entries in the organization's own books; no money is moved. Pass `items`: an array where each element mirrors create_transaction's arguments (type, txnDate, amount, currency?, description?, reported?, accountId?, partyName?, categoryId?, settleEmployeeName?, fromAccountId?, toAccountId?, projectId?, contractId?, subscriptionId?, subscriptionPeriod?). Per-type requirements match create_transaction (expense/income: accountId+partyName; advance: partyName+settleEmployeeName; transfer: fromAccountId+toAccountId); categoryId is optional (omit → 未分類, unclassified). Account/category/project/contract/subscription ids are validated against your org; party/employee names are created on demand and deduped within the batch. subscriptionPeriod (YYYY-MM-DD) is required on any item that sets subscriptionId. All rows are written in a single database insert. Returns the created count, the ids, and — for every contract any item linked to — `contractProgress` (amount/received/remaining/fullyCollected). For each entry with `fullyCollected` true while the contract is still draft/active, tell the user that contract is now fully collected and ask whether to set it to completed (已完成); on a yes, call update_contract with status='completed'. Never flip the status without asking. Max 1000 items per call. Items also accept billingItemId; `results` carries each row's id, links, unlinked and hints (and partySimilar when its partyName created a party that looks like an existing one)." +
+      "Write many ledger entries in one call — use this instead of calling create_transaction in a loop. Like create_transaction, this only records entries in the organization's own books; no money is moved. Pass `items`: an array where each element mirrors create_transaction's arguments (type, txnDate, amount, currency?, description?, reported?, accountId?, partyName?, categoryId?, settleEmployeeName?, fromAccountId?, toAccountId?, projectId?, contractId?, subscriptionId?, subscriptionPeriod?). Per-type requirements match create_transaction (expense/income: accountId+partyName; advance: partyName+settleEmployeeName; transfer: fromAccountId+toAccountId); categoryId is optional (omit → 未分類, unclassified). Account/category/project/contract/subscription ids are validated against your org; party/employee names are created on demand and deduped within the batch. subscriptionPeriod (YYYY-MM-DD) is required on any item that sets subscriptionId. All rows are written in a single database insert. Returns the created count, the ids, and — for every contract any item linked to — `contractProgress` (amount/received/remaining/fullyCollected). For each entry with `fullyCollected` true while the contract is still draft/active, tell the user that contract is now fully collected and ask whether to set it to completed (已完成); on a yes, call update_contract with status='completed'. Never flip the status without asking. Max 1000 items per call. Items also accept billingItemId, bankMemo and bankRef; `results` carries each row's id, links, unlinked and hints (and partySimilar when its partyName created a party that looks like an existing one)." +
+      BANK_FIELDS_NOTE +
       LINKING_NOTE,
     inputSchema: {
       type: "object",
@@ -1248,6 +1300,8 @@ export const transactionTools: Record<string, ToolDef> = {
                 type: "boolean",
                 description: "有報公司統編。Default false.",
               },
+              bankMemo: BANK_MEMO_ARG,
+              bankRef: BANK_REF_ARG,
             },
             required: ["type", "txnDate", "amount"],
             additionalProperties: false,
@@ -1351,6 +1405,8 @@ export const transactionTools: Record<string, ToolDef> = {
         toAccountId: n.toAccountId,
         book: n.reported ? "both" : "internal",
         billedToCompanyTaxId: n.billedToCompanyTaxId,
+        bankMemo: n.bankMemo,
+        bankRef: n.bankRef,
       }));
       // 一次 insert 全部（chunkSize = 筆數），維持「整批成功或整批失敗」。
       const inserted = await insertTransactions({ db, orgId, source: "mcp" }, values, {
@@ -1418,7 +1474,8 @@ export const transactionTools: Record<string, ToolDef> = {
 
   update_transaction: {
     description:
-      "Edit a transaction's date, amount, currency, description, category (categoryId 0 clears it → 未分類; setting a category also clears needsReview on imported rows), needsReview (待確認 flag on rows imported by e.g. the Wise sync; pass false to confirm a row without choosing a category; a synced Wise currency conversion is a transfer with only one account set — that is expected and it can be edited like any other row), project, contract, subscription, subscription period, billing item (billingItemId; 0 clears it), invoice (invoiceId; 0 clears it), reported flag, or billedToCompanyTaxId (有報公司統編), or attach files the user sent in chat (documentIds + docKind) — only provided fields change. To change the account or counterparty, delete and recreate, or use the app. If the edit touches a contract-linked transaction, the result carries `contractProgress` for the contracts involved — when an entry is `fullyCollected` while the contract is still draft/active, tell the user and ask whether to set that contract to completed (已完成) via update_contract; never flip the status without asking. Linking a billingItemId / subscriptionId / contractId re-derives the inherited contract and project (values you set yourself are kept)." +
+      "Edit a transaction's date, amount, currency, description, category (categoryId 0 clears it → 未分類; setting a category also clears needsReview on imported rows), needsReview (待確認 flag on rows imported by e.g. the Wise sync; pass false to confirm a row without choosing a category; a synced Wise currency conversion is a transfer with only one account set — that is expected and it can be edited like any other row), project, contract, subscription, subscription period, billing item (billingItemId; 0 clears it), invoice (invoiceId; 0 clears it), reported flag, billedToCompanyTaxId (有報公司統編), bankMemo / bankRef (the bank's own remark and reference number; empty string clears), or attach files the user sent in chat (documentIds + docKind) — only provided fields change. To change the account or counterparty, delete and recreate, or use the app. If the edit touches a contract-linked transaction, the result carries `contractProgress` for the contracts involved — when an entry is `fullyCollected` while the contract is still draft/active, tell the user and ask whether to set that contract to completed (已完成) via update_contract; never flip the status without asking. Linking a billingItemId / subscriptionId / contractId re-derives the inherited contract and project (values you set yourself are kept)." +
+      BANK_FIELDS_NOTE +
       LINKING_NOTE,
     inputSchema: {
       type: "object",
@@ -1451,6 +1508,8 @@ export const transactionTools: Record<string, ToolDef> = {
           type: "boolean",
           description: "待確認 flag of imported rows. false = mark as reviewed. Setting a non-zero categoryId clears it automatically.",
         },
+        bankMemo: { ...BANK_MEMO_ARG, description: `${BANK_MEMO_ARG.description} Empty string clears it.` },
+        bankRef: { ...BANK_REF_ARG, description: `${BANK_REF_ARG.description} Empty string clears it.` },
         ...DOCUMENT_ARGS,
         ...ORG_ARG,
       },
@@ -1504,6 +1563,10 @@ export const transactionTools: Record<string, ToolDef> = {
       if (optBoolean(args, "billedToCompanyTaxId") !== undefined) {
         patch.billedToCompanyTaxId = optBoolean(args, "billedToCompanyTaxId");
       }
+      const bankMemo = optBankText(args, "bankMemo");
+      if (bankMemo !== undefined) patch.bankMemo = bankMemo;
+      const bankRef = optBankText(args, "bankRef");
+      if (bankRef !== undefined) patch.bankRef = bankRef;
       await applyTxnRelationPatch(patch, db, args, orgId);
       await applyTxnInvoicePatch(patch, db, args, orgId, existing.type);
       // 指定了分類 = 有人看過這筆了；自動匯入（Wise 同步）的「待確認」一併清掉。
