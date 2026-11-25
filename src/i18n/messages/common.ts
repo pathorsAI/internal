@@ -110,7 +110,12 @@ const common = {
     placeholder: { "zh-TW": "選擇組織", en: "Select organization" },
     toast: {
       switchFailed: { "zh-TW": "切換組織失敗", en: "Failed to switch organization" },
+      switched: { "zh-TW": "已切換到 {name}", en: "Switched to {name}" },
     },
+  },
+  newVersion: {
+    message: { "zh-TW": "有新版本", en: "A new version is available" },
+    reload: { "zh-TW": "重新整理", en: "Reload" },
   },
   paginationNav: {
     ariaLabel: { "zh-TW": "分頁", en: "Pagination" },
