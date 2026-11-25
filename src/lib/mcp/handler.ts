@@ -512,16 +512,16 @@ async function auditApiKeyCall(
     const orgId = await resolveOrg(args, ctx).catch(() => ctx.apiKey.organizationId);
     const action: ActivityAction = audit?.action ?? (isReadOnlyTool(name) ? "read" : "update");
     const summary = error === null ? name : `${name}（失敗：${error.slice(0, 200)}）`;
-    await logApi(
+    await logApi({
       orgId,
-      ctx.userId,
-      ctx.apiKey.name,
+      userId: ctx.userId,
+      keyName: ctx.apiKey.name,
       action,
-      audit?.entityType ?? "tool",
-      audit?.entityId ?? null,
+      entityType: audit?.entityType ?? "tool",
+      entityId: audit?.entityId ?? null,
       summary,
-      { toolName: name },
-    );
+      extra: { toolName: name },
+    });
   } catch {
     // ignore audit failures
   }
@@ -627,7 +627,16 @@ async function auditToolWrite(
     const label = summary ?? name;
     const extra = { toolName: name };
     if (channel === "line" || channel === "whatsapp") {
-      return await logChat(channel, orgId, ctx.userId, audit.action, audit.entityType, audit.entityId, label, extra);
+      return await logChat({
+        channel,
+        orgId,
+        userId: ctx.userId,
+        action: audit.action,
+        entityType: audit.entityType,
+        entityId: audit.entityId,
+        summary: label,
+        extra,
+      });
     }
     const log = channel === "ai" ? logAi : logMcp;
     return await log(orgId, ctx.userId, audit.action, audit.entityType, audit.entityId, label, extra);

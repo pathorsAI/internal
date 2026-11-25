@@ -393,7 +393,9 @@ function columnFlex(k: number): number {
 }
 
 function tableRowBox(cells: readonly string[], table: ChatTable, header: boolean) {
-  const size = table.headers.length >= 4 ? "xxs" : "xs";
+  const wide = table.headers.length >= 4;
+  const headerSize = wide ? "xxs" : "xs";
+  const bodySize = wide ? "xs" : "sm";
   return {
     type: "box",
     layout: "horizontal",
@@ -401,7 +403,7 @@ function tableRowBox(cells: readonly string[], table: ChatTable, header: boolean
     contents: cells.map((c, k) => ({
       type: "text",
       text: c || "-",
-      size: header ? size : table.headers.length >= 4 ? "xs" : "sm",
+      size: header ? headerSize : bodySize,
       color: header ? MUTED : TEXT,
       ...(header ? { weight: "bold" } : {}),
       flex: columnFlex(k),
