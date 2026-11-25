@@ -76,7 +76,7 @@ function runAfterResponse(task: () => Promise<void>): void {
 
 // ---- 頁面瀏覽 ----
 
-/** 同一人同一頁 30 秒內只記一次（重新整理、RSC refresh、layout 與 page 各呼叫一次 getSession）。 */
+/** 同一人同一頁 30 秒內只記一次（重新整理、RSC refresh、同一頁裡多個元件各呼叫一次 requireOrg）。 */
 export const PAGE_DEDUPE_MS = 30_000;
 const MAX_DEDUPE_ENTRIES = 2_000;
 const lastPageView = new Map<string, number>();
@@ -106,19 +106,14 @@ export function resetPageViewDedupe(): void {
 
 /**
  * 記一次 dashboard 頁面載入。route 必須是 src/lib/usage/routes.ts 的 pattern（proxy 已正規化）。
- * 組織在背景才解析（使用者「目前的組織」→ session 的 active org）；沒有就記 NULL，統計時依成員資格歸戶。
+ * orgId 是 requireOrg() 解析出來的組織（跟頁面查資料用的是同一個）。
  */
-export function recordPageView(args: {
-  route: string;
-  userId: string;
-  resolveOrg: () => Promise<string | null>;
-}): void {
+export function recordPageView(args: { route: string; userId: string; orgId: string }): void {
   if (!usageTrackingEnabled()) return;
   if (!shouldRecordPageView(args.userId, args.route)) return;
   runAfterResponse(async () => {
-    const orgId = await args.resolveOrg().catch(() => null);
     await insert({
-      organizationId: orgId,
+      organizationId: args.orgId,
       userId: args.userId,
       kind: "page",
       channel: "web",

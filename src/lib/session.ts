@@ -9,29 +9,25 @@ import { auth } from "@/lib/auth";
 import { USAGE_ROUTE_HEADER, recordPageView } from "@/lib/usage/record";
 import { isDashboardRoute } from "@/lib/usage/routes";
 
-/**
- * 目前登入的 session。dashboard 頁面載入時（src/proxy.ts 標了 USAGE_ROUTE_HEADER）順便記一筆
- * 功能使用紀錄：只記路由 pattern，寫入排在回應之後，失敗不影響頁面（src/lib/usage/record.ts）。
- * layout 與 page 各呼叫一次也只記一筆（30 秒去重）。
- */
 export async function getSession() {
-  const reqHeaders = await headers();
-  const session = await auth.api.getSession({ headers: reqHeaders });
-  // proxy 的 matcher 沒涵蓋的路徑（例如 /signup）不會清掉外部送來的 header，所以再確認一次
-  // 它是一個已知頁面的 pattern，不讓任意字串寫進統計。
-  const route = reqHeaders.get(USAGE_ROUTE_HEADER);
-  if (session && route && isDashboardRoute(route)) {
-    const userId = session.user.id;
-    const active = session.session.activeOrganizationId ?? null;
-    recordPageView({
-      route,
-      userId,
-      // 跟 resolveSessionOrgId 同一個順序（目前的組織 → session 的 active org），但只讀不寫，
-      // 在回應送出後才查；查不到就記 NULL，統計時依成員資格歸戶。
-      resolveOrg: async () => (await getCurrentOrgId(userId)) ?? active,
-    });
-  }
-  return session;
+  return auth.api.getSession({ headers: await headers() });
+}
+
+/**
+ * 功能使用紀錄（src/lib/usage/record.ts）：dashboard 頁面載入時記一筆，只記路由 pattern，
+ * 寫入排在回應之後，失敗不影響頁面。
+ *
+ * 放在 requireOrg() 而不是 getSession()：App Router 的 prefetch 會跑 dashboard layout（它在
+ * loading.tsx 之上，裡面呼叫 getSession），但動態頁面的 prefetch 停在 loading.tsx、不會跑到頁面
+ * 本身的 requireOrg()。Next 在 proxy 與 headers() 都把 prefetch header 拿掉了，沒辦法直接判斷，
+ * 所以靠「只有頁面本身才呼叫 requireOrg」來分辨。src/proxy.ts 只在 GET、非 server action 時
+ * 標 USAGE_ROUTE_HEADER，所以 server action 裡的 requireOrg 不會記。
+ * matcher 沒涵蓋的路徑不會清掉外部送來的 header，這裡再確認它是已知頁面的 pattern。
+ * 同一人同一頁 30 秒內只記一次。
+ */
+async function trackPageView(userId: string, orgId: string): Promise<void> {
+  const route = (await headers()).get(USAGE_ROUTE_HEADER);
+  if (route && isDashboardRoute(route)) recordPageView({ route, userId, orgId });
 }
 
 /**
@@ -85,6 +81,7 @@ export async function requireOrg() {
   const orgId = await resolveSessionOrgId(session);
   if (!orgId) redirect("/onboarding");
 
+  await trackPageView(session.user.id, orgId);
   return { session, orgId, userId: session.user.id };
 }
 

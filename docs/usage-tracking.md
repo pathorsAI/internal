@@ -24,9 +24,14 @@ changed what; usage events are high-volume statistics with a retention limit.
 
 - **Page views.** `src/proxy.ts` normalizes the pathname to a route pattern from
   `src/lib/usage/routes.ts` (`/dashboard/ai/42` → `/dashboard/ai/[id]`) and puts it in a request
-  header. It skips non-GET requests, prefetches and server actions, and strips the header from
-  incoming requests so it cannot be forged. `getSession()` (`src/lib/session.ts`) reads the header
-  once it has the session and calls `recordPageView`. Paths that match no known page are not recorded.
+  header. It skips non-GET requests, browser prefetches and server actions, and strips the header
+  from incoming requests so it cannot be forged. `requireOrg()` (`src/lib/session.ts`) reads the
+  header once it has resolved the organization and calls `recordPageView`. Paths that match no known
+  page are not recorded.
+  - Why `requireOrg()` and not `getSession()`: App Router prefetches render the dashboard layout
+    (which calls `getSession()`) but stop at `loading.tsx` for dynamic pages, so they never reach the
+    page's own `requireOrg()`. Next strips the `next-router-prefetch` header from both `proxy` and
+    `headers()`, so it cannot be checked directly.
 - **Tool calls.** `runToolWithAudit` (`src/lib/mcp/handler.ts`) is the single entry point for MCP,
   REST `/api/v1`, the in-app AI and the LINE / WhatsApp bots. It times every call and calls
   `recordToolCall` with the tool name, channel (`api` whenever an API key is used), success and duration.
