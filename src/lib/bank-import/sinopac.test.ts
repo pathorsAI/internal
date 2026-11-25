@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { writeXlsx } from "@/lib/xlsx-write";
 import {
   candidateGap,
+  findMultiMatch,
+  findNearMatch,
   guessAccountMap,
   lineHashInput,
   matchStatementLines,
@@ -15,6 +17,7 @@ import {
   SinopacFileError,
   type MatchCandidate,
   type MatchLine,
+  uniqueSubsetSum,
 } from "./sinopac";
 
 // 真實匯出（~/Pathors/docs/bank/sinopac-statement-2026-01-21_2026-11-25.tsv）擷取的片段：
@@ -320,5 +323,75 @@ describe("account mapping", () => {
   test("--map argument", () => {
     expect(parseAccountMapArg("9228=1, 4952=15")).toEqual({ "9228": 1, "4952": 15 });
     expect(() => parseAccountMapArg("9228:1")).toThrow();
+  });
+});
+
+describe("one bank line, several entries", () => {
+  const ACCT = 1;
+  const line = (cents: number, over: Partial<MatchLine> = {}): MatchLine => ({
+    key: 0,
+    bankAccountId: ACCT,
+    date: "2026-06-06",
+    currency: "TWD",
+    direction: "out",
+    cents,
+    ref: null,
+    ...over,
+  });
+  let nextId = 1;
+  const txn = (amount: string, over: Partial<MatchCandidate> = {}): MatchCandidate => ({
+    id: nextId++,
+    txnDate: "2026-06-06",
+    amount,
+    currency: "TWD",
+    fromAccountId: ACCT,
+    toAccountId: null,
+    bankRef: null,
+    ...over,
+  });
+  const none = new Set<number>();
+
+  test("uniqueSubsetSum returns the only combination, and refuses when there are two", () => {
+    expect(uniqueSubsetSum([500, 300, 700], 1000)).toEqual([1, 2]);
+    // 300 + 700 與 1000 都湊得出 1000 → 不猜
+    expect(uniqueSubsetSum([300, 700, 1000], 1000)).toBeNull();
+    expect(uniqueSubsetSum([300, 400], 1000)).toBeNull();
+  });
+
+  test("a same-day group that adds up exactly matches, even with many entries", () => {
+    const parts = Array.from({ length: 18 }, (_, i) => txn(String(2000 + i), { partyId: 7 }));
+    const total = parts.reduce((s, c) => s + Math.round(Number(c.amount) * 100), 0);
+    const other = txn("999", { txnDate: "2026-06-04" });
+    const ids = findMultiMatch(line(total), [...parts, other], none);
+    expect(ids).toEqual(parts.map((c) => c.id));
+  });
+
+  test("falls back to a unique subset across days; claimed and other-account entries are ignored", () => {
+    const a = txn("50000", { txnDate: "2026-11-16" });
+    const b = txn("33531", { txnDate: "2026-11-18" });
+    const claimed = txn("83531");
+    const otherAcct = txn("1", { fromAccountId: 2 });
+    const ids = findMultiMatch(
+      line(8_353_100, { date: "2026-11-17" }),
+      [a, b, { ...claimed, txnDate: "2026-11-17" }, otherAcct],
+      new Set([claimed.id]),
+    );
+    expect(ids).toEqual([a.id, b.id]);
+  });
+
+  test("ambiguous combinations are left alone", () => {
+    const days = ["2026-06-03", "2026-06-05", "2026-06-07", "2026-06-09"];
+    const cands = ["100", "200", "150", "150"].map((amt, i) => txn(amt, { txnDate: days[i] }));
+    // 100 + 200 與 150 + 150 都是 300 元 → 不猜
+    expect(findMultiMatch(line(30_000), cands, none)).toBeNull();
+  });
+
+  test("near match: within 1% and the window, smallest difference wins; exact amounts are not 'near'", () => {
+    const far = txn("75000");
+    const close = txn("75474", { txnDate: "2026-06-07" });
+    const exact = txn("75444");
+    expect(findNearMatch(line(7_544_400), [far, close], none)).toEqual({ id: close.id, amount: "75474" });
+    expect(findNearMatch(line(7_544_400), [exact], none)).toBeNull();
+    expect(findNearMatch(line(7_544_400), [txn("76300")], none)).toBeNull();
   });
 });

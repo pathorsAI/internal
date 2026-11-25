@@ -1,15 +1,16 @@
 /**
- * 匯入永豐銀行（SinoPac，永豐寰宇金融網）對帳單：對到的既有交易補上銀行備註與參考號，
+ * 匯入永豐銀行（SinoPac，永豐寰宇金融網）對帳單：對到的既有交易補上銀行備註與參考號（含一對多：銀行一筆 = 系統幾筆加總），
  * 對不到的新建「待確認」交易，沖正的兩行互相抵銷，匯過的行不會重複。
  * 跟帳戶頁「匯入永豐明細」是同一套邏輯（src/db/bank-import.ts、src/lib/bank-import/sinopac.ts）。
  *
  * 用法：
  *   bun scripts/import-sinopac-statement.ts --org <組織 id 或 slug> --file <明細檔> \
- *     --map 9228=1,4952=15 [--dry-run] [--actor-email someone@example.com]
+ *     --map 9228=1,4952=15 [--dry-run] [--skip-unmatched] [--actor-email someone@example.com]
  *
  *   --map         帳號末四碼=帳本帳戶 id（帳本帳戶沒有存帳號，一定要明講）。檔案裡出現、但沒列在
  *                 --map 的帳戶會整個略過（不寫入、下次對應好再匯）。
  *   --dry-run     只試算：印出每一類的筆數與會新建的行，**完全不寫入**（連匯入紀錄都不寫）。
+ *   --skip-unmatched 配不上的行只列出來，不新建交易（也不記錄，人工處理完再重匯同一份檔案）。
  *   --actor-email 寫進 bank_statement_lines.imported_by_user_id 的成員（選填）；操作紀錄一律記成 system。
  *
  * bun 會自動讀 .env.local 的 DATABASE_URL；要指定別的環境檔用 `bun --env-file=… scripts/…`。
@@ -43,6 +44,7 @@ const { values } = parseArgs({
     file: { type: "string" },
     map: { type: "string" },
     "dry-run": { type: "boolean", default: false },
+    "skip-unmatched": { type: "boolean", default: false },
     "actor-email": { type: "string" },
   },
   strict: true,
@@ -52,12 +54,14 @@ if (!values.org) fail("--org <組織 id 或 slug> 必填");
 if (!values.file) fail("--file <明細檔> 必填");
 if (!values.map) fail("--map 必填，例如 --map 9228=1,4952=15");
 const dryRun = values["dry-run"] === true;
+const skipUnmatched = values["skip-unmatched"] === true;
 
 const SKIP_LABEL: Record<string, string> = {
   correction_unpaired: "沖正找不到原交易",
   unmapped: "帳戶未對應（--map 沒列）",
   currency_mismatch: "帳本帳戶幣別不同",
   created_deleted: "之前建的交易已被刪除",
+  left_unmatched: "配不上（--skip-unmatched：只列出、不新建）",
 };
 
 function describe(l: PlannedLine): string {
@@ -91,6 +95,7 @@ function printCounts(c: SinopacPlan["counts"]) {
   console.log(`  新建待確認   ${c.created}`);
   console.log(`  沖正抵銷     ${c.correctionPair}`);
   console.log(`  已匯入過     ${c.duplicate}`);
+  console.log(`  金額差一點   ${c.nearMatch}`);
   console.log(`  略過         ${c.skipped}`);
   console.log(`  讀不懂的行   ${c.parseErrors}`);
   console.log(`  合計         ${c.total + c.parseErrors}`);
@@ -101,6 +106,16 @@ function printPlan(plan: SinopacPlan) {
   printCounts(plan.counts);
   const created = plan.lines.filter((l) => l.decision === "create" || l.decision === "recover");
   printSection(`對不到既有交易、會新建待確認的 ${created.length} 行：`, created, (l) => `${describe(l)}${recoverSuffix(l)}`);
+  printSection(
+    "一對多（銀行一筆 = 系統幾筆加總）：",
+    plan.lines.filter((l) => l.transactionIds),
+    (l) => `${describe(l)}  → ${(l.transactionIds ?? []).map((id) => "#" + id).join("、")}`,
+  );
+  printSection(
+    "金額差一點、可能是同一筆（不新建、不記錄，請人工確認）：",
+    plan.lines.filter((l) => l.decision === "near_match"),
+    (l) => `${describe(l)}  ≈ #${l.transactionId} 記 ${l.nearAmount}`,
+  );
   printSection(
     "沖正抵銷（不建、不對交易）：",
     plan.lines.filter((l) => l.decision === "correction_pair"),
@@ -163,12 +178,13 @@ async function main() {
   console.log(dryRun ? "模式：--dry-run（只試算，不寫入任何東西）" : "模式：寫入");
 
   if (dryRun) {
-    printPlan(await planSinopacImport(db, org.id, parsed, accountMap));
+    printPlan(await planSinopacImport(db, org.id, parsed, accountMap, { skipUnmatched }));
     console.log("\n（--dry-run：沒有寫入任何資料。確認無誤後拿掉 --dry-run 再跑一次。）");
     return;
   }
 
   const res = await applySinopacImport(db, org.id, parsed, accountMap, {
+    skipUnmatched,
     userId: actorId,
     log: (summary) => logSystem(org.id, "create", "transaction", null, `${summary}（scripts/import-sinopac-statement.ts）`),
   });

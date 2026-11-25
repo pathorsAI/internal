@@ -8,6 +8,7 @@ import { FileUp, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Amount } from "@/components/amount";
 import { StatusTag } from "@/components/ds/status-dot";
 import {
@@ -31,22 +32,29 @@ import { applySinopacImportAction, previewSinopacImport, type SinopacPreview } f
 
 const NONE = "none";
 
-/** 會寫入資料庫的行（預覽預設只列這些）。 */
+/** 會寫入資料庫的行。 */
 function writes(l: PlannedLine): boolean {
-  return l.decision !== "duplicate" && !(l.decision === "skip" && l.skipReason !== "correction_unpaired");
+  if (l.decision === "duplicate" || l.decision === "near_match") return false;
+  return !(l.decision === "skip" && l.skipReason !== "correction_unpaired");
+}
+
+/** 預覽預設列出的行：會寫入的，加上要人看的（金額差一點、配不上只列出）。 */
+function worthShowing(l: PlannedLine): boolean {
+  return writes(l) || l.decision === "near_match" || l.skipReason === "left_unmatched";
 }
 
 function decisionTone(l: PlannedLine): "income" | "primary" | "neutral" | "warning" {
   if (l.decision === "match" || l.decision === "recover") return "income";
   if (l.decision === "create") return "primary";
-  if (l.decision === "skip") return "warning";
+  if (l.decision === "skip" || l.decision === "near_match") return "warning";
   return "neutral";
 }
 
-function formData(file: File, map: Record<string, number> | null): FormData {
+function formData(file: File, map: Record<string, number> | null, skipUnmatched: boolean): FormData {
   const fd = new FormData();
   fd.set("file", file);
   if (map) fd.set("map", JSON.stringify(map));
+  if (skipUnmatched) fd.set("skipUnmatched", "1");
   return fd;
 }
 
@@ -62,13 +70,14 @@ export function SinopacImportButton() {
   const [preview, setPreview] = useState<SinopacPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
+  const [skipUnmatched, setSkipUnmatched] = useState(false);
   const [loading, startLoading] = useTransition();
   const [applying, startApplying] = useTransition();
 
-  function runPreview(f: File, map: Record<string, number> | null) {
+  function runPreview(f: File, map: Record<string, number> | null, skip = skipUnmatched) {
     setError(null);
     startLoading(async () => {
-      const res = await previewSinopacImport(formData(f, map));
+      const res = await previewSinopacImport(formData(f, map, skip));
       if (res.ok) setPreview(res.result);
       else {
         setPreview(null);
@@ -91,10 +100,15 @@ export function SinopacImportButton() {
     runPreview(file, next);
   }
 
+  function onSkipUnmatched(v: boolean) {
+    setSkipUnmatched(v);
+    if (file) runPreview(file, preview?.accountMap ?? null, v);
+  }
+
   function apply() {
     if (!file || !preview) return;
     startApplying(async () => {
-      const res = await applySinopacImportAction(formData(file, preview.accountMap));
+      const res = await applySinopacImportAction(formData(file, preview.accountMap, skipUnmatched));
       if (!res.ok) {
         setError(res.error);
         return;
@@ -148,6 +162,19 @@ export function SinopacImportButton() {
               <p className="text-xs text-muted-foreground">{t("fileHint")}</p>
             </div>
 
+            <div className="flex items-start gap-3">
+              <Switch
+                id="sinopac-skip-unmatched"
+                checked={skipUnmatched}
+                onCheckedChange={onSkipUnmatched}
+                disabled={busy}
+              />
+              <div className="flex flex-col gap-0.5">
+                <Label htmlFor="sinopac-skip-unmatched">{t("skipUnmatched.label")}</Label>
+                <p className="text-xs text-muted-foreground">{t("skipUnmatched.hint")}</p>
+              </div>
+            </div>
+
             {loading ? (
               <p className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" /> {t("loading")}
@@ -175,7 +202,7 @@ export function SinopacImportButton() {
                 <AccountMapping plan={plan} options={preview.options} map={preview.accountMap} onChange={onMap} disabled={busy} />
                 <Counts counts={plan.counts} />
                 <ParseErrors plan={plan} />
-                <PreviewLines lines={showAll ? plan.lines : plan.lines.filter(writes)} />
+                <PreviewLines lines={showAll ? plan.lines : plan.lines.filter(worthShowing)} />
                 <div className="flex items-center gap-2 text-sm">
                   <Button type="button" size="sm" variant="ghost" onClick={() => setShowAll((v) => !v)}>
                     {showAll ? t("filter.actionable") : t("filter.all", { count: plan.lines.length })}
@@ -258,10 +285,11 @@ function Counts({ counts }: Readonly<{ counts: PlanCounts }>) {
     [t("counts.created"), counts.created],
     [t("counts.correctionPair"), counts.correctionPair],
     [t("counts.duplicate"), counts.duplicate],
+    [t("counts.nearMatch"), counts.nearMatch],
     [t("counts.skipped"), counts.skipped],
   ];
   return (
-    <dl className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-5">
+    <dl className="grid grid-cols-3 gap-x-6 gap-y-2 sm:grid-cols-6">
       {items.map(([label, n]) => (
         <div key={label} className="flex flex-col">
           <dt className="text-xs text-muted-foreground">{label}</dt>
@@ -289,7 +317,11 @@ function ParseErrors({ plan }: Readonly<{ plan: SinopacPlan }>) {
 function decisionLabel(t: ReturnType<typeof useTranslations<"bankImport">>, l: PlannedLine): string {
   switch (l.decision) {
     case "match":
-      return t("decision.match", { id: l.transactionId ?? 0 });
+      return l.transactionIds
+        ? t("decision.matchMulti", { count: l.transactionIds.length })
+        : t("decision.match", { id: l.transactionId ?? 0 });
+    case "near_match":
+      return t("decision.near_match", { id: l.transactionId ?? 0, amount: l.nearAmount ?? "" });
     case "recover":
       return t("decision.recover", { id: l.transactionId ?? 0 });
     case "create":
