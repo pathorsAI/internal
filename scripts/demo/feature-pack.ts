@@ -451,14 +451,16 @@ export async function seedFeaturePack(opts: FeaturePackOptions): Promise<Feature
   });
 
   const vba = await section("vendor billing accounts", async () => {
-    const base = { organizationId: ORG, ownerUserId: owner.id, ledgerMode: "match_only", status: "active", note: NOTE };
+    // 確認過的帳戶不會出現在「需要處理」；Figma 故意留著沒確認，示範那一條提醒長什麼樣子。
+    const verified = new Date(`${day(-20)}T10:00:00+08:00`).toISOString();
+    const base = { organizationId: ORG, ownerUserId: owner.id, ledgerMode: "match_only", status: "active", note: NOTE, lastVerifiedAt: verified };
     const rows = await db
       .insert(vendorBillingAccounts)
       .values([
         // 手動帳戶＝固定支出
         { ...base, partyId: party.beichen, provider: "other", source: "manual", displayName: "辦公室租金（北辰共享辦公室）", paymentMethodId: pm.transfer, schedule: "fixed", anchorDate: monthDay(-6, 5), intervalMonths: 1, expectedAmount: dec(gross(35_000)), currency: "TWD", billingUrl: null, meta: {} },
         { ...base, partyId: party.anhe, provider: "other", source: "manual", displayName: "記帳士月費", paymentMethodId: pm.transfer, schedule: "fixed", anchorDate: monthDay(-6, 10), intervalMonths: 1, expectedAmount: dec(gross(8_000)), currency: "TWD", billingUrl: null, meta: {} },
-        { ...base, partyId: party.figma, provider: "other", source: "manual", displayName: "Figma 團隊方案（年繳）", paymentMethodId: pm.wise, schedule: "fixed", anchorDate: monthDay(-8, 15), intervalMonths: 12, expectedAmount: dec(540), currency: "USD", billingUrl: "https://www.figma.com/settings", meta: {} },
+        { ...base, partyId: party.figma, provider: "other", source: "manual", displayName: "Figma 團隊方案（年繳）", lastVerifiedAt: null, paymentMethodId: pm.wise, schedule: "fixed", anchorDate: monthDay(-8, 15), intervalMonths: 12, expectedAmount: dec(540), currency: "USD", billingUrl: "https://www.figma.com/settings", meta: {} },
         // 雲端：synced 帳戶。external_id 是假的格式樣本，沒有對應的整合，不會被同步排程碰到。
         { ...base, partyId: party.gcp, provider: "gcp", source: "synced", externalId: "01D3M0-0A0A0A-DEMO01", displayName: "GCP 計費帳號（示範）", paymentMethodId: pm.wise, schedule: "usage", anchorDate: null, intervalMonths: 1, expectedAmount: null, currency: "USD", billingUrl: null, lastSeenAt: new Date().toISOString(), meta: { demo: true } },
         { ...base, partyId: party.azure, provider: "azure", source: "synced", externalId: "a1b2c3d4-0000-4000-8000-00000000de01", displayName: "Azure 訂閱（示範）", paymentMethodId: pm.card, schedule: "usage", anchorDate: null, intervalMonths: 1, expectedAmount: null, currency: "TWD", billingUrl: null, lastSeenAt: new Date().toISOString(), meta: { demo: true } },
@@ -789,7 +791,7 @@ export async function seedFeaturePack(opts: FeaturePackOptions): Promise<Feature
     if (utilities && accrued) {
       const [je] = await db
         .insert(journalEntries)
-        .values({ organizationId: ORG, ledger: "both", kind: "adjustment", entryDate: monthEnd(-1), memo: `估列 ${ym(-1)} 水電費（帳單次月才到）`, createdBy: owner.id })
+        .values({ organizationId: ORG, ledger: "both", kind: "adjustment", entryDate: monthEnd(-1), memo: `估列 ${ym(-1)} 水電費（帳單次月才到）`, createdBy: owner.name || owner.email })
         .returning({ id: journalEntries.id });
       await db.insert(journalLines).values([
         { entryId: je.id, glAccountId: utilities, debit: dec(4_800), credit: "0", memo: "估列水電費" },
