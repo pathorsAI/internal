@@ -31,13 +31,14 @@
  */
 import { parseArgs } from "node:util";
 import { addDays, addMonths, format, startOfMonth } from "date-fns";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getDb } from "@/db";
 import { splitGross } from "@/lib/vat";
 import { hasFieldEncryptionKey } from "@/lib/crypto";
 import { createEmployeeAccount, nationalIdColumns } from "@/db/employee-accounts";
 import { organization } from "@/db/auth-schema";
+import { seedFeaturePack } from "./demo/feature-pack";
 import {
   accountReconciliations,
   activityLog,
@@ -1073,13 +1074,30 @@ const payslipItemCount = await section("payslip items", async () => {
 const reconciliationCount = await section("reconciliations", async () => {
   const lastMonthEnd = plus(monthStart(0), -1);
   const prevMonthEnd = plus(monthStart(-1), -1);
+  // 結存照帳上算（期初＋收－付，含互轉），總帳的「銀行對帳」檢查與對帳頁才對得上。
+  // 早期版本寫死金額，跟交易對不起來，財報檢查會整排紅。
+  const opening = new Map<number, number>([
+    [twdAcct, 1_250_000],
+    [usdAcct, 18_000],
+    [cashAcct, 20_000],
+  ]);
+  const balance = async (acct: number, asOf: string) => {
+    const [r] = await db
+      .select({
+        net: sql<string>`coalesce(sum(case when ${transactions.toAccountId} = ${acct} then ${transactions.amount} else 0 end), 0)
+          - coalesce(sum(case when ${transactions.fromAccountId} = ${acct} then ${transactions.amount} else 0 end), 0)`,
+      })
+      .from(transactions)
+      .where(and(eq(transactions.organizationId, ORG), sql`${transactions.txnDate} <= ${asOf}`));
+    return dec((opening.get(acct) ?? 0) + Number(r?.net ?? 0));
+  };
   const rows = await db
     .insert(accountReconciliations)
     .values([
-      { ...scoped, accountId: twdAcct, asOfDate: lastMonthEnd, statementBalance: dec(1_486_500), note: "與銀行對帳單相符" },
-      { ...scoped, accountId: twdAcct, asOfDate: prevMonthEnd, statementBalance: dec(1_312_000), note: "與銀行對帳單相符" },
-      { ...scoped, accountId: usdAcct, asOfDate: lastMonthEnd, statementBalance: dec(23_400), note: "USD 帳戶月結" },
-      { ...scoped, accountId: cashAcct, asOfDate: lastMonthEnd, statementBalance: dec(41_800), note: "零用金盤點，差異 0" },
+      { ...scoped, accountId: twdAcct, asOfDate: lastMonthEnd, statementBalance: await balance(twdAcct, lastMonthEnd), note: "與銀行對帳單相符" },
+      { ...scoped, accountId: twdAcct, asOfDate: prevMonthEnd, statementBalance: await balance(twdAcct, prevMonthEnd), note: "與銀行對帳單相符" },
+      { ...scoped, accountId: usdAcct, asOfDate: lastMonthEnd, statementBalance: await balance(usdAcct, lastMonthEnd), note: "USD 帳戶月結" },
+      { ...scoped, accountId: cashAcct, asOfDate: lastMonthEnd, statementBalance: await balance(cashAcct, lastMonthEnd), note: "零用金盤點，差異 0" },
     ])
     .returning({ id: accountReconciliations.id });
   return rows.length;
@@ -1146,6 +1164,18 @@ const activityCount = await section("activity log", async () => {
 });
 
 // ---------------------------------------------------------------------------
+// 16. 新功能資料包（連結層、收款分配、營業稅別、廠商計費與雲端、總帳、AI、API key、
+//     使用紀錄、復原）。自成一組資料，跟上面的 Meridian 故事並存；細節見 scripts/demo/feature-pack.ts。
+//     正式 DB 上已存在的示範組織改用 scripts/seed-demo-features.ts 補。
+// ---------------------------------------------------------------------------
+
+const featurePack = await seedFeaturePack({
+  db,
+  orgId: ORG,
+  owner: { id: ownerUser.id, email: ownerUser.email, name: ownerUser.name },
+});
+
+// ---------------------------------------------------------------------------
 // 摘要
 // ---------------------------------------------------------------------------
 
@@ -1175,5 +1205,6 @@ console.log("  payroll item types   7");
 console.log("  reconciliations      " + reconciliationCount);
 console.log("  documents            " + documentCount + "  (1 accountant notice pending, 1 notified)");
 console.log("  activity log         " + activityCount);
+console.log("  feature pack         " + Object.entries(featurePack).map(([k, n]) => `${k} ${n}`).join(", "));
 console.log("");
 console.log(`  Sign in as ${ownerUser.email} and pass organizationId="${slug}" to any MCP tool.`);
